@@ -532,16 +532,17 @@ class MegatronActor(MegatronModelManager, Worker):
             self._broadcast_outputs_record.stop()
         else:
             outputs = {}
-
             if forward_outputs:
                 keys = forward_outputs[0].keys()
                 for key in keys:
                     metric_mean = torch.stack(
                         [loss_reduced[key] for loss_reduced in forward_outputs]
                     ).mean()
-                    torch.distributed.broadcast(metric_mean, get_last_rank())
-
                     outputs[key] = metric_mean.cpu().item()
+
+            output_list = [outputs]
+            torch.distributed.broadcast_object_list(output_list, get_last_rank())
+            outputs = output_list[0]
 
         if self.use_profiler:
             self.profiler.stop(forward_only=forward_only)
