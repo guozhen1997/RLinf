@@ -174,8 +174,8 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
         cfg.model.layernorm_epsilon = hf_config.rms_norm_eps
 
         # MoE model
-        cfg.model.num_moe_experts = getattr(hf_config, "num_experts", 0.0)
-        cfg.model.moe_ffn_hidden_size = getattr(hf_config, "moe_intermediate_size", 0.0)
+        cfg.model.num_moe_experts = getattr(hf_config, "num_experts", None)
+        cfg.model.moe_ffn_hidden_size = getattr(hf_config, "moe_intermediate_size", None)
         cfg.model.moe_router_topk = getattr(hf_config, "num_experts_per_tok", 2)
         cfg.model.head_dim = getattr(hf_config, "head_dim", cfg.model.hidden_size // cfg.model.num_attention_heads)
 
