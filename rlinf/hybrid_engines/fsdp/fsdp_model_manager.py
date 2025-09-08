@@ -22,6 +22,7 @@ from torch.distributed.fsdp import MixedPrecision, ShardingStrategy, StateDictTy
 from transformers import AutoModelForCausalLM
 
 from rlinf.config import torch_dtype_from_precision
+from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.hybrid_engines.fsdp.utils import (
     get_fsdp_wrap_policy,
     init_fn,
@@ -38,11 +39,7 @@ class FSDPModelManager:
         self._cfg = cfg
         self.torch_dtype = torch_dtype_from_precision(self._cfg.model.precision)
 
-        assert (
-            self.torch_dtype == torch.float16 or self.torch_dtype == torch.bfloat16
-        ), (
-            f"Precision {self._cfg.model.precision} is not supported, only support bf16 and fp16."
-        )
+        self.tokenizer = hf_tokenizer(cfg.tokenizer.tokenizer_model)
 
     def model_provider_func(self) -> torch.nn.Module:
         if self._cfg.model.get("gptq_model", False):
@@ -65,7 +62,6 @@ class FSDPModelManager:
                 torch_dtype=self.torch_dtype,
                 device_map=self._cfg.model.get("device_map", "auto"),
                 trust_remote_code=True,
-                use_safetensors=self._cfg.model.get("use_safetensors", False),
             )
             if torch.cuda.is_available():
                 model = model.cuda()
@@ -82,8 +78,8 @@ class FSDPModelManager:
 
         mixed_precision = MixedPrecision(
             param_dtype=self.torch_dtype,
-            reduce_dtype=self.torch_dtype,
-            buffer_dtype=self.torch_dtype,
+            reduce_dtype=torch.float32,
+            buffer_dtype=torch.float32,
         )
 
         if self._cfg.model.sharding_strategy == "full_shard":
@@ -101,7 +97,6 @@ class FSDPModelManager:
         self.model = FSDP(
             module,
             param_init_fn=init_fn,
-            use_orig_params=True,
             auto_wrap_policy=auto_wrap_policy,
             device_id=int(os.environ["LOCAL_RANK"]),
             sharding_strategy=sharding_strategy,  # zero3
@@ -123,7 +118,7 @@ class FSDPModelManager:
             },
         ]
 
-        if self._cfg.model.vh_mode in ["a", "a0", "a6"]:
+        if self._cfg.model.get("vh_mode", None) in ["a", "a0", "a6"]:
             param_groups.append(
                 {
                     "params": [
