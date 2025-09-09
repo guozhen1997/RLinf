@@ -78,7 +78,7 @@ class TransformFunc:
         num_key_value_heads = (
             config.model_config.num_query_groups or num_attention_heads
         )
-        head_dim = hidden_size // num_attention_heads
+        head_dim = config.model_config.kv_channels
 
         tp_size = config.model_config.tensor_model_parallel_size
 
@@ -341,11 +341,11 @@ class TransformFunc:
             ),
             "self_attention.q_layernorm.weight": (
                 TransformType.SPLIT_NONE,
-                ["self_attn.q_layernorm.weight"],
+                ["self_attn.q_norm.weight"],
             ),
             "self_attention.k_layernorm.weight": (
                 TransformType.SPLIT_NONE,
-                ["self_attn.k_layernorm.weight"],
+                ["self_attn.k_norm.weight"],
             ),
             "pre_mlp_layernorm.weight": (
                 TransformType.SPLIT_NONE,
@@ -455,14 +455,18 @@ def tp_reshard_fn_qwen3_30b(model_state_dict, merge_factor, tp_group):
         if (
             "rotary_pos_emb.inv_freq" in k
             or "linear_qkv.layer_norm_weight" in k
-            or "mlp.linear_fc1.layer_norm_weight" in k
+            or "linear_fc1.layer_norm_weight" in k
             or "final_layernorm.weight" in k
+            or "q_layernorm.weight" in k
+            or "k_layernorm.weight" in k
+            or "pre_mlp_layernorm.weight" in k
+            or "router.weight" in k
         ):
             model_state_dict[k] = v.clone()
             continue
 
         dim = 0
-        if "self_attention.linear_proj.weight" in k or "mlp.linear_fc2.weight" in k:
+        if "self_attention.linear_proj.weight" in k or "linear_fc2.weight" in k:
             dim = 1
         model_state_dict[k] = _gather_tp_group_tensor_and_reshard(
             v, dim, merge_factor, tp_group

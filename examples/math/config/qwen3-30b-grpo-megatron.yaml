@@ -98,7 +98,7 @@ rollout:
   return_logprobs: ${not:${algorithm.recompute_logprobs}}
 
   tensor_parallel_size: 4
-  pipeline_parallel_size: 2
+  pipeline_parallel_size: 1
   
   validate_weight: False # whether to send all weights at first for weight comparison.
   validate_save_dir: null # the directory to save the weights for comparison. If validate_weight is True, this will be used to save the weights for comparison.
