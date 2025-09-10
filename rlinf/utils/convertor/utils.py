@@ -18,6 +18,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 
+from rlinf.utils.resharding.reshard_config import ReshardConfig
+
 
 class TransformType(Enum):
     SPLIT_QKV = "split_qkv"
@@ -125,7 +127,7 @@ class ConvertorRule:
 
 
 class BaseConvertor:
-    def __init__(self, config, strict: bool = False):
+    def __init__(self, config: ReshardConfig, strict: bool = False):
         self.cfg = config
         self.strict = strict
         self.rules = self.build_rules()
@@ -450,7 +452,9 @@ register_mg2hf_convertor("qwen2.5", Qwen2_5Convertor)
 register_mg2hf_convertor("qwen2.5-vl", Qwen2_5VLConvertor)
 
 
-def get_mg2hf_convertor(model_arch: str, config, strict: bool = False) -> BaseConvertor:
+def get_mg2hf_convertor(
+    model_arch: str, config: ReshardConfig, strict: bool = False
+) -> BaseConvertor:
     if model_arch not in _MG2HF_CONVERTOR_REGISTRY:
         raise ValueError(f"No convertor registered for {model_arch}")
     convertor_cls = _MG2HF_CONVERTOR_REGISTRY[model_arch]
