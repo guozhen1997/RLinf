@@ -46,7 +46,7 @@ def torch_dtype_from_precision(precision: Union[int, str]) -> torch.dtype:
         return torch.bfloat16
     elif precision in [16, "16", "fp16", "16-mixed"]:
         return torch.float16
-    elif precision in [32, "32", "32-true"]:
+    elif precision in [32, "32", "fp32", "32-true"]:
         return torch.float32
     elif precision in [None]:
         return None
@@ -540,9 +540,6 @@ def validate_embodied_cfg(cfg):
     cfg.env.eval.num_envs = cfg.env.eval.num_envs // stage_num // env_world_size
 
     with open_dict(cfg):
-        cfg.actor.model.sharding_strategy = cfg.actor.model.get(
-            "sharding_strategy", "full_shard"
-        )
         if cfg.env.train.simulator_type == "maniskill":
 
             def get_robot_control_mode(robot: str):

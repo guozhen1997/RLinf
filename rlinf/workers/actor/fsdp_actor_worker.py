@@ -529,7 +529,7 @@ class FSDPActor(FSDPModelManager, Worker):
 class EmbodiedFSDPActor(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig):
         Worker.__init__(self)
-        super().__init__(cfg.actor)
+        super().__init__(cfg.actor, self._world_size, self.logger)
 
         self.cfg = cfg
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
@@ -538,7 +538,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         self.device_mesh = init_device_mesh(
             "cuda", mesh_shape=(world_size,), mesh_dim_names=["fsdp"]
         )
-
         self._env_group_name = cfg.env.group_name
         self._rollout_group_name = cfg.rollout.group_name
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
