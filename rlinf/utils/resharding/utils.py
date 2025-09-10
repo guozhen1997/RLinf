@@ -123,13 +123,236 @@ class BaseTensorParallelResharder:
 
 class Qwen2_5_TP_Resharder(BaseTensorParallelResharder):
     def build_rules(self) -> List[TensorParallelReshardRule]:
-        return NotImplementedError("Qwen2.5 TP reshard rules not implemented yet")
-
+        LID = r"(?P<i>\d+)"
+        WB = r"(?P<wb>weight|bias)"
+        rules = [
+            # embedding
+            TensorParallelReshardRule(
+                pattern=re.compile(r"embedding\.word_embeddings\.weight"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+            ),
+            # attn layer norm
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.linear_qkv\.layer_norm_weight"
+                ),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # attn o project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.linear_proj\.{WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=1,
+                predicate=None,
+            ),
+            # attn qkv project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"decoder\.layers\.{LID}\.self_attention\.linear_qkv\.{WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+                predicate=None,
+            ),
+            # mlp fc1 project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.linear_fc1\.{WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+                predicate=None,
+            ),
+            # mlp fc2 project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"decoder\.layers\.{LID}\.mlp\.linear_fc2\.{WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=1,
+                predicate=None,
+            ),
+            # mlp final layer norm
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"decoder\.layers\.{LID}\.linear_fc1\.layer_norm_weight"
+                ),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # final_layernorm
+            TensorParallelReshardRule(
+                pattern=re.compile(r"decoder\.final_layernorm\.{WB}"),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # output layer
+            TensorParallelReshardRule(
+                pattern=re.compile(r"output_layer\.weight"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+                predicate=None,
+            ),
+        ]
+        return rules
 
 class Qwen2_5_VL_TP_Resharder(BaseTensorParallelResharder):
-    def build_rules(self):
-        return NotImplementedError("Qwen2.5 VL TP reshard rules not implemented yet")
+    LID = r"(?P<i>\d+)"
+    WB = r"(?P<wb>weight|bias)"
+    VISION_PREFIX = "vision_model"    
+    VISION_DECODER_LAYERS_PREFIX = f"{VISION_PREFIX}.decoder.layers"
+    LLM_PREFIX = "language_model"
+    LLM_DECODER_LAYERS_PREFIX = f"{LLM_PREFIX}.decoder.layers"
+    def _build_vision_rules(self) -> List[TensorParallelReshardRule]:
 
+        vision_rules = [
+            # vision embedding
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_PREFIX}\.patch_embed\.proj\.weight"),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # vision o proj weight
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_proj\.weight"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=1,
+            ),
+            # vision o proj bias
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_proj\.bias"),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # vision qkv proj weight/bias
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_qkv\.{self.WB}"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+            ),
+            # vision attn layer norm
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_qkv\.layer_norm_weight"
+                ),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # vision mlp fc1 project weight/bias
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc1\.{self.WB}"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+            ),
+            # vision mlp fc2 project weight
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc2\.weight"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=1,
+            ),
+            # vision mlp fc2 project bias
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc2\.bias"),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # vision mlp final layer norm
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.linear_fc1\.layer_norm_weight"
+                ),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # vision final_layernorm
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_PREFIX}\.decoder\.final_layernorm\.{self.WB}"),
+                action=TensorParallelReshardType.KEEP,
+            ),
+        ]
+        return vision_rules
+        
+    def _build_llm_rules(self) -> List[TensorParallelReshardRule]:
+        llm_rules = [
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.LLM_PREFIX}\.embedding\.word_embeddings\.weight"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+            ),
+            # llm attn layer norm
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.LLM_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_qkv\.layer_norm_weight"
+                ),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # llm attn o project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.LLM_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_proj\.{self.WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=1,
+            ),
+            # llm attn qkv project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.LLM_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_qkv\.{self.WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+            ),
+            # llm mlp fc1 project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.LLM_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc1\.{self.WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+            ),
+            # llm mlp fc2 project
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.LLM_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc2\.{self.WB}"
+                ),
+                action=TensorParallelReshardType.CONCAT,
+                dim=1,
+            ),
+            # llm fc1 layer norm
+            TensorParallelReshardRule(
+                pattern=re.compile(
+                    rf"{self.LLM_DECODER_LAYERS_PREFIX}\.{self.LID}\.linear_fc1\.layer_norm_weight"
+                ),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            # llm final_layernorm
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.LLM_PREFIX}\.decoder\.final_layernorm\.{self.WB}"),
+                action=TensorParallelReshardType.KEEP,
+            ),    
+        ]
+        return llm_rules
+
+    def _build_projection_rules(self) -> List[TensorParallelReshardRule]:
+        projection_rules = [
+            # projection linear_fc1 weight/bias
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_PREFIX}\.projection\.encoder\.linear_fc1\.{self.WB}"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=0,
+            ),
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_PREFIX}\.projection\.encoder\.inear_fc2\.weight"),
+                action=TensorParallelReshardType.CONCAT,
+                dim=1,
+            ),
+            TensorParallelReshardRule(
+                pattern=re.compile(rf"{self.VISION_PREFIX}\.projection\.encoder\.linear_fc2\.bias"),
+                action=TensorParallelReshardType.KEEP,
+            ),
+            
+        ]
+        return projection_rules
+        
+    def build_rules(self):
+        rules = self._build_vision_rules() + self._build_projection_rules() + self._build_llm_rules()
+        return rules
 
 _MG2HF_TP_RESHARDER_REGISTRY: Dict[str, Type[BaseTensorParallelResharder]] = {}
 
