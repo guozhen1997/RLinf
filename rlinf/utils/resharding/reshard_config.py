@@ -15,11 +15,12 @@
 from dataclasses import dataclass
 from typing import Callable
 
+from megatron.core import parallel_state
 from megatron.core.transformer import TransformerConfig
 
 from rlinf.utils.convertor.utils import get_mg2hf_convertor
 
-from .utils import get_pp_reshard_fn, get_tp_reshard_fn
+from .utils import get_mg2hf_tp_resharder, get_pp_reshard_fn
 
 
 @dataclass
@@ -65,7 +66,12 @@ class ReshardConfig:
             self.convert_fn = self._convertor.convert
 
         if self.tp_reshard_fn is None:
-            self.tp_reshard_fn = get_tp_reshard_fn(self.model_arch)
+            self._tp_resharder = get_mg2hf_tp_resharder(
+                self.model_arch,
+                parallel_state.get_tensor_model_parallel_group(),
+                strict=True,
+            )
+            self.tp_reshard_fn = self._tp_resharder.apply
 
         if self.pp_reshard_fn is None:
             self.pp_reshard_fn = get_pp_reshard_fn(self.model_arch)
