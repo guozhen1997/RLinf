@@ -15,24 +15,14 @@
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Dict, List, Optional, Type, Union
 
 import torch
 from megatron.core import parallel_state
 
-
-def get_pp_reshard_fn(model_arch: str):
-    if model_arch == "qwen2.5":
-        return pp_reshard_fn_qwen2_5
-    else:
-        raise NotImplementedError(
-            f"get_pp_reshard_fn for model_arch {model_arch} is not implemented"
-        )
-
-
-##############################
-# tp reshard fn implementation
-##############################
+#############################
+# tp reshard  implementation
+#############################
 
 
 class TensorParallelReshardType(Enum):
@@ -52,15 +42,10 @@ class TensorParallelReshardRule:
 class BaseTensorParallelResharder:
     def __init__(
         self,
-        tp_group: torch.distributed.ProcessGroup,
-        ep_group: Optional[torch.distributed.ProcessGroup] = None,
+        merge_factor: int,
         strict: bool = True,
     ):
-        self.tp_group = tp_group
-        self.tp_world_size = torch.distributed.get_world_size(group=tp_group)
-        self.ep_group = ep_group
-        if ep_group is not None:
-            self.ep_world_size = torch.distributed.get_world_size(group=ep_group)
+        self.merge_factor = merge_factor
         # maybe here if ep > 1 should use ep_group to do things on mlp
         # if so, just pass ep_group and implement more rules for ep
         self.rules: List[TensorParallelReshardRule] = self.build_rules()
@@ -76,7 +61,9 @@ class BaseTensorParallelResharder:
                 return rule
         return None
 
-    def apply(self, model_state_dict: Dict) -> Dict:
+    def apply(
+        self, model_state_dict: Dict, sub_tp_group: torch.distributed.ProcessGroup
+    ) -> Dict:
         new_state_dict = {}
         for k, v in model_state_dict.items():
             rule = self._match_rules(k)
@@ -96,14 +83,17 @@ class BaseTensorParallelResharder:
                         f"Dim must be specified for CONCAT action in key: {k}"
                     )
                 new_state_dict[k] = self._gather_tp_group_tensor_and_reshard(
-                    v, rule.dim, self.tp_world_size, self.tp_group
+                    tensor=v,
+                    dim=rule.dim,
+                    merge_factor=self.merge_factor,
+                    sub_tp_group=sub_tp_group,
                 )
             elif rule.action == TensorParallelReshardType.SUM:
                 # may be strange but used in some cases
                 gathered_tensors = [
-                    torch.zeros_like(v) for _ in range(self.tp_world_size)
+                    torch.zeros_like(v) for _ in range(self.merge_factor)
                 ]
-                torch.distributed.all_gather(gathered_tensors, v, group=self.tp_group)
+                torch.distributed.all_gather(gathered_tensors, v, group=sub_tp_group)
                 new_state_dict[k] = sum(gathered_tensors)
             else:
                 raise ValueError(f"Unknown action {rule.action} for key: {k}")
@@ -111,10 +101,10 @@ class BaseTensorParallelResharder:
         return new_state_dict
 
     @staticmethod
-    def _gather_tp_group_tensor_and_reshard(tensor, dim, merge_factor, tp_group):
+    def _gather_tp_group_tensor_and_reshard(tensor, dim, merge_factor, sub_tp_group):
         gathered_tensors = [torch.zeros_like(tensor) for _ in range(merge_factor)]
 
-        torch.distributed.all_gather(gathered_tensors, tensor, group=tp_group)
+        torch.distributed.all_gather(gathered_tensors, tensor, group=sub_tp_group)
 
         resharded_tensor = torch.cat(gathered_tensors, dim=dim)
 
@@ -159,18 +149,14 @@ class Qwen2_5_TP_Resharder(BaseTensorParallelResharder):
             ),
             # mlp fc1 project
             TensorParallelReshardRule(
-                pattern=re.compile(
-                    rf"decoder\.layers\.{LID}\.mlp\.linear_fc1\.{WB}"
-                ),
+                pattern=re.compile(rf"decoder\.layers\.{LID}\.mlp\.linear_fc1\.{WB}"),
                 action=TensorParallelReshardType.CONCAT,
                 dim=0,
                 predicate=None,
             ),
             # mlp fc2 project
             TensorParallelReshardRule(
-                pattern=re.compile(
-                    rf"decoder\.layers\.{LID}\.mlp\.linear_fc2\.{WB}"
-                ),
+                pattern=re.compile(rf"decoder\.layers\.{LID}\.mlp\.linear_fc2\.{WB}"),
                 action=TensorParallelReshardType.CONCAT,
                 dim=1,
                 predicate=None,
@@ -184,7 +170,7 @@ class Qwen2_5_TP_Resharder(BaseTensorParallelResharder):
             ),
             # final_layernorm
             TensorParallelReshardRule(
-                pattern=re.compile(r"decoder\.final_layernorm\.{WB}"),
+                pattern=re.compile(rf"decoder\.final_layernorm\.{WB}"),
                 action=TensorParallelReshardType.KEEP,
             ),
             # output layer
@@ -197,15 +183,16 @@ class Qwen2_5_TP_Resharder(BaseTensorParallelResharder):
         ]
         return rules
 
+
 class Qwen2_5_VL_TP_Resharder(BaseTensorParallelResharder):
     LID = r"(?P<i>\d+)"
     WB = r"(?P<wb>weight|bias)"
-    VISION_PREFIX = "vision_model"    
+    VISION_PREFIX = "vision_model"
     VISION_DECODER_LAYERS_PREFIX = f"{VISION_PREFIX}.decoder.layers"
     LLM_PREFIX = "language_model"
     LLM_DECODER_LAYERS_PREFIX = f"{LLM_PREFIX}.decoder.layers"
-    def _build_vision_rules(self) -> List[TensorParallelReshardRule]:
 
+    def _build_vision_rules(self) -> List[TensorParallelReshardRule]:
         vision_rules = [
             # vision embedding
             TensorParallelReshardRule(
@@ -214,18 +201,24 @@ class Qwen2_5_VL_TP_Resharder(BaseTensorParallelResharder):
             ),
             # vision o proj weight
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_proj\.weight"),
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_proj\.weight"
+                ),
                 action=TensorParallelReshardType.CONCAT,
                 dim=1,
             ),
             # vision o proj bias
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_proj\.bias"),
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_proj\.bias"
+                ),
                 action=TensorParallelReshardType.KEEP,
             ),
             # vision qkv proj weight/bias
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_qkv\.{self.WB}"),
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.self_attention\.linear_qkv\.{self.WB}"
+                ),
                 action=TensorParallelReshardType.CONCAT,
                 dim=0,
             ),
@@ -238,19 +231,25 @@ class Qwen2_5_VL_TP_Resharder(BaseTensorParallelResharder):
             ),
             # vision mlp fc1 project weight/bias
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc1\.{self.WB}"),
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc1\.{self.WB}"
+                ),
                 action=TensorParallelReshardType.CONCAT,
                 dim=0,
             ),
             # vision mlp fc2 project weight
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc2\.weight"),
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc2\.weight"
+                ),
                 action=TensorParallelReshardType.CONCAT,
                 dim=1,
             ),
             # vision mlp fc2 project bias
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc2\.bias"),
+                pattern=re.compile(
+                    rf"{self.VISION_DECODER_LAYERS_PREFIX}\.{self.LID}\.mlp\.linear_fc2\.bias"
+                ),
                 action=TensorParallelReshardType.KEEP,
             ),
             # vision mlp final layer norm
@@ -262,16 +261,20 @@ class Qwen2_5_VL_TP_Resharder(BaseTensorParallelResharder):
             ),
             # vision final_layernorm
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_PREFIX}\.decoder\.final_layernorm\.{self.WB}"),
+                pattern=re.compile(
+                    rf"{self.VISION_PREFIX}\.decoder\.final_layernorm\.{self.WB}"
+                ),
                 action=TensorParallelReshardType.KEEP,
             ),
         ]
         return vision_rules
-        
+
     def _build_llm_rules(self) -> List[TensorParallelReshardRule]:
         llm_rules = [
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.LLM_PREFIX}\.embedding\.word_embeddings\.weight"),
+                pattern=re.compile(
+                    rf"{self.LLM_PREFIX}\.embedding\.word_embeddings\.weight"
+                ),
                 action=TensorParallelReshardType.CONCAT,
                 dim=0,
             ),
@@ -323,9 +326,11 @@ class Qwen2_5_VL_TP_Resharder(BaseTensorParallelResharder):
             ),
             # llm final_layernorm
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.LLM_PREFIX}\.decoder\.final_layernorm\.{self.WB}"),
+                pattern=re.compile(
+                    rf"{self.LLM_PREFIX}\.decoder\.final_layernorm\.{self.WB}"
+                ),
                 action=TensorParallelReshardType.KEEP,
-            ),    
+            ),
         ]
         return llm_rules
 
@@ -333,38 +338,48 @@ class Qwen2_5_VL_TP_Resharder(BaseTensorParallelResharder):
         projection_rules = [
             # projection linear_fc1 weight/bias
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_PREFIX}\.projection\.encoder\.linear_fc1\.{self.WB}"),
+                pattern=re.compile(
+                    rf"{self.VISION_PREFIX}\.projection\.encoder\.linear_fc1\.{self.WB}"
+                ),
                 action=TensorParallelReshardType.CONCAT,
                 dim=0,
             ),
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_PREFIX}\.projection\.encoder\.inear_fc2\.weight"),
+                pattern=re.compile(
+                    rf"{self.VISION_PREFIX}\.projection\.encoder\.inear_fc2\.weight"
+                ),
                 action=TensorParallelReshardType.CONCAT,
                 dim=1,
             ),
             TensorParallelReshardRule(
-                pattern=re.compile(rf"{self.VISION_PREFIX}\.projection\.encoder\.linear_fc2\.bias"),
+                pattern=re.compile(
+                    rf"{self.VISION_PREFIX}\.projection\.encoder\.linear_fc2\.bias"
+                ),
                 action=TensorParallelReshardType.KEEP,
             ),
-            
         ]
         return projection_rules
-        
+
     def build_rules(self):
-        rules = self._build_vision_rules() + self._build_projection_rules() + self._build_llm_rules()
+        rules = (
+            self._build_vision_rules()
+            + self._build_projection_rules()
+            + self._build_llm_rules()
+        )
         return rules
 
-_MG2HF_TP_RESHARDER_REGISTRY: Dict[str, Type[BaseTensorParallelResharder]] = {}
+
+_TP_RESHARDER_REGISTRY: Dict[str, Type[BaseTensorParallelResharder]] = {}
 
 
 def register_mg2hf_tp_resharder(
     model_arch: str, cls: Type[BaseTensorParallelResharder]
 ):
-    if model_arch in _MG2HF_TP_RESHARDER_REGISTRY:
+    if model_arch in _TP_RESHARDER_REGISTRY:
         raise ValueError(
             f"Model arch {model_arch} already registered in mg2hf tp resharder registry"
         )
-    _MG2HF_TP_RESHARDER_REGISTRY[model_arch] = cls
+    _TP_RESHARDER_REGISTRY[model_arch] = cls
     return cls
 
 
@@ -372,71 +387,196 @@ register_mg2hf_tp_resharder("qwen2.5", Qwen2_5_TP_Resharder)
 register_mg2hf_tp_resharder("qwen2.5-vl", Qwen2_5_VL_TP_Resharder)
 
 
-def get_mg2hf_tp_resharder(
-    model_arch: str, tp_group: torch.distributed.ProcessGroup, strict: bool = True
+def get_tp_resharder(
+    model_arch: str,
+    merge_factor: int,
+    strict: bool = True,
 ) -> BaseTensorParallelResharder:
-    if model_arch not in _MG2HF_TP_RESHARDER_REGISTRY:
+    if model_arch not in _TP_RESHARDER_REGISTRY:
         raise ValueError(
             f"Model arch {model_arch} not registered in mg2hf tp resharder registry"
         )
-    cls = _MG2HF_TP_RESHARDER_REGISTRY[model_arch]
-    return cls(tp_group, strict)
+    cls = _TP_RESHARDER_REGISTRY[model_arch]
+    return cls(merge_factor=merge_factor, strict=strict)
 
 
 ##############################
-# pp reshard fn implementation
+# pp reshard implementation
 ##############################
 
 
-def _gather_pp_group_tensor_and_reshard(
-    model_state_dict, key, pp_src_idx, group, dtype
-):
-    tensor = model_state_dict.get(key)
-    if tensor is not None:
-        tensor_shape = [tensor.shape]
-    else:
-        tensor_shape = [None]
+class PipelineParallelReshardType(Enum):
+    KEEP = "keep"
+    BROADCAST_FROM_STAGE = "broadcast_from_stage"
 
-    torch.distributed.broadcast_object_list(tensor_shape, pp_src_idx, group=group)
 
-    if tensor_shape[0] is None:
+@dataclass
+class PipelineParallelReshardRule:
+    pattern: re.Pattern
+    action: PipelineParallelReshardType
+    # "first", "last", "fixed index", "callable to get index"
+    src: Union[str, int, Callable[[str], int], None] = None
+    # used to filter stages need to receive
+    dst_predicate: Optional[Callable[[str], bool]] = None
+    # used to filter whether apply this rule
+    predicate: Optional[Callable[[str], bool]] = None
+
+
+class BasePipelineParallelResharder:
+    def __init__(
+        self,
+        pp_group: torch.distributed.ProcessGroup,
+        dtype: torch.dtype,
+        strict: bool = True,
+    ):
+        self.pp_group = pp_group
+        self.strict = strict
+        self.dtype = dtype
+        self.first_rank = parallel_state.get_pipeline_model_parallel_first_rank()
+        self.last_rank = parallel_state.get_pipeline_model_parallel_last_rank()
+        self.pp_rank = torch.distributed.get_rank(group=pp_group)
+        self.pp_world_size = torch.distributed.get_world_size(group=pp_group)
+
+        self.rules: List[PipelineParallelReshardRule] = self.build_rules()
+
+    def build_rules(self) -> List[PipelineParallelReshardRule]:
+        raise NotImplementedError("Subclasses must implement build_rules method")
+
+    def _match_rules(self, key: str) -> Optional[PipelineParallelReshardRule]:
+        for rule in self.rules:
+            m = rule.pattern.match(key)
+            if m and (rule.predicate is None or rule.predicate(key)):
+                return rule
         return None
-    if torch.distributed.get_rank() != pp_src_idx:
-        tensor = torch.empty(tensor_shape[0], dtype=dtype).cuda()
 
-    torch.distributed.broadcast(tensor.contiguous(), pp_src_idx, group=group)
-    return tensor
+    @staticmethod
+    def _gather_pp_group_tensor_and_reshard(
+        model_state_dict: Dict,
+        key: str,
+        pp_src_rank: int,
+        pp_group: torch.distributed.ProcessGroup,
+        dtype: torch.dtype,
+    ) -> Optional[torch.Tensor]:
+        tensor = model_state_dict.get(key)
+        if tensor is not None:
+            tensor_shape = [tensor.shape]
+        else:
+            tensor_shape = [None]
+
+        torch.distributed.broadcast_object_list(
+            tensor_shape, src=pp_src_rank, group=pp_group
+        )
+
+        if tensor_shape[0] is None:
+            return None
+        if torch.distributed.get_rank() != pp_src_rank:
+            tensor = torch.empty(tensor_shape[0], dtype=dtype).cuda()
+
+        torch.distributed.broadcast(
+            tensor.contiguous(), src=pp_src_rank, group=pp_group
+        )
+        return tensor
+
+    def _resolve_src_rank(self, rule: PipelineParallelReshardRule, key: str) -> int:
+        if rule.src == "first":
+            return self.first_rank
+        elif rule.src == "last":
+            return self.last_rank
+        elif isinstance(rule.src, int):
+            if rule.src < 0 or rule.src >= self.pp_world_size:
+                raise ValueError(f"Fixed src index {rule.src} out of range")
+            return self.first_rank + rule.src
+        elif callable(rule.src):
+            idx = rule.src(key)
+            if idx < 0 or idx >= self.pp_world_size:
+                raise ValueError(f"Callable src index {idx} out of range")
+            return self.first_rank + idx
+        else:
+            raise ValueError(f"Invalid src {rule.src} in rule for key: {key}")
+
+    def apply(self, model_state_dict: Dict) -> Dict:
+        for k in model_state_dict.keys():
+            rule = self._match_rules(k)
+            if rule is None:
+                if self.strict:
+                    raise ValueError(
+                        f"PPResharder set strict True but no matching rule for key: {k}"
+                    )
+                else:
+                    continue
+            if rule.action == PipelineParallelReshardType.KEEP:
+                continue
+            elif rule.action == PipelineParallelReshardType.BROADCAST_FROM_STAGE:
+                pp_src_rank = self._resolve_src_rank(rule, k)
+                tensor = self._gather_pp_group_tensor_and_reshard(
+                    model_state_dict, k, pp_src_rank, self.pp_group, self.dtype
+                )
+                if tensor is not None:
+                    model_state_dict[k] = tensor.clone()
+
+            else:
+                raise ValueError(f"Unknown action {rule.action} for key: {k}")
+        return model_state_dict
 
 
-def pp_reshard_fn_qwen2_5(model_state_dict, pp_group, dtype):
-    pp_first_rank = parallel_state.get_pipeline_model_parallel_first_rank()
-    pp_last_rank = parallel_state.get_pipeline_model_parallel_last_rank()
+class Qwen2_5_PP_Resharder(BasePipelineParallelResharder):
+    def build_rules(self) -> List[PipelineParallelReshardRule]:
+        return [
+            PipelineParallelReshardRule(
+                pattern=re.compile(r"decoder\.final_layernorm\.weight"),
+                action=PipelineParallelReshardType.BROADCAST_FROM_STAGE,
+                src="last",
+            ),
+            PipelineParallelReshardRule(
+                pattern=re.compile(r"decoder\.final_layernorm\.bias"),
+                action=PipelineParallelReshardType.BROADCAST_FROM_STAGE,
+                src="last",
+            ),
+            PipelineParallelReshardRule(
+                pattern=re.compile(r"embedding\.word_embeddings\.weight"),
+                action=PipelineParallelReshardType.BROADCAST_FROM_STAGE,
+                src="first",
+            ),
+            PipelineParallelReshardRule(
+                pattern=re.compile(r"output_layer\.weight"),
+                action=PipelineParallelReshardType.BROADCAST_FROM_STAGE,
+                src="last",
+            ),
+            # use strict = false to skip other params, just keep
+        ]
 
-    key = "decoder.final_layernorm.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
 
-    key = "decoder.final_layernorm.bias"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
+class Qwen2_5_VL_PP_Resharder(BasePipelineParallelResharder):
+    def build_rules(selfw) -> List[PipelineParallelReshardRule]:
+        raise NotImplementedError
 
-    key = "embedding.word_embeddings.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_first_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
 
-    key = "output_layer.weight"
-    tensor = _gather_pp_group_tensor_and_reshard(
-        model_state_dict, key, pp_last_rank, pp_group, dtype
-    )
-    if tensor is not None:
-        model_state_dict[key] = tensor.clone()
-    return model_state_dict
+_PP_RESHARDER_REGISTRY: Dict[str, Type[BasePipelineParallelResharder]] = {}
+
+
+def register_pp_resharder(model_arch: str, cls: Type[BasePipelineParallelResharder]):
+    if model_arch in _PP_RESHARDER_REGISTRY:
+        raise ValueError(
+            f"Model arch {model_arch} already registered in pp resharder registry"
+        )
+    _PP_RESHARDER_REGISTRY[model_arch] = cls
+    return cls
+
+
+def get_pp_resharder(
+    model_arch: str,
+    pp_group: torch.distributed.ProcessGroup,
+    strict: bool = True,
+    dtype: Optional[torch.dtype] = None,
+) -> BasePipelineParallelResharder:
+    if model_arch not in _PP_RESHARDER_REGISTRY:
+        raise ValueError(
+            f"Model arch {model_arch} not registered in pp resharder registry"
+        )
+    cls = _PP_RESHARDER_REGISTRY[model_arch]
+
+    return cls(pp_group=pp_group, strict=strict, dtype=dtype)
+
+
+register_pp_resharder("qwen2.5", Qwen2_5_PP_Resharder)
+register_pp_resharder("qwen2.5-vl", Qwen2_5_VL_PP_Resharder)
