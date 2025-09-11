@@ -13,13 +13,15 @@
 # limitations under the License.
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Callable
 
 from megatron.core.transformer import TransformerConfig
 
-from rlinf.utils.convertor.utils import get_mg2hf_convertor
 
-from .utils import get_pp_reshard_fn, get_tp_reshard_fn
+class ReshardWeightFormat(Enum):
+    MCORE = "mcore"
+    HF = "hf"
 
 
 @dataclass
@@ -29,7 +31,7 @@ class ReshardConfig:
 
     model_config: TransformerConfig
 
-    reshard_weights_format: str = "sglang"
+    reshard_weights_format: ReshardWeightFormat = ReshardWeightFormat.MCORE
     """Resharding weights format, support sglang, mcore (megatron core)."""
 
     reshard_tp_size: int = 1
@@ -59,13 +61,3 @@ class ReshardConfig:
             raise ValueError(
                 "Please specify the model_arch, valid options are `qwen2.5` and `llama2`."
             )
-
-        if self.convert_fn is None and self.reshard_weights_format != "mcore":
-            self._convertor = get_mg2hf_convertor(self.model_arch, self, strict=True)
-            self.convert_fn = self._convertor.convert
-
-        if self.tp_reshard_fn is None:
-            self.tp_reshard_fn = get_tp_reshard_fn(self.model_arch)
-
-        if self.pp_reshard_fn is None:
-            self.pp_reshard_fn = get_pp_reshard_fn(self.model_arch)
