@@ -191,6 +191,7 @@ class VLLMWorker(Worker):
             with self.worker_timer():
                 vllm_results = self._vllm_engine.generate(
                     input_ids=request.input_ids,
+                    image_data=request.image_data,
                     sampling_params=self._sampling_params,
                     return_logprobs=self._return_logprobs,
                 )
