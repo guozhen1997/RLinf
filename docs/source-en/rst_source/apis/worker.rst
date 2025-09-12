@@ -11,11 +11,13 @@ Worker
 
 .. autoclass:: rlinf.scheduler.worker.worker.Worker
    :members: worker_address, create_group, send, recv, send_tensor, recv_tensor, create_channel, connect_channel, broadcast
-   :class-doc-from: init
-   :exclude-members: __init__, __new__
+   :member-order: bysource
+   :class-doc-from: class
+   :exclude-members: __new__
 
 WorkerGroup
 -----------
 
 .. autoclass:: rlinf.scheduler.worker.worker_group.WorkerGroup
    :members:
+   :member-order: bysource
