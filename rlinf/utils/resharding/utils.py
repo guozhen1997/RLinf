@@ -260,61 +260,61 @@ class Qwen2_5VLHFWeightResharder(BaseHFWeightResharder):
             # attention
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.self_attn\.q_proj\.(weight|bias)"
+                    r"language_model\.layers\.\d+\.self_attn\.q_proj\.(weight|bias)"
                 ),
                 dim=0,
             ),
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.self_attn\.k_proj\.(weight|bias)"
+                    r"language_model\.layers\.\d+\.self_attn\.k_proj\.(weight|bias)"
                 ),
                 dim=0,
             ),
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.self_attn\.v_proj\.(weight|bias)"
+                    r"language_model\.layers\.\d+\.self_attn\.v_proj\.(weight|bias)"
                 ),
                 dim=0,
             ),
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.self_attn\.o_proj\.weight"
+                    r"language_model\.layers\.\d+\.self_attn\.o_proj\.weight"
                 ),
                 dim=1,
             ),
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.input_layernorm\.weight"
+                    r"language_model\.layers\.\d+\.input_layernorm\.weight"
                 )
             ),
             # mlp
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.mlp\.gate_proj\.weight"
+                    r"language_model\.layers\.\d+\.mlp\.gate_proj\.weight"
                 ),
                 dim=0,
             ),
             HFWeightReshardRule(
-                re.compile(r"model\.language_model\.layers\.\d+\.mlp\.up_proj\.weight"),
+                re.compile(r"language_model\.layers\.\d+\.mlp\.up_proj\.weight"),
                 dim=0,
             ),
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.mlp\.down_proj\.weight"
+                    r"language_model\.layers\.\d+\.mlp\.down_proj\.weight"
                 ),
                 dim=1,
             ),
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.language_model\.layers\.\d+\.post_attention_layernorm\.weight"
+                    r"language_model\.layers\.\d+\.post_attention_layernorm\.weight"
                 )
             ),
             # embedding
             HFWeightReshardRule(
-                re.compile(r"model\.language_model\.embed_tokens\.weight"), dim=0
+                re.compile(r"language_model\.embed_tokens\.weight"), dim=0
             ),
             # norm
-            HFWeightReshardRule(re.compile(r"model\.language_model\.norm\.weight")),
+            HFWeightReshardRule(re.compile(r"language_model\.norm\.weight")),
         ]
         return llm_rules
 
@@ -322,60 +322,60 @@ class Qwen2_5VLHFWeightResharder(BaseHFWeightResharder):
         vision_rules = [
             # attention
             HFWeightReshardRule(
-                re.compile(r"model\.vision\.blocks\.\d+\.attn\.qkv\.(weight|bias)"),
+                re.compile(r"visual\.blocks\.\d+\.attn\.qkv\.(weight|bias)"),
                 dim=0,
             ),
             HFWeightReshardRule(
-                re.compile(r"model\.vision\.blocks\.\d+\.attn\.proj\.weight"), dim=1
+                re.compile(r"visual\.blocks\.\d+\.attn\.proj\.weight"), dim=1
             ),
             HFWeightReshardRule(
-                re.compile(r"model\.vision\.blocks\.\d+\.attn\.proj\.bias")
+                re.compile(r"visual\.blocks\.\d+\.attn\.proj\.bias")
             ),
             # mlp
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.vision\.blocks\.\d+\.mlp\.gate_proj\.(weight|bias)"
+                    r"visual\.blocks\.\d+\.mlp\.gate_proj\.(weight|bias)"
                 ),
                 dim=0,
             ),
             HFWeightReshardRule(
-                re.compile(r"model\.vision\.blocks\.\d+\.mlp\.up_proj\.(weight|bias)"),
+                re.compile(r"visual\.blocks\.\d+\.mlp\.up_proj\.(weight|bias)"),
                 dim=0,
             ),
             HFWeightReshardRule(
-                re.compile(r"model\.vision\.blocks\.\d+\.mlp\.down_proj\.weight"), dim=1
+                re.compile(r"visual\.blocks\.\d+\.mlp\.down_proj\.weight"), dim=1
             ),
             HFWeightReshardRule(
-                re.compile(r"model\.vision\.blocks\.\d+\.mlp\.down_proj\.bias")
+                re.compile(r"visual\.blocks\.\d+\.mlp\.down_proj\.bias")
             ),
             # norm
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.vision\.blocks\.\d+\.norm1\.weight",
+                    r"visual\.blocks\.\d+\.norm1\.weight",
                 )
             ),
             HFWeightReshardRule(
                 re.compile(
-                    r"model\.vision\.blocks\.\d+\.norm2\.weight",
+                    r"visual\.blocks\.\d+\.norm2\.weight",
                 )
             ),
             # vision embed
             HFWeightReshardRule(
-                re.compile(r"model\.vision\.patch_embed\.proj\.weight")
+                re.compile(r"visual\.patch_embed\.proj\.weight")
             ),
         ]
         return vision_rules
 
     def _build_projector_rules(self) -> List[HFWeightReshardRule]:
         projector_rules = [
-            HFWeightReshardRule(re.compile(r"model\.visual\.merger\.ln_q.weight")),
+            HFWeightReshardRule(re.compile(r"visual\.merger\.ln_q.weight")),
             HFWeightReshardRule(
-                re.compile(r"model\.visual\.merger\.mlp\.0\.(weight|bias)"), dim=0
+                re.compile(r"visual\.merger\.mlp\.0\.(weight|bias)"), dim=0
             ),
             HFWeightReshardRule(
-                re.compile(r"model\.visual\.merger\.mlp\.2\.weight"), dim=1
+                re.compile(r"visual\.merger\.mlp\.2\.weight"), dim=1
             ),
-            HFWeightReshardRule(re.compile(r"model\.visual\.merger\.mlp\.2\.bias")),
+            HFWeightReshardRule(re.compile(r"visual\.merger\.mlp\.2\.bias")),
         ]
         return projector_rules
 
