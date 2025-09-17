@@ -123,7 +123,8 @@ class FSDPActor(FSDPModelManager, Worker):
             gc.collect()
             torch.cuda.empty_cache()
         self.rollout_weights_reshard = FSDPWeightReshard(
-            self.cfg.rollout.tensor_parallel_size
+            reshard_tp_size=self.cfg.rollout.tensor_parallel_size,
+            model_arch=self.cfg.rollout.model_arch,
         )
         self._setup_rollout_weight_dst_ranks()
 

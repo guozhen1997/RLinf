@@ -1,13 +1,37 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 from typing import Dict
 
 import torch
 
+from rlinf.utils.resharding.utils import BaseHFWeightResharder, get_hf_resharder
+
 
 class FSDPWeightReshard:
-    def __init__(self, reshard_tp_size):
+    def __init__(self, reshard_tp_size: int, model_arch: str):
         self.reshard_tp_size = reshard_tp_size
 
         self.rollout_tp_rank = torch.distributed.get_rank() % self.reshard_tp_size
+
+        resharder_cls = get_hf_resharder(model_arch=model_arch)
+        self._resharder: BaseHFWeightResharder = resharder_cls(
+            rollout_tp_rank=self.rollout_tp_rank,
+            reshard_tp_size=self.reshard_tp_size,
+            strict=True,
+        )
 
     def reshard_state_dict(
         self,
@@ -16,45 +40,4 @@ class FSDPWeightReshard:
         """
         reshard full state dict
         """
-        local_state = {}
-
-        for k, v in state_dict.items():
-            if (
-                "norm.weight" in k
-                or "rotary_emb.inv_freq" in k
-                or "input_layernorm.weight" in k
-                or "post_attention_layernorm.weight" in k
-            ):
-                local_state[k] = v.clone()
-                continue
-
-            if any(
-                x in k
-                for x in [
-                    "embed_tokens",
-                    "q_proj",
-                    "k_proj",
-                    "v_proj",
-                    "gate_proj",
-                    "up_proj",
-                ]
-            ):
-                dim = 0
-            elif any(x in k for x in ["o_proj", "down_proj", "lm_head"]):
-                dim = 1
-            else:
-                local_state[k] = v.clone()
-                continue
-
-            if v.ndim == 1:
-                shard_size = v.shape[0] // self.reshard_tp_size
-                start = self.rollout_tp_rank * shard_size
-                end = (self.rollout_tp_rank + 1) * shard_size
-                local_state[k] = v[start:end].clone()
-            else:
-                shard_size = v.shape[dim] // self.reshard_tp_size
-                start = self.rollout_tp_rank * shard_size
-                end = (self.rollout_tp_rank + 1) * shard_size
-                local_state[k] = v.narrow(dim, start, shard_size).clone()
-
-        return local_state
+        return self._resharder.reshard(state_dict)
