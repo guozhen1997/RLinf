@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import dataclasses
+import importlib.util
 import logging
 import os
 from dataclasses import asdict
@@ -710,9 +711,7 @@ def build_transformer_config(cfg) -> "TransformerConfig":
     tp_only_amax_red = cfg.get("tp_only_amax_red", False)
 
     if cfg.get("enable_cuda_graph", False):
-        try:
-            import transformer_engine
-        except ImportError:
+        if importlib.util.find_spec("transformer_engine") is None:
             raise ImportError(
                 "Can not import transformer_engine, which is required for cudagraphs."
             )
