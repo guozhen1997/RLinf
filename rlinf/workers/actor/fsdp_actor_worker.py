@@ -139,66 +139,26 @@ class FSDPActor(FSDPModelManager, Worker):
         )
 
     def del_reshard_state_dict(self):
-        if hasattr(self, "reshard_state_dict"):
-            del self.reshard_state_dict
+        if hasattr(self, "rollou_state_dict"):
+            del self.rollou_state_dict
 
     def sync_model_to_rollout(self):
         if next(self.model.parameters()).is_cpu:
             self.load_fsdp_param_and_grad(self.device)
-            self.load_fsdp_optimizer(self.device)
 
-        state_dict = self.get_model_state_dict()
-        self.reshard_state_dict = self.rollout_weights_reshard.reshard_state_dict(
-            state_dict
-        )
+        self.rollou_state_dict = self.get_model_state_dict()
+
         if self._weight_dst_rank_in_rollout is not None:
-            handle = {k: reduce_tensor(v) for k, v in self.reshard_state_dict.items()}
+            handle = {k: reduce_tensor(v) for k, v in self.rollou_state_dict.items()}
 
             self.send(
                 handle, self._rollout_group_name, self._weight_dst_rank_in_rollout
             )
         if self.cfg.actor.get("enable_offload", False):
             self.offload_fsdp_param_and_grad()
-            self.offload_fsdp_optimizer()
             torch.cuda.synchronize()
             gc.collect()
             torch.cuda.empty_cache()
-
-    def _get_rollout_result(self, rollout_channel: Channel):
-        """Receive rollout results."""
-        num_results_per_actor_dp = (
-            self._component_placement.get_world_size("rollout")
-            // self.cfg.rollout.tensor_parallel_size
-            // self.cfg.rollout.pipeline_parallel_size
-            // self._component_placement.get_world_size("actor")
-        )
-        rollout_results = []
-        for _ in range(num_results_per_actor_dp):
-            # Each result is a list of RolloutResult because of rollout_batch_size_per_gpu
-            rollout_result = rollout_channel.get()
-            rollout_results.append(rollout_result)
-
-        # Flatten rollout results
-        rollout_results = [
-            rollout_result
-            for rollout_dp_results in rollout_results
-            for rollout_result in rollout_dp_results
-        ]
-        rollout_result = RolloutResult.merge_result_list(rollout_results)
-        self.log_debug(f"Received {rollout_result.num_sequence} responses")
-
-        return rollout_result
-
-    def process_rollout_result(self, input_channel: Channel):
-        rollout_result = self._get_rollout_result(input_channel)
-        self.rollout_batches = rollout_result.to_actor_batch(
-            self.cfg.data.max_prompt_length,
-            self.cfg.actor.model.encoder_seq_length,
-            self.tokenizer.eos_token_id,
-        )
-
-        if not self.cfg.reward.use_reward_model:
-            self.answers = rollout_result.answers
 
     def compute_logprobs(self):
         self.model.eval()

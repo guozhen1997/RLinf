@@ -77,7 +77,7 @@ def main(cfg) -> None:
     )
 
     tokenizer = hf_tokenizer(cfg.actor.tokenizer.tokenizer_model)
-    train_ds, val_ds = create_rl_dataset(cfg.data, tokenizer)
+    train_ds, val_ds = create_rl_dataset(cfg, tokenizer)
 
     runner = MathRunner(
         cfg=cfg,
