@@ -217,6 +217,8 @@ class VisionLanguageDataset(Dataset):
                             f"image content should be bytes, but got {type(image_content)} , content is {image_content}"
                         )
                     image_list.append(image_content)
+            if image_list == []:
+                return [None]
             return image_list
 
         def process_prompt(
