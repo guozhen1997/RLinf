@@ -22,10 +22,14 @@ import psutil
 import setproctitle
 import torch
 from omegaconf import DictConfig
+from sglang.srt.disaggregation.utils import (
+    DisaggregationMode,
+)
 from sglang.srt.managers.io_struct import (
     ReleaseMemoryOccupationReqInput,
     ResumeMemoryOccupationReqInput,
 )
+from sglang.srt.managers.mm_utils import init_embedding_cache
 from sglang.srt.managers.scheduler import Scheduler as _Scheduler
 from sglang.srt.managers.scheduler import logger
 from sglang.srt.server_args import PortArgs, ServerArgs
@@ -33,6 +37,7 @@ from sglang.srt.utils import (
     broadcast_pyobj,
     configure_logger,
     get_bool_env_var,
+    kill_itself_when_parent_died,
     set_gpu_proc_affinity,
     suppress_other_loggers,
 )
@@ -106,10 +111,13 @@ class Scheduler(_Scheduler, Worker):
         self.actor_weight_rank = RankMapper.get_rollout_rank_to_actor_rank_map(
             placement
         )[(self.get_parent_rank(), self._rank)]
+        use_presharded_weights = (
+            False if self.cfg.actor.training_backend == "fsdp" else True
+        )
         # it's important to use load_weight to load resharded weight from megatron
         for _, module in self.tp_worker.worker.model_runner.model.named_modules():
             if hasattr(module, "use_presharded_weights"):
-                module.use_presharded_weights = True
+                module.use_presharded_weights = use_presharded_weights
 
         self._logger.info(
             f"Running Scheduler dp rank {self.get_parent_rank()}, tp rank {self.tp_rank}, corresponding actor weight rank = {self.actor_weight_rank}"
@@ -303,6 +311,7 @@ def run_scheduler_process(
 
     # Config the process
     # kill_itself_when_parent_died()  # This is disabled because it does not work for `--dp 2`
+    kill_itself_when_parent_died()
     setproctitle.setproctitle(f"sglang::scheduler{prefix.replace(' ', '_')}")
     faulthandler.enable()
     parent_process = psutil.Process().parent()
@@ -318,6 +327,11 @@ def run_scheduler_process(
     # Set cpu affinity to this gpu process
     if get_bool_env_var("SGLANG_SET_CPU_AFFINITY"):
         set_gpu_proc_affinity(server_args.tp_size, server_args.nnodes, gpu_id)
+
+    embedding_cache_size = 100
+    if "SGLANG_VLM_CACHE_SIZE_MB" in os.environ:
+        embedding_cache_size = int(os.environ["SGLANG_VLM_CACHE_SIZE_MB"])
+    init_embedding_cache(embedding_cache_size * 1024 * 1024)
 
     # Create a scheduler and run the event loop
     try:
@@ -340,10 +354,27 @@ def run_scheduler_process(
                 "max_req_input_len": scheduler.max_req_input_len,
             }
         )
-        if scheduler.enable_overlap:
-            scheduler.event_loop_overlap()
-        else:
-            scheduler.event_loop_normal()
+        disaggregation_mode: DisaggregationMode = scheduler.disaggregation_mode
+
+        if disaggregation_mode == DisaggregationMode.NULL:
+            if server_args.pp_size > 1:
+                scheduler.event_loop_pp()
+            elif scheduler.enable_overlap:
+                scheduler.event_loop_overlap()
+            else:
+                scheduler.event_loop_normal()
+        elif disaggregation_mode == DisaggregationMode.PREFILL:
+            if scheduler.enable_overlap:
+                scheduler.event_loop_overlap_disagg_prefill()
+            else:
+                scheduler.event_loop_normal_disagg_prefill()
+
+        elif disaggregation_mode == DisaggregationMode.DECODE:
+            if scheduler.enable_overlap:
+                scheduler.event_loop_overlap_disagg_decode()
+            else:
+                scheduler.event_loop_normal_disagg_decode()
+
     except Exception:
         traceback = get_exception_traceback()
         logger.error(f"Scheduler hit an exception: {traceback}")
