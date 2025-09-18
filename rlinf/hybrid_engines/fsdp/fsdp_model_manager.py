@@ -43,7 +43,9 @@ class FSDPModelManager:
 
     def model_provider_func(self) -> torch.nn.Module:
         model_config = AutoConfig.from_pretrained(
-            self._cfg.model.model_path, trust_remote_code=True, attn_implementation="flash_attention_2"
+            self._cfg.model.model_path,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2",
         )
 
         if self._cfg.model.get("gptq_model", False):
@@ -64,7 +66,7 @@ class FSDPModelManager:
             else:
                 auto_model_class = AutoModelForCausalLM
 
-            # TODO: fix this, load model in float16/bfloat16 may cause optimizer in bf16, which is incorrect 
+            # TODO: fix this, load model in float16/bfloat16 may cause optimizer in bf16, which is incorrect
             # default load in float16
             model = auto_model_class.from_pretrained(
                 self._cfg.model.model_path,

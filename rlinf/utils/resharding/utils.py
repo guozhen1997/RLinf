@@ -13,11 +13,6 @@
 # limitations under the License.
 
 
-import logging
-import re
-from dataclasses import dataclass
-from typing import Dict, List, Optional
-
 import torch
 
 
@@ -101,6 +96,7 @@ def _gather_pp_group_tensor_and_reshard(
 
 def pp_reshard_fn_qwen2_5(model_state_dict, pp_group, dtype):
     from megatron.core import parallel_state
+
     pp_first_rank = parallel_state.get_pipeline_model_parallel_first_rank()
     pp_last_rank = parallel_state.get_pipeline_model_parallel_last_rank()
 

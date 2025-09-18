@@ -288,7 +288,7 @@ class VisionLanguageDataset(Dataset):
                 prompt=prompt_ids,
                 length=prompt_length,
                 image_data=image_list,
-                answer=answer,
+                answer=str(answer),
                 solution=solution,
                 idx=idx,
             )

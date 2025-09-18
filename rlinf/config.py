@@ -713,7 +713,9 @@ def build_transformer_config(cfg) -> "TransformerConfig":
         try:
             import transformer_engine
         except ImportError:
-            raise ImportError("Can not import transformer_engine, which is required for cudagraphs.")
+            raise ImportError(
+                "Can not import transformer_engine, which is required for cudagraphs."
+            )
         assert cfg.get("use_te_rng_tracker", False), (
             "Transformer engine's RNG tracker is required for cudagraphs, this can be enabled with \
             'use_te_rng_tracker=True'."

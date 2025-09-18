@@ -52,7 +52,6 @@ from rlinf.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
 )
-from rlinf.utils.resharding.fsdp_weight_reshard import FSDPWeightReshard
 from rlinf.utils.utils import (
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
@@ -122,10 +121,6 @@ class FSDPActor(FSDPModelManager, Worker):
             torch.cuda.synchronize()
             gc.collect()
             torch.cuda.empty_cache()
-        self.rollout_weights_reshard = FSDPWeightReshard(
-            reshard_tp_size=self.cfg.rollout.tensor_parallel_size,
-            model_arch=self.cfg.rollout.model_arch,
-        )
         self._setup_rollout_weight_dst_ranks()
 
     def _setup_rollout_weight_dst_ranks(self):
@@ -149,6 +144,7 @@ class FSDPActor(FSDPModelManager, Worker):
         self.rollou_state_dict = self.get_model_state_dict()
 
         if self._weight_dst_rank_in_rollout is not None:
+
             def transform_key(k):
                 if k.startswith("model.language_model."):
                     return "model." + k[21:]
@@ -156,7 +152,11 @@ class FSDPActor(FSDPModelManager, Worker):
                     return k[6:]
                 else:
                     return k
-            handle = {transform_key(k): reduce_tensor(v) for k, v in self.rollou_state_dict.items()}
+
+            handle = {
+                transform_key(k): reduce_tensor(v)
+                for k, v in self.rollou_state_dict.items()
+            }
 
             self.send(
                 handle, self._rollout_group_name, self._weight_dst_rank_in_rollout
@@ -417,7 +417,6 @@ class FSDPActor(FSDPModelManager, Worker):
             texts.append(
                 self.tokenizer.decode(response.tolist(), skip_special_tokens=True)
             )
-
         rewards = self.reward_fn(texts, answers)
         reward_scores = [
             self.cfg.reward.reward_scale
