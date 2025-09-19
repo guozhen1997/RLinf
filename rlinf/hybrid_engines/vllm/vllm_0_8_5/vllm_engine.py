@@ -194,7 +194,9 @@ class VLLMEngine:
             request_id = str(next(self.request_counter))
             tokens_prompt = TokensPrompt(
                 prompt_token_ids=input_id,
-                multi_modal_data=image_data[idx] if image_data is not None else None,
+                multi_modal_data={"image": image_data[idx]}
+                if image_data is not None
+                else None,
             )
             self._engine.add_request(
                 request_id=request_id,
