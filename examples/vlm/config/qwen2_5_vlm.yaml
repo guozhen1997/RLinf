@@ -1,0 +1,212 @@
+defaults:
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+cluster:
+  num_nodes: 1
+  num_gpus_per_node: 8
+  component_placement:
+    actor: all
+
+runner:
+  task_type: math
+  logger:
+    log_path: ${runner.output_dir}/${runner.experiment_name}
+    project_name: rlinf
+    experiment_name: ${runner.experiment_name}
+    logger_backends: ["tensorboard"]
+
+  max_epochs: -1
+  max_steps: 20000
+
+  val_check_interval: -1
+  save_interval: 50
+
+  seq_length: 2048
+  enable_dynamic_batch_size: False
+  max_tokens_per_mbs: 2048
+
+  resume_dir: /mnt/public/tangyueran/Qwen2.5-VL-3B-Instruct
+  experiment_name: qwen25_3b_vl
+  output_dir: ./output_mcore_qwen2_5_vl_pretrain
+
+algorithm:
+  group_size: 8
+  n_minibatches: 1
+  training_batch_size_per_gpu: 4
+
+  rollout_batch_size_per_gpu: null
+
+  logprob_forward_micro_batch_size: 1
+  val_rollout_batch_size_per_gpu: 1
+  recompute_logprobs: True
+  shuffle_rollout: False
+  
+  adv_type: grpo
+  normalize_advantages: True
+  early_stop_imp_ratio: 5.0
+  use_valid_token_scale: False 
+
+  # GRPO loss params
+  loss_type: ppo
+  loss_agg_func: "token-mean"
+  kl_beta: 0.0 # 0.001
+  kl_penalty_type: low_var_kl
+  ratio_clip_eps: 0.2
+  entropy_bonus: 0.0
+  calculate_entropy: False
+  clip_ratio_c: null # 3.0
+
+  sampling_params:
+    use_greedy: False
+    temperature: 1.0
+    top_k: 1000000
+    top_p: 1.0
+    repetition_penalty: 1.0
+    max_new_tokens: ${subtract:${runner.seq_length}, ${data.max_prompt_length}}
+    min_new_tokens: 1
+
+data:
+  type: vlm
+  max_prompt_length: 1024
+  filter_prompt_by_length: True
+  rollout_batch_size: 512
+  val_rollout_batch_size: null
+  num_workers: 2
+  shuffle: True
+  validation_shuffle: True
+  seed: 1234
+  train_data_paths: ["/mnt/public/tangyueran/llava-datasets-wds/wds"]
+  val_data_paths: ["/mnt/public/tangyueran/llava-datasets-wds/wds"]
+
+rollout:
+  group_name: "RolloutGroup"
+  gpu_memory_utilization: 0.55
+  model_dir: /mnt/public/tangyueran/Qwen2.5-VL-3B-Instruct
+  model_arch: qwen2.5
+  enforce_eager: False
+  distributed_executor_backend: mp
+  disable_log_stats: False
+  detokenize: False
+  padding: null
+  eos: null
+
+  attention_backend: triton
+  return_logprobs: False
+
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+
+  validate_weight: False
+  validate_save_dir: False
+  print_outputs: False
+
+  sglang_decode_log_interval: 500000
+  max_running_requests: 64
+  cuda_graph_max_bs: 128
+
+  use_torch_compile: False
+  torch_compile_max_bs: 128
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: megatron
+  mcore_gpt: True
+  spec_name: decoder_gpt
+
+  checkpoint_load_path: /mnt/public/tangyueran/Qwen2.5-VL-3B-Instruct
+
+  offload_optimizer: False
+  offload_weight: False
+  offload_grad: False
+
+  enable_dp_load_balance: False
+
+  calculate_flops: False
+
+  model:
+    precision: fp16
+    add_bias_linear: False
+    tensor_model_parallel_size: 2
+    pipeline_model_parallel_size: 2
+
+    activation: swiglu
+    sequence_parallel: True
+    recompute_method: block
+    recompute_granularity: full
+    recompute_num_layers: 20
+
+    seq_length: ${runner.seq_length}
+    encoder_seq_length: 2048
+
+    normalizaton: rmsnorm
+
+    position_embedding_type: rope
+
+    apply_rope_fusion: False
+    bias_dropout_fusion: False
+    persist_layer_norm: False
+    bias_activation_fusion: False
+    attention_softmax_in_fp32: False
+    batch_p2p_comm: False
+    variable_seq_lengths: False
+    gradient_accumulation_fusion: False
+    use_cpu_initialization: False
+
+  optim:
+    optimizer: adam
+    bf16: False
+    fp16: True
+    lr: 1e-05
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-05
+    min_lr: 1.0e-6
+    weight_decay: 0.01
+    use_distributed_optimizer: True
+    overlap_grad_reduce: True
+    overlap_param_gather: True
+    optimizer_enable_pin: false
+    overlap_param_gather_with_optimizer_step: False
+    clip_grad: 1.0
+    loss_scale: 65536
+
+  lr_sched:
+    lr_warmup_fraction: 0.01
+    lr_warmup_init: 0.0
+    lr_warmup_iters: 200
+    max_lr: 1.0e-5
+    min_lr: 1.0e-6
+    lr_decay_style: cosine
+    start_weight_decay: 200
+    end_weight_decay: 20000
+    lr_decay_iters: 19800
+
+  tokenizer:
+    tokenizer_model: Qwen2VLTokenizer
+    use_fast: False
+    trust_remote_code: True
+    padding_side: 'right'
+
+  megatron:
+    ddp_bucket_size: null
+    distributed_backend: nccl
+    distributed_timeout_minutes: 10
+    ckpt_format: torch
+    use_dist_ckpt: False
+    tp_comm_bootstrap_backend: nccl
+    tp_comm_overlap_config: null
+    use_hf_ckpt: False
+    use_profiler: False
+
+reward:
+  use_reward_model: false
+  reward_type: 'math'
+  reward_scale: 5.0
+
+critic:
+  use_critic_model: false
