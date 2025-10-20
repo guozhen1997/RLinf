@@ -33,7 +33,6 @@ from typing import Dict, Union
 import torch
 from accelerate import init_empty_weights
 from packaging import version
-from prismatic.extern.hf.modeling_prismatic import PrismaticProjector
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import (

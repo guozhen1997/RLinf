@@ -228,21 +228,23 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
 def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
     OmegaConf.set_struct(cfg, True)
     with open_dict(cfg):
-        if "fsdp_config" not in cfg:
-            cfg.fsdp_config = OmegaConf.create({})
-        cfg.fsdp_config.forward_prefetch = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.strategy = cfg.fsdp_config.get("strategy", "fsdp")
+
+        cfg.fsdp_config.sharding_strategy = cfg.fsdp_config.get(
+            "sharding_strategy", "full_shard"
+        )
+
+        cfg.fsdp_config.forward_prefetch = cfg.fsdp_config.get(
             "forward_prefetch", False
         )
-        cfg.fsdp_config.limit_all_gathers = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.limit_all_gathers = cfg.fsdp_config.get(
             "limit_all_gathers", False
         )
-        cfg.fsdp_config.backward_prefetch = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.backward_prefetch = cfg.fsdp_config.get(
             "backward_prefetch", None
         )
-        cfg.fsdp_config.use_orig_params = cfg.get("fsdp_config", {}).get(
-            "use_orig_params", False
-        )
-        cfg.fsdp_config.use_liger_kernel = cfg.get("fsdp_config", {}).get(
+        cfg.fsdp_config.use_orig_params = cfg.fsdp_config.get("use_orig_params", False)
+        cfg.fsdp_config.use_liger_kernel = cfg.fsdp_config.get(
             "use_liger_kernel", False
         )
 
@@ -251,6 +253,22 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
             "pre",
             "post",
         ], "fsdp_config.backward_prefetch must be one of [None, 'pre', 'post']"
+
+        # validate mixed precision config
+        assert hasattr(cfg.fsdp_config, "mixed_precision"), (
+            "fsdp_config.mixed_precision is required in FSDP actor configuration."
+        )
+
+        mixed_precision_config = cfg.fsdp_config.mixed_precision
+        mixed_precision_config.param_dtype = mixed_precision_config.get(
+            "param_dtype", "bf16"
+        )
+        mixed_precision_config.reduce_dtype = mixed_precision_config.get(
+            "reduce_dtype", "bf16"
+        )
+        mixed_precision_config.buffer_dtype = mixed_precision_config.get(
+            "buffer_dtype", "fp32"
+        )
 
     return cfg
 

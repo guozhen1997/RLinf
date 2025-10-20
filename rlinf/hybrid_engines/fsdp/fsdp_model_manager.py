@@ -14,26 +14,26 @@
 
 import os
 import random
+from typing import Tuple
 
 import numpy as np
 import torch
 import torch.optim as optim
 from omegaconf import DictConfig
 from packaging import version
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
+    BackwardPrefetch,
     MixedPrecision,
     ShardedOptimStateDictConfig,
     ShardedStateDictConfig,
     ShardingStrategy,
     StateDictType,
-    BackwardPrefetch,
 )
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import DTensor
-from transformers import AutoModelForCausalLM, AutoModelForVision2Seq, AutoConfig
+from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
 
 from rlinf.config import torch_dtype_from_precision
-from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.hybrid_engines.fsdp.utils import (
     apply_fsdp2_to_model,
     clip_grad_by_total_norm_,
@@ -46,7 +46,6 @@ from rlinf.hybrid_engines.fsdp.utils import (
     get_lr_scheduler,
     init_fn,
 )
-from rlinf.utils.logging import get_logger
 from rlinf.utils.utils import clear_memory
 
 if version.parse(torch.__version__) >= version.parse("2.6"):
@@ -65,25 +64,32 @@ class FSDPModelManager:
     FSDP Model Manager for RL training
     """
 
-    def __init__(self, cfg: DictConfig, world_size: int, logger=None):
+    def __init__(self, cfg: DictConfig, world_size: int, logger=None) -> None:
+        """
+        Initialize FSDP Model Manager.
+
+        Assumes:
+            - torch.distributed has been initialized outside before calling this constructor.
+            - all cfg parameters are validated in `valid_fsdp_config`.
+
+        Params:
+            cfg: actor config in yaml file.
+            world_size: total number of FSDP actor processes.
+            logger: logger instance used by FSDP actor.
+        """
         self._cfg = cfg
         self._logger = logger
 
-        mixed_precision_config = self._cfg.fsdp_config.get("mixed_precision", None)
-        if mixed_precision_config is not None:
-            self.param_dtype = torch_dtype_from_precision(
-                mixed_precision_config.get("param_dtype", "bf16")
-            )
-            self.reduce_dtype = torch_dtype_from_precision(
-                mixed_precision_config.get("reduce_dtype", "fp32")
-            )
-            self.buffer_dtype = torch_dtype_from_precision(
-                mixed_precision_config.get("buffer_dtype", "fp32")
-            )
-        else:
-            self.param_dtype = torch.bfloat16
-            self.reduce_dtype = torch.float32
-            self.buffer_dtype = torch.float32
+        mixed_precision_config = self._cfg.fsdp_config.mixed_precision
+        self.param_dtype = torch_dtype_from_precision(
+            mixed_precision_config.param_dtype
+        )
+        self.reduce_dtype = torch_dtype_from_precision(
+            mixed_precision_config.reduce_dtype
+        )
+        self.buffer_dtype = torch_dtype_from_precision(
+            mixed_precision_config.buffer_dtype
+        )
 
         if self._cfg.model.get("precision"):
             self.param_dtype = torch_dtype_from_precision(self._cfg.model.precision)
@@ -97,10 +103,16 @@ class FSDPModelManager:
             else None
         )
 
+        assert torch.distributed.is_initialized(), (
+            "torch distributed is not initialized in FSDPModelManager's constructor."
+        )
         self.world_size = torch.distributed.get_world_size()
         self.rank = torch.distributed.get_rank()
 
     def model_provider_func(self) -> torch.nn.Module:
+        """
+        Initialize model used by FSDP actor
+        """
         cfg = self._cfg
         use_gptq = cfg.model.get("gptq_model", False)
         load_in_8bit = cfg.model.get("load_in_8bit", False)
@@ -154,6 +166,12 @@ class FSDPModelManager:
         return model
 
     def _optimize_with_liger_kernel(self, model: torch.nn.Module) -> None:
+        """
+        Replace model modules with liger-kernel optimized modules.
+
+        Params:
+            model: the model to be optimized.
+        """
         if self._cfg.model.get("gptq_model", False) or self._cfg.model.get(
             "load_in_8bit", False
         ):
@@ -205,7 +223,7 @@ class FSDPModelManager:
         except Exception as e:
             self.logger.warning(f"[FSDP] Liger kernels not applied: {e}")
 
-    def setup_model_and_optimizer(self):
+    def setup_model_and_optimizer(self) -> None:
         """Setup model and optimizer."""
         module = self.model_provider_func()
 
@@ -356,7 +374,16 @@ class FSDPModelManager:
             num_cycles=num_cycles,
         )
 
-    def optimizer_step(self):
+    def optimizer_step(self) -> Tuple[int, float, float]:
+        """
+        Perform optimizer step with gradient clipping if configured.
+
+        Returns:
+            success: 1 if the step is successful, 0 if skipped due to non-finite grad norm.
+            grad_norm: the gradient norm.
+            lr: the current learning rate.
+        """
+
         assert self._cfg.optim.clip_grad is not None
 
         if fsdp_version(self.model) == 1:
@@ -394,7 +421,13 @@ class FSDPModelManager:
 
         return success, grad_norm.item(), lr
 
-    def get_rng_state(self):
+    def get_rng_state(self) -> dict:
+        """
+        Get rng state.
+
+        Returns:
+            rng_state: the current rng state.
+        """
         rng_state = {
             "cpu": torch.get_rng_state(),
             "numpy": np.random.get_state(),
@@ -404,22 +437,34 @@ class FSDPModelManager:
             rng_state["cuda"] = torch.cuda.get_rng_state()
         return rng_state
 
-    def load_rng_state(self, rng_state):
+    def load_rng_state(self, rng_state: dict) -> None:
+        """
+        Load rng state.
+
+        Params:
+            rng_state: the rng state to load.
+        """
         torch.set_rng_state(rng_state["cpu"])
         np.random.set_state(rng_state["numpy"])
         random.setstate(rng_state["random"])
         if torch.cuda.is_available():
             torch.cuda.set_rng_state(rng_state["cuda"])
 
-    def get_model_state_dict(self):
+    def get_model_state_dict(self) -> dict:
+        """
+        Get full model state dict.
+        """
         state_dict = get_fsdp_full_state_dict(
             self.model, offload_to_cpu=True, rank0_only=False
         )
         return state_dict
 
-    def load_checkpoint(self, load_path: str):
+    def load_checkpoint(self, load_path: str) -> None:
         """
         Load checkpoint from local path.
+
+        Params:
+            load_path: the directory to load checkpoint.
         """
         is_cuda_available = torch.cuda.is_available()
         if next(self.model.parameters()).is_cpu and is_cuda_available:
@@ -470,10 +515,14 @@ class FSDPModelManager:
 
         torch.distributed.barrier()
 
-    def save_checkpoint(self, save_path: str):
+    def save_checkpoint(self, save_path: str) -> None:
         """
         Save checkpoint to local path.
         Every rank will save its own model and optim shard.
+
+        Params:
+            save_path: the directory to save checkpoint.
+            save_path: the directory to save checkpoint.
         """
         is_cuda_available = torch.cuda.is_available()
         if next(self.model.parameters()).is_cpu and is_cuda_available:
@@ -525,19 +574,33 @@ class FSDPModelManager:
 
         torch.distributed.barrier()
 
-    def offload_fsdp_grad(self):
+    def offload_fsdp_grad(self) -> None:
+        """
+        Offload FSDP gradients to CPU.
+        """
         for _, param in self.model.named_parameters():
             if param.grad is not None:
                 param.grad = param.grad.to("cpu", non_blocking=True)
         clear_memory()
 
-    def load_fsdp_grad(self, device_id):
+    def load_fsdp_grad(self, device_id: int) -> None:
+        """
+        Load FSDP gradients to the specified device.
+        Params:
+            device_id: the target device id to load gradients.
+        """
         for _, param in self.model.named_parameters():
             if param.grad is not None:
                 param.grad = param.grad.to(device_id, non_blocking=True)
         clear_memory()
 
-    def offload_fsdp_param_and_grad(self, offload_grad=False):
+    def offload_fsdp_param_and_grad(self, offload_grad: bool = False) -> None:
+        """
+        Offload FSDP parameters and gradients(options) to CPU.
+
+        Params:
+            offload_grad: whether to offload gradients.
+        """
         if fsdp_version(self.model) == 2:
             self.model = self.model.to("cpu")
             clear_memory()
@@ -566,7 +629,14 @@ class FSDPModelManager:
                 param.grad = param.grad.to("cpu", non_blocking=True)
         clear_memory()
 
-    def load_fsdp_param_and_grad(self, device_id, load_grad=False):
+    def load_fsdp_param_and_grad(self, device_id: int, load_grad: bool = False) -> None:
+        """
+        Load FSDP parameters and gradients(options) to the specified device.
+
+        Params:
+            device_id: the target device id to load parameters and gradients.
+            load_grad: whether to load gradients.
+        """
         if fsdp_version(self.model) == 2:
             self.model = self.model.to("cuda")
             clear_memory()
@@ -595,7 +665,10 @@ class FSDPModelManager:
                 param.grad = param.grad.to(device_id, non_blocking=True)
         clear_memory()
 
-    def offload_fsdp_optimizer(self):
+    def offload_fsdp_optimizer(self) -> None:
+        """
+        Offload optimizer states to CPU.
+        """
         if not self.optimizer.state:
             return
         for param_group in self.optimizer.param_groups:
@@ -606,7 +679,13 @@ class FSDPModelManager:
                         state[key] = value.to("cpu", non_blocking=True)
         clear_memory()
 
-    def load_fsdp_optimizer(self, device_id):
+    def load_fsdp_optimizer(self, device_id: int) -> None:
+        """
+        Load optimizer states to the specified device.
+
+        Params:
+            device_id: the target device id to load optimizer states.
+        """
         if not self.optimizer.state:
             return
         for param_group in self.optimizer.param_groups:
