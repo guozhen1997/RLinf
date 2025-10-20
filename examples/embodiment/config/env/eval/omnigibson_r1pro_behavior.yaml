@@ -1,0 +1,42 @@
+simulator_type: omnigibson
+auto_reset: ${algorithm.auto_reset}
+ignore_terminations: ${algorithm.ignore_terminations}
+use_rel_reward: True
+seed: 0
+num_group: ${algorithm.num_group_envs}
+group_size: ${algorithm.group_size}
+use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
+max_episode_steps: 80
+max_steps: 80
+only_eval: True
+image_size: [224, 224]
+
+video_cfg:
+  save_video: False
+  info_on_video: True
+  video_base_dir: ${runner.logger.log_path}/video/train
+
+base_config_name: r1pro_behavior
+num_envs: 2
+
+omnigibson_cfg:
+  action_frequency: 30                  # (int): environment executes action at the action_frequency rate
+  rendering_frequency: 30
+  physics_frequency: 120                # (int): physics frequency (1 / physics_timestep for physx)
+  external_sensors: null                # (None or list): If specified, list of sensor configurations for external sensors to add. Should specify sensor "type" and any additional kwargs to instantiate the sensor. Each entry should be the kwargs passed to @create_sensor, in addition to position, orientation
+  
+  scene:
+    scene_instance: null
+    scene_file: null
+
+  robots:
+    obs_modalities: ["rgb"]
+    sensor_config:
+      VisionSensor:
+        sensor_kwargs:
+          image_height: 224
+          image_width: 224
+
+tasks:
+  activity_task_indices: "0-1" # eg. "0-49" or "0-20,49"
+  task_description_path: /mnt/mnt/public/guozhen/test_behavior/task.jsonl

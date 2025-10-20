@@ -1116,6 +1116,9 @@ class EnvOutput:
             image_tensor = obs["images"]
         elif self.simulator_type == "robotwin":
             image_tensor = obs["images"]
+        elif self.simulator_type == "omnigibson":
+            image_tensor = obs["images"]
+            wrist_image_tensor = obs["wrist_images"]
         else:
             raise NotImplementedError
 
