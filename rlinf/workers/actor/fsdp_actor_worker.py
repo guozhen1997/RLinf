@@ -65,7 +65,7 @@ from rlinf.workers.rollout.utils import RankMapper
 class FSDPActor(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig, placement: ModelParallelComponentPlacement):
         Worker.__init__(self)
-        super().__init__(cfg.actor)
+        super().__init__(cfg.actor, self._world_size)
 
         self.cfg = cfg
 
@@ -117,8 +117,8 @@ class FSDPActor(FSDPModelManager, Worker):
             self.ref_policy_state_dict = retrieve_model_state_dict_in_cpu(self.model)
 
         if self.cfg.actor.get("enable_offload", False):
-            self.offload_fsdp_param_and_grad()
-            self.offload_fsdp_optimizer()
+            self.offload_param_and_grad()
+            self.offload_optimizer()
         self._setup_rollout_weight_dst_ranks()
 
     def _setup_rollout_weight_dst_ranks(self) -> None:
@@ -137,10 +137,10 @@ class FSDPActor(FSDPModelManager, Worker):
 
     def sync_model_to_rollout(self) -> None:
         if self.cfg.actor.get("enable_offload", False):
-            self.offload_fsdp_optimizer()
+            self.offload_optimizer()
 
         if next(self.model.parameters()).is_cpu:
-            self.load_fsdp_param_and_grad(self.device)
+            self.load_param_and_grad(self.device)
         self.rollout_state_dict = self.get_model_state_dict()
 
         has_visual = any("visual." in k for k in self.rollout_state_dict.keys())
@@ -166,7 +166,7 @@ class FSDPActor(FSDPModelManager, Worker):
             )
 
         if self.cfg.actor.get("enable_offload", False):
-            self.offload_fsdp_param_and_grad()
+            self.offload_param_and_grad()
 
     def compute_logprobs(self) -> None:
         self.model.eval()
@@ -198,8 +198,8 @@ class FSDPActor(FSDPModelManager, Worker):
         # Otherwise, it may lead to OOM
         with self.device_lock:
             if self.cfg.actor.get("enable_offload", False):
-                self.load_fsdp_param_and_grad(self.device)
-                self.load_fsdp_optimizer(self.device)
+                self.load_param_and_grad(self.device)
+                self.load_optimizer(self.device)
 
     @torch.no_grad()
     def inference_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -529,14 +529,13 @@ class FSDPActor(FSDPModelManager, Worker):
 class EmbodiedFSDPActor(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig):
         Worker.__init__(self)
-        super().__init__(cfg.actor, self._world_size, self.logger)
+        super().__init__(cfg.actor, self._world_size)
 
         self.cfg = cfg
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
         self.device = torch.cuda.current_device()
-        world_size = self._world_size
         self.device_mesh = init_device_mesh(
-            "cuda", mesh_shape=(world_size,), mesh_dim_names=["fsdp"]
+            "cuda", mesh_shape=(self._world_size,), mesh_dim_names=["fsdp"]
         )
         self._env_group_name = cfg.env.group_name
         self._rollout_group_name = cfg.rollout.group_name
@@ -561,11 +560,8 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
     def init_worker(self):
         self.setup_model_and_optimizer()
         if self.cfg.actor.get("enable_offload", False):
-            self.offload_fsdp_param_and_grad()
-            self.offload_fsdp_optimizer()
-            torch.cuda.synchronize()
-            gc.collect()
-            torch.cuda.empty_cache()
+            self.offload_param_and_grad()
+            self.offload_optimizer()
 
     def model_provider_func(self):
         model = get_model(self.cfg.actor.checkpoint_load_path, self.cfg.actor.model)
@@ -575,8 +571,8 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
     def sync_model_to_rollout(self):
         if next(self.model.parameters()).is_cpu:
-            self.load_fsdp_param_and_grad(self.device)
-            self.load_fsdp_optimizer(self.device)
+            self.load_param_and_grad(self.device)
+            self.load_optimizer(self.device)
 
         state_dict = self.get_model_state_dict()
         if self._weight_dst_rank_in_rollout is not None:
@@ -584,14 +580,17 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 state_dict, self._rollout_group_name, self._weight_dst_rank_in_rollout
             )
         if self.cfg.actor.get("enable_offload", False):
-            self.offload_fsdp_param_and_grad()
-            self.offload_fsdp_optimizer()
+            self.offload_param_and_grad()
+            self.offload_optimizer()
             torch.cuda.synchronize()
             del state_dict
             gc.collect()
             torch.cuda.empty_cache()
 
-    async def recv_rollout_batch(self):
+    async def recv_rollout_batch(self) -> None:
+        """
+        Receive rollout batch from rollout workers.
+        """
         send_num = self._component_placement.get_world_size("rollout") * self.stage_num
         recv_num = self._component_placement.get_world_size("actor")
         split_num = compute_split_num(send_num, recv_num)
@@ -613,7 +612,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
         self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
-    def _process_received_rollout_batch(self, rollout_batch):
+    def _process_received_rollout_batch(
+        self, rollout_batch: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
         """
         original shape: [rollout_epoch x n_chunk_steps, bsz, num_action_chunks, ...]
         target shape: [n_chunk_steps, rollout_epoch x bsz, num_action_chunks, ...]
@@ -744,8 +745,8 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
     def run_training(self):
         if self.cfg.actor.get("enable_offload", False):
-            self.load_fsdp_param_and_grad(self.device)
-            self.load_fsdp_optimizer(self.device)
+            self.load_param_and_grad(self.device)
+            self.load_optimizer(self.device)
 
         self.model.train()
         self.optimizer.zero_grad()

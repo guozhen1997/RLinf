@@ -28,7 +28,7 @@
 
 import functools
 from contextlib import nullcontext
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 import torch
 from accelerate import init_empty_weights
@@ -49,16 +49,20 @@ except ImportError:
 
 if version.parse(torch.__version__) >= version.parse("2.6"):
     from torch.distributed.fsdp import (
+        BackwardPrefetch,
         CPUOffloadPolicy,
         FSDPModule,
         MixedPrecisionPolicy,
+        ShardingStrategy,
         fully_shard,
     )
 elif version.parse(torch.__version__) >= version.parse("2.4"):
     from torch.distributed._composable.fsdp import (
+        BackwardPrefetch,
         CPUOffloadPolicy,
         FSDPModule,
         MixedPrecisionPolicy,
+        ShardingStrategy,
         fully_shard,
     )
 else:
@@ -560,3 +564,77 @@ def get_grad_norm(
         total_norm = total_norm.item() ** (1.0 / norm_type)  # type: ignore
 
     return total_norm
+
+
+def get_sharding_strategy(strategy_str: str) -> ShardingStrategy:
+    """
+    Get FSDP sharding strategy from string.
+
+    Args:
+        strategy_str (str): The sharding strategy as a string. Can be "full_sharding", "shard_grad_op", "hybrid_sharding", or "no_shard".
+
+    Returns:
+        ShardingStrategy: The corresponding ShardingStrategy enum value.
+    """
+    SHARDING_STRATEGIES = {
+        "full_sharding": ShardingStrategy.FULL_SHARD,
+        "shard_grad_op": ShardingStrategy.SHARD_GRAD_OP,
+        "hybrid_sharding": ShardingStrategy.HYBRID_SHARD,
+        "no_shard": ShardingStrategy.NO_SHARD,
+    }
+    assert strategy_str in SHARDING_STRATEGIES, (
+        f"Unknown sharding strategy: {strategy_str}"
+    )
+    return SHARDING_STRATEGIES[strategy_str]
+
+
+def get_backward_prefetch_strategy(
+    prefetch_str: Optional[str],
+) -> Optional[BackwardPrefetch]:
+    """
+    Get the backward prefetch strategy from string.
+
+    Args:
+        prefetch_str (Optional[str]): The prefetch strategy as a string. Can be "pre", "post", or None.
+
+    Returns:
+        Optional[BackwardPrefetch]: The corresponding BackwardPrefetch enum value or None.
+    """
+    if prefetch_str is None:
+        return None
+    BACKWARD_PREFETCH_STRATEGIES = {
+        "pre": BackwardPrefetch.BACKWARD_PRE,
+        "post": BackwardPrefetch.BACKWARD_POST,
+    }
+    assert prefetch_str in BACKWARD_PREFETCH_STRATEGIES, (
+        f"Unknown backward prefetch strategy: {prefetch_str}"
+    )
+    return BACKWARD_PREFETCH_STRATEGIES[prefetch_str]
+
+
+def rebuild_dtensor(tensor: torch.Tensor, meta: Dict) -> DTensor:
+    """
+    Rebuild a DTensor from its local tensor and meta information.
+
+    Args:
+        tensor (torch.Tensor): The local tensor shard.
+        meta (Dict): The meta information containing device_mesh, placements, shape, and stride.
+
+    Returns:
+        DTensor: The reconstructed DTensor.
+    """
+    return DTensor.from_local(
+        tensor, device_mesh=meta["device_mesh"], placements=meta["placements"]
+    )
+
+
+def save_dtensor_meta(dtensor: DTensor) -> Dict:
+    """
+    Save the meta information of a DTensor for reconstruction later.
+    """
+    return {
+        "device_mesh": dtensor.device_mesh,
+        "placements": dtensor.placements,
+        "shape": dtensor.shape,
+        "stride": dtensor.stride(),
+    }
