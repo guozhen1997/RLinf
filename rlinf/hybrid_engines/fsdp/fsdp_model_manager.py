@@ -20,6 +20,8 @@ from omegaconf import DictConfig
 from packaging import version
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
 
+from rlinf.config import torch_dtype_from_precision
+from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     clip_grad_by_total_norm_,
@@ -45,7 +47,7 @@ class FSDPModelManager:
     FSDP Model Manager for RL training
     """
 
-    def __init__(self, cfg: DictConfig, world_size: int) -> None:
+    def __init__(self, cfg: DictConfig, world_size: int, rank: int) -> None:
         """
         Initialize FSDP Model Manager.
 
@@ -59,12 +61,13 @@ class FSDPModelManager:
         """
         self._cfg = cfg
         self._logger = get_logger()
+        self.torch_dtype = torch_dtype_from_precision(self._cfg.model.precision)
 
-        assert torch.distributed.is_initialized(), (
-            "torch distributed is not initialized in FSDPModelManager's constructor."
-        )
-        self.world_size = torch.distributed.get_world_size()
-        self.rank = torch.distributed.get_rank()
+        if cfg.get("tokenizer", {}).get("tokenizer_model", None) is not None:
+            self.tokenizer = hf_tokenizer(cfg.tokenizer.tokenizer_model)
+
+        self.world_size = world_size
+        self.rank = rank
 
         self._strategy = FSDPStrategyBase.create(
             self._cfg, self.world_size, self.rank, self._logger

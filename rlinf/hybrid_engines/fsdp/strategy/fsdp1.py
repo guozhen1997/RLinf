@@ -70,7 +70,7 @@ class FSDP1Strategy(FSDPStrategyBase):
 
         is_vla_model = (
             True
-            if self._cfg.model.get("model_name", None) in ["openvla", "openvla_oft"]
+            if self.cfg.model.get("model_name", None) in ["openvla", "openvla_oft"]
             else False
         )
 
@@ -89,7 +89,7 @@ class FSDP1Strategy(FSDPStrategyBase):
             module=model,
             param_init_fn=init_fn,
             auto_wrap_policy=auto_wrap_policy,
-            device_id=torch.device(f"cuda:{self.rank}"),
+            device_id=int(os.environ["LOCAL_RANK"]),
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
             sync_module_states=True,

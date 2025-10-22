@@ -65,7 +65,7 @@ from rlinf.workers.rollout.utils import RankMapper
 class FSDPActor(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig, placement: ModelParallelComponentPlacement):
         Worker.__init__(self)
-        super().__init__(cfg.actor, self._world_size)
+        super().__init__(cfg.actor, self._world_size, self._rank)
 
         self.cfg = cfg
 
@@ -483,16 +483,6 @@ class FSDPActor(FSDPModelManager, Worker):
 
         return rollout_metrics, training_metrics_list
 
-    def save_checkpoint(self, save_base_path: str, step: int) -> None:
-        torch.distributed.barrier()
-        model_state = self.get_model_state_dict()
-        optim_state = self.get_optimizer_state_dict()
-        if self._rank == 0:
-            os.makedirs(save_base_path, exist_ok=True)
-            torch.save(model_state, os.path.join(save_base_path, "model.pt"))
-            torch.save(optim_state, os.path.join(save_base_path, "optim.pt"))
-        torch.distributed.barrier()
-
     # Advantages and returns
     def compute_advantages_and_returns(
         self, input_channel: Channel, output_channel: Channel
@@ -529,7 +519,7 @@ class FSDPActor(FSDPModelManager, Worker):
 class EmbodiedFSDPActor(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig):
         Worker.__init__(self)
-        super().__init__(cfg.actor, self._world_size)
+        super().__init__(cfg.actor, self._world_size, self._rank)
 
         self.cfg = cfg
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))

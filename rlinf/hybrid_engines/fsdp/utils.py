@@ -571,15 +571,15 @@ def get_sharding_strategy(strategy_str: str) -> ShardingStrategy:
     Get FSDP sharding strategy from string.
 
     Args:
-        strategy_str (str): The sharding strategy as a string. Can be "full_sharding", "shard_grad_op", "hybrid_sharding", or "no_shard".
+        strategy_str (str): The sharding strategy as a string. Can be "full_shard", "shard_grad_op", "hybrid_shard", or "no_shard".
 
     Returns:
         ShardingStrategy: The corresponding ShardingStrategy enum value.
     """
     SHARDING_STRATEGIES = {
-        "full_sharding": ShardingStrategy.FULL_SHARD,
+        "full_shard": ShardingStrategy.FULL_SHARD,
         "shard_grad_op": ShardingStrategy.SHARD_GRAD_OP,
-        "hybrid_sharding": ShardingStrategy.HYBRID_SHARD,
+        "hybrid_shard": ShardingStrategy.HYBRID_SHARD,
         "no_shard": ShardingStrategy.NO_SHARD,
     }
     assert strategy_str in SHARDING_STRATEGIES, (

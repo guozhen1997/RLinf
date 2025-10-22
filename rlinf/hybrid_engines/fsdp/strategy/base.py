@@ -72,32 +72,37 @@ class FSDPStrategyBase(ABC):
             Optimizer: The constructed optimizer.
         """
         betas = (self.cfg.optim.adam_beta1, self.cfg.optim.adam_beta2)
-        param_groups = [
-            {
-                "params": [
-                    p
-                    for n, p in model.named_parameters()
-                    if "value_head" not in n and p.requires_grad
-                ],
-                "lr": self.cfg.optim.lr,
-                "betas": betas,
-            }
-        ]
 
-        if self.cfg.model.vh_mode in ["a", "a0", "a6"]:
-            param_groups.append(
-                {
-                    "params": [
-                        p
-                        for n, p in model.named_parameters()
-                        if "value_head" in n and p.requires_grad
-                    ],
-                    "lr": self.cfg.optim.value_lr,
-                    "betas": betas,
-                }
+        params_actor = []
+        params_critic = []
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                if "value_head" in name or "model.value_head" in name:
+                    params_critic.append(param)
+                else:
+                    params_actor.append(param)
+
+        if len(params_critic) > 0:
+            return torch.optim.AdamW(
+                [
+                    {"params": params_actor, "lr": self.cfg.optim.lr, "betas": betas},
+                    {
+                        "params": params_critic,
+                        "lr": self.cfg.optim.value_lr,
+                        "betas": betas,
+                    },
+                ]
             )
-
-        return torch.optim.Adam(param_groups)
+        else:
+            return torch.optim.AdamW(
+                [
+                    {
+                        "params": params_actor,
+                        "lr": self.cfg.optim.lr,
+                        "betas": betas,
+                    },
+                ]
+            )
 
     def build_lr_scheduler(self, optimizer: Optimizer) -> LRScheduler:
         """
