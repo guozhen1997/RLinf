@@ -140,7 +140,7 @@ class FSDPActor(FSDPModelManager, Worker):
             self.offload_optimizer()
 
         if next(self.model.parameters()).is_cpu:
-            self.load_param_and_grad(self.device)
+            self.load_param_and_grad(self.device, True)
         self.rollout_state_dict = self.get_model_state_dict()
 
         has_visual = any("visual." in k for k in self.rollout_state_dict.keys())
@@ -445,17 +445,14 @@ class FSDPActor(FSDPModelManager, Worker):
                     )
 
                     append_to_dict(metrics, mbs_metrics_data)
-                # apply gradient clipping and optimizer step at the end of a global batch
-                grad_norm = self.model.clip_grad_norm_(
-                    max_norm=self.cfg.actor.optim.clip_grad
+
+                grad_norm, lr = self.optimizer_step(
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    grad_scaler=self.grad_scaler,
+                    lr_scheduler=self.lr_scheduler,
+                    dp_group=self._dp_group,
                 )
-                if not torch.isfinite(grad_norm).all():
-                    self.log_warning(
-                        "grad norm is not finite, skip this optimizer step."
-                    )
-                else:
-                    self.optimizer.step()
-                self.optimizer.zero_grad()
 
                 # aggregate metrics across micro-batches
                 mean_metric_dict = {
@@ -465,15 +462,9 @@ class FSDPActor(FSDPModelManager, Worker):
                 mean_metric_dict = all_reduce_dict(
                     mean_metric_dict, op=torch.distributed.ReduceOp.AVG
                 )
-                # add optimizer stats
-                if torch.is_tensor(grad_norm):
-                    mean_metric_dict["actor/grad_norm"] = float(
-                        grad_norm.detach().item()
-                    )
-                else:
-                    mean_metric_dict["actor/grad_norm"] = float(grad_norm)
-                lr = self.optimizer.param_groups[0]["lr"]
-                mean_metric_dict["actor/lr"] = torch.as_tensor(lr).float().cpu()
+
+                mean_metric_dict["actor/grad_norm"] = float(grad_norm)
+                mean_metric_dict["actor/lr"] = lr
                 training_metrics_list.append(mean_metric_dict)
 
         # Rollout metrics

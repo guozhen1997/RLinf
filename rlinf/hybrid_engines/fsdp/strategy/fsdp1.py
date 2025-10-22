@@ -18,6 +18,7 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
+from torch.amp.grad_scaler import GradScaler
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
     MixedPrecision,
@@ -314,3 +315,48 @@ class FSDP1Strategy(FSDPStrategyBase):
                     if isinstance(value, torch.Tensor):
                         state[key] = value.to(device, non_blocking=True)
         clear_memory()
+
+    def optimizer_step(
+        self,
+        model: FSDP,
+        optimizer: Optimizer,
+        grad_scaler: GradScaler,
+        lr_scheduler: LRScheduler,
+        dp_group: Optional[torch.distributed.ProcessGroup] = None,
+    ) -> tuple[float, float]:
+        """
+        Perform an optimizer step with gradient scaling.
+
+        Args:
+            - optimizer (Optimizer): The optimizer used for training.
+            - grad_scaler (GradScaler): The gradient scaler for mixed precision training.
+
+        Returns:
+            - tuple[int, float, float]: A tuple containing grad_norm and lr.
+        """
+
+        assert self.cfg.optim.clip_grad is not None, (
+            "Gradient clipping value must be set."
+        )
+
+        grad_scaler.unscale_(optimizer)
+        grad_norm = model.clip_grad_norm_(self.cfg.optim.clip_grad)
+
+        is_finite = torch.isfinite(torch.as_tensor(grad_norm))
+
+        if not is_finite:
+            self.logger.warning("[FSDP1] Grad norm is not finite, skip optimizer step.")
+
+        grad_scaler.step(optimizer)
+        grad_scaler.update()
+        lr_scheduler.step()
+
+        lr = optimizer.param_groups[0]["lr"] if optimizer.param_groups else 0.0
+
+        grad_norm_value = (
+            float(grad_norm.detach().item())
+            if torch.is_tensor(grad_norm)
+            else float(grad_norm)
+        )
+
+        return grad_norm_value, lr

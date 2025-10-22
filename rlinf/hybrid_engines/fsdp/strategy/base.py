@@ -14,7 +14,7 @@
 
 import random
 from abc import ABC, abstractmethod
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 import numpy as np
 import torch
@@ -271,4 +271,17 @@ class FSDPStrategyBase(ABC):
     ) -> None:
         raise NotImplementedError(
             "onload_param method must be implemented by subclasses."
+        )
+
+    @abstractmethod
+    def optimizer_step(
+        self,
+        model: FSDP,
+        optimizer: Optimizer,
+        grad_scaler: GradScaler,
+        lr_scheduler: LRScheduler,
+        dp_group: Optional[torch.distributed.ProcessGroup] = None,
+    ) -> tuple[float, float]:
+        raise NotImplementedError(
+            "optimizer_step method must be implemented by subclasses."
         )

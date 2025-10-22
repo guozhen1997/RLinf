@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from typing import Dict, Tuple
+from typing import Dict
 
 import torch
 from omegaconf import DictConfig
@@ -24,10 +24,7 @@ from rlinf.config import torch_dtype_from_precision
 from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
-    clip_grad_by_total_norm_,
     create_device_mesh,
-    fsdp_version,
-    get_grad_norm,
 )
 from rlinf.utils.logging import get_logger
 
@@ -215,53 +212,6 @@ class FSDPModelManager:
         self.lr_scheduler = self._strategy.build_lr_scheduler(optimizer=self.optimizer)
         self.grad_scaler = self._strategy.build_grad_scaler()
 
-    def optimizer_step(self) -> Tuple[int, float, float]:
-        """
-        Perform optimizer step with gradient clipping if configured.
-
-        Returns:
-            success: 1 if the step is successful, 0 if skipped due to non-finite grad norm.
-            grad_norm: the gradient norm.
-            lr: the current learning rate.
-        """
-
-        assert self._cfg.optim.clip_grad is not None
-
-        if fsdp_version(self.model) == 1:
-            grad_norm = self.model.clip_grad_norm_(max_norm=self._cfg.optim.clip_grad)
-        else:
-            grad_norm = get_grad_norm(
-                self.model.parameters(),
-                dp_group=self._dp_group,
-                dtype=torch.float32,
-            )
-            if self._cfg.optim.clip_grad is not None:
-                clip_grad_by_total_norm_(
-                    self.model.parameters(),
-                    max_grad_norm=self._cfg.optim.clip_grad,
-                    total_norm=grad_norm,
-                    dtype=torch.float32,
-                )
-            grad_norm = torch.tensor([grad_norm])
-
-        # if grad_norm is not finite, skip the update
-        success = 1
-        if not torch.isfinite(grad_norm):
-            self._logger.warning(
-                f"[Rank {torch.distributed.get_rank()}] grad_norm is not finite: {grad_norm}"
-            )
-            self.optimizer.zero_grad()
-            success = 0
-        else:
-            self.optimizer.step()
-
-        # TODO: lr scheduler step after all rollout batches are processed
-        lr = self.lr_scheduler.get_last_lr()
-
-        self.lr_scheduler.step()
-
-        return success, grad_norm.item(), lr
-
     def get_rng_state(self) -> Dict:
         """
         Get rng state.
@@ -339,3 +289,17 @@ class FSDPModelManager:
             device_id: the target device id to load optimizer states.
         """
         self._strategy.onload_optimizer(self.optimizer, device_id)
+
+    def optimizer_step(self) -> tuple[float, float]:
+        """
+        Perform optimizer step.
+
+        Returns:
+            A tuple of (grad_norm, lr).
+        """
+        return self._strategy.optimizer_step(
+            self.model,
+            self.optimizer,
+            self.grad_scaler,
+            self.lr_scheduler,
+        )

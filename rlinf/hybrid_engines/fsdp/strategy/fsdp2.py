@@ -18,6 +18,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
+from torch.amp.grad_scaler import GradScaler
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
@@ -34,8 +35,10 @@ from rlinf.hybrid_engines.fsdp import FSDPModule
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     apply_fsdp2_to_model,
+    clip_grad_by_total_norm_,
     get_fsdp_full_state_dict,
     get_fsdp_state_ctx,
+    get_grad_norm,
 )
 from rlinf.utils.utils import clear_memory
 
@@ -179,7 +182,7 @@ class FSDP2Strategy(FSDPStrategyBase):
 
     def get_model_state_dict(self, model: FSDPModule) -> dict:
         state_dict = get_fsdp_full_state_dict(
-            model, offload_to_cpu=True, rank0_only=False
+            model, offload_to_cpu=False, rank0_only=False
         )
         return state_dict
 
@@ -232,3 +235,37 @@ class FSDP2Strategy(FSDPStrategyBase):
                         st[k] = v.detach().to(device, non_blocking=True)
                         del v
         clear_memory()
+
+    def optimizer_step(
+        self,
+        model: FSDPModule,
+        optimizer: Optimizer,
+        grad_scaler: GradScaler,
+        lr_scheduler: LRScheduler,
+        dp_group: Optional[torch.distributed.ProcessGroup] = None,
+    ) -> tuple[float, float]:
+        grad_norm = get_grad_norm(
+            model.parameters(),
+            dp_group=dp_group,
+            dtype=torch.float32,
+        )
+        if self._cfg.optim.clip_grad is not None:
+            clip_grad_by_total_norm_(
+                model.parameters(),
+                max_grad_norm=self._cfg.optim.clip_grad,
+                total_norm=grad_norm,
+                dtype=torch.float32,
+            )
+        grad_norm = torch.tensor([grad_norm])
+
+        grad_scaler.step(optimizer)
+        grad_scaler.update()
+        lr_scheduler.step()
+
+        lr = optimizer.param_groups[0]["lr"] if optimizer.param_groups else 0.0
+        grad_norm_value = (
+            float(grad_norm.detach().item())
+            if torch.is_tensor(grad_norm)
+            else float(grad_norm)
+        )
+        return grad_norm_value, lr
