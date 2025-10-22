@@ -13,7 +13,8 @@
 # limitations under the License.
 
 import os
-from typing import Optional
+from contextlib import nullcontext
+from typing import ContextManager, Optional
 
 import torch
 import torch.nn as nn
@@ -23,9 +24,6 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     MixedPrecisionPolicy,
-    ShardedOptimStateDictConfig,
-    ShardedStateDictConfig,
-    StateDictType,
 )
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
@@ -36,8 +34,7 @@ from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     apply_fsdp2_to_model,
     clip_grad_by_total_norm_,
-    get_fsdp_full_state_dict,
-    get_fsdp_state_ctx,
+    get_fsdp2_full_state_dict_all_ranks,
     get_grad_norm,
 )
 from rlinf.utils.utils import clear_memory
@@ -48,6 +45,16 @@ class FSDP2Strategy(FSDPStrategyBase):
         super().__init__(cfg, world_size, rank, logger)
 
     def wrap_model(self, model: nn.Module, device_mesh: DeviceMesh) -> FSDPModule:
+        """
+        Wrap the model with FSDP2's fully_shard.
+
+        Args:
+            - model (nn.Module): The model to be wrapped.
+            - device_mesh (DeviceMesh): The device mesh for FSDP2.
+
+        Returns:
+            - FSDPModule: The FSDP2 wrapped model.
+        """
         mixed_precision_config = self.cfg.fsdp_config.mixed_precision
         param_dtype = torch_dtype_from_precision(mixed_precision_config.param_dtype)
         reduce_dtype = torch_dtype_from_precision(mixed_precision_config.reduce_dtype)
@@ -81,50 +88,47 @@ class FSDP2Strategy(FSDPStrategyBase):
         self,
         model: FSDPModule,
         optimizer: Optimizer,
-        lr_scheduler: Optional[LRScheduler],
+        lr_scheduler: LRScheduler,
         save_path: str,
     ) -> None:
-        cuda_available = torch.cuda.is_available()
-        if next(model.parameters()).is_cpu and cuda_available:
-            self.get_model_state_dict(torch.cuda.current_device())
-            self.get_optimizer_state_dict(torch.cuda.current_device())
+        """
+        Save the model, optimizer, lr_scheduler and rng state to the specified path.
+        Different from FSDP1, FSDP2 saves sharded state dicts for model and optimizer.
 
-        state_dict_cfg = ShardedStateDictConfig(
-            offload_to_cpu=True if cuda_available else False
+        Args:
+            - model (FSDPModule): The FSDP2 wrapped model.
+            - optimizer (Optimizer): The optimizer.
+            - lr_scheduler (LRScheduler): The learning rate scheduler.
+            - save_path (str): The path to save the checkpoint.
+        """
+        os.makedirs(save_path, exist_ok=True)
+
+        model_path = os.path.join(save_path, f"model_rank_{self.rank}.pt")
+        optim_path = os.path.join(save_path, f"optim_rank_{self.rank}.pt")
+        extra_path = os.path.join(
+            save_path,
+            f"extra_state_rank_{self.rank}.pt",
         )
-        optim_cfg = ShardedOptimStateDictConfig(
-            offload_to_cpu=True if cuda_available else False
-        )
-        with get_fsdp_state_ctx(
-            model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg
-        ):
-            model_path = os.path.join(save_path, f"model_rank_{self.rank}.pt")
-            optim_path = os.path.join(save_path, f"optim_rank_{self.rank}.pt")
-            extra_path = os.path.join(
-                save_path,
-                f"extra_state_world_rank_{self.rank}.pt",
-            )
 
-            model_state_dict = model.state_dict()
-            torch.save(model_state_dict, model_path)
-            if self.rank == 0:
-                self.logger.info(f"Saved model to {os.path.abspath(model_path)}")
+        model_state_dict = model.state_dict()
+        torch.save(model_state_dict, model_path)
+        if self.rank == 0:
+            self.logger.info(f"Saved model to {os.path.abspath(model_path)}")
 
-            optimizer_state_dict = optimizer.state_dict()
-            torch.save(optimizer_state_dict, optim_path)
-            if self.rank == 0:
-                self.logger.info(f"Saved optim to {os.path.abspath(optim_path)}")
+        optimizer_state_dict = optimizer.state_dict()
+        torch.save(optimizer_state_dict, optim_path)
+        if self.rank == 0:
+            self.logger.info(f"Saved optim to {os.path.abspath(optim_path)}")
 
-            lr_scheduler_state_dict = (
-                lr_scheduler.state_dict() if lr_scheduler is not None else None
-            )
-            extra_state_dict = {
-                "lr_scheduler": lr_scheduler_state_dict,
-                "rng": self.save_rng_state(),
-            }
-            torch.save(extra_state_dict, extra_path)
-            if self.rank == 0:
-                self.logger.info(f"Saved extra_state to {os.path.abspath(extra_path)}")
+        lr_scheduler_state_dict = lr_scheduler.state_dict()
+
+        extra_state_dict = {
+            "lr_scheduler": lr_scheduler_state_dict,
+            "rng": self.save_rng_state(),
+        }
+        torch.save(extra_state_dict, extra_path)
+        if self.rank == 0:
+            self.logger.info(f"Saved extra_state to {os.path.abspath(extra_path)}")
 
         torch.distributed.barrier()
 
@@ -132,69 +136,83 @@ class FSDP2Strategy(FSDPStrategyBase):
         self,
         model: FSDPModule,
         optimizer: Optimizer,
-        lr_scheduler: Optional[LRScheduler],
+        lr_scheduler: LRScheduler,
         load_path: str,
     ) -> None:
-        cuda_available = torch.cuda.is_available()
-        if next(self.model.parameters()).is_cpu and cuda_available:
-            self.get_model_state_dict(torch.cuda.current_device())
-            self.get_optimizer_state_dict(torch.cuda.current_device())
+        """
+        Load the model, optimizer, lr_scheduler and rng state from the specified path.
 
-        state_dict_cfg = ShardedStateDictConfig(
-            offload_to_cpu=True if cuda_available else False
+        Args:
+            - model (FSDPModule): The FSDP wrapped model.
+            - optimizer (Optimizer): The optimizer.
+            - lr_scheduler (LRScheduler): The learning rate scheduler.
+            - load_path (str): The path to load the checkpoint from.
+        """
+        model_path = os.path.join(load_path, f"model_rank_{self.rank}.pt")
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"{model_path} not found.")
+        model_state_dict = torch.load(model_path, weights_only=False)
+        model.load_state_dict(model_state_dict)
+        if self.rank == 0:
+            self.logger.info(f"Loaded model from {model_path}")
+
+        optim_path = os.path.join(load_path, f"optim_rank_{self.rank}.pt")
+        if not os.path.exists(optim_path):
+            raise FileNotFoundError(f"{optim_path} not found.")
+
+        optimizer_state_dict = torch.load(optim_path, weights_only=False)
+        optimizer.load_state_dict(optimizer_state_dict)
+        if self.rank == 0:
+            self.logger.info(f"Loaded optimizer from {optim_path}")
+
+        extra_state_path = os.path.join(
+            load_path,
+            f"extra_state_rank_{self.rank}.pt",
         )
-        optim_cfg = ShardedOptimStateDictConfig(
-            offload_to_cpu=True if cuda_available else False
-        )
-
-        with get_fsdp_state_ctx(
-            model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg
-        ):
-            model_path = os.path.join(load_path, f"model_rank_{self.rank}.pt")
-            model_state_dict = torch.load(model_path, weights_only=False)
-            self.model.load_state_dict(model_state_dict)
+        if not os.path.exists(extra_state_path):
+            raise FileNotFoundError(f"{extra_state_path} not found.")
+        extra_state_dict = torch.load(extra_state_path, weights_only=False)
+        if "rng" in extra_state_dict:
+            self.load_rng_state(extra_state_dict["rng"])
             if self.rank == 0:
-                self.logger.info(f"Loaded model from {model_path}")
+                self.logger.info(f"Loaded rng from {extra_state_path}")
 
-            optim_path = os.path.join(load_path, f"optim_rank_{self.rank}.pt")
-            optimizer_state_dict = torch.load(optim_path, weights_only=False)
-            self.optimizer.load_state_dict(optimizer_state_dict)
-            if self.rank == 0:
-                self.logger.info(f"Loaded optimizer from {optim_path}")
-
-            extra_state_path = os.path.join(
-                load_path,
-                f"extra_state_rank_{self.rank}.pt",
-            )
-            extra_state_dict = torch.load(extra_state_path, weights_only=False)
-            if "rng" in extra_state_dict:
-                self.load_rng_state(extra_state_dict["rng"])
-                if self.rank == 0:
-                    self.logger.info(f"Loaded rng from {extra_state_path}")
-
-            lr_scheduler_state_dict = extra_state_dict["lr_scheduler"]
-            if lr_scheduler_state_dict is not None and self.lr_scheduler is not None:
-                lr_scheduler.load_state_dict(lr_scheduler_state_dict)
-                if self.rank == 0:
-                    self.logger.info(f"Loaded lr_scheduler from {extra_state_path}")
+        lr_scheduler_state_dict = extra_state_dict.get("lr_scheduler")
+        lr_scheduler.load_state_dict(lr_scheduler_state_dict)
+        if self.rank == 0:
+            self.logger.info(f"Loaded lr_scheduler from {extra_state_path}")
 
         torch.distributed.barrier()
 
     def get_model_state_dict(self, model: FSDPModule) -> dict:
-        state_dict = get_fsdp_full_state_dict(
-            model, offload_to_cpu=False, rank0_only=False
-        )
-        return state_dict
+        """
+        Get the full model state dict of FSDP2 from all ranks.
+
+        Args:
+            - model (FSDPModule): The FSDP2 wrapped model.
+
+        Returns:
+            - dict: The full model state dict.
+        """
+        return get_fsdp2_full_state_dict_all_ranks(model, False)
 
     def get_optimizer_state_dict(self, optimizer: Optimizer) -> dict:
         raise NotImplementedError(
-            "FSDP2Strategy does not support get_optimizer_state_dict yet."
+            "[FSDP2] get_optimizer_state_dict is not implemented yet."
         )
 
     @torch.no_grad()
     def onload_param_and_grad(
         self, model: FSDPModule, device: torch.device, onload_grad: bool
     ) -> None:
+        """
+        Load model parameters and gradients to the specified device.
+
+        Args:
+            - model (FSDPModule): The FSDP2 wrapped model.
+            - device (torch.device): The target device.
+            - onload_grad (bool): Whether to load gradients or not.
+        """
         model.to(device=device)
         if onload_grad:
             for param in model.parameters():
@@ -204,6 +222,13 @@ class FSDP2Strategy(FSDPStrategyBase):
 
     @torch.no_grad()
     def offload_param_and_grad(self, model: FSDPModule, offload_grad: bool) -> None:
+        """
+        Offload model parameters and gradients to CPU.
+
+        Args:
+            - model (FSDPModule): The FSDP2 wrapped model.
+            - offload_grad (bool): Whether to offload gradients or not.
+        """
         model.to(device="cpu")
 
         if offload_grad:
@@ -214,6 +239,12 @@ class FSDP2Strategy(FSDPStrategyBase):
 
     @torch.no_grad()
     def offload_optimizer(self, optimizer: Optimizer) -> None:
+        """
+        Offload optimizer states to CPU.
+
+        Args:
+            - optimizer (Optimizer): The optimizer.
+        """
         for st in optimizer.state.values():
             if not isinstance(st, dict):
                 continue
@@ -226,6 +257,13 @@ class FSDP2Strategy(FSDPStrategyBase):
 
     @torch.no_grad()
     def onload_optimizer(self, optimizer: Optimizer, device: torch.device) -> None:
+        """
+        Load optimizer states to the specified device.
+
+        Args:
+            - optimizer (Optimizer): The optimizer.
+            - device (torch.device): The target device.
+        """
         for st in optimizer.state.values():
             if not isinstance(st, dict):
                 continue
@@ -244,23 +282,40 @@ class FSDP2Strategy(FSDPStrategyBase):
         lr_scheduler: LRScheduler,
         dp_group: Optional[torch.distributed.ProcessGroup] = None,
     ) -> tuple[float, float]:
+        """
+        Perform optimizer step with gradient clipping if specified.
+
+        Args:
+            - model (FSDPModule): The FSDP2 wrapped model.
+            - optimizer (Optimizer): The optimizer.
+            - grad_scaler (GradScaler): The gradient scaler for mixed precision.
+            - lr_scheduler (LRScheduler): The learning rate scheduler.
+            - dp_group (Optional[torch.distributed.ProcessGroup]): The data parallel group for FSDP2, used for grad norm.
+
+        Returns:
+            - tuple[float, float]: The gradient norm and learning rate after the step.
+        """
         grad_norm = get_grad_norm(
             model.parameters(),
             dp_group=dp_group,
             dtype=torch.float32,
         )
-        if self._cfg.optim.clip_grad is not None:
+        if self.cfg.optim.clip_grad is not None:
             clip_grad_by_total_norm_(
                 model.parameters(),
-                max_grad_norm=self._cfg.optim.clip_grad,
+                max_grad_norm=self.cfg.optim.clip_grad,
                 total_norm=grad_norm,
                 dtype=torch.float32,
             )
         grad_norm = torch.tensor([grad_norm])
+        is_finite = torch.isfinite(grad_norm)
+        if not is_finite:
+            self.logger.warning("[FSDP2] Grad norm is not finite, skip optimizer step.")
+        else:
+            grad_scaler.step(optimizer)
+            lr_scheduler.step()
 
-        grad_scaler.step(optimizer)
         grad_scaler.update()
-        lr_scheduler.step()
 
         lr = optimizer.param_groups[0]["lr"] if optimizer.param_groups else 0.0
         grad_norm_value = (
@@ -269,3 +324,23 @@ class FSDP2Strategy(FSDPStrategyBase):
             else float(grad_norm)
         )
         return grad_norm_value, lr
+
+    def before_micro_batch(
+        self, model: FSDPModule, is_last_micro_batch: bool
+    ) -> ContextManager:
+        """
+        Context manager to control gradient synchronization for FSDP2.
+        FSDP2 does not provide model.no_sync, but provides set_requires_gradient_sync.
+
+        Args:
+            - model (FSDPModule): The FSDP2 wrapped model.
+            - is_last_micro_batch (bool): Whether this is the last micro batch.
+
+        Returns:
+            - ContextManager: nullcontext, just for interface consistency.
+        """
+        if is_last_micro_batch:
+            model.set_requires_gradient_sync(True)
+        else:
+            model.set_requires_gradient_sync(False)
+        return nullcontext()

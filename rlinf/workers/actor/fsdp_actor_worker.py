@@ -14,7 +14,6 @@
 
 import gc
 import os
-from contextlib import nullcontext
 from typing import Dict, Tuple
 
 import numpy as np
@@ -339,10 +338,9 @@ class FSDPActor(FSDPModelManager, Worker):
                 self.optimizer.zero_grad()
                 metrics = {}
                 for idx, m_batch in enumerate(train_micro_batches):
-                    backward_ctx = (
-                        self.model.no_sync()
-                        if idx < self.gradient_accumulation - 1
-                        else nullcontext()
+                    backward_ctx = self.before_micro_batch(
+                        self.model,
+                        is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
                     )
                     for k, v in m_batch.items():
                         m_batch[k] = v.cuda() if isinstance(v, torch.Tensor) else v
@@ -368,13 +366,16 @@ class FSDPActor(FSDPModelManager, Worker):
                         ref_logprobs = m_batch["ref_logprobs"]
 
                     loss_mask = m_batch["attention_mask"][:, -self.response_len :]
-                    output = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        position_ids=position_ids,
-                        **multi_modal_inputs,
-                        use_cache=False,
-                    )
+                    with torch.amp.autocast(
+                        device_type="cuda", dtype=torch.float16, enabled=self.use_fp16
+                    ):
+                        output = self.model(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            position_ids=position_ids,
+                            **multi_modal_inputs,
+                            use_cache=False,
+                        )
 
                     logits = output.logits
 
@@ -434,7 +435,7 @@ class FSDPActor(FSDPModelManager, Worker):
                     # scale loss for gradient accumulation and backprop
                     loss = loss / self.gradient_accumulation
                     with backward_ctx:
-                        loss.backward()
+                        self.grad_scaler.scale(loss).backward()
 
                     mbs_metrics_data.update(
                         {
@@ -446,13 +447,7 @@ class FSDPActor(FSDPModelManager, Worker):
 
                     append_to_dict(metrics, mbs_metrics_data)
 
-                grad_norm, lr = self.optimizer_step(
-                    model=self.model,
-                    optimizer=self.optimizer,
-                    grad_scaler=self.grad_scaler,
-                    lr_scheduler=self.lr_scheduler,
-                    dp_group=self._dp_group,
-                )
+                grad_norm, lr = self.optimizer_step()
 
                 # aggregate metrics across micro-batches
                 mean_metric_dict = {

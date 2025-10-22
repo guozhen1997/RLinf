@@ -14,7 +14,7 @@
 
 import random
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Union
+from typing import ContextManager, Dict, Optional, Union
 
 import numpy as np
 import torch
@@ -43,23 +43,6 @@ class FSDPStrategyBase(ABC):
 
             self._logger = logging.getLogger(__name__)
         return self._logger
-
-    @abstractmethod
-    def wrap_model(
-        self, model: nn.Module, device_mesh: DeviceMesh
-    ) -> Union[FSDP, FSDPModule]:
-        """
-        Wrap the model with FSDP or FSDPModule based on the strategy.
-
-        Args:
-            model (nn.Module): The model to be wrapped.
-
-        Returns:
-            Union[FSDP, FSDPModule]: The wrapped model.
-        """
-        raise NotImplementedError(
-            "_wrap_model method must be implemented by subclasses."
-        )
 
     def build_optimizer(self, model: Union[nn.Module, FSDPModule, FSDP]) -> Optimizer:
         """
@@ -190,25 +173,25 @@ class FSDPStrategyBase(ABC):
         Load the RNG state from the provided state dictionary.
 
         Args:
-            rng_state (Dict): The RNG state dictionary containing states for 'cpu', 'cuda', 'rng_states', and 'amp'.
+            rng_state (Dict): The RNG state dictionary containing states for 'cpu', 'numpy', 'random', and optionally 'cuda'.
         """
-        NEEDED_KEYS = ["cpu", "cuda", "rng_states", "amp"]
-        assert set(NEEDED_KEYS).issubset(set(rng_state.keys())), (
-            f"rng_state must contain the keys: {NEEDED_KEYS}"
+        required_keys = ["cpu", "numpy", "random"]
+        assert set(required_keys).issubset(rng_state.keys()), (
+            f"rng_state must contain the keys: {required_keys}"
         )
 
         torch.set_rng_state(rng_state["cpu"])
         np.random.set_state(rng_state["numpy"])
         random.setstate(rng_state["random"])
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and "cuda" in rng_state:
             torch.cuda.set_rng_state(rng_state["cuda"])
 
     def save_rng_state(self) -> Dict:
         """
         Save the current RNG state into a dictionary.
 
-        Returns:
-            Dict: The RNG state dictionary containing states for 'cpu', 'cuda', 'rng_states', and 'amp'.
+            Returns:
+                Dict: The RNG state dictionary containing states for 'cpu', 'numpy', 'random', and optionally 'cuda'.
         """
         rng_state = {
             "cpu": torch.get_rng_state(),
@@ -220,12 +203,29 @@ class FSDPStrategyBase(ABC):
         return rng_state
 
     @abstractmethod
+    def wrap_model(
+        self, model: nn.Module, device_mesh: DeviceMesh
+    ) -> Union[FSDP, FSDPModule]:
+        """
+        Wrap the model with FSDP or FSDPModule based on the strategy.
+
+        Args:
+            model (nn.Module): The model to be wrapped.
+
+        Returns:
+            Union[FSDP, FSDPModule]: The wrapped model.
+        """
+        raise NotImplementedError(
+            "_wrap_model method must be implemented by subclasses."
+        )
+
+    @abstractmethod
     def save_checkpoint(
         self,
         model: Union[FSDP, FSDPModule],
         optimizer: Optimizer,
-        checkpoint_path: str,
-        rank: int,
+        lr_scheduler: LRScheduler,
+        save_path: str,
     ) -> None:
         raise NotImplementedError(
             "save_checkpoint method must be implemented by subclasses."
@@ -233,7 +233,11 @@ class FSDPStrategyBase(ABC):
 
     @abstractmethod
     def load_checkpoint(
-        self, model: Union[FSDP, FSDPModule], optimizer: Optimizer, checkpoint_path: str
+        self,
+        model: Union[FSDP, FSDPModule],
+        optimizer: Optimizer,
+        lr_scheduler: LRScheduler,
+        load_path: str,
     ) -> None:
         raise NotImplementedError(
             "load_checkpoint method must be implemented by subclasses."
@@ -276,7 +280,7 @@ class FSDPStrategyBase(ABC):
     @abstractmethod
     def optimizer_step(
         self,
-        model: FSDP,
+        model: Union[FSDP, FSDPModule],
         optimizer: Optimizer,
         grad_scaler: GradScaler,
         lr_scheduler: LRScheduler,
@@ -284,4 +288,12 @@ class FSDPStrategyBase(ABC):
     ) -> tuple[float, float]:
         raise NotImplementedError(
             "optimizer_step method must be implemented by subclasses."
+        )
+
+    @abstractmethod
+    def before_micro_batch(
+        self, model: Union[FSDP, FSDPModule], is_last_micro_batch: bool
+    ) -> ContextManager:
+        raise NotImplementedError(
+            "before_micro_batch method must be implemented by subclasses."
         )

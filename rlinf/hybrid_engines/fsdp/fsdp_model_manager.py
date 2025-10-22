@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from typing import Dict
+from typing import ContextManager, Dict, Union
 
 import torch
 from omegaconf import DictConfig
@@ -22,6 +22,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Se
 
 from rlinf.config import torch_dtype_from_precision
 from rlinf.data.tokenizers import hf_tokenizer
+from rlinf.hybrid_engines.fsdp import FSDP, FSDPModule
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     create_device_mesh,
@@ -60,6 +61,7 @@ class FSDPModelManager:
         self._logger = get_logger()
         self.torch_dtype = torch_dtype_from_precision(self._cfg.model.precision)
 
+        self.use_fp16 = self.torch_dtype == torch.float16
         if cfg.get("tokenizer", {}).get("tokenizer_model", None) is not None:
             self.tokenizer = hf_tokenizer(cfg.tokenizer.tokenizer_model)
 
@@ -122,7 +124,7 @@ class FSDPModelManager:
 
             model = auto_model_class.from_pretrained(
                 cfg.model.model_path,
-                torch_dtype=self.torch_dtype,
+                torch_dtype=torch.float32 if self.use_fp16 else self.torch_dtype,
                 config=model_config,
                 trust_remote_code=True,
             )
@@ -194,7 +196,7 @@ class FSDPModelManager:
             self._logger.warning(f"[FSDP] Liger kernels not applied: {e}")
 
     def setup_model_and_optimizer(self) -> None:
-        """Setup model and optimizer."""
+        """Setup model, lr_scheduler, optimizer and grad_scaler."""
         module = self.model_provider_func()
 
         # Enable gradient checkpointing if configured
@@ -244,7 +246,9 @@ class FSDPModelManager:
         Params:
             load_path: the directory to load checkpoint.
         """
-        self._strategy.load_checkpoint(self.model, self.optimizer, load_path)
+        self._strategy.load_checkpoint(
+            self.model, self.optimizer, self.lr_scheduler, load_path
+        )
 
     def save_checkpoint(self, save_path: str) -> None:
         """
@@ -254,7 +258,9 @@ class FSDPModelManager:
         Params:
             save_path: the directory to save checkpoint.
         """
-        self._strategy.save_checkpoint(self.model, self.optimizer, save_path, self.rank)
+        self._strategy.save_checkpoint(
+            self.model, self.optimizer, self.lr_scheduler, save_path
+        )
 
     def offload_param_and_grad(self, offload_grad: bool = False) -> None:
         """
@@ -292,14 +298,39 @@ class FSDPModelManager:
 
     def optimizer_step(self) -> tuple[float, float]:
         """
-        Perform optimizer step.
+        Perform optimizer step using its optimizer, lr_scheduler and grad_scaler.
 
         Returns:
             A tuple of (grad_norm, lr).
         """
         return self._strategy.optimizer_step(
-            self.model,
-            self.optimizer,
-            self.grad_scaler,
-            self.lr_scheduler,
+            model=self.model,
+            optimizer=self.optimizer,
+            grad_scaler=self.grad_scaler,
+            lr_scheduler=self.lr_scheduler,
+            dp_group=self._dp_group,
+        )
+
+    def before_micro_batch(
+        self, model: Union[FSDP, FSDPModule], is_last_micro_batch: bool
+    ) -> ContextManager:
+        """
+            Setup context manager before processing a micro-batch.
+            This is used to control gradient synchronization behavior.
+            Depending on the specific FSDP strategy being used, if using
+            FSDP, it will return model.no_sync() for non-last micro-batches to
+            avoid gradient synchronization, and nullcontext() for the last
+            micro-batch to ensure gradients are synchronized and updated.
+            If using FSDP2, it will set requires_gradient_sync flag
+            on the model accordingly.
+
+        Args:
+            model: The FSDP or FSDPModule model.
+            is_last_micro_batch: A boolean indicating if this is the last micro-batch.
+
+        Returns:
+            A context manager for the micro-batch processing.
+        """
+        return self._strategy.before_micro_batch(
+            model=model, is_last_micro_batch=is_last_micro_batch
         )

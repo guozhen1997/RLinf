@@ -13,7 +13,8 @@
 # limitations under the License.
 
 import os
-from typing import Dict, Optional
+from contextlib import nullcontext
+from typing import ContextManager, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -106,7 +107,7 @@ class FSDP1Strategy(FSDPStrategyBase):
         self,
         model: FSDP,
         optimizer: Optimizer,
-        lr_scheduler: Optional[LRScheduler],
+        lr_scheduler: LRScheduler,
         save_path: str,
     ) -> None:
         """
@@ -126,19 +127,18 @@ class FSDP1Strategy(FSDPStrategyBase):
             os.makedirs(save_path, exist_ok=True)
             torch.save(model_state, os.path.join(save_path, "model.pt"))
             torch.save(optim_state, os.path.join(save_path, "optimizer.pt"))
-            if lr_scheduler is not None:
-                torch.save(
-                    lr_scheduler.state_dict(),
-                    os.path.join(save_path, "lr_scheduler.pt"),
-                )
+            torch.save(
+                lr_scheduler.state_dict(),
+                os.path.join(save_path, "lr_scheduler.pt"),
+            )
         torch.distributed.barrier()
 
     def load_checkpoint(
         self,
         model: FSDP,
         optimizer: Optimizer,
-        save_path: str,
-        lr_scheduler: Optional[LRScheduler] = None,
+        lr_scheduler: LRScheduler,
+        load_path: str,
     ) -> None:
         """
         Load model, optimizer and lr_scheduler(if exists) state dicts from the specified path.
@@ -155,10 +155,10 @@ class FSDP1Strategy(FSDPStrategyBase):
         """
         torch.distributed.barrier()
 
-        model_path = os.path.join(save_path, "model.pt")
-        optim_path = os.path.join(save_path, "optimizer.pt")
+        model_path = os.path.join(load_path, "model.pt")
+        optim_path = os.path.join(load_path, "optimizer.pt")
         if not (os.path.exists(model_path) and os.path.exists(optim_path)):
-            raise FileNotFoundError(f"Missing checkpoint files in {save_path}")
+            raise FileNotFoundError(f"Missing checkpoint files in {load_path}")
 
         assert torch.cuda.is_available(), (
             "CUDA is not available for loading checkpoint."
@@ -177,12 +177,11 @@ class FSDP1Strategy(FSDPStrategyBase):
         sharded_osd = FSDP.shard_full_optim_state_dict(optim_full_state, model)
         optimizer.load_state_dict(sharded_osd)
 
-        if lr_scheduler is not None:
-            sched_path = os.path.join(save_path, "lr_scheduler.pt")
-            if os.path.exists(sched_path):
-                lr_scheduler.load_state_dict(torch.load(sched_path))
-            else:
-                raise FileNotFoundError(f"lr_scheduler.pt not found in {save_path}")
+        sched_path = os.path.join(load_path, "lr_scheduler.pt")
+        if os.path.exists(sched_path):
+            lr_scheduler.load_state_dict(torch.load(sched_path))
+        else:
+            raise FileNotFoundError(f"lr_scheduler.pt not found in {load_path}")
         torch.distributed.barrier()
 
     def get_model_state_dict(self, model: FSDP) -> Dict:
@@ -220,6 +219,12 @@ class FSDP1Strategy(FSDPStrategyBase):
 
     @torch.no_grad()
     def offload_param_and_grad(self, model: FSDP, offload_grad: bool) -> None:
+        """
+        Offload model parameters and gradients to CPU.
+        Args:
+            - model (FSDP): The FSDP wrapped model.
+            - offload_grad (bool): Whether to offload gradients or not.
+        """
         for _, param in model.named_parameters():
             if hasattr(param, "_handle") and param._handle is not None:
                 flat_param = param._handle.flat_param
@@ -346,11 +351,11 @@ class FSDP1Strategy(FSDPStrategyBase):
 
         if not is_finite:
             self.logger.warning("[FSDP1] Grad norm is not finite, skip optimizer step.")
+        else:
+            grad_scaler.step(optimizer)
+            lr_scheduler.step()
 
-        grad_scaler.step(optimizer)
         grad_scaler.update()
-        lr_scheduler.step()
-
         lr = optimizer.param_groups[0]["lr"] if optimizer.param_groups else 0.0
 
         grad_norm_value = (
@@ -360,3 +365,19 @@ class FSDP1Strategy(FSDPStrategyBase):
         )
 
         return grad_norm_value, lr
+
+    def before_micro_batch(
+        self, model: FSDP, is_last_micro_batch: bool
+    ) -> ContextManager:
+        """
+        Context manager for handling gradient synchronization during micro-batches for FSDP.
+        it will disable gradient synchronization for non-last micro-batches to reduce all-reduce count.
+
+        Args:
+            - model (FSDP): The FSDP wrapped model.
+            - is_last_micro_batch (bool): Whether the current micro-batch is the last one
+
+        Returns:
+            - ContextManager: The context manager for gradient synchronization.
+        """
+        return model.no_sync() if not is_last_micro_batch else nullcontext()
