@@ -13,8 +13,9 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    env, rollout: 0
-    actor: 1-4
+    env: 0
+    rollout: 1
+    actor: 2-3
 
 runner:
   task_type: embodied
@@ -132,8 +133,9 @@ actor:
     policy_setup: "widowx_bridge"
     add_value_head: True
     image_size: [224, 224]
-    is_lora: False
+    is_lora: True
     lora_rank: 32
+    lora_path: "/mnt/mnt/public/mjwei/download_models/openvla/lora_adapter"
     ckpt_path: null
     use_wrist_image: False
     num_images_in_input: 3
