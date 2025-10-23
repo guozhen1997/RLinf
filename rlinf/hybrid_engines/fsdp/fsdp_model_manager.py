@@ -250,7 +250,7 @@ class FSDPModelManager:
             self.model, self.optimizer, self.lr_scheduler, load_path
         )
 
-    def save_checkpoint(self, save_path: str) -> None:
+    def save_checkpoint(self, save_path: str, global_steps: int) -> None:
         """
         Save checkpoint to local path.
         Every rank will save its own model and optim shard.

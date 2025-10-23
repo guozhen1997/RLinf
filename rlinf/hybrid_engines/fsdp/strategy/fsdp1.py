@@ -123,6 +123,7 @@ class FSDP1Strategy(FSDPStrategyBase):
         torch.distributed.barrier()
         model_state = self.get_model_state_dict(model=model)
         optim_state = self.get_optimizer_state_dict(model=model, optimizer=optimizer)
+
         if self.rank == 0:
             os.makedirs(save_path, exist_ok=True)
             torch.save(model_state, os.path.join(save_path, "model.pt"))

@@ -100,8 +100,11 @@ class FSDP2Strategy(FSDPStrategyBase):
             - optimizer (Optimizer): The optimizer.
             - lr_scheduler (LRScheduler): The learning rate scheduler.
             - save_path (str): The path to save the checkpoint.
+            - global_steps (int): The global training steps, used to create sub-directory.
         """
-        os.makedirs(save_path, exist_ok=True)
+        if self.rank == 0:
+            os.makedirs(save_path, exist_ok=True)
+        torch.distributed.barrier()
 
         model_path = os.path.join(save_path, f"model_rank_{self.rank}.pt")
         optim_path = os.path.join(save_path, f"optim_rank_{self.rank}.pt")
