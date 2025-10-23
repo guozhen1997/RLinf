@@ -135,6 +135,14 @@ def get_model(cfg: DictConfig, override_config_kwargs=None):
         model.to(torch_dtype)
 
     elif model_type == SupportedModel.OPENVLA_OFT:
+        from rlinf.models.embodiment.openvla_oft import (
+            get_model as get_openvla_oft_model,
+        )
+
+        model = get_openvla_oft_model(cfg)
+        model.to(torch_dtype)
+
+    elif model_type == SupportedModel.OPENVLA_OFT_RLINF:
         from prismatic.extern.hf.configuration_prismatic import (
             OpenVLAConfig as OpenVLAOFTConfig,
         )
@@ -168,6 +176,9 @@ def get_model(cfg: DictConfig, override_config_kwargs=None):
             num_action_chunks=cfg.num_action_chunks,
             trust_remote_code=True,
             add_value_head=cfg.add_value_head,
+            proprio_dim=cfg.proprio_dim,
+            use_proprio=cfg.use_proprio,
+            use_film=cfg.use_film,
         )
 
         # oft add
