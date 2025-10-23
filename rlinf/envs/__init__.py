@@ -33,9 +33,9 @@ def get_env_cls(env_type, env_cfg=None):
 
         return LiberoEnv
     elif env_type == "robotwin":
-        from rlinf.envs.robotwin.RoboTwin_env import RoboTwin
+        from rlinf.envs.robotwin.robotwin_env import RoboTwinEnv
 
-        return RoboTwin
+        return RoboTwinEnv
     elif env_type == "isaaclab":
         from rlinf.envs.isaaclab import REGISTER_ISAACLAB_ENVS
 
