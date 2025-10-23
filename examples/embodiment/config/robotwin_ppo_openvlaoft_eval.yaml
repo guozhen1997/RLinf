@@ -15,36 +15,35 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 0-1
-    rollout: 0-1
-    env: 0-1
+    env: 0-7
+    rollout: 0-7
+    actor: 0-7
 
 runner:
   task_type: embodied
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "robotwin_ppo_openvlaoft"
+    experiment_name: "test_openvla"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1000
   max_steps: -1
 
-  only_eval: False
-  eval_policy_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
+  only_eval: True
+  eval_policy_path: null
   val_check_interval: -1
-  save_interval: 40
-
-  resume_dir: null
+  save_interval: 100
+  seq_length: 4096
+  max_prompt_length: 128
 
 algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
 
-  rollout_epoch: 1
-  eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
-
+  rollout_epoch: 1 # 16
+  eval_rollout_epoch: 1
   reward_type: chunk_level
   logprob_type: token_level
   entropy_type: token_level
@@ -66,7 +65,7 @@ algorithm:
 
   # params for rollout
   sampling_params:
-    do_sample: True
+    do_sample: False
     temperature_train: 1.6
     temperature_eval: 1.6
     top_k: -1
@@ -82,11 +81,7 @@ algorithm:
 
 env:
   group_name: "EnvGroup"
-  enable_offload: True
-
-  # Override the default values in env/robotwin_single_task
-  train:
-    total_num_envs: 2
+  enable_offload: False
   eval:
     total_num_envs: 32
     auto_reset: True
@@ -102,26 +97,24 @@ env:
 rollout:
   group_name: "RolloutGroup"
   backend: "huggingface"
-  enable_offload: True
+  enable_offload: False
   pipeline_stage_num: 1
   model:
     model_type: "openvla_oft"
-    model_path: "/path/to/model/Openvla-oft-SFT-libero10-trajall/"
+    model_path: "/mnt/public/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
     precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 1 # 1
-  global_batch_size: 32 # 640
+  global_batch_size: 40 # 640
   seed: 1234
   enable_offload: True
 
-  # Override the default values in model/openvla_oft
   model:
-    model_path: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k/"
-
-    model_type: "openvla_oft"
+    model_path: "/mnt/public/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+    model_name: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14
     use_proprio: True
@@ -133,16 +126,23 @@ actor:
     center_crop: True
 
     add_value_head: True
-    max_prompt_length: 50
+
+    max_prompt_length: 128
 
   optim:
-    lr: 5.0e-6
-    value_lr: 5.0e-5
+    lr: 1.0e-4
+    value_lr: 3.0e-3
     adam_beta1: 0.9
     adam_beta2: 0.999
     adam_eps: 1.0e-05
-    weight_decay: 0.01
     clip_grad: 10.0
+
+  tokenizer:
+    tokenizer_type: "HuggingFaceTokenizer"
+    tokenizer_model: ${actor.model.model_path}
+    use_fast: False
+    trust_remote_code: True
+    padding_side: "right"
 
   # Override the default values in training_backend/fsdp
   fsdp_config:

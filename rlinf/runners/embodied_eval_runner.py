@@ -59,7 +59,7 @@ class EmbodiedEvalRunner:
         self.rollout.init_worker().wait()
         self.env.init_worker().wait()
 
-        if self.cfg.runner.eval_policy_path is not None:
+        if self.cfg.runner.get("eval_policy_path", None) is not None:
             self.logger.info(
                 f"Using checkpoint for evaluation (from runner.eval_policy_path): {self.cfg.runner.eval_policy_path}"
             )

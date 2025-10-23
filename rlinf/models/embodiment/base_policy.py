@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch.nn as nn
+from abc import ABC, abstractmethod
 
 
-class BasePolicy(nn.Module):
+class BasePolicy(ABC):
     def preprocess_env_obs(self, env_obs):
         return env_obs
 
@@ -37,5 +37,6 @@ class BasePolicy(nn.Module):
     def crossq_q_forward(self, **kwargs):
         raise NotImplementedError
 
+    @abstractmethod
     def default_forward(self, **kwargs):
         raise NotImplementedError

@@ -50,6 +50,7 @@ class SupportedModel(Enum):
     # Embodied models
     OPENVLA = ("openvla", "embodied")
     OPENVLA_OFT = ("openvla_oft", "embodied")
+    OPENVLA_OFT_RLINF = ("openvla_oft_rlinf", "embodied")
     OPENPI = ("openpi", "embodied")
     MLP_POLICY = ("mlp_policy", "embodied")
     GR00T = ("gr00t", "embodied")
@@ -765,6 +766,9 @@ def validate_embodied_cfg(cfg):
         ), (
             "env.train.max_steps_per_rollout_epoch must be divisible by actor.model.num_action_chunks"
         )
+
+    # if cfg.runner.only_eval:
+    #     assert cfg.env.eval.num_envs > 0
 
     with open_dict(cfg):
         if (
