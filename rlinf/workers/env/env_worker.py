@@ -129,6 +129,9 @@ class EnvWorker(Worker):
                 self.last_intervened_info_list.append((None, None))
                 self.env_list[i].stop_env()
 
+            if self.cfg.env.enable_offload:
+                self.env_list[i].close()
+
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any]]:
