@@ -195,14 +195,14 @@ class EnvWorker(Worker):
     def _init_simulator(self):
         for i in range(self.stage_num):
             self.simulator_list[i].start_simulator()
-            extracted_obs, _ = (
-                self.simulator_list[i].reset()
-            )
+            extracted_obs, _ = self.simulator_list[i].reset()
             self.last_obs_list.append(extracted_obs)
-            dones = torch.zeros((self.cfg.env.train.num_envs,), dtype=bool).unsqueeze(1).repeat(1, self.cfg.actor.model.num_action_chunks)
-            self.last_dones_list.append(
-                dones
+            dones = (
+                torch.zeros((self.cfg.env.train.num_envs,), dtype=bool)
+                .unsqueeze(1)
+                .repeat(1, self.cfg.actor.model.num_action_chunks)
             )
+            self.last_dones_list.append(dones)
             self.simulator_list[i].stop_simulator()
 
     def env_interact_step(
@@ -360,14 +360,14 @@ class EnvWorker(Worker):
             env_output_list = []
             if not self.cfg.env.train.auto_reset:
                 for i in range(self.stage_num):
-                    extracted_obs, infos = (
-                        self.simulator_list[i].reset()
-                    )
+                    extracted_obs, infos = self.simulator_list[i].reset()
                     self.last_obs_list.append(extracted_obs)
-                    dones = torch.zeros((self.cfg.env.train.num_envs,), dtype=bool).unsqueeze(1).repeat(1, self.cfg.actor.model.num_action_chunks)
-                    self.last_dones_list.append(
-                        dones
+                    dones = (
+                        torch.zeros((self.cfg.env.train.num_envs,), dtype=bool)
+                        .unsqueeze(1)
+                        .repeat(1, self.cfg.actor.model.num_action_chunks)
                     )
+                    self.last_dones_list.append(dones)
                     env_output = EnvOutput(
                         simulator_type=self.cfg.env.train.simulator_type,
                         obs=extracted_obs,

@@ -602,11 +602,21 @@ def validate_embodied_cfg(cfg):
             )
             omnigibson_cfg = OmegaConf.create(omnigibson_cfg)
             cfg.env.train.omnigibson_cfg = omnigibson_cfg
-            cfg.env.train.omnigibson_cfg.env.action_frequency = custom_cfg.action_frequency
-            cfg.env.train.omnigibson_cfg.env.rendering_frequency = custom_cfg.rendering_frequency
-            cfg.env.train.omnigibson_cfg.env.physics_frequency = custom_cfg.physics_frequency
-            cfg.env.train.omnigibson_cfg.env.external_sensors = custom_cfg.external_sensors
-            cfg.env.train.omnigibson_cfg.scene.scene_instance = custom_cfg.scene.scene_instance
+            cfg.env.train.omnigibson_cfg.env.action_frequency = (
+                custom_cfg.action_frequency
+            )
+            cfg.env.train.omnigibson_cfg.env.rendering_frequency = (
+                custom_cfg.rendering_frequency
+            )
+            cfg.env.train.omnigibson_cfg.env.physics_frequency = (
+                custom_cfg.physics_frequency
+            )
+            cfg.env.train.omnigibson_cfg.env.external_sensors = (
+                custom_cfg.external_sensors
+            )
+            cfg.env.train.omnigibson_cfg.scene.scene_instance = (
+                custom_cfg.scene.scene_instance
+            )
             cfg.env.train.omnigibson_cfg.scene.scene_file = custom_cfg.scene.scene_file
 
             cfg.env.train.omnigibson_cfg.robots[

@@ -26,7 +26,6 @@ import torch
 from av.container import Container
 from av.stream import Stream
 from omegaconf import OmegaConf, open_dict
-from omnigibson.macros import gm
 from omnigibson.envs import VectorEnvironment
 from omnigibson.learning.utils.eval_utils import (
     ROBOT_CAMERA_NAMES,
@@ -36,14 +35,16 @@ from omnigibson.learning.utils.obs_utils import (
     create_video_writer,
     write_video,
 )
+from omnigibson.macros import gm
+
+from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
+from rlinf.utils.logging import get_logger
+
 # Make sure object states are enabled
 gm.HEADLESS = True
 gm.ENABLE_OBJECT_STATES = True
 gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_TRANSITION_RULES = True
-
-from rlinf.envs.libero.utils import list_of_dict_to_dict_of_list, to_tensor
-from rlinf.utils.logging import get_logger
 
 __all__ = ["OmnigibsonEnv"]
 
@@ -84,8 +85,10 @@ class OmnigibsonEnv(gym.Env):
 
     def _load_tasks_cfg(self):
         with open_dict(self.cfg):
-            self.cfg.omnigibson_cfg["task"]["activity_name"] = TASK_INDICES_TO_NAMES[self.cfg.tasks.task_idx]
-        
+            self.cfg.omnigibson_cfg["task"]["activity_name"] = TASK_INDICES_TO_NAMES[
+                self.cfg.tasks.task_idx
+            ]
+
         with open(self.cfg.tasks.task_description_path, "r") as f:
             text = f.read()
             task_description = [json.loads(x) for x in text.strip().split("\n") if x]
@@ -93,26 +96,39 @@ class OmnigibsonEnv(gym.Env):
             task_description[i]["task_name"]: task_description[i]["task"]
             for i in range(len(task_description))
         }
-        self.task_description = task_description_map[self.cfg.omnigibson_cfg["task"]["activity_name"]]
+        self.task_description = task_description_map[
+            self.cfg.omnigibson_cfg["task"]["activity_name"]
+        ]
 
     def _init_env(self):
         self._load_tasks_cfg()
-        self.env = VectorEnvironment(self.cfg.num_envs, OmegaConf.to_container(self.cfg.omnigibson_cfg, resolve=True))
+        self.env = VectorEnvironment(
+            self.cfg.num_envs,
+            OmegaConf.to_container(self.cfg.omnigibson_cfg, resolve=True),
+        )
 
     def _extract_obs_image(self, raw_obs):
-        for _, sensor_data in raw_obs.items():
+        for sensor_data in raw_obs.values():
             assert isinstance(sensor_data, dict)
             for k, v in sensor_data.items():
                 if "left_realsense_link:Camera:0" in k:
-                    left_image = v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0 # [H, W, C] -> [C, H, W]
+                    left_image = (
+                        v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0
+                    )  # [H, W, C] -> [C, H, W]
                 elif "right_realsense_link:Camera:0" in k:
-                    right_image = v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0 # [H, W, C] -> [C, H, W]
+                    right_image = (
+                        v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0
+                    )  # [H, W, C] -> [C, H, W]
                 elif "zed_link:Camera:0" in k:
-                    zed_image = v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0 # [H, W, C] -> [C, H, W]
+                    zed_image = (
+                        v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0
+                    )  # [H, W, C] -> [C, H, W]
 
         return {
-            "images": zed_image, # [C, H, W]
-            "wrist_images": torch.stack([left_image, right_image], axis=0), # [N_IMG, C, H, W]
+            "images": zed_image,  # [C, H, W]
+            "wrist_images": torch.stack(
+                [left_image, right_image], axis=0
+            ),  # [N_IMG, C, H, W]
         }
 
     def _wrap_obs(self, obs_list):
@@ -122,8 +138,12 @@ class OmnigibsonEnv(gym.Env):
             extracted_obs_list.append(extracted_obs)
 
         obs = {
-            "images": torch.stack([obs["images"] for obs in extracted_obs_list], axis=0), # [N_ENV, C, H, W]
-            "wrist_images": torch.stack([obs["wrist_images"] for obs in extracted_obs_list], axis=0), # [N_ENV, N_IMG, C, H, W]
+            "images": torch.stack(
+                [obs["images"] for obs in extracted_obs_list], axis=0
+            ),  # [N_ENV, C, H, W]
+            "wrist_images": torch.stack(
+                [obs["wrist_images"] for obs in extracted_obs_list], axis=0
+            ),  # [N_ENV, N_IMG, C, H, W]
             "task_descriptions": [
                 self.task_description for i in range(self.cfg.num_envs)
             ],
@@ -314,14 +334,18 @@ class OmnigibsonEnv(gym.Env):
             }
             self.returns[env_idx] += reward
             if "success" in info:
-                self.success_once[env_idx] = self.success_once[env_idx] | info["success"]
+                self.success_once[env_idx] = (
+                    self.success_once[env_idx] | info["success"]
+                )
                 episode_info["success_once"] = self.success_once[env_idx].clone()
             if "fail" in info:
                 self.fail_once[env_idx] = self.fail_once[env_idx] | info["fail"]
                 episode_info["fail_once"] = self.fail_once[env_idx].clone()
             episode_info["return"] = self.returns[env_idx].clone()
             episode_info["episode_len"] = self.elapsed_steps.clone()
-            episode_info["reward"] = episode_info["return"] / episode_info["episode_len"]
+            episode_info["reward"] = (
+                episode_info["return"] / episode_info["episode_len"]
+            )
             if self.ignore_terminations:
                 episode_info["success_at_end"] = info["success"]
 
@@ -329,7 +353,7 @@ class OmnigibsonEnv(gym.Env):
 
         infos = {"episode": to_tensor(list_of_dict_to_dict_of_list(info_lists))}
         return infos
-    
+
     def _handle_auto_reset(self, dones, extracted_obs, infos):
         final_obs = extracted_obs.copy()
         env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]

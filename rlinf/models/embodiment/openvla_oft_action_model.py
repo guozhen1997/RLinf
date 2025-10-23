@@ -217,7 +217,9 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             all_images = [env_obs["images"]]
             if self.vision_backbone.get_num_images_in_input() > 1:
                 wrist_imgs = env_obs["wrist_images"]  # [B, N_IMG, C, H, W]
-                all_images.extend([wrist_imgs[:, i] for i in range(wrist_imgs.shape[1])])
+                all_images.extend(
+                    [wrist_imgs[:, i] for i in range(wrist_imgs.shape[1])]
+                )
 
             max_length = self.max_prompt_length
             device = next(self.parameters()).device
@@ -244,21 +246,24 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                         proprio_states=env_obs["states"],
                         padding="max_length",
                         max_length=max_length,
-                    ) for wrist_image in all_images
+                    )
+                    for wrist_image in all_images
                 ]
 
                 # Concatenate all images
                 primary_pixel_values = inputs["pixel_values"]
-                all_wrist_pixel_values = [wrist_inputs["pixel_values"] for wrist_inputs in all_wrist_inputs]
-                inputs["pixel_values"] = torch.cat([primary_pixel_values] + all_wrist_pixel_values, dim=1)
+                all_wrist_pixel_values = [
+                    wrist_inputs["pixel_values"] for wrist_inputs in all_wrist_inputs
+                ]
+                inputs["pixel_values"] = torch.cat(
+                    [primary_pixel_values] + all_wrist_pixel_values, dim=1
+                )
 
             input_ids = inputs["input_ids"].to(device=device, dtype=torch.long)
             attention_mask = inputs["attention_mask"].to(
                 device=device, dtype=torch.bool
             )
-            pixel_values = inputs["pixel_values"].to(
-                device=device, dtype=precision
-            )
+            pixel_values = inputs["pixel_values"].to(device=device, dtype=precision)
 
             B, N, C, H, W = pixel_values.shape
             pixel_values = pixel_values.reshape(B, N * C, H, W)
