@@ -283,9 +283,9 @@ class FSDPStrategyBase(ABC):
         model: Union[FSDP, FSDPModule],
         optimizer: Optimizer,
         grad_scaler: GradScaler,
-        lr_scheduler: LRScheduler,
+        lr_scheduler: Optional[LRScheduler] = None,
         dp_group: Optional[torch.distributed.ProcessGroup] = None,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, list[float]]:
         raise NotImplementedError(
             "optimizer_step method must be implemented by subclasses."
         )

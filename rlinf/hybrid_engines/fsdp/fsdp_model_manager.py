@@ -296,18 +296,17 @@ class FSDPModelManager:
         """
         self._strategy.onload_optimizer(self.optimizer, device_id)
 
-    def optimizer_step(self) -> tuple[float, float]:
+    def optimizer_step(self) -> tuple[float, list[float]]:
         """
         Perform optimizer step using its optimizer, lr_scheduler and grad_scaler.
 
         Returns:
-            A tuple of (grad_norm, lr).
+            A tuple of (grad_norm, lr_list), lr_list contains learning rates for all param groups.
         """
         return self._strategy.optimizer_step(
             model=self.model,
             optimizer=self.optimizer,
             grad_scaler=self.grad_scaler,
-            lr_scheduler=self.lr_scheduler,
             dp_group=self._dp_group,
         )
 

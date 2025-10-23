@@ -117,6 +117,7 @@ class EmbodiedRunner:
             with self.timer("step"):
                 with self.timer("sync_weights"):
                     self.update_rollout_weights()
+                with self.timer("generate_rollouts"):
                     env_metrics = self.generate_rollouts()
 
                 # compute advantages and returns.

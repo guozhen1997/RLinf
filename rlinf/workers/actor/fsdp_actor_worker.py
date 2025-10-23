@@ -447,7 +447,7 @@ class FSDPActor(FSDPModelManager, Worker):
 
                     append_to_dict(metrics, mbs_metrics_data)
 
-                grad_norm, lr = self.optimizer_step()
+                grad_norm, lr_list = self.optimizer_step()
 
                 # aggregate metrics across micro-batches
                 mean_metric_dict = {
@@ -459,7 +459,7 @@ class FSDPActor(FSDPModelManager, Worker):
                 )
 
                 mean_metric_dict["actor/grad_norm"] = float(grad_norm)
-                mean_metric_dict["actor/lr"] = lr
+                mean_metric_dict["actor/lr"] = lr_list[0]
                 training_metrics_list.append(mean_metric_dict)
 
         # Rollout metrics
@@ -725,7 +725,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             self.load_optimizer(self.device)
 
         self.model.train()
-        self.optimizer.zero_grad()
         rollout_size = (
             self.rollout_batch["prev_logprobs"].shape[0]
             * self.rollout_batch["prev_logprobs"].shape[1]
@@ -788,10 +787,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 )
 
                 self.optimizer.zero_grad()
-                for data in train_micro_batch:
+                for idx, data in enumerate(train_micro_batch):
                     for k, v in data.items():
                         data[k] = v.to(f"cuda:{int(os.environ['LOCAL_RANK'])}")
-
+                    backward_ctx = self.before_micro_batch(
+                        self.model,
+                        is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
+                    )
                     advantages = data["advantages"]
                     prev_logprobs = data["prev_logprobs"]
                     returns = data.get("returns", None)
@@ -809,13 +811,16 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         True if self.cfg.algorithm.adv_type == "embodied_gae" else False
                     )
 
-                    output_dict = self.model(
-                        data=data,
-                        compute_logprobs=True,
-                        compute_entropy=True,
-                        compute_values=compute_values,
-                        use_cache=False,
-                    )
+                    with torch.amp.autocast(
+                        device_type="cuda", dtype=torch.float16, enabled=self.use_fp16
+                    ):
+                        output_dict = self.model(
+                            data=data,
+                            compute_logprobs=True,
+                            compute_entropy=True,
+                            compute_values=compute_values,
+                            use_cache=False,
+                        )
 
                     if self.cfg.actor.model.model_name in ["openpi"]:
                         prev_logprobs = output_dict["prev_logprobs"]
@@ -847,25 +852,21 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     loss, metrics_data = actor_loss(**kwargs)
 
                     loss /= self.gradient_accumulation
-                    loss.backward()
+                    with backward_ctx:
+                        self.grad_scaler.scale(loss).backward()
 
                     metrics_data["loss"] = loss.detach().item()
                     append_to_dict(metrics, metrics_data)
 
                 torch.cuda.empty_cache()
 
-                grad_norm = self.model.clip_grad_norm_(
-                    max_norm=self.cfg.actor.optim.clip_grad
-                )
-                self.optimizer.step()
-
-                self.optimizer.zero_grad()
+                grad_norm, lr_list = self.optimizer_step()
                 data = {
-                    "actor/grad_norm": grad_norm.detach().item(),
-                    "actor/lr": self.optimizer.param_groups[0]["lr"],
+                    "actor/grad_norm": grad_norm,
+                    "actor/lr": lr_list[0],
                 }
                 if self.cfg.algorithm.adv_type == "embodied_gae":
-                    data["critic/lr"] = self.optimizer.param_groups[1]["lr"]
+                    data["critic/lr"] = lr_list[1]
                 append_to_dict(metrics, data)
 
         mean_metric_dict = {key: np.mean(value) for key, value in metrics.items()}
@@ -873,22 +874,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             mean_metric_dict, op=torch.distributed.ReduceOp.AVG
         )
 
-        self.optimizer.zero_grad()
-        torch.cuda.synchronize()
-        torch.distributed.barrier()
-        torch.cuda.empty_cache()
-
         return mean_metric_dict
-
-    def save_checkpoint(self, save_base_path, step):
-        torch.distributed.barrier()
-        model_state = self.get_model_state_dict()
-        optim_state = self.get_optimizer_state_dict()
-        if self._rank == 0:
-            os.makedirs(save_base_path, exist_ok=True)
-            torch.save(model_state, os.path.join(save_base_path, "model.pt"))
-            torch.save(optim_state, os.path.join(save_base_path, "optim.pt"))
-        torch.distributed.barrier()
 
     def set_global_step(self, global_step):
         if hasattr(self.model, "set_global_step"):

@@ -326,9 +326,9 @@ class FSDP1Strategy(FSDPStrategyBase):
         model: FSDP,
         optimizer: Optimizer,
         grad_scaler: GradScaler,
-        lr_scheduler: LRScheduler,
+        lr_scheduler: Optional[LRScheduler] = None,
         dp_group: Optional[torch.distributed.ProcessGroup] = None,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, list[float]]:
         """
         Perform an optimizer step with gradient scaling.
 
@@ -353,10 +353,14 @@ class FSDP1Strategy(FSDPStrategyBase):
             self.logger.warning("[FSDP1] Grad norm is not finite, skip optimizer step.")
         else:
             grad_scaler.step(optimizer)
-            lr_scheduler.step()
+            if lr_scheduler is not None:
+                lr_scheduler.step()
 
         grad_scaler.update()
-        lr = optimizer.param_groups[0]["lr"] if optimizer.param_groups else 0.0
+
+        lr_list = []
+        for param_group in optimizer.param_groups:
+            lr_list.append(param_group["lr"])
 
         grad_norm_value = (
             float(grad_norm.detach().item())
@@ -364,7 +368,7 @@ class FSDP1Strategy(FSDPStrategyBase):
             else float(grad_norm)
         )
 
-        return grad_norm_value, lr
+        return grad_norm_value, lr_list
 
     def before_micro_batch(
         self, model: FSDP, is_last_micro_batch: bool
