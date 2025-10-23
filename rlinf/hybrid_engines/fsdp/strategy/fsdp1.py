@@ -37,7 +37,7 @@ from rlinf.hybrid_engines.fsdp.utils import (
     get_sharding_strategy,
     init_fn,
 )
-from rlinf.utils.utils import clear_memory
+from rlinf.utils.utils import clear_memory, is_vla_model
 
 
 class FSDP1Strategy(FSDPStrategyBase):
@@ -70,17 +70,11 @@ class FSDP1Strategy(FSDPStrategyBase):
             self.cfg.fsdp_config.sharding_strategy
         )
 
-        is_vla_model = (
-            True
-            if self.cfg.model.get("model_name", None) in ["openvla", "openvla_oft"]
-            else False
-        )
-
         auto_wrap_policy = get_fsdp_wrap_policy(
             module=model,
             config=None,
             is_lora=self.cfg.model.is_lora,
-            is_vla_model=is_vla_model,
+            is_vla_model=is_vla_model(self.cfg),
         )
 
         backward_prefetch = get_backward_prefetch_strategy(

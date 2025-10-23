@@ -119,9 +119,6 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, is_vla_model=False)
     if config.get("disable", False):
         return None
 
-    # Check if this is a VLA model by looking for language_model attribute
-    is_vla_model = hasattr(module, "language_model")
-
     # Get transformer layer classes to wrap
     if hasattr(module, "language_model"):
         # For VLA models, get transformer classes from language_model submodule
