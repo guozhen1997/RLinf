@@ -147,8 +147,8 @@ class FSDP1Strategy(FSDPStrategyBase):
         Args:
             - model (FSDP): The FSDP wrapped model.
             - optimizer (Optimizer): The optimizer used for training.
-            - save_path (str): The directory path to load the checkpoint files from.
             - lr_scheduler (Optional[LRScheduler]): The learning rate scheduler used for training.
+            - load_path (str): The directory path to load the checkpoint files from.
 
         Raises:
             - FileNotFoundError: If the checkpoint files are not found in the specified path.
@@ -164,9 +164,14 @@ class FSDP1Strategy(FSDPStrategyBase):
         assert torch.cuda.is_available(), (
             "CUDA is not available for loading checkpoint."
         )
-        local_device = torch.device(f"cuda:{self.rank}")
-        model_state = torch.load(model_path, map_location=local_device)
-        optim_full_state = torch.load(optim_path, map_location=local_device)
+        # here we use current_device is also ok.
+        device = f"cuda:{os.environ['LOCAL_RANK']}"
+        # load to cpu first to lower gpu memory usage
+        model_state = torch.load(model_path, map_location="cpu")
+        optim_full_state = torch.load(optim_path, map_location="cpu")
+
+        if next(model.parameters()).is_cpu:
+            self.onload_param_and_grad(model, device, onload_grad=False)
 
         with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
             missing, unexpected = model.load_state_dict(model_state, strict=True)

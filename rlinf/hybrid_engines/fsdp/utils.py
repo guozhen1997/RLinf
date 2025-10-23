@@ -27,14 +27,12 @@
 # limitations under the License.
 
 import functools
-from contextlib import nullcontext
 from typing import Dict, Optional, Union
 
 import torch
 from accelerate import init_empty_weights
 from packaging import version
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import (
     _module_wrap_policy,
     transformer_auto_wrap_policy,
@@ -51,7 +49,6 @@ if version.parse(torch.__version__) >= version.parse("2.6"):
     from torch.distributed.fsdp import (
         BackwardPrefetch,
         CPUOffloadPolicy,
-        FSDPModule,
         MixedPrecisionPolicy,
         ShardingStrategy,
         fully_shard,
@@ -60,7 +57,6 @@ elif version.parse(torch.__version__) >= version.parse("2.4"):
     from torch.distributed._composable.fsdp import (
         BackwardPrefetch,
         CPUOffloadPolicy,
-        FSDPModule,
         MixedPrecisionPolicy,
         ShardingStrategy,
         fully_shard,
@@ -294,55 +290,6 @@ def apply_fsdp2_to_model(
     )
 
 
-def fsdp2_load_full_state_dict(
-    model: torch.nn.Module, full_state: dict, cpu_offload=None
-):
-    """
-    Loads the full state dict (could be only on rank 0) into the sharded model. This is done by broadcasting the
-    parameters from rank 0 to all other ranks. This function modifies the model in-place.
-
-    Args:
-        model (`torch.nn.Module`): The model to load the state dict into
-        full_state (`dict`): The full state dict to load, can only be on rank 0
-    """
-    from torch.distributed.checkpoint.state_dict import (
-        StateDictOptions,
-        set_model_state_dict,
-    )
-
-    # To broadcast, it needs to be instantiated in the GPU.
-    if torch.distributed.get_rank() == 0:
-        model = model.to(device="cuda", non_blocking=True)
-    else:
-        model = model.to_empty(device="cuda")
-
-    cpu_offload = cpu_offload is not None
-    options = StateDictOptions(
-        full_state_dict=True, cpu_offload=cpu_offload, broadcast_from_rank0=True
-    )
-    set_model_state_dict(model, full_state, options=options)
-
-    # rotary_emb is not in state_dict, so we need to broadcast it manually
-    for name, buf in model.named_buffers():
-        torch.distributed.broadcast(buf, src=0)
-
-
-def fsdp_version(model):
-    if isinstance(model, FSDP):
-        return 1
-    elif isinstance(model, FSDPModule):
-        return 2
-    else:
-        return 0
-
-
-def get_fsdp_state_ctx(model, state_type, state_cfg, optim_cfg):
-    if fsdp_version(model) == 1:
-        return FSDP.state_dict_type(model, state_type, state_cfg, optim_cfg)
-    else:
-        return nullcontext()
-
-
 def get_fsdp2_full_state_dict_all_ranks(
     model: torch.nn.Module, offload_to_cpu: bool = True
 ):
@@ -369,57 +316,6 @@ def get_fsdp2_full_state_dict_all_ranks(
             else:
                 clean_state_dict[key] = value
         return clean_state_dict
-
-
-def get_fsdp_full_state_dict(
-    model: torch.nn.Module, offload_to_cpu: bool = True, rank0_only: bool = True
-):
-    """
-    Get the full state dict from an FSDP model.
-
-    Args:
-        model (torch.nn.Module): The FSDP model to get state dict from
-        offload_to_cpu (bool, optional): Whether to offload the state dict to CPU. Defaults to True.
-        rank0_only (bool, optional): Whether to only get state dict on rank 0. Defaults to True.
-
-    Returns:
-        dict: The full state dict of the model
-
-    Raises:
-        NotImplementedError: If the FSDP version is unknown
-    """
-    if fsdp_version(model) == 1:
-        from torch.distributed.fsdp import FullStateDictConfig, StateDictType
-
-        state_dict_config = FullStateDictConfig(
-            offload_to_cpu=offload_to_cpu, rank0_only=rank0_only
-        )
-        with get_fsdp_state_ctx(
-            model,
-            state_type=StateDictType.FULL_STATE_DICT,
-            state_cfg=state_dict_config,
-            optim_cfg=None,
-        ):
-            state_dict = model.state_dict()
-        return state_dict
-    elif fsdp_version(model) == 2:
-        if rank0_only:
-            from torch.distributed.checkpoint.state_dict import (
-                StateDictOptions,
-                get_model_state_dict,
-            )
-
-            state_dict_config = StateDictOptions(
-                full_state_dict=True,
-                cpu_offload=offload_to_cpu,
-                broadcast_from_rank0=False,
-            )
-            state_dict = get_model_state_dict(model, options=state_dict_config)
-            return state_dict
-        else:
-            return get_fsdp2_full_state_dict_all_ranks(model, offload_to_cpu)
-    else:
-        raise NotImplementedError(f"Unknown FSDP version {fsdp_version}")
 
 
 def get_lr_scheduler(

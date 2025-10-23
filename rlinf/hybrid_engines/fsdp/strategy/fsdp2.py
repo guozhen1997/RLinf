@@ -20,6 +20,14 @@ import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 from torch.amp.grad_scaler import GradScaler
+from torch.distributed import checkpoint as dcp
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    get_optimizer_state_dict,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
@@ -100,39 +108,28 @@ class FSDP2Strategy(FSDPStrategyBase):
             - optimizer (Optimizer): The optimizer.
             - lr_scheduler (LRScheduler): The learning rate scheduler.
             - save_path (str): The path to save the checkpoint.
-            - global_steps (int): The global training steps, used to create sub-directory.
         """
         if self.rank == 0:
             os.makedirs(save_path, exist_ok=True)
         torch.distributed.barrier()
 
-        model_path = os.path.join(save_path, f"model_rank_{self.rank}.pt")
-        optim_path = os.path.join(save_path, f"optim_rank_{self.rank}.pt")
-        extra_path = os.path.join(
-            save_path,
-            f"extra_state_rank_{self.rank}.pt",
-        )
+        opts = StateDictOptions(full_state_dict=False, cpu_offload=True)
 
-        model_state_dict = model.state_dict()
-        torch.save(model_state_dict, model_path)
-        if self.rank == 0:
-            self.logger.info(f"Saved model to {os.path.abspath(model_path)}")
+        state = {
+            "model": get_model_state_dict(model, options=opts),
+            "optim": get_optimizer_state_dict(model, optimizer, options=opts),
+            # "extra": {"lr_scheduler": lr_scheduler.state_dict(), "rng": self.save_rng_state()},
+        }
 
-        optimizer_state_dict = optimizer.state_dict()
-        torch.save(optimizer_state_dict, optim_path)
-        if self.rank == 0:
-            self.logger.info(f"Saved optim to {os.path.abspath(optim_path)}")
+        dcp.save(state, checkpoint_id=save_path)
 
-        lr_scheduler_state_dict = lr_scheduler.state_dict()
-
-        extra_state_dict = {
-            "lr_scheduler": lr_scheduler_state_dict,
+        extra_state = {
+            "lr_scheduler": lr_scheduler.state_dict(),
             "rng": self.save_rng_state(),
         }
-        torch.save(extra_state_dict, extra_path)
-        if self.rank == 0:
-            self.logger.info(f"Saved extra_state to {os.path.abspath(extra_path)}")
-
+        torch.save(
+            extra_state, os.path.join(save_path, f"extra_state_rank_{self.rank}.pt")
+        )
         torch.distributed.barrier()
 
     def load_checkpoint(
@@ -151,40 +148,27 @@ class FSDP2Strategy(FSDPStrategyBase):
             - lr_scheduler (LRScheduler): The learning rate scheduler.
             - load_path (str): The path to load the checkpoint from.
         """
-        model_path = os.path.join(load_path, f"model_rank_{self.rank}.pt")
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"{model_path} not found.")
-        model_state_dict = torch.load(model_path, weights_only=False)
-        model.load_state_dict(model_state_dict)
-        if self.rank == 0:
-            self.logger.info(f"Loaded model from {model_path}")
+        opts = StateDictOptions(full_state_dict=False, cpu_offload=True)
 
-        optim_path = os.path.join(load_path, f"optim_rank_{self.rank}.pt")
-        if not os.path.exists(optim_path):
-            raise FileNotFoundError(f"{optim_path} not found.")
+        model_sd = model.state_dict()
+        optim_sd = optimizer.state_dict()
 
-        optimizer_state_dict = torch.load(optim_path, weights_only=False)
-        optimizer.load_state_dict(optimizer_state_dict)
-        if self.rank == 0:
-            self.logger.info(f"Loaded optimizer from {optim_path}")
+        dcp.load({"model": model_sd, "optim": optim_sd}, checkpoint_id=load_path)
 
-        extra_state_path = os.path.join(
-            load_path,
-            f"extra_state_rank_{self.rank}.pt",
-        )
+        set_model_state_dict(model, model_sd, options=opts)
+        set_optimizer_state_dict(model, optimizer, optim_sd, options=opts)
+
+        extra_state_path = os.path.join(load_path, f"extra_state_rank_{self.rank}.pt")
         if not os.path.exists(extra_state_path):
-            raise FileNotFoundError(f"{extra_state_path} not found.")
-        extra_state_dict = torch.load(extra_state_path, weights_only=False)
-        if "rng" in extra_state_dict:
-            self.load_rng_state(extra_state_dict["rng"])
-            if self.rank == 0:
-                self.logger.info(f"Loaded rng from {extra_state_path}")
-
-        lr_scheduler_state_dict = extra_state_dict.get("lr_scheduler")
-        lr_scheduler.load_state_dict(lr_scheduler_state_dict)
-        if self.rank == 0:
-            self.logger.info(f"Loaded lr_scheduler from {extra_state_path}")
-
+            raise FileNotFoundError(
+                f"[FSDP2] Extra state file not found at {extra_state_path}"
+            )
+        extra = torch.load(extra_state_path, map_location="cpu", weights_only=False)
+        assert "lr_scheduler" in extra and "rng" in extra, (
+            "[FSDP2] Extra state must contain 'lr_scheduler' and 'rng' keys."
+        )
+        lr_scheduler.load_state_dict(extra["lr_scheduler"])
+        self.load_rng_state(extra["rng"])
         torch.distributed.barrier()
 
     def get_model_state_dict(self, model: FSDPModule) -> dict:
