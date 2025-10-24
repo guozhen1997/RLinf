@@ -28,7 +28,6 @@ from av.stream import Stream
 from omegaconf import OmegaConf, open_dict
 from omnigibson.envs import VectorEnvironment
 from omnigibson.learning.utils.eval_utils import (
-    ROBOT_CAMERA_NAMES,
     TASK_INDICES_TO_NAMES,
 )
 from omnigibson.learning.utils.obs_utils import (
@@ -75,8 +74,7 @@ class OmnigibsonEnv(gym.Env):
         self._video_writer = None
         if self.cfg.video_cfg.save_video:
             video_name = (
-                str(self.cfg.video_cfg.video_base_dir)
-                + f"/{self.cfg.init_params.task_type}_{self.env._current_episode}.mp4"
+                str(self.cfg.video_cfg.video_base_dir) + "/behavior_video.mp4"
             )
             self.video_writer = create_video_writer(
                 fpath=video_name,
@@ -162,15 +160,9 @@ class OmnigibsonEnv(gym.Env):
         self, actions=None
     ) -> Tuple[dict, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         raw_obs, rewards, terminations, truncations, infos = self.env.step(actions)
+        if self.cfg.video_cfg.save_video:
+            self._write_video(raw_obs)
         obs = self._wrap_obs(raw_obs)
-
-        # if self.video_cfg.save_video:
-        #     plot_infos = {
-        #         "rewards": step_reward,
-        #         "terminations": terminations,
-        #         "task": self.task_descriptions,
-        #     }
-        #     self.add_new_frames(raw_obs, plot_infos)
         infos = self._record_metrics(rewards, infos)
         if self.ignore_terminations:
             terminations[:] = False
@@ -267,25 +259,22 @@ class OmnigibsonEnv(gym.Env):
         """
         Flush the video writer.
         """
-        self._write_video()
+        if self.cfg.video_cfg.save_video:
+            self.video_writer = None
 
-    def _write_video(self) -> None:
+    def _write_video(self, raw_obs) -> None:
         """
         Write the current robot observations to video.
         """
-        # concatenate obs
-        left_wrist_rgb = cv2.resize(
-            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["left_wrist"] + "::rgb"].numpy(),
-            (224, 224),
-        )
-        right_wrist_rgb = cv2.resize(
-            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["right_wrist"] + "::rgb"].numpy(),
-            (224, 224),
-        )
-        head_rgb = cv2.resize(
-            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["head"] + "::rgb"].numpy(),
-            (448, 448),
-        )
+        for sensor_data in raw_obs[0].values():
+            for k, v in sensor_data.items():
+                if "left_realsense_link:Camera:0" in k:
+                    left_wrist_rgb = cv2.resize(v["rgb"].numpy(), (224, 224))
+                elif "right_realsense_link:Camera:0" in k:
+                    right_wrist_rgb = cv2.resize(v["rgb"].numpy(), (224, 224))
+                elif "zed_link:Camera:0" in k:
+                    head_rgb = cv2.resize(v["rgb"].numpy(), (448, 448))
+
         write_video(
             np.expand_dims(
                 np.hstack([np.vstack([left_wrist_rgb, right_wrist_rgb]), head_rgb]), 0

@@ -626,6 +626,41 @@ def validate_embodied_cfg(cfg):
                 0
             ].sensor_config = custom_cfg.robots.sensor_config
 
+            custom_cfg = cfg.env.eval.omnigibson_cfg.copy()
+
+            # Load the pre-selected configuration and set the online_sampling flag
+            config_filename = os.path.join(
+                og.example_config_path, "r1pro_behavior.yaml"
+            )
+            omnigibson_cfg = yaml.load(
+                open(config_filename, "r"), Loader=yaml.FullLoader
+            )
+            omnigibson_cfg = OmegaConf.create(omnigibson_cfg)
+            cfg.env.eval.omnigibson_cfg = omnigibson_cfg
+            cfg.env.eval.omnigibson_cfg.env.action_frequency = (
+                custom_cfg.action_frequency
+            )
+            cfg.env.eval.omnigibson_cfg.env.rendering_frequency = (
+                custom_cfg.rendering_frequency
+            )
+            cfg.env.eval.omnigibson_cfg.env.physics_frequency = (
+                custom_cfg.physics_frequency
+            )
+            cfg.env.eval.omnigibson_cfg.env.external_sensors = (
+                custom_cfg.external_sensors
+            )
+            cfg.env.eval.omnigibson_cfg.scene.scene_instance = (
+                custom_cfg.scene.scene_instance
+            )
+            cfg.env.eval.omnigibson_cfg.scene.scene_file = custom_cfg.scene.scene_file
+
+            cfg.env.eval.omnigibson_cfg.robots[
+                0
+            ].obs_modalities = custom_cfg.robots.obs_modalities
+            cfg.env.eval.omnigibson_cfg.robots[
+                0
+            ].sensor_config = custom_cfg.robots.sensor_config
+
             # Also accepts int or list/tuple of tokens (ints or range strings)
             def parse_activity_ids(activity_ids) -> list[int]:
                 if activity_ids is None:
@@ -662,9 +697,13 @@ def validate_embodied_cfg(cfg):
             cfg.env.train.tasks.activity_task_indices = parse_activity_ids(
                 cfg.env.train.tasks.activity_task_indices
             )
-            assert len(cfg.env.train.tasks.activity_task_indices) > 0, (
-                "No activity IDs provided"
+            cfg.env.eval.tasks.activity_task_indices = parse_activity_ids(
+                cfg.env.eval.tasks.activity_task_indices
             )
+            assert (
+                len(cfg.env.train.tasks.activity_task_indices) > 0
+                and len(cfg.env.eval.tasks.activity_task_indices) > 0
+            ), "No activity IDs provided"
 
     return cfg
 

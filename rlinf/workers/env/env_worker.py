@@ -158,6 +158,7 @@ class EnvWorker(Worker):
             with open_dict(self.cfg):
                 # self.cfg.env.train.tasks.task_idx = self.cfg.env.train.tasks.activity_task_indices[self._rank]
                 self.cfg.env.train.tasks.task_idx = 0
+                self.cfg.env.eval.tasks.task_idx = 0
             from rlinf.envs.omnigibson.omnigibson_env import OmnigibsonEnv
 
             if not only_eval:
@@ -429,7 +430,7 @@ class EnvWorker(Worker):
         for i in range(self.stage_num):
             self.eval_simulator_list[i].start_simulator()
             self.eval_simulator_list[i].is_start = True
-            extracted_obs, _, _, _, infos = self.eval_simulator_list[i].step()
+            extracted_obs, infos = self.eval_simulator_list[i].reset()
             env_output = EnvOutput(
                 simulator_type=self.cfg.env.eval.simulator_type,
                 obs=extracted_obs,

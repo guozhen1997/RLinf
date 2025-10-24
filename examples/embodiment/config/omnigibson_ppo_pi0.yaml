@@ -40,8 +40,8 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  n_chunk_steps: 20
-  n_eval_chunk_steps: 20
+  n_chunk_steps: 200
+  n_eval_chunk_steps: 200
   num_group_envs: 2
   rollout_epoch: 8
   reward_type: chunk_level
@@ -116,31 +116,25 @@ actor:
   enable_offload: True
 
   model:
-    model_name: "openvla_oft"
-    value_type: ${algorithm.reward_type}  # 'action' or 'token'
-    action_dim: 23
-    num_action_chunks: 8
-    use_proprio: False
-    unnorm_key: behavior_turn_on_radio
-    center_crop: True
-
-    precision: "bf16"
-    add_bias_linear: False
-    add_qkv_bias: True
-    vocab_size: 32000
-    hidden_size: 4096
-    policy_setup: "widowx_bridge"
-    add_value_head: True
-    image_size: [224, 224]
+    model_name: "openpi"
+    precision: null
+    num_action_chunks: 5 # interface for the env
+    action_dim: 7
     is_lora: False
-    lora_rank: 32
-    ckpt_path: null
-    use_wrist_image: False
-    num_images_in_input: 3
-    attn_implementation: "flash_attention_2"
-    low_cpu_mem_usage: True
-    trust_remote_code: True
-    gradient_checkpointing: True
+    use_wrist_image: True
+    use_proprio: True
+    num_steps: 4
+    sharding_strategy: "no_shard"
+    # openpi specific parameters
+    openpi:
+      noise_level: 0.5
+      action_chunk: ${actor.model.num_action_chunks}
+      num_steps: ${actor.model.num_steps}
+      train_expert_only: True
+      action_env_dim: ${actor.model.action_dim}
+      noise_method: "flow_sde" 
+      add_value_head: True
+      detach_critic_input: True
 
   optim:
     lr: 1.0e-4
