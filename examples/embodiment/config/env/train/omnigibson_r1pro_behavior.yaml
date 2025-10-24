@@ -6,8 +6,8 @@ seed: 0
 num_group: ${algorithm.num_group_envs}
 group_size: ${algorithm.group_size}
 use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
-max_episode_steps: 80
-max_steps: 80
+max_episode_steps: 2000
+max_steps: 2000
 only_eval: False
 image_size: [224, 224]
 
@@ -17,7 +17,7 @@ video_cfg:
   video_base_dir: ${runner.logger.log_path}/video/train
 
 base_config_name: r1pro_behavior
-num_envs: 2
+num_envs: ${algorithm.num_group_envs}
 
 omnigibson_cfg:
   action_frequency: 30                  # (int): environment executes action at the action_frequency rate
