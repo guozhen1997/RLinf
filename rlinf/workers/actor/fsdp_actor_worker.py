@@ -366,9 +366,7 @@ class FSDPActor(FSDPModelManager, Worker):
                         ref_logprobs = m_batch["ref_logprobs"]
 
                     loss_mask = m_batch["attention_mask"][:, -self.response_len :]
-                    with torch.amp.autocast(
-                        device_type="cuda", dtype=torch.float16, enabled=self.use_fp16
-                    ):
+                    with self.amp_context:
                         output = self.model(
                             input_ids=input_ids,
                             attention_mask=attention_mask,
@@ -461,6 +459,9 @@ class FSDPActor(FSDPModelManager, Worker):
                 mean_metric_dict["actor/grad_norm"] = float(grad_norm)
                 mean_metric_dict["actor/lr"] = lr_list[0]
                 training_metrics_list.append(mean_metric_dict)
+
+        # put lr scheduler step here
+        self.lr_scheduler.step()
 
         # Rollout metrics
         rollout_metrics, _, _ = compute_math_rollout_metrics(
@@ -811,9 +812,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         True if self.cfg.algorithm.adv_type == "embodied_gae" else False
                     )
 
-                    with torch.amp.autocast(
-                        device_type="cuda", dtype=torch.float16, enabled=self.use_fp16
-                    ):
+                    with self.amp_context:
                         output_dict = self.model(
                             data=data,
                             compute_logprobs=True,
@@ -868,7 +867,8 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 if self.cfg.algorithm.adv_type == "embodied_gae":
                     data["critic/lr"] = lr_list[1]
                 append_to_dict(metrics, data)
-
+        # put LR scheduler step here
+        self.lr_scheduler.step()
         mean_metric_dict = {key: np.mean(value) for key, value in metrics.items()}
         mean_metric_dict = all_reduce_dict(
             mean_metric_dict, op=torch.distributed.ReduceOp.AVG

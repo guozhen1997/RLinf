@@ -116,15 +116,14 @@ class FSDPStrategyBase(ABC):
             num_cycles=num_cycles,
         )
 
-    def build_grad_scaler(self) -> GradScaler:
+    def build_grad_scaler(self, enabled: bool) -> GradScaler:
         """
         Build the gradient scaler for mixed precision training if model uses fp16.
 
         Returns:
             GradScaler: The gradient scaler.
         """
-        use_fp16 = self.cfg.model.precision == "fp16"
-        return GradScaler(enabled=use_fp16)
+        return GradScaler(enabled=enabled)
 
     @classmethod
     def create(

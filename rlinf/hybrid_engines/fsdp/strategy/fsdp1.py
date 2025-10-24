@@ -20,9 +20,12 @@ import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 from torch.amp.grad_scaler import GradScaler
+from torch.distributed import checkpoint as dcp
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
     MixedPrecision,
+    ShardedOptimStateDictConfig,
+    ShardedStateDictConfig,
     StateDictType,
 )
 from torch.optim import Optimizer
@@ -114,18 +117,28 @@ class FSDP1Strategy(FSDPStrategyBase):
             - lr_scheduler (Optional[LRScheduler]): The learning rate scheduler used for training.
             - save_path (str): The directory path to save the checkpoint files.
         """
-        torch.distributed.barrier()
-        model_state = self.get_model_state_dict(model=model)
-        optim_state = self.get_optimizer_state_dict(model=model, optimizer=optimizer)
 
-        if self.rank == 0:
+        if self.rank == 0 and not os.path.exists(save_path):
             os.makedirs(save_path, exist_ok=True)
-            torch.save(model_state, os.path.join(save_path, "model.pt"))
-            torch.save(optim_state, os.path.join(save_path, "optimizer.pt"))
-            torch.save(
-                lr_scheduler.state_dict(),
-                os.path.join(save_path, "lr_scheduler.pt"),
-            )
+        torch.distributed.barrier()
+
+        with FSDP.state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            ShardedStateDictConfig(offload_to_cpu=True),
+            ShardedOptimStateDictConfig(offload_to_cpu=True),
+        ):
+            model_sd = model.state_dict()
+            optim_sd = FSDP.optim_state_dict(model, optimizer)
+
+        dcp.save({"model": model_sd, "optim": optim_sd}, checkpoint_id=save_path)
+
+        extra = {
+            "lr_scheduler": lr_scheduler.state_dict(),
+            "rng": self.save_rng_state(),
+        }
+        torch.save(extra, os.path.join(save_path, f"extra_state_rank_{self.rank}.pt"))
+
         torch.distributed.barrier()
 
     def load_checkpoint(
@@ -150,38 +163,24 @@ class FSDP1Strategy(FSDPStrategyBase):
         """
         torch.distributed.barrier()
 
-        model_path = os.path.join(load_path, "model.pt")
-        optim_path = os.path.join(load_path, "optimizer.pt")
-        if not (os.path.exists(model_path) and os.path.exists(optim_path)):
-            raise FileNotFoundError(f"Missing checkpoint files in {load_path}")
+        model_sd, optim_sd = {}, {}
+        dcp.load({"model": model_sd, "optim": optim_sd}, checkpoint_id=load_path)
 
-        assert torch.cuda.is_available(), (
-            "CUDA is not available for loading checkpoint."
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            ShardedStateDictConfig(offload_to_cpu=True),
+            ShardedOptimStateDictConfig(offload_to_cpu=True),
         )
-        # here we use current_device is also ok.
-        device = f"cuda:{os.environ['LOCAL_RANK']}"
-        # load to cpu first to lower gpu memory usage
-        model_state = torch.load(model_path, map_location="cpu")
-        optim_full_state = torch.load(optim_path, map_location="cpu")
+        model.load_state_dict(model_sd)
+        osd_to_load = FSDP.optim_state_dict_to_load(model, optimizer, optim_sd)
+        optimizer.load_state_dict(osd_to_load)
 
-        if next(model.parameters()).is_cpu:
-            self.onload_param_and_grad(model, device, onload_grad=False)
-
-        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
-            missing, unexpected = model.load_state_dict(model_state, strict=True)
-            if missing or unexpected:
-                raise RuntimeError(
-                    f"State dict mismatch. missing={missing}, unexpected={unexpected}"
-                )
-
-        sharded_osd = FSDP.shard_full_optim_state_dict(optim_full_state, model)
-        optimizer.load_state_dict(sharded_osd)
-
-        sched_path = os.path.join(load_path, "lr_scheduler.pt")
-        if os.path.exists(sched_path):
-            lr_scheduler.load_state_dict(torch.load(sched_path))
-        else:
-            raise FileNotFoundError(f"lr_scheduler.pt not found in {load_path}")
+        extra = torch.load(
+            os.path.join(load_path, f"extra_state_rank_{self.rank}.pt"),
+            map_location="cpu",
+        )
+        lr_scheduler.load_state_dict(extra["lr_scheduler"])
         torch.distributed.barrier()
 
     def get_model_state_dict(self, model: FSDP) -> Dict:

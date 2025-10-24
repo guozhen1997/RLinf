@@ -226,6 +226,17 @@ def validate_model_cfg_by_hf_config(cfg, hf_model_path):
 
 
 def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
+    def validate_amp_cfg(config: DictConfig) -> DictConfig:
+        if "amp" not in config:
+            config.amp = {}
+        config.amp.enabled = config.amp.get("enabled", False)
+        config.amp.precision = config.amp.get("precision", "bf16")
+        assert config.amp.precision in ["fp16", "bf16"], (
+            "fsdp.amp.precision must be one of ['fp16', 'bf16']"
+        )
+        config.amp.use_grad_scaler = config.amp.get("use_grad_scaler", False)
+        return config
+
     OmegaConf.set_struct(cfg, True)
     with open_dict(cfg):
         cfg.fsdp_config.strategy = cfg.fsdp_config.get("strategy", "fsdp")
@@ -247,6 +258,7 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
         cfg.fsdp_config.use_liger_kernel = cfg.fsdp_config.get(
             "use_liger_kernel", False
         )
+        cfg.fsdp_config = validate_amp_cfg(cfg.fsdp_config)
 
         assert cfg.fsdp_config.backward_prefetch in [
             None,

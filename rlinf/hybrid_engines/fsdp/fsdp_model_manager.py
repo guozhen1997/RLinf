@@ -81,6 +81,28 @@ class FSDPModelManager:
             else None
         )
 
+        self.amp_context = self._create_amp_context()
+
+    def _create_amp_context(self) -> ContextManager:
+        """
+        Create AMP context manager based on configuration.
+
+        Returns:
+            A context manager for automatic mixed precision (AMP) if enabled,
+            otherwise a null context manager.
+        """
+        from contextlib import nullcontext
+
+        if not self._cfg.fsdp_config.amp.enabled:
+            self._logger.info("[FSDP] AMP is disabled.")
+            return nullcontext()
+
+        precision = torch_dtype_from_precision(self._cfg.fsdp_config.amp.precision)
+
+        self._logger.info(f"[FSDP] AMP is enabled with precision: {precision}.")
+
+        return torch.amp.autocast(device_type="cuda", dtype=precision)
+
     def model_provider_func(self) -> torch.nn.Module:
         """
         Initialize model used by FSDP actor
@@ -212,7 +234,9 @@ class FSDPModelManager:
         )
         self.optimizer = self._strategy.build_optimizer(model=self.model)
         self.lr_scheduler = self._strategy.build_lr_scheduler(optimizer=self.optimizer)
-        self.grad_scaler = self._strategy.build_grad_scaler()
+        self.grad_scaler = self._strategy.build_grad_scaler(
+            self._cfg.fsdp_config.amp.use_grad_scaler
+        )
 
     def get_rng_state(self) -> Dict:
         """

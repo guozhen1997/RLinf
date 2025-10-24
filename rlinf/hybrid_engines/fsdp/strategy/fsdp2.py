@@ -118,7 +118,6 @@ class FSDP2Strategy(FSDPStrategyBase):
         state = {
             "model": get_model_state_dict(model, options=opts),
             "optim": get_optimizer_state_dict(model, optimizer, options=opts),
-            # "extra": {"lr_scheduler": lr_scheduler.state_dict(), "rng": self.save_rng_state()},
         }
 
         dcp.save(state, checkpoint_id=save_path)
