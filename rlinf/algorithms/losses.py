@@ -58,6 +58,7 @@ def compute_embodied_ppo_actor_critic_loss(**kwargs) -> Tuple[torch.Tensor, Dict
     loss_mask = kwargs.get("loss_mask", None)
     loss_mask_sum = kwargs.get("loss_mask_sum", None)
     max_episode_steps = kwargs.get("max_episode_steps", None)
+    critic_warmup = kwargs.get("critic_warmup", False)
 
     # Compute policy loss mask ratio
     loss_mask_ratio = (
@@ -116,7 +117,13 @@ def compute_embodied_ppo_actor_critic_loss(**kwargs) -> Tuple[torch.Tensor, Dict
 
     # Entropy loss
     entropy_loss = entropy.mean() if entropy is not None else torch.tensor(0.0)
-    loss = policy_loss + value_loss - entropy_bonus * entropy_loss
+
+    if critic_warmup:
+        loss = value_loss
+        policy_loss = torch.tensor(0)
+        entropy_loss = torch.tensor(0)
+    else:
+        loss = policy_loss + value_loss - entropy_bonus * entropy_loss
 
     # Metrics
     metrics_data = {
