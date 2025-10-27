@@ -51,7 +51,7 @@ class RoboTwinEnv(gym.Env):
         self._init_env()
 
         self.prev_step_reward = torch.zeros(self.num_envs, dtype=torch.float32)
-        self.info_logging_keys = ["is_success"]
+
         if self.record_metrics:
             self._init_metrics()
             self._elapsed_steps = torch.zeros(
@@ -61,7 +61,11 @@ class RoboTwinEnv(gym.Env):
     def _init_env(self):
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
-        group_seeds = torch.randint(0, 30, (self.num_group,))
+
+        num_groups = self.num_envs // self.group_size
+        assert self.num_envs % self.group_size == 0, f"num_envs ({self.num_envs}) must be divisible by group_size ({self.group_size})"
+
+        group_seeds = torch.randint(0, 30, (num_groups,))
         env_seeds = group_seeds.repeat_interleave(self.group_size).tolist()
 
         self.venv = VectorEnv(
