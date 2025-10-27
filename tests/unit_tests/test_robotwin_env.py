@@ -1,3 +1,17 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 #!/usr/bin/env python3
 """
 Test the functionality of RoboTwinEnv
@@ -18,7 +32,6 @@ def create_test_config():
         {
             "seed": 42,
             "assets_path": "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin",
-            "root_path": "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin",
             "auto_reset": True,
             "use_rel_reward": True,
             "ignore_terminations": False,
@@ -33,6 +46,7 @@ def create_test_config():
                 "video_base_dir": "./videos",
             },
             "task_config": {
+                "root_path": "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin",
                 "task_name": "place_shoe",
                 "render_freq": 0,
                 "episode_num": 500,
