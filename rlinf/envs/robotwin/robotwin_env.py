@@ -12,16 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, List, Optional, Tuple, Union
 import os
+from typing import Dict, List, Optional, Tuple, Union
+
 import gymnasium as gym
 import numpy as np
 import torch
 from omegaconf import OmegaConf
 from robotwin.envs.vector_env import VectorRoboTwinEnv
 
-
 __all__ = ["RoboTwinEnv"]
+
 
 class RoboTwinEnv(gym.Env):
     def __init__(self, cfg, seed_offset, total_num_processes, record_metrics=True):
@@ -53,7 +54,9 @@ class RoboTwinEnv(gym.Env):
         self.info_logging_keys = ["is_success"]
         if self.record_metrics:
             self._init_metrics()
-            self._elapsed_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+            self._elapsed_steps = torch.zeros(
+                self.num_envs, dtype=torch.long, device=self.device
+            )
 
     def _init_env(self):
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
@@ -144,9 +147,13 @@ class RoboTwinEnv(gym.Env):
         wrist_images = torch.stack([torch.from_numpy(img) for img in wrist_images])
         states = torch.stack([torch.from_numpy(state) for state in states])
 
-        images = images.permute(0, 3, 1, 2).unsqueeze(1) # [B, H, W, C] -> [B, 1, C, H, W]
-        wrist_images = wrist_images.permute(0, 1, 4, 2, 3) # [B, N_IMG, H, W, C] -> [B, N_IMG, C, H, W]
-        
+        images = images.permute(0, 3, 1, 2).unsqueeze(
+            1
+        )  # [B, H, W, C] -> [B, 1, C, H, W]
+        wrist_images = wrist_images.permute(
+            0, 1, 4, 2, 3
+        )  # [B, N_IMG, H, W, C] -> [B, N_IMG, C, H, W]
+
         extracted_obs = {
             "images": images,
             "wrist_images": wrist_images,
@@ -215,9 +222,7 @@ class RoboTwinEnv(gym.Env):
             actions = actions[:, None, :]
 
         self._elapsed_steps += 1
-        raw_obs, step_reward, terminations, truncations, infos = self.venv.step(
-            actions
-        )
+        raw_obs, step_reward, terminations, truncations, infos = self.venv.step(actions)
         extracted_obs = self._extract_obs_image(raw_obs, infos)
 
         if self.use_custom_reward:
@@ -226,19 +231,17 @@ class RoboTwinEnv(gym.Env):
             if isinstance(step_reward, list):
                 step_reward = torch.as_tensor(
                     np.array(step_reward, dtype=np.float32).reshape(-1),
-                    device=self.device
+                    device=self.device,
                 )
 
         infos = self._record_metrics(step_reward, infos)
         if isinstance(terminations, list):
             terminations = torch.as_tensor(
-                np.array(terminations).reshape(-1),
-                device=self.device
+                np.array(terminations).reshape(-1), device=self.device
             )
         if isinstance(truncations, list):
             truncations = torch.as_tensor(
-                np.array(truncations).reshape(-1),
-                device=self.device
+                np.array(truncations).reshape(-1), device=self.device
             )
         if self.ignore_terminations:
             terminations[:] = False
