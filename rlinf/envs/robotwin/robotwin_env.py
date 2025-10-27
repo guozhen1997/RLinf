@@ -19,7 +19,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from robotwin.envs.vector_env import VectorRoboTwinEnv
+from robotwin.envs.vector_env import VectorEnv
 
 __all__ = ["RoboTwinEnv"]
 
@@ -60,12 +60,11 @@ class RoboTwinEnv(gym.Env):
 
     def _init_env(self):
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
-        os.environ["ROBOTWIN_ROOT_PATH"] = self.cfg.root_path
 
         group_seeds = torch.randint(0, 30, (self.num_group,))
         env_seeds = group_seeds.repeat_interleave(self.group_size).tolist()
 
-        self.venv = VectorRoboTwinEnv(
+        self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
             horizon=1,  # Set horizon to 1 since we handle chunk steps externally
