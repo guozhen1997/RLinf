@@ -16,11 +16,11 @@ video_cfg:
 
 
 assets_path: "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
-root_path: "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 max_step: 30
 
 task_config:
+  root_path: "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
   task_name: place_shoe
   render_freq: 0
   episode_num: 500
