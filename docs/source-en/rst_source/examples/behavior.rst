@@ -245,6 +245,6 @@ Visualization and Results
 
 
 For the Behavior experiment, we were inspired by 
-`Behavior-1K <https://github.com/StanfordVL/b1k-baselines.git>`_, 
+`Behavior-1K baselines <https://github.com/StanfordVL/b1k-baselines.git>`_, 
 with only minor modifications. We thank the authors for releasing their open-source code.
 

@@ -241,5 +241,5 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
 
 
 对于 Behavior 实验，我们受到了 
-`Behavior-1K <https://github.com/StanfordVL/b1k-baselines.git>` 的启发， 
+`Behavior-1K baselines <https://github.com/StanfordVL/b1k-baselines.git>` 的启发， 
 仅进行了少量修改。我们感谢作者发布开源代码。
