@@ -1,7 +1,7 @@
 基于 Behavior 模拟器的强化学习
 ==============================
 
-本示例提供了在 **`Behavior <https://behavior.stanford.edu/index.html>`_** 环境中使用 **RLinf** 框架
+本示例提供了在 **Behavior**_ 环境中使用 **RLinf** 框架
 通过强化学习微调 Behavior 算法的完整指南。它涵盖了整个过程——从
 环境设置和核心算法设计到训练配置、
 评估和可视化——以及可重现的命令和
@@ -240,43 +240,8 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
        logger_backends: ["tensorboard", "wandb"] # tensorboard, wandb, swanlab
 
 
-**Behavior 结果**
-~~~~~~~~~~~~~~~~~~
-
-我们在 Behavior 环境中使用 PPO 和 GRPO 训练了 OpenVLA-OFT。
-通过我们的 RL 训练取得的结果如下所示：
-
-.. list-table:: **OpenVLA-OFT 模型在 Behavior 上的结果**
-   :header-rows: 1
-
-   * - 模型
-     - Spatial 
-     - Goal 
-     - Object 
-     - Long 
-     - 平均
-
-   * - OpenVLA-OFT-SFT (one-shot)
-     - 56.5%
-     - 45.6%
-     - 25.6%
-     - 9.7%
-     - 34.4%
-
-   * - PPO-OpenVLA-OFT-RLinf
-     - **99.0%**
-     - **99.0%**
-     - **99.0%**
-     - **94.4%**
-     - **97.9%**
-
-   * - GRPO-OpenVLA-OFT-RLinf
-     - 97.8%
-     - 97.8%
-     - 78.6%
-     - 81.4%
-     - 88.9%
-
 对于 Behavior 实验，我们受到了 
 `https://github.com/StanfordVL/b1k-baselines.git` 的启发， 
 仅进行了少量修改。我们感谢作者发布开源代码。
+
+.. _Behavior: https://behavior.stanford.edu/index.html

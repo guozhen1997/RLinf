@@ -3,7 +3,7 @@ Reinforcement Learning on Behavior Simulator
 
 This example provides a complete guide to fine-tuning the 
 Behavior algorithms with reinforcement learning in the 
-**`Behavior <https://behavior.stanford.edu/index.html>`_** environment
+**Behavior**_ environment
 using the **RLinf** framework. It covers the entire process—from
 environment setup and core algorithm design to training configuration,
 evaluation, and visualization—along with reproducible commands and
@@ -245,43 +245,8 @@ Visualization and Results
        logger_backends: ["tensorboard", "wandb"] # tensorboard, wandb, swanlab
 
 
-**Behavior Results**
-~~~~~~~~~~~~~~~~~~
-
-We trained OpenVLA-OFT with PPO and GRPO in the Behavior environment.
-The results achieved through our RL training are shown below:
-
-.. list-table:: **OpenVLA-OFT model results on Behavior**
-   :header-rows: 1
-
-   * - Model
-     - Spatial 
-     - Goal 
-     - Object 
-     - Long 
-     - Average
-
-   * - OpenVLA-OFT-SFT (one-shot)
-     - 56.5%
-     - 45.6%
-     - 25.6%
-     - 9.7%
-     - 34.4%
-
-   * - PPO-OpenVLA-OFT-RLinf
-     - **99.0%**
-     - **99.0%**
-     - **99.0%**
-     - **94.4%**
-     - **97.9%**
-
-   * - GRPO-OpenVLA-OFT-RLinf
-     - 97.8%
-     - 97.8%
-     - 78.6%
-     - 81.4%
-     - 88.9%
-
 For the Behavior experiment, we were inspired by 
 `https://github.com/StanfordVL/b1k-baselines.git`, 
 with only minor modifications. We thank the authors for releasing their open-source code.
+
+.. _Behavior: https://behavior.stanford.edu/index.html
