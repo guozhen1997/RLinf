@@ -360,4 +360,5 @@ class BehaviorEnv(gym.Env):
         return extracted_obs, infos
 
     def update_reset_state_ids(self):
+        # use for multi task training
         pass
