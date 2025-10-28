@@ -73,9 +73,7 @@ class OmnigibsonEnv(gym.Env):
         # manually reset environment episode number
         self._video_writer = None
         if self.cfg.video_cfg.save_video:
-            video_name = (
-                str(self.cfg.video_cfg.video_base_dir) + "/behavior_video.mp4"
-            )
+            video_name = str(self.cfg.video_cfg.video_base_dir) + "/behavior_video.mp4"
             self.video_writer = create_video_writer(
                 fpath=video_name,
                 resolution=(448, 672),

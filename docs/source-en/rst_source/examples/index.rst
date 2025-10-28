@@ -197,6 +197,7 @@ Thanks to this decoupled design, workers can be flexibly and dynamically schedul
 
    maniskill
    libero
+   behavior
    pi0
    reasoning
    coding_online_rl
