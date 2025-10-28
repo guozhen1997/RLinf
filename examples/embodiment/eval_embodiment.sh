@@ -8,6 +8,7 @@ export MUJOCO_GL="osmesa"
 export PYOPENGL_PLATFORM="osmesa"
 export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
 
+# only necessary when you want to use behavior environment.
 export OMNIGIBSON_DATASET_PATH=/path/to/behavior/datasets/behavior-1k-assets/
 export OMNIGIBSON_KEY_PATH=/path/to/behavior/datasets/omnigibson.key
 export OMNIGIBSON_ASSET_PATH=/path/to/behavior/datasets/omnigibson-robot-assets/

@@ -12,17 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Standard library imports
 import json
 import os
 from typing import Tuple
 
-# Third-party imports
 import cv2
 import gymnasium as gym
 import numpy as np
-
-# OmniGibson imports
 import torch
 from av.container import Container
 from av.stream import Stream
@@ -105,22 +101,21 @@ class BehaviorEnv(gym.Env):
             OmegaConf.to_container(self.cfg.omnigibson_cfg, resolve=True),
         )
 
+    def _permute_and_norm(self, x):
+        # [H, W, C] -> [C, H, W]
+        return x.to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0
+
     def _extract_obs_image(self, raw_obs):
+        permute_and_norm = self._permute_and_norm
         for sensor_data in raw_obs.values():
             assert isinstance(sensor_data, dict)
             for k, v in sensor_data.items():
                 if "left_realsense_link:Camera:0" in k:
-                    left_image = (
-                        v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0
-                    )  # [H, W, C] -> [C, H, W]
+                    left_image = permute_and_norm(v["rgb"])
                 elif "right_realsense_link:Camera:0" in k:
-                    right_image = (
-                        v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0
-                    )  # [H, W, C] -> [C, H, W]
+                    right_image = permute_and_norm(v["rgb"])
                 elif "zed_link:Camera:0" in k:
-                    zed_image = (
-                        v["rgb"].to(torch.uint8)[..., :3].permute(2, 0, 1) / 255.0
-                    )  # [H, W, C] -> [C, H, W]
+                    zed_image = permute_and_norm(v["rgb"])
 
         return {
             "images": zed_image,  # [C, H, W]
@@ -223,7 +218,7 @@ class BehaviorEnv(gym.Env):
 
     @property
     def device(self):
-        return "cuda:0"
+        return "cuda"
 
     @property
     def elapsed_steps(self):
@@ -302,17 +297,13 @@ class BehaviorEnv(gym.Env):
         if env_idx is not None:
             mask = torch.zeros(self.cfg.num_envs, dtype=bool, device=self.device)
             mask[env_idx] = True
-            self.prev_step_reward[mask] = 0.0
-            if self.record_metrics:
-                self.success_once[mask] = False
-                self.fail_once[mask] = False
-                self.returns[mask] = 0
         else:
-            self.prev_step_reward[:] = 0
-            if self.record_metrics:
-                self.success_once[:] = False
-                self.fail_once[:] = False
-                self.returns[:] = 0.0
+            mask = torch.ones(self.cfg.num_envs, dtype=bool, device=self.device)
+        self.prev_step_reward[mask] = 0.0
+        if self.record_metrics:
+            self.success_once[mask] = False
+            self.fail_once[mask] = False
+            self.returns[mask] = 0
 
     def _record_metrics(self, rewards, infos):
         info_lists = []
