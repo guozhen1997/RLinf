@@ -1,6 +1,6 @@
 defaults:
-  - env/train: omnigibson_r1pro_behavior
-  - env/eval: omnigibson_r1pro_behavior
+  - env/train: behavior_r1pro
+  - env/eval: behavior_r1pro
   - override hydra/job_logging: stdout
 
 hydra:

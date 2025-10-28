@@ -91,7 +91,7 @@ def prepare_actions(
         )
     elif simulator_type == "robotwin":
         chunk_actions = raw_chunk_actions
-    elif simulator_type == "omnigibson":
+    elif simulator_type == "behavior":
         chunk_actions = raw_chunk_actions
     else:
         raise NotImplementedError

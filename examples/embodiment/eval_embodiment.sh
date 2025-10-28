@@ -8,6 +8,12 @@ export MUJOCO_GL="osmesa"
 export PYOPENGL_PLATFORM="osmesa"
 export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
 
+export OMNIGIBSON_DATASET_PATH=/path/to/behavior/datasets/behavior-1k-assets/
+export OMNIGIBSON_KEY_PATH=/path/to/behavior/datasets/omnigibson.key
+export OMNIGIBSON_ASSET_PATH=/path/to/behavior/datasets/omnigibson-robot-assets/
+export OMNIGIBSON_DATA_PATH=/path/to/behavior/datasets/
+export OMNIGIBSON_HEADLESS=1
+
 LIBERO_PATH=/opt/libero
 export PYTHONPATH=${LIBERO_PATH}:$PYTHONPATH
 

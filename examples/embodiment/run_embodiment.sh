@@ -12,12 +12,10 @@ export LIBERO_REPO_PATH="/opt/libero"
 
 export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:$PYTHONPATH
 
-export OMNIGIBSON_DATASET_PATH=/mnt/mnt/public/mjwei/repo/BEHAVIOR-1K/datasets/behavior-1k-assets/
-export OMNIGIBSON_KEY_PATH=/mnt/mnt/public/mjwei/repo/BEHAVIOR-1K/datasets/omnigibson.key
-export OMNIGIBSON_ASSET_PATH=/mnt/mnt/public/mjwei/repo/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
-export OMNIGIBSON_DATA_PATH=/mnt/mnt/public/mjwei/repo/BEHAVIOR-1K/datasets/
-export ISAAC_PATH=/isaac-sim/
-export EXP_PATH=/isaac-sim/apps/
+export OMNIGIBSON_DATASET_PATH=/path/to/behavior/datasets/behavior-1k-assets/
+export OMNIGIBSON_KEY_PATH=/path/to/behavior/datasets/omnigibson.key
+export OMNIGIBSON_ASSET_PATH=/path/to/behavior/datasets/omnigibson-robot-assets/
+export OMNIGIBSON_DATA_PATH=/path/to/behavior/datasets/
 export OMNIGIBSON_HEADLESS=1
 
 if [ -z "$1" ]; then

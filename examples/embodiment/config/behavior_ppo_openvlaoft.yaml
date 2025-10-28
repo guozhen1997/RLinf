@@ -1,6 +1,6 @@
 defaults:
-  - env/train: omnigibson_r1pro_behavior
-  - env/eval: omnigibson_r1pro_behavior
+  - env/train: behavior_r1pro
+  - env/eval: behavior_r1pro
   - override hydra/job_logging: stdout
 
 hydra:
@@ -13,7 +13,8 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor, env, rollout: 0-0
+    actor: 0-1
+    env, rollout: 2-3
 
 runner:
   task_type: embodied
@@ -39,9 +40,9 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  n_chunk_steps: 200
-  n_eval_chunk_steps: 200
-  num_group_envs: 1
+  n_chunk_steps: 20
+  n_eval_chunk_steps: 20
+  num_group_envs: 2
   rollout_epoch: 8
   reward_type: chunk_level
   logprob_type: token_level

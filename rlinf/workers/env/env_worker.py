@@ -154,12 +154,12 @@ class EnvWorker(Worker):
                             enable_offload=enable_offload,
                         )
                     )
-        elif self.cfg.env.train.simulator_type == "omnigibson":
+        elif self.cfg.env.train.simulator_type == "behavior":
             with open_dict(self.cfg):
                 # self.cfg.env.train.tasks.task_idx = self.cfg.env.train.tasks.activity_task_indices[self._rank]
                 self.cfg.env.train.tasks.task_idx = 0
                 self.cfg.env.eval.tasks.task_idx = 0
-            from rlinf.envs.omnigibson.omnigibson_env import OmnigibsonEnv
+            from rlinf.envs.behavior.behavior_env import BehaviorEnv
 
             if not only_eval:
                 for stage_id in range(self.stage_num):
@@ -169,7 +169,7 @@ class EnvWorker(Worker):
                             rank=self._rank,
                             seed_offset=self._rank * self.stage_num + stage_id,
                             total_num_processes=self._world_size * self.stage_num,
-                            env_cls=OmnigibsonEnv,
+                            env_cls=BehaviorEnv,
                             enable_offload=enable_offload,
                         )
                     )
@@ -181,7 +181,7 @@ class EnvWorker(Worker):
                             rank=self._rank,
                             seed_offset=self._rank * self.stage_num + stage_id,
                             total_num_processes=self._world_size * self.stage_num,
-                            env_cls=OmnigibsonEnv,
+                            env_cls=BehaviorEnv,
                             enable_offload=enable_offload,
                         )
                     )

@@ -14,6 +14,7 @@
 
 # Standard library imports
 import json
+import os
 from typing import Tuple
 
 # Third-party imports
@@ -45,10 +46,10 @@ gm.ENABLE_OBJECT_STATES = True
 gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_TRANSITION_RULES = True
 
-__all__ = ["OmnigibsonEnv"]
+__all__ = ["BehaviorEnv"]
 
 
-class OmnigibsonEnv(gym.Env):
+class BehaviorEnv(gym.Env):
     def __init__(self, cfg, seed_offset, total_num_processes, record_metrics=True):
         self.cfg = cfg
         self.ignore_terminations = cfg.ignore_terminations
@@ -73,6 +74,7 @@ class OmnigibsonEnv(gym.Env):
         # manually reset environment episode number
         self._video_writer = None
         if self.cfg.video_cfg.save_video:
+            os.makedirs(str(self.cfg.video_cfg.video_base_dir), exist_ok=True)
             video_name = str(self.cfg.video_cfg.video_base_dir) + "/behavior_video.mp4"
             self.video_writer = create_video_writer(
                 fpath=video_name,
@@ -359,12 +361,3 @@ class OmnigibsonEnv(gym.Env):
 
     def update_reset_state_ids(self):
         pass
-        # reset_state_ids = torch.randint(
-        #     low=0,
-        #     high=self.total_num_group_envs,
-        #     size=(self.num_group,),
-        #     generator=self._generator,
-        # )
-        # self.reset_state_ids = reset_state_ids.repeat_interleave(
-        #     repeats=self.group_size
-        # ).to(self.device)
