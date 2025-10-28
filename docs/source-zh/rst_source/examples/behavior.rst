@@ -1,12 +1,23 @@
 基于 Behavior 模拟器的强化学习
 ==============================
 
-Behavior 1K 是一个包含 1000 个真实世界操作任务的数据集。
+本示例提供了在 **`Behavior <https://behavior.stanford.edu/index.html>`_** 环境中使用 **RLinf** 框架
+通过强化学习微调 Behavior 算法的完整指南。它涵盖了整个过程——从
+环境设置和核心算法设计到训练配置、
+评估和可视化——以及可重现的命令和
+配置片段。
 
-Behavior 使用 IsaacSim 作为仿真平台。
+主要目标是开发一个能够执行
+机器人操作能力的模型：
+
+1. **视觉理解**\ ：处理来自机器人相机的 RGB 图像。
+2. **语言理解**\ ：理解自然语言的任务描述。
+3. **动作生成**\ ：产生精确的机器人动作（位置、旋转、夹爪控制）。
+4. **强化学习**\ ：结合环境反馈，使用 PPO 优化策略。
+
 
 环境
------------------------
+-----------
 
 **Behavior 环境**
 
@@ -26,7 +37,7 @@ Behavior 使用 IsaacSim 作为仿真平台。
 
 
 算法
------------------------------------------
+---------
 
 **核心算法组件**
 
@@ -54,39 +65,120 @@ Behavior 使用 IsaacSim 作为仿真平台。
 
    - 用于批评函数的价值头
 
+模型下载
+---------------
+
+在开始训练之前，您需要下载相应的预训练模型。根据您要使用的算法类型，我们提供不同的模型选项：
+
+**OpenVLA-OFT 模型下载**
+
+OpenVLA-OFT 提供了一个适用于 Behavior 环境中所有任务类型的统一模型。
+
+.. code:: bash
+
+   # 下载模型（选择任一方法）
+   # 方法 1: 使用 git clone
+   git lfs install
+   git clone https://huggingface.co/RLinf/RLinf-OpenVLAOFT-Behavior
+
+   # 方法 2: 使用 huggingface-hub
+   pip install huggingface-hub
+   hf download RLinf/RLinf-OpenVLAOFT-Behavior
+
+或者，您也可以使用 ModelScope 从 https://www.modelscope.cn/models/RLinf/RLinf-OpenVLAOFT-Behavior 下载模型。
+
+下载后，请确保在配置 yaml 文件中正确指定模型路径。
+
 运行脚本
--------------------
-**安装步骤**
+---------------
 
-1. **克隆所需仓库**
+**1. 关键集群配置**
 
-   .. code-block:: bash
-      git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
+.. code:: yaml
 
-2. **下载资源**
+   cluster:
+      num_nodes: 1
+      component_placement:
+         env: 0-3
+         rollout: 4-7
+         actor: 0-7
 
-   .. code-block:: bash
-      cd third_party/BEHAVIOR-1K
-      ./setup.sh --omnigibson --bddl --joylo --dataset
+   rollout:
+      pipeline_stage_num: 2
 
-3. **设置环境变量和资源路径**
+您可以灵活配置 env、rollout 和 actor 组件的 GPU 数量。使用上述配置，您可以实现
+env 和 rollout 之间的管道重叠，以及与 actor 的共享。
+此外，通过在配置中设置 ``pipeline_stage_num = 2``，
+您可以实现 rollout 和 actor 之间的管道重叠，提高 rollout 效率。
 
-   .. code-block:: bash
-      export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/
-      export OMNIGIBSON_KEY_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson.key
-      export OMNIGIBSON_ASSET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
-      export OMNIGIBSON_DATA_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/
-      export OMNIGIBSON_HEADLESS=1
+.. code:: yaml
 
-4. **评估环境**
-   .. code-block:: bash
+   cluster:
+      num_nodes: 1
+      component_placement:
+         env,rollout,actor: all
 
-      bash examples/embodiment/eval_embodiment.sh behavior_eval
+您也可以重新配置布局以实现完全共享，
+其中 env、rollout 和 actor 组件都共享所有 GPU。
 
-5. **训练环境**
-   .. code-block:: bash
+.. code:: yaml
 
-      bash examples/embodiment/run_embodiment.sh behavior_ppo_openvlaoft
+   cluster:
+      num_nodes: 1
+      component_placement:
+         env: 0-1
+         rollout: 2-5
+         actor: 6-7
+
+您也可以重新配置布局以实现完全分离，
+其中 env、rollout 和 actor 组件各自使用自己的 GPU，无
+干扰，消除了卸载功能的需要。
+
+--------------
+
+.. code:: bash
+
+   # 克隆所需仓库
+   git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
+
+   # 下载资源
+   cd third_party/BEHAVIOR-1K
+   ./setup.sh --omnigibson --bddl --joylo --dataset
+
+   # 设置环境变量和资源路径
+   export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/
+   export OMNIGIBSON_KEY_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson.key
+   export OMNIGIBSON_ASSET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
+   export OMNIGIBSON_DATA_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/
+   export OMNIGIBSON_HEADLESS=1
+
+--------------
+
+**3. 配置文件**
+
+以 behavior 为例：
+
+- OpenVLA-OFT + PPO:
+  ``examples/embodiment/config/behavior_ppo_openvlaoft.yaml``
+- OpenVLA-OFT + GRPO:
+  ``examples/embodiment/config/behavior_grpo_openvlaoft.yaml``
+
+--------------
+
+**4. 启动命令**
+
+要使用选定的配置开始训练，请运行以下
+命令：
+
+::
+
+   bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
+
+例如，要在 Behavior 环境中使用 PPO 算法训练 OpenVLA-OFT 模型，请运行：
+
+::
+
+   bash examples/embodiment/run_embodiment.sh behavior_ppo_openvlaoft
 
 
 可视化和结果
@@ -94,84 +186,96 @@ Behavior 使用 IsaacSim 作为仿真平台。
 
 **1. TensorBoard 日志记录**
 
-.. code-block:: bash
+.. code:: bash
 
    # 启动 TensorBoard
    tensorboard --logdir ./logs --port 6006
 
-**2. 关键指标跟踪**
+--------------
 
-- **训练指标**:
+**2. 关键监控指标**
 
-  - ``actor/loss``: PPO 策略损失
-  - ``actor/value_loss``: 价值函数损失
-  - ``actor/entropy``: 策略熵
-  - ``actor/grad_norm``: 梯度范数
-  - ``actor/lr``: 学习率
+-  **训练指标**
 
-- **Rollout 指标**:
+   -  ``actor/loss``: 策略损失
+   -  ``actor/value_loss``: 价值函数损失 (PPO)
+   -  ``actor/grad_norm``: 梯度范数
+   -  ``actor/approx_kl``: 新旧策略之间的 KL 散度
+   -  ``actor/pg_clipfrac``: 策略裁剪比例
+   -  ``actor/value_clip_ratio``: 价值损失裁剪比例 (PPO)
 
-  - ``rollout/reward_mean``: 平均回合奖励
-  - ``rollout/reward_std``: 奖励标准差
-  - ``rollout/episode_length``: 平均回合长度
-  - ``rollout/success_rate``: 任务完成率
+-  **Rollout 指标**
 
-- **环境指标**:
+   -  ``rollout/returns_mean``: 平均回合回报
+   -  ``rollout/advantages_mean``: 平均优势值
 
-  - ``env/success_rate``: 跨环境成功率
-  - ``env/step_reward``: 逐步奖励
-  - ``env/termination_rate``: 回合终止率
+-  **环境指标**
+
+   -  ``env/episode_len``: 平均回合长度
+   -  ``env/success_once``: 任务成功率
+
+--------------
 
 **3. 视频生成**
 
-Behavior 环境支持多相机视图的综合视频录制：
-
-.. code-block:: yaml
+.. code:: yaml
 
    video_cfg:
      save_video: True
      info_on_video: True
-     video_base_dir: ./logs/video/train
+     video_base_dir: ${runner.logger.log_path}/video/train
 
-**视频功能**:
-- **多相机布局**: 在单个视频中组合头部相机 (448×448) 和手腕相机 (224×224 每个)
-- **布局**: 头部相机在右侧，手腕相机堆叠在左侧
-- **分辨率**: 最终视频分辨率为 448×672 像素
-- **格式**: MP4 格式，RGB 编码
-- **信息覆盖**: 任务描述和成功指标覆盖在视频帧上
+--------------
 
 **4. WandB 集成**
 
-.. code-block:: yaml
+.. code:: yaml
 
-   trainer:
+   runner:
+     task_type: embodied
      logger:
-       wandb:
-         enable: True
-         project_name: "RLinf"
-         experiment_name: "openvlaoft-Behavior"
-
-**5. 环境指标跟踪**
-
-Behavior 环境提供全面的指标跟踪：
-
-- **成功指标**: 每回合成功率和累积成功跟踪
-- **回合信息**: 回合长度、回报和奖励统计
-- **多环境支持**: 跨多个并行环境的指标跟踪
-- **实时监控**: 成功率、失败率和性能指标
-- **视频集成**: 指标覆盖在生成的视频上用于视觉分析
+       log_path: "../results"
+       project_name: rlinf
+       experiment_name: "test_behavior"
+       logger_backends: ["tensorboard", "wandb"] # tensorboard, wandb, swanlab
 
 
-**技术实现细节**
+**Behavior 结果**
+~~~~~~~~~~~~~~~~~~
 
-Behavior 环境实现包含几个关键技术特性：
+我们在 Behavior 环境中使用 PPO 和 GRPO 训练了 OpenVLA-OFT。
+通过我们的 RL 训练取得的结果如下所示：
 
-- **多相机处理**: 从多个相机传感器自动提取和处理图像
-- **任务描述加载**: 从 JSONL 文件动态加载任务描述，支持任务名称映射
-- **动作处理**: 支持单步和分块动作执行
-- **指标收集**: 全面跟踪成功率、回合长度和性能指标
-- **视频录制**: 实时视频生成，具有多相机布局和指标覆盖
-- **环境管理**: 支持并行环境，具有单独的指标跟踪
+.. list-table:: **OpenVLA-OFT 模型在 Behavior 上的结果**
+   :header-rows: 1
+
+   * - 模型
+     - Spatial 
+     - Goal 
+     - Object 
+     - Long 
+     - 平均
+
+   * - OpenVLA-OFT-SFT (one-shot)
+     - 56.5%
+     - 45.6%
+     - 25.6%
+     - 9.7%
+     - 34.4%
+
+   * - PPO-OpenVLA-OFT-RLinf
+     - **99.0%**
+     - **99.0%**
+     - **99.0%**
+     - **94.4%**
+     - **97.9%**
+
+   * - GRPO-OpenVLA-OFT-RLinf
+     - 97.8%
+     - 97.8%
+     - 78.6%
+     - 81.4%
+     - 88.9%
 
 对于 Behavior 实验，我们受到了 
 `https://github.com/StanfordVL/b1k-baselines.git` 的启发， 

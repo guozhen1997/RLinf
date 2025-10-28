@@ -1,12 +1,30 @@
-RL with Behavior Simulator
-==========================
+Reinforcement Learning on Behavior Simulator
+============================================
 
-Behavior 1K is a dataset of 1000 manipulation tasks collected from the real world.
+This example provides a complete guide to fine-tuning the 
+Behavior algorithms with reinforcement learning in the 
+**`Behavior <https://behavior.stanford.edu/index.html>`_** environment
+using the **RLinf** framework. It covers the entire process—from
+environment setup and core algorithm design to training configuration,
+evaluation, and visualization—along with reproducible commands and
+configuration snippets.
 
-Behavior uses IsaacSim as the simulation platform.
+The primary objective is to develop a model capable of performing
+robotic manipulation by:
+
+1. **Visual Understanding**: Processing RGB images from the robot's
+   camera.
+2. **Language Comprehension**: Interpreting natural-language task
+   descriptions.
+3. **Action Generation**: Producing precise robotic actions (position,
+   rotation, gripper control).
+4. **Reinforcement Learning**: Optimizing the policy via the PPO with
+   environment feedback.
+
+--------------
 
 Environment
------------------------
+-----------
 
 **Behavior Environment**
 
@@ -26,7 +44,7 @@ Environment
 
 
 Algorithm
------------------------------------------
+---------
 
 **Core Algorithm Components**
 
@@ -47,47 +65,125 @@ Algorithm
    - Compute the advantage of each action by subtracting the group’s mean reward.
 
 
-3. **Vision-Language-Action Model**
+Model Download
+---------------
 
-   - OpenVLA architecture with multimodal fusion
+Before starting training, you need to download the corresponding pretrained models. Based on the algorithm type you want to use, we provide different model options:
 
-   - Action tokenization and de-tokenization
+**OpenVLA-OFT Model Download**
 
-   - Value head for critic function
+OpenVLA-OFT provides a unified model that is suitable for all task types in the Behavior environment.
 
-Running the Script
--------------------
-**Installation Steps**
+.. code:: bash
 
-1. **Clone Required Repositories**
+   # Download the model (choose either method)
+   # Method 1: Using git clone
+   git lfs install
+   git clone https://huggingface.co/RLinf/RLinf-OpenVLAOFT-Behavior
 
-   .. code-block:: bash
-      git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
+   # Method 2: Using huggingface-hub
+   pip install huggingface-hub
+   hf download RLinf/RLinf-OpenVLAOFT-Behavior
 
-2. **Download Assets**
+Alternatively, you can also use ModelScope to download the model from https://www.modelscope.cn/models/RLinf/RLinf-OpenVLAOFT-Behavior.
 
-   .. code-block:: bash
-      cd third_party/BEHAVIOR-1K
-      ./setup.sh --omnigibson --bddl --joylo --dataset
+After downloading, please make sure to specify the model path correctly in your configuration yaml file.
 
-3. **Set Environment Variables and Asset Paths**
+Running Scripts
+---------------
 
-   .. code-block:: bash
-      export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/
-      export OMNIGIBSON_KEY_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson.key
-      export OMNIGIBSON_ASSET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
-      export OMNIGIBSON_DATA_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/
-      export OMNIGIBSON_HEADLESS=1
+**1. Key Cluster Configuration**
 
-4. **Evluate the Environment**
-   .. code-block:: bash
+.. code:: yaml
 
-      bash examples/embodiment/eval_embodiment.sh behavior_eval
+   cluster:
+      num_nodes: 1
+      component_placement:
+         env: 0-3
+         rollout: 4-7
+         actor: 0-7
 
-4. **Train the Environment**
-   .. code-block:: bash
+   rollout:
+      pipeline_stage_num: 2
 
-      bash examples/embodiment/run_embodiment.sh behavior_ppo_openvlaoft
+Here you can flexibly configure the GPU count for env, rollout, and
+actor components. Using the above configuration, you can achieve
+pipeline overlap between env and rollout, and sharing with actor.
+Additionally, by setting ``pipeline_stage_num = 2`` in the
+configuration, you can achieve pipeline overlap between rollout and
+actor, improving rollout efficiency.
+
+.. code:: yaml
+
+   cluster:
+      num_nodes: 1
+      component_placement:
+         env,rollout,actor: all
+
+You can also reconfigure the placement to achieve complete sharing,
+where env, rollout, and actor components all share all GPUs.
+
+.. code:: yaml
+
+   cluster:
+      num_nodes: 1
+      component_placement:
+         env: 0-1
+         rollout: 2-5
+         actor: 6-7
+
+You can also reconfigure the placement to achieve complete separation,
+where env, rollout, and actor components each use their own GPUs without
+interference, eliminating the need for offload functionality.
+
+--------------
+
+**2. Installation Steps**
+
+.. code:: bash
+
+   # Clone Required Repositories
+   git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
+
+   # Download Assets
+   cd third_party/BEHAVIOR-1K
+   ./setup.sh --omnigibson --bddl --joylo --dataset
+
+   # Set Environment Variables and Asset Paths
+   export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/
+   export OMNIGIBSON_KEY_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson.key
+   export OMNIGIBSON_ASSET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
+   export OMNIGIBSON_DATA_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/
+   export OMNIGIBSON_HEADLESS=1
+
+--------------
+
+**3. Configuration Files**
+
+Using behavior as an example:
+
+- OpenVLA-OFT + PPO:
+  ``examples/embodiment/config/behavior_ppo_openvlaoft.yaml``
+- OpenVLA-OFT + GRPO:
+  ``examples/embodiment/config/behavior_grpo_openvlaoft.yaml``
+
+--------------
+
+**4. Launch Command**
+
+To start training with a chosen configuration, run the following
+command:
+
+::
+
+   bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
+
+For example, to train the OpenVLA-OFT model using the PPO algorithm in
+the Behavior environment, run:
+
+::
+
+   bash examples/embodiment/run_embodiment.sh behavior_ppo_openvlaoft
 
 
 Visualization and Results
@@ -95,84 +191,96 @@ Visualization and Results
 
 **1. TensorBoard Logging**
 
-.. code-block:: bash
+.. code:: bash
 
-   # Start TensorBoard
+   # Launch TensorBoard
    tensorboard --logdir ./logs --port 6006
 
-**2. Key Metrics Tracked**
+--------------
 
-- **Training Metrics**:
+**2. Key Monitoring Metrics**
 
-  - ``actor/loss``: PPO policy loss
-  - ``actor/value_loss``: Value function loss
-  - ``actor/entropy``: Policy entropy
-  - ``actor/grad_norm``: Gradient norm
-  - ``actor/lr``: Learning rate
+-  **Training Metrics**
 
-- **Rollout Metrics**:
+   -  ``actor/loss``: Policy loss
+   -  ``actor/value_loss``: Value function loss (PPO)
+   -  ``actor/grad_norm``: Gradient norm
+   -  ``actor/approx_kl``: KL divergence between old and new policies
+   -  ``actor/pg_clipfrac``: Policy clipping ratio
+   -  ``actor/value_clip_ratio``: Value loss clipping ratio (PPO)
 
-  - ``rollout/reward_mean``: Average episode reward
-  - ``rollout/reward_std``: Reward standard deviation
-  - ``rollout/episode_length``: Average episode length
-  - ``rollout/success_rate``: Task completion rate
+-  **Rollout Metrics**
 
-- **Environment Metrics**:
+   -  ``rollout/returns_mean``: Average episode return
+   -  ``rollout/advantages_mean``: Mean advantage value
 
-  - ``env/success_rate``: Success rate across environments
-  - ``env/step_reward``: Step-by-step reward
-  - ``env/termination_rate``: Episode termination rate
+-  **Environment Metrics**
+
+   -  ``env/episode_len``: Average episode length
+   -  ``env/success_once``: Task success rate
+
+--------------
 
 **3. Video Generation**
 
-The Behavior environment supports comprehensive video recording with multi-camera views:
-
-.. code-block:: yaml
+.. code:: yaml
 
    video_cfg:
      save_video: True
      info_on_video: True
-     video_base_dir: ./logs/video/train
+     video_base_dir: ${runner.logger.log_path}/video/train
 
-**Video Features**:
-- **Multi-camera Layout**: Combines head camera (448×448) and wrist cameras (224×224 each) in a single video
-- **Layout**: Head camera on the right, wrist cameras stacked on the left
-- **Resolution**: Final video resolution of 448×672 pixels
-- **Format**: MP4 format with RGB encoding
-- **Info Overlay**: Task descriptions and success metrics overlaid on video frames
+--------------
 
 **4. WandB Integration**
 
-.. code-block:: yaml
+.. code:: yaml
 
-   trainer:
+   runner:
+     task_type: embodied
      logger:
-       wandb:
-         enable: True
-         project_name: "RLinf"
-         experiment_name: "openvlaoft-Behavior"
-
-**5. Environment Metrics Tracking**
-
-The Behavior environment provides comprehensive metrics tracking:
-
-- **Success Metrics**: Per-episode success rates and cumulative success tracking
-- **Episode Information**: Episode lengths, returns, and reward statistics
-- **Multi-environment Support**: Metrics tracked across multiple parallel environments
-- **Real-time Monitoring**: Success rates, failure rates, and performance indicators
-- **Video Integration**: Metrics overlaid on generated videos for visual analysis
+       log_path: "../results"
+       project_name: rlinf
+       experiment_name: "test_behavior"
+       logger_backends: ["tensorboard", "wandb"] # tensorboard, wandb, swanlab
 
 
-**Technical Implementation Details**
+**Behavior Results**
+~~~~~~~~~~~~~~~~~~
 
-The Behavior environment implementation includes several key technical features:
+We trained OpenVLA-OFT with PPO and GRPO in the Behavior environment.
+The results achieved through our RL training are shown below:
 
-- **Multi-camera Processing**: Automatic extraction and processing of images from multiple camera sensors
-- **Task Description Loading**: Dynamic loading of task descriptions from JSONL files with task name mapping
-- **Action Processing**: Support for both single-step and chunked action execution
-- **Metrics Collection**: Comprehensive tracking of success rates, episode lengths, and performance metrics
-- **Video Recording**: Real-time video generation with multi-camera layout and metric overlays
-- **Environment Management**: Support for parallel environments with individual metric tracking
+.. list-table:: **OpenVLA-OFT model results on Behavior**
+   :header-rows: 1
+
+   * - Model
+     - Spatial 
+     - Goal 
+     - Object 
+     - Long 
+     - Average
+
+   * - OpenVLA-OFT-SFT (one-shot)
+     - 56.5%
+     - 45.6%
+     - 25.6%
+     - 9.7%
+     - 34.4%
+
+   * - PPO-OpenVLA-OFT-RLinf
+     - **99.0%**
+     - **99.0%**
+     - **99.0%**
+     - **94.4%**
+     - **97.9%**
+
+   * - GRPO-OpenVLA-OFT-RLinf
+     - 97.8%
+     - 97.8%
+     - 78.6%
+     - 81.4%
+     - 88.9%
 
 For the Behavior experiment, we were inspired by 
 `https://github.com/StanfordVL/b1k-baselines.git`, 
