@@ -2,7 +2,7 @@ Reinforcement Learning on Behavior Simulator
 ============================================
 
 This example provides a complete guide to fine-tuning the 
-Behavior algorithms with reinforcement learning in the **Behavior** environment
+Behavior algorithms with reinforcement learning in the `Behavior <https://behavior.stanford.edu/index.html>`_ environment
 using the **RLinf** framework. It covers the entire process—from
 environment setup and core algorithm design to training configuration,
 evaluation, and visualization—along with reproducible commands and
@@ -245,7 +245,6 @@ Visualization and Results
 
 
 For the Behavior experiment, we were inspired by 
-`https://github.com/StanfordVL/b1k-baselines.git`, 
+`Behavior-1K <https://github.com/StanfordVL/b1k-baselines.git>`_, 
 with only minor modifications. We thank the authors for releasing their open-source code.
 
-.. _Behavior: https://behavior.stanford.edu/index.html
