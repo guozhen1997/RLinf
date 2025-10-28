@@ -2,8 +2,7 @@ Reinforcement Learning on Behavior Simulator
 ============================================
 
 This example provides a complete guide to fine-tuning the 
-Behavior algorithms with reinforcement learning in the 
-**Behavior**_ environment
+Behavior algorithms with reinforcement learning in the **`Behavior <https://behavior.stanford.edu/index.html>`_** environment
 using the **RLinf** framework. It covers the entire process—from
 environment setup and core algorithm design to training configuration,
 evaluation, and visualization—along with reproducible commands and
