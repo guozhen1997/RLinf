@@ -62,7 +62,7 @@ Running the Script
 1. **Clone Required Repositories**
 
    .. code-block:: bash
-      git clone https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
+      git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
 
 2. **Download Assets**
 
