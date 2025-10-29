@@ -296,7 +296,7 @@ class EnvWorker(Worker):
         for gather_id in range(self.gather_num):
             chunk_action.append(
                 self.channel.get(
-                    queue_name=f"{self._action_queue_name}_{gather_id + self._rank * self.gather_num}",
+                    key=f"{self._action_queue_name}_{gather_id + self._rank * self.gather_num}",
                 )
             )
         chunk_action = np.concatenate(chunk_action, axis=0)
