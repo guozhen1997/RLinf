@@ -1,4 +1,4 @@
-基于 Behavior 模拟器的强化学习
+基于 Behavior 的强化学习
 ==============================
 
 本示例提供了在 `Behavior <https://behavior.stanford.edu/index.html>`_ 环境中使用 **RLinf** 框架
@@ -65,6 +65,76 @@
 
    - 用于批评函数的价值头
 
+前置依赖（软件安装与数据集/资源下载）
+--------------
+
+依赖安装
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. warning::
+
+   请参考以下 ISAAC-SIM 的软硬件依赖文档确定自己的环境是否满足要求。
+
+   https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/requirements.html
+
+   https://docs.omniverse.nvidia.com/dev-guide/latest/common/technical-requirements.html
+
+   尤其注意，如果你的GPU是Hopper及以上架构，请按照570及以上的NVIDIA驱动。
+
+   另外，如果您的GPU没有Ray Tracing能力（例如A100、H100），BEHAVIOR的渲染质量会非常差，画面可能会出现严重的马赛克或模糊。
+   
+**选项 1：Docker 镜像**
+
+使用我们的新 Docker 镜像 `rlinf/rlinf:agentic-rlinf0.1-behavior` 来运行BEHAVIOR实验。
+
+**选项 2：自定义环境**
+
+.. warning::
+
+   **风险自负！**
+
+   我们强烈建议不要构建自定义环境，因为 BEHAVIOR 和 ISAAC-SIM 的依赖关系非常复杂，一旦出错，可能会导致难以调试的问题。
+   但我们仍然提供此选项，以防 Docker 在您的环境中不可用。
+
+.. code:: bash
+
+   pip install uv
+   bash requirements/install.sh openvla-oft --enable-behavior
+
+**资源文件和数据集**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ISAAC-SIM 4.5下载
+
+.. warning::
+
+   `ISAAC_PATH` 环境变量必须在每次运行实验前都进行设置。
+
+.. code:: bash
+
+   export ISAAC_PATH=/path/to/isaac-sim
+   curl https://download.isaacsim.omniverse.nvidia.com/isaac-sim-standalone-4.5.0-linux-x86_64.zip -o isaac-sim.zip
+   unzip isaac-sim.zip && rm isaac-sim.zip
+
+* BEHAVIOR 数据集和资源下载
+
+.. warning::
+
+   `OMNIGIBSON_DATA_PATH` 环境变量必须在每次运行实验前都进行设置。
+
+.. code:: bash
+
+   # 将以下环境变量改到你希望存放Behavior资源和数据集的目录
+   # 注意，相关数据集会占用超过30GB的存储空间
+   export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
+
+   # 请确保您在运行下面的命令前已激活正确的 Python 虚拟环境（venv）
+   # 如果您在使用 Docker 镜像，您需要通过`source switch_env openvla-oft`命令切换到`openvla-oft`环境
+   python -c "from omnigibson.utils.asset_utils import download_omnigibson_robot_assets; download_omnigibson_robot_assets()"
+   python -c "from omnigibson.utils.asset_utils import download_behavior_1k_assets; download_behavior_1k_assets(accept_license=True)" 
+   python -c "from omnigibson.utils.asset_utils import download_2025_challenge_task_instances; download_2025_challenge_task_instances()"
+
+
 模型下载
 ---------------
 
@@ -93,6 +163,11 @@ OpenVLA-OFT 提供了一个适用于 Behavior 环境中所有任务类型的统�
 ---------------
 
 **1. 关键集群配置**
+
+.. warning::
+
+   注意，由于ISAAC-SIM的特殊行为，请尽量将env放置在从0开始的GPU上。
+   否则，ISAAC-SIM可能会在某些GPU上卡住。
 
 .. code:: yaml
 
@@ -136,31 +211,7 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
 
 --------------
 
-**2. 安装环境**
-
-.. code:: bash
-
-   # 克隆所需仓库
-   git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
-
-   # 安装第三方库
-   cd third_party/BEHAVIOR-1K
-   pip install -e bddl
-   pip install -e OmniGibson
-   pip install -e joylo
-
-   # 设置环境变量和资源路径
-   export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/
-   export OMNIGIBSON_KEY_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson.key
-   export OMNIGIBSON_ASSET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
-   export OMNIGIBSON_DATA_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/
-   export ISAAC_PATH=/isaac-sim
-   export EXP_PATH=$ISAAC_PATH/apps/
-   export OMNIGIBSON_HEADLESS=1
-
---------------
-
-**3. 配置文件**
+**2. 配置文件**
 
 以 behavior 为例：
 
@@ -171,19 +222,23 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
 
 --------------
 
-**4. 启动命令**
+**3. 启动命令**
 
 要使用选定的配置开始训练，请运行以下
 命令：
 
-::
+.. code:: bash
 
+   export ISAAC_PATH=/path/to/isaac-sim
+   export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
 例如，要在 Behavior 环境中使用 PPO 算法训练 OpenVLA-OFT 模型，请运行：
 
-::
+.. code:: bash
 
+   export ISAAC_PATH=/path/to/isaac-sim
+   export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
    bash examples/embodiment/run_embodiment.sh behavior_ppo_openvlaoft
 
 
