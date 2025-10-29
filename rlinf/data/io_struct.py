@@ -14,7 +14,7 @@
 
 import uuid
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -160,7 +160,7 @@ class RolloutRequest:
         ]
 
 
-class FinishReasonEnum(StrEnum):
+class FinishReasonEnum(str, Enum):
     ABORT = "abort"
     STOP = "stop"
     LENGTH = "length"

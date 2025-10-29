@@ -63,6 +63,75 @@ Algorithm
 
    - Compute the advantage of each action by subtracting the group’s mean reward.
 
+Prerequisites
+--------------
+
+.. warning::
+
+   Please refer to the following ISAAC-SIM software and hardware dependency documentation to ensure your environment meets the requirements.
+
+   https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/requirements.html
+
+   https://docs.omniverse.nvidia.com/dev-guide/latest/common/technical-requirements.html
+
+   In particular, if your GPU is of Hopper architecture or above, please follow the instructions for NVIDIA driver version 570 or above.
+
+   Additionally, if your GPU lacks Ray Tracing capabilities (e.g., A100, H100), the rendering quality of BEHAVIOR will be very poor, and the visuals may suffer from severe artifacts or blurriness.
+
+Dependency Installation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Option 1: Docker Image**
+
+Use our new Docker image `rlinf/rlinf:agentic-rlinf0.1-behavior` for running the behavior experiment.
+
+**Option 2: Custom Environment**
+
+.. warning::
+
+   **TRY AT YOUR OWN RISK!!!**
+
+   We strongly advise against building custom environments because dependencies of BEHAVIOR and ISAAC-SIM are extremely hard to get right.
+   But we still provide this option just in case Docker is not available to you.
+
+.. code:: bash
+
+   pip install uv
+   bash requirements/install.sh openvla-oft --enable-behavior
+
+Assets and Datasets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ISAAC-SIM 4.5 Download
+
+.. warning::
+
+   The `ISAAC_PATH` environment variable must be set every time you run the experiment.
+
+.. code:: bash
+
+   export ISAAC_PATH=/path/to/isaac-sim
+   curl https://download.isaacsim.omniverse.nvidia.com/isaac-sim-standalone-4.5.0-linux-x86_64.zip -o isaac-sim.zip
+   unzip isaac-sim.zip && rm isaac-sim.zip
+
+* BEHAVIOR Datasets and Assets Download
+
+.. warning::
+
+   The `OMNIGIBSON_DATA_PATH` environment variable must be set every time you run the experiment.
+
+.. code:: bash
+
+   # Change to the directory you wish to put the assets and datasets
+   # Beware, the datasets occupy more than 30GB of space
+   export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
+
+   # Make sure you are inside the correct Python virtual environment (venv) before running below commands
+   # For our Docker image, you need to switch to the `openvla-oft` venv via `source switch_env openvla-oft`
+   python -c "from omnigibson.utils.asset_utils import download_omnigibson_robot_assets; download_omnigibson_robot_assets()"
+   python -c "from omnigibson.utils.asset_utils import download_behavior_1k_assets; download_behavior_1k_assets(accept_license=True)" 
+   python -c "from omnigibson.utils.asset_utils import download_2025_challenge_task_instances; download_2025_challenge_task_instances()"
+
 
 Model Download
 ---------------
@@ -92,6 +161,11 @@ Running Scripts
 ---------------
 
 **1. Key Cluster Configuration**
+
+.. warning::
+
+   Beware, due to the special behavior of ISAAC-SIM, please try to place the env on GPUs starting from 0.
+   Otherwise, ISAAC-SIM may get stuck on certain GPUs.
 
 .. code:: yaml
 
@@ -137,31 +211,7 @@ interference, eliminating the need for offload functionality.
 
 --------------
 
-**2. Installation Steps**
-
-.. code:: bash
-
-   # Clone Required Repositories
-   git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
-
-   # Install Third-Party Libraries
-   cd third_party/BEHAVIOR-1K
-   pip install -e bddl
-   pip install -e OmniGibson
-   pip install -e joylo
-
-   # Set Environment Variables and Asset Paths
-   export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/
-   export OMNIGIBSON_KEY_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson.key
-   export OMNIGIBSON_ASSET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
-   export OMNIGIBSON_DATA_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/
-   export ISAAC_PATH=/isaac-sim
-   export EXP_PATH=$ISAAC_PATH/apps/
-   export OMNIGIBSON_HEADLESS=1
-
---------------
-
-**3. Configuration Files**
+**2. Configuration Files**
 
 Using behavior as an example:
 
@@ -172,20 +222,24 @@ Using behavior as an example:
 
 --------------
 
-**4. Launch Command**
+**3. Launch Command**
 
 To start training with a chosen configuration, run the following
 command:
 
-::
+.. code:: bash
 
+   export ISAAC_PATH=/path/to/isaac-sim
+   export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
 For example, to train the OpenVLA-OFT model using the PPO algorithm in
 the Behavior environment, run:
 
-::
+.. code:: bash
 
+   export ISAAC_PATH=/path/to/isaac-sim
+   export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
    bash examples/embodiment/run_embodiment.sh behavior_ppo_openvlaoft
 
 
