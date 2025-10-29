@@ -21,4 +21,4 @@ num_envs: ${algorithm.num_group_envs}
 
 tasks:
   activity_task_indices: "0" # eg. "0-49" or "0-20,49"
-  task_description_path: /mnt/mnt/public/guozhen/test_behavior/task.jsonl
+  task_description_path: examples/embodiment/config/env/behavior_task.jsonl
