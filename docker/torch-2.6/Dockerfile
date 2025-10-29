@@ -105,6 +105,9 @@ RUN source switch_env openvla-oft && UV_TORCH_BACKEND=auto uv sync --active
 RUN source switch_env openvla-oft && uv sync --extra embodied --active
 RUN source switch_env openvla-oft && uv pip install git+https://github.com/moojink/openvla-oft.git --no-build-isolation
 RUN source switch_env openvla-oft && uv pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl --no-build-isolation
+RUN source switch_env openvla-oft && uv pip install git+https://github.com/stanfordvl/BEHAVIOR-1K.git@v3.7.1#subdirectory=bddl
+RUN source switch_env openvla-oft && uv pip install git+https://github.com/stanfordvl/BEHAVIOR-1K.git@v3.7.1#subdirectory=OmniGibson
+RUN source switch_env openvla-oft && uv pip install git+https://github.com/stanfordvl/BEHAVIOR-1K.git@v3.7.1#subdirectory=joylo
 RUN source switch_env openvla-oft && uv pip uninstall pynvml
 
 # Install openpi env
@@ -112,6 +115,9 @@ RUN uv venv openpi
 RUN source switch_env openpi && UV_TORCH_BACKEND=auto uv sync --active
 RUN source switch_env openpi && uv sync --extra embodied --active
 RUN source switch_env openpi && GIT_LFS_SKIP_SMUDGE=1 uv pip install git+https://github.com/Physical-Intelligence/openpi
+RUN source switch_env openpi && uv pip install git+https://github.com/stanfordvl/BEHAVIOR-1K.git@v3.7.1#subdirectory=bddl
+RUN source switch_env openpi && uv pip install git+https://github.com/stanfordvl/BEHAVIOR-1K.git@v3.7.1#subdirectory=OmniGibson
+RUN source switch_env openpi && uv pip install git+https://github.com/stanfordvl/BEHAVIOR-1K.git@v3.7.1#subdirectory=joylo
 RUN source switch_env openpi && uv pip uninstall pynvml
 
 # Install maniskill assets
