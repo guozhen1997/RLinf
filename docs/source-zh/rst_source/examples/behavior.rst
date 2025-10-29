@@ -141,9 +141,11 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
    # 克隆所需仓库
    git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
 
-   # 下载资源
+   # 安装第三方库
    cd third_party/BEHAVIOR-1K
-   ./setup.sh --omnigibson --bddl --joylo --dataset
+   pip install -e bddl
+   pip install -e OmniGibson
+   pip install -e joylo
 
    # 设置环境变量和资源路径
    export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/

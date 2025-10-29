@@ -144,9 +144,11 @@ interference, eliminating the need for offload functionality.
    # Clone Required Repositories
    git clone -b v3.7.1 https://github.com/StanfordVL/BEHAVIOR-1K.git third_party/BEHAVIOR-1K
 
-   # Download Assets
+   # Install Third-Party Libraries
    cd third_party/BEHAVIOR-1K
-   ./setup.sh --omnigibson --bddl --joylo --dataset
+   pip install -e bddl
+   pip install -e OmniGibson
+   pip install -e joylo
 
    # Set Environment Variables and Asset Paths
    export OMNIGIBSON_DATASET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/behavior-1k-assets/
