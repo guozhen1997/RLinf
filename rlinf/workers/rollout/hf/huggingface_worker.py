@@ -197,7 +197,7 @@ class MultiStepRolloutWorker(Worker):
 
     def recv_env_output(self):
         env_output = self.channel.get(
-            queue_name=f"{self._obs_queue_name}_{self._rank}",
+            key=f"{self._obs_queue_name}_{self._rank}",
         )
         return env_output
 
