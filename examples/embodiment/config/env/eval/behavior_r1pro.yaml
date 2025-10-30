@@ -1,4 +1,4 @@
-simulator_type: bahavior
+simulator_type: behavior
 auto_reset: ${algorithm.auto_reset}
 ignore_terminations: ${algorithm.ignore_terminations}
 use_rel_reward: True
