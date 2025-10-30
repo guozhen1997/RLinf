@@ -196,14 +196,14 @@ class EnvWorker(Worker):
     def _init_simulator(self):
         for i in range(self.stage_num):
             self.simulator_list[i].start_simulator()
-            extracted_obs, _ = self.simulator_list[i].reset()
-            self.last_obs_list.append(extracted_obs)
-            dones = (
-                torch.zeros((self.cfg.env.train.num_envs,), dtype=bool)
-                .unsqueeze(1)
-                .repeat(1, self.cfg.actor.model.num_action_chunks)
+            extracted_obs, rewards, terminations, truncations, infos = (
+                self.simulator_list[i].step()
             )
-            self.last_dones_list.append(dones)
+            self.last_obs_list.append(extracted_obs)
+            dones = torch.logical_or(terminations, truncations)
+            self.last_dones_list.append(
+                dones.unsqueeze(1).repeat(1, self.cfg.actor.model.num_action_chunks)
+            )
             self.simulator_list[i].stop_simulator()
 
     def env_interact_step(
@@ -430,7 +430,7 @@ class EnvWorker(Worker):
         for i in range(self.stage_num):
             self.eval_simulator_list[i].start_simulator()
             self.eval_simulator_list[i].is_start = True
-            extracted_obs, infos = self.eval_simulator_list[i].reset()
+            extracted_obs, _, _, _, infos = self.eval_simulator_list[i].step()
             env_output = EnvOutput(
                 simulator_type=self.cfg.env.eval.simulator_type,
                 obs=extracted_obs,

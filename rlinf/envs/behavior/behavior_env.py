@@ -154,6 +154,11 @@ class BehaviorEnv(gym.Env):
     def step(
         self, actions=None
     ) -> Tuple[dict, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
+        if actions is None:
+            assert self._is_start, "Actions must be provided after the first reset."
+            obs, infos = self.reset()
+            terminations, truncations = torch.zeros(self.cfg.num_envs, dtype=bool), torch.zeros(self.cfg.num_envs, dtype=bool)
+            return obs, None, terminations, truncations, infos
         raw_obs, rewards, terminations, truncations, infos = self.env.step(actions)
         if self.cfg.video_cfg.save_video:
             self._write_video(raw_obs)
