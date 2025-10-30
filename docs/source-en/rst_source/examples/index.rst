@@ -63,21 +63,21 @@ as well as reinforcement learning training examples on real robots.
      </div>
 
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <b>[Ongoing]Real-World RL with Franka</b><br>
+         RLinf worker seamlessly integrates with the Franka robotic arm
+       </p>
+     </div>
+
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <img src="https://github.com/RLinf/misc/raw/main/pic/behavior.jpg"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
           <b>Reinforcement Learning on Behavior Simulator</b>
          </a><br>
          Support Behavior+OpenVLA+PPO/GRPO training
-       </p>
-     </div>
-
-     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/RLinf/misc/raw/main/pic/waiting_icon.jpg"
-            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-         <b>[Ongoing]RL with World Models</b><br>
-         Training with integrated UnifoLM-WMA-0 world models
        </p>
      </div>
    </div>

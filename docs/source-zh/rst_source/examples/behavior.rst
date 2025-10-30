@@ -136,6 +136,8 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
 
 --------------
 
+**2. 安装环境**
+
 .. code:: bash
 
    # 克隆所需仓库
@@ -152,6 +154,8 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
    export OMNIGIBSON_KEY_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson.key
    export OMNIGIBSON_ASSET_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/omnigibson-robot-assets/
    export OMNIGIBSON_DATA_PATH=/path/to/third_party/BEHAVIOR-1K/datasets/
+   export ISAAC_PATH=/isaac-sim
+   export EXP_PATH=$ISAAC_PATH/apps/
    export OMNIGIBSON_HEADLESS=1
 
 --------------
