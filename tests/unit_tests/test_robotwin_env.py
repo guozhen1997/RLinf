@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/usr/bin/env python3
+# !/usr/bin/env python3
 """
 Test the functionality of RoboTwinEnv
 """
@@ -31,7 +31,7 @@ def create_test_config():
     config = OmegaConf.create(
         {
             "seed": 42,
-            "assets_path": "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin",
+            "assets_path": "/mnt/public_zgc/home/shchen/codes/RLinf_RoboTwin",
             "auto_reset": True,
             "use_rel_reward": True,
             "ignore_terminations": False,
@@ -46,7 +46,7 @@ def create_test_config():
                 "video_base_dir": "./videos",
             },
             "task_config": {
-                "root_path": "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin",
+                "root_path": "/mnt/public_zgc/home/shchen/codes/RLinf_RoboTwin",
                 "task_name": "place_shoe",
                 "render_freq": 0,
                 "episode_num": 500,
