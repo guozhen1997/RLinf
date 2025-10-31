@@ -117,7 +117,7 @@ python -m mani_skill.utils.download_asset widowx250s -y
 
 # Download assets for SAPIEN
 export PHYSX_VERSION=105.1-physx-5.3.1.patch0
-export PHYSX_DIR=/opt/.sapien/physx/$PHYSX_VERSION
+export PHYSX_DIR=/opt/.sapien/physx/\$PHYSX_VERSION
 mkdir -p \$PHYSX_DIR
 wget -O \$PHYSX_DIR/linux-so.zip https://github.com/sapien-sim/physx-precompiled/releases/download/\$PHYSX_VERSION/linux-so.zip
 unzip \$PHYSX_DIR/linux-so.zip -d \$PHYSX_DIR && rm \$PHYSX_DIR/linux-so.zip
