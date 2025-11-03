@@ -13,9 +13,9 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 0-1
-    env: 2
-    rollout: 3
+    actor: 0-7
+    env: 0-3
+    rollout: 4-7
 
 runner:
   task_type: embodied
@@ -30,7 +30,7 @@ runner:
 
   only_eval: False
   val_check_interval: -1
-  save_interval: 40
+  save_interval: 100
   seq_length: 4096
   max_prompt_length: 50
 
@@ -41,10 +41,10 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  n_chunk_steps: 10
+  n_chunk_steps: 20 # 10
   n_eval_chunk_steps: 10
-  num_group_envs: 2
-  rollout_epoch: 1
+  num_group_envs: 8
+  rollout_epoch: 16 # 1
   reward_type: chunk_level
   logprob_type: token_level
   entropy_type: token_level
@@ -96,9 +96,9 @@ rollout:
     queue_size: 0
   mode: "colocate"
   backend: "huggingface"
-  model_dir: "/path/to/model/Openvla-oft-SFT-libero10-trajall/"
+  model_dir: "/mnt/public/xusi/ckpt/downloaded_tokenizer/openvla-oft_ckpt/Optional--100000_chkpt"
   precision: ${actor.model.precision}
-  enable_offload: False
+  enable_offload: True
   pipeline_stage_num: 1
 
 actor:
@@ -108,12 +108,12 @@ actor:
     queue_name: "replay_buffer"
     queue_size: 0
   training_backend: "fsdp"
-  checkpoint_load_path: "/path/to/model/Openvla-oft-SFT-libero10-trajall/"
+  checkpoint_load_path: "/mnt/public/xusi/ckpt/downloaded_tokenizer/openvla-oft_ckpt/Optional--100000_chkpt"
   checkpoint_save_path: "../results"
-  micro_batch_size: 2
-  global_batch_size: 20
+  micro_batch_size: 4 # 1
+  global_batch_size: 640 # 0
   seed: 1234
-  enable_offload: False
+  enable_offload: True
 
   model:
     model_name: "openvla_oft"
@@ -121,7 +121,7 @@ actor:
     action_dim: 14
     num_action_chunks: 8
     use_proprio: False
-    unnorm_key: bridge_orig
+    unnorm_key: aloha_place_shoe
     center_crop: True
 
     precision: "bf16"
@@ -133,14 +133,14 @@ actor:
     image_size: [224, 224]
     is_lora: True
     lora_rank: 32
-    lora_path: /path/to/models/oft-sft/lora_004000/
+    lora_path: /mnt/public/xusi/ckpt/downloaded_tokenizer/openvla-oft_ckpt/Optional--100000_chkpt/lora_adapter/
     ckpt_path: null
     use_wrist_image: False
     num_images_in_input: 3
     attn_implementation: "flash_attention_2"
     low_cpu_mem_usage: True
     trust_remote_code: True
-    gradient_checkpointing: False
+    gradient_checkpointing: True
 
   optim:
     lr: 1.0e-4
@@ -152,7 +152,7 @@ actor:
 
   tokenizer:
     tokenizer_type: "HuggingFaceTokenizer"
-    tokenizer_model: "/path/to/model/Openvla-oft-SFT-libero10-trajall/"
+    tokenizer_model: "/mnt/public/xusi/ckpt/downloaded_tokenizer/openvla-oft_ckpt/Optional--100000_chkpt"
     use_fast: False
     trust_remote_code: True
     padding_side: "right"

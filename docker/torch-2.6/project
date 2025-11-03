@@ -86,7 +86,6 @@ embodied = [
     "open3d",
     "zarr",
     "openai",
-    "ffmpeg",
     "mplib==0.2.1",
 ]
 
