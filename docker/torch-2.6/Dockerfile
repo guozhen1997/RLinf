@@ -136,6 +136,10 @@ ENV PYTHONPATH=/opt/libero:$PYTHONPATH
 
 FROM embodied-common-image AS embodied-image
 
+# Install RoboTwin
+RUN git clone https://github.com/Tian-Nian/RLinf_RoboTwin.git /opt/RLinf_RoboTwin
+ENV PYTHONPATH=/opt/RLinf_RoboTwin:$PYTHONPATH
+
 # Install openvla env
 RUN uv venv openvla --python=${PYTHON_VERSION}
 RUN source switch_env openvla && UV_TORCH_BACKEND=auto uv sync --active
@@ -149,6 +153,8 @@ RUN uv venv openvla-oft --python=${PYTHON_VERSION}
 RUN source switch_env openvla-oft && UV_TORCH_BACKEND=auto uv sync --active
 RUN source switch_env openvla-oft && uv sync --extra embodied --active
 RUN source switch_env openvla-oft && uv pip install git+https://github.com/moojink/openvla-oft.git --no-build-isolation
+RUN source switch_env openvla-oft && uv pip install git+https://github.com/facebookresearch/pytorch3d.git --no-build-isolation
+RUN source switch_env openvla-oft && uv pip install git+git+https://github.com/NVlabs/curobo.git --no-build-isolation
 RUN source switch_env openvla-oft && uv pip install $FLASH_ATTENTION_WHEEL --no-build-isolation
 RUN source switch_env openvla-oft && uv pip uninstall pynvml
 
