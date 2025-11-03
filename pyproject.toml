@@ -83,6 +83,11 @@ embodied = [
     "cloudpickle",
     "gym",
     "av",
+    "open3d",
+    "zarr",
+    "openai",
+    "ffmpeg",
+    "mplib==0.2.1",
 ]
 
 [tool.uv]
