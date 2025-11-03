@@ -47,6 +47,7 @@ from rlinf.utils.placement import (
     ModelParallelComponentPlacement,
 )
 from rlinf.utils.utils import (
+    clear_memory,
     compute_logprobs_from_logits,
     cpu_weight_swap,
     masked_mean,
@@ -890,12 +891,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     "actor/grad_norm": grad_norm,
                     "actor/lr": lr_list[0],
                 }
-                if self.cfg.algorithm.adv_type == "gae":
+                if len(lr_list) > 1:
                     data["critic/lr"] = lr_list[1]
                 append_to_dict(metrics, data)
         # put LR scheduler step here
         self.lr_scheduler.step()
         self.optimizer.zero_grad()
+        clear_memory()
         mean_metric_dict = {key: np.mean(value) for key, value in metrics.items()}
         mean_metric_dict = all_reduce_dict(
             mean_metric_dict, op=torch.distributed.ReduceOp.AVG

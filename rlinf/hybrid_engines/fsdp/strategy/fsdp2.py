@@ -30,6 +30,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     MixedPrecisionPolicy,
+    OffloadPolicy,
 )
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
@@ -69,9 +70,9 @@ class FSDP2Strategy(FSDPStrategyBase):
         )
 
         offload_policy = (
-            CPUOffloadPolicy(pin_memory=False)
+            CPUOffloadPolicy(pin_memory=self.cfg.fsdp_config.offload_pin_memory)
             if self.cfg.fsdp_config.cpu_offload
-            else None
+            else OffloadPolicy()
         )
 
         fsdp2_model = apply_fsdp2_to_model(
@@ -289,6 +290,8 @@ class FSDP2Strategy(FSDPStrategyBase):
         Returns:
             - ContextManager: nullcontext, just for interface consistency.
         """
+        if not self.cfg.fsdp_config.enable_gradient_accumulation:
+            return nullcontext()
         if is_last_micro_batch:
             model.set_requires_gradient_sync(True)
         else:

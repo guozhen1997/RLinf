@@ -271,6 +271,9 @@ def validate_fsdp_cfg(cfg: DictConfig, resume_dir: Optional[str] = None) -> Dict
         cfg.fsdp_config.reshard_after_forward = cfg.fsdp_config.get(
             "reshard_after_forward", True
         )
+        cfg.fsdp_config.enable_gradient_accumulation = cfg.fsdp_config.get(
+            "enable_gradient_accumulation", False
+        )
 
         if resume_dir is not None:
             cfg.fsdp_config.use_orig_params = True
