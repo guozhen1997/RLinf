@@ -20,6 +20,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 from robotwin.envs.vector_env import VectorEnv
+import torch.multiprocessing as mp
 
 from .utils import put_info_on_image, save_rollout_video, tile_images
 
@@ -60,7 +61,8 @@ class RoboTwinEnv(gym.Env):
             )
 
     def _init_env(self):
-        os.environ["ASSETS_PATH"] = self.cfg.assets_path
+        mp.set_start_method("spawn", force=True)
+        # os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
         num_groups = self.num_envs // self.group_size
         assert self.num_envs % self.group_size == 0, (
@@ -74,7 +76,6 @@ class RoboTwinEnv(gym.Env):
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
             horizon=1,  # Set horizon to 1 since we handle chunk steps externally
-            max_step=self.cfg.max_step,
             env_seeds=env_seeds,
         )
 
@@ -206,7 +207,7 @@ class RoboTwinEnv(gym.Env):
             assert self._is_start, "Actions must be provided after the first reset."
 
         if self.is_start:
-            extracted_obs, infos = self.reset(seed=self.seed)
+            extracted_obs, infos = self.reset()
             self._is_start = False
             terminations = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device

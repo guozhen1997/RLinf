@@ -8,18 +8,16 @@ group_size: ${algorithm.group_size}
 use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
 max_episode_steps: 80
 only_eval: False
-max_steps: 80
+
 video_cfg:
   save_video: False
   info_on_video: True
   video_base_dir: ${runner.logger.log_path}/video/train
 
-
-assets_path: "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 
 task_config:
-  root_path: "/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
+  root_path: "/mnt/public/guozhen/test/RLinf_RoboTwin" # depreciated, will remove this config later
   task_name: place_shoe
   render_freq: 0
   episode_num: 500
