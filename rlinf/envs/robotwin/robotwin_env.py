@@ -21,6 +21,8 @@ import torch
 from omegaconf import OmegaConf
 from robotwin.envs.vector_env import VectorEnv
 
+from .utils import put_info_on_image, save_rollout_video, tile_images
+
 __all__ = ["RoboTwinEnv"]
 
 
@@ -51,7 +53,6 @@ class RoboTwinEnv(gym.Env):
         self._init_env()
 
         self.prev_step_reward = torch.zeros(self.num_envs, dtype=torch.float32)
-
         if self.record_metrics:
             self._init_metrics()
             self._elapsed_steps = torch.zeros(
@@ -61,9 +62,10 @@ class RoboTwinEnv(gym.Env):
     def _init_env(self):
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
-
         num_groups = self.num_envs // self.group_size
-        assert self.num_envs % self.group_size == 0, f"num_envs ({self.num_envs}) must be divisible by group_size ({self.group_size})"
+        assert self.num_envs % self.group_size == 0, (
+            f"num_envs ({self.num_envs}) must be divisible by group_size ({self.group_size})"
+        )
 
         group_seeds = torch.randint(0, 30, (num_groups,))
         env_seeds = group_seeds.repeat_interleave(self.group_size).tolist()
@@ -237,6 +239,13 @@ class RoboTwinEnv(gym.Env):
                     device=self.device,
                 )
 
+        if self.video_cfg.save_video:
+            plot_infos = {
+                "rewards": step_reward,
+                "terminations": terminations,
+                "task": self.task_descriptions,
+            }
+            self.add_new_frames(raw_obs, plot_infos)
         infos = self._record_metrics(step_reward, infos)
         if isinstance(terminations, list):
             terminations = torch.as_tensor(
@@ -331,3 +340,30 @@ class RoboTwinEnv(gym.Env):
 
     def sample_action_space(self):
         return np.random.randn(self.num_envs, self.horizon, 14)
+
+    def flush_video(self, video_sub_dir: Optional[str] = None):
+        output_dir = os.path.join(self.video_cfg.video_base_dir, f"seed_{self.seed}")
+        if video_sub_dir is not None:
+            output_dir = os.path.join(output_dir, f"{video_sub_dir}")
+        save_rollout_video(
+            self.render_images,
+            output_dir=output_dir,
+            video_name=f"{self.video_cnt}",
+        )
+        self.video_cnt += 1
+        self.render_images = []
+
+    def add_new_frames(self, raw_obs, plot_infos):
+        images = []
+        for env_id, raw_single_obs in enumerate(raw_obs):
+            info_item = {
+                k: v if np.size(v) == 1 else v[env_id] for k, v in plot_infos.items()
+            }
+            img = raw_single_obs["agentview_image"][::-1, ::-1]
+            img = put_info_on_image(img, info_item)
+            images.append(img)
+        full_image = tile_images(images, nrows=int(np.sqrt(self.num_envs)))
+        self.render_images.append(full_image)
+
+    def update_reset_state_ids(self):
+        pass
