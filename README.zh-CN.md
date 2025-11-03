@@ -30,10 +30,12 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 
 
 ## 最新动态
-- [2025/10] 🔥 Pi0和Pi0.5的强化学习微调已经上线! 文档：[π₀和π₀.₅模型强化学习训练](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/pi0.html)
+- [2025/11] 🔥 基于[Behavior 1k](https://github.com/StanfordVL/BEHAVIOR-1K)的强化学习微调已经上线! 文档：[RL on Behavior 1k](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/behavior.html) 
+- [2025/11] lora微调支持π₀和π₀.₅模型。
+- [2025/10] 🔥 π₀和π₀.₅模型的强化学习微调已经上线! 文档：[π₀和π₀.₅模型强化学习训练](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/pi0.html)。更多技术细节请参考：[π₀ 与 π₀.₅ 模型强化学习微调技术报告](https://arxiv.org/abs/2510.25889)。
 - [2025/10] 🔥 RLinf 正式支持在线强化学习！文档：[coding_online_rl](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/coding_online_rl.html)，同时发布文章 [《首个开源的Agent在线强化学习框架RLinf-Online！让你的Agent今天比昨天更聪明》](https://mp.weixin.qq.com/s/jmohmDokuWLhQHFueSHZIQ)。
 - [2025/10] 🔥 RLinf算法技术报告 [《RLinf-VLA：一个统一且高效的VLA+RL训练框架》](https://arxiv.org/abs/2510.06710) 已正式发布。
-- [2025/09] 🔥 [示例库](https://rlinf.readthedocs.io/en/latest/rst_source/examples/index.html) 已更新，用户可以在其中找到多种可直接使用的示例！
+- [2025/09] 🔥 [示例库](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/index.html) 已更新，用户可以在其中找到多种可直接使用的示例！
 - [2025/09] 🔥 我们的论文 [《RLinf: Flexible and Efficient Large-scale Reinforcement Learning via Macro-to-Micro Flow Transformation》](https://arxiv.org/abs/2509.15965)已正式发布。
 - [2025/09] 🔥 机器之心关于 RLinf 的报道[《首个为具身智能而生的大规模强化学习框架RLinf！清华、北京中关村学院、无问芯穹等重磅开源》](https://mp.weixin.qq.com/s/Xtv4gDu3lhDDGadLrzt6Aw)已经发布。
 - [2025/08] RLinf 已经开源，正式的 v0.1 版本即将发布。
@@ -41,38 +43,98 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 
 ## ✨ 核心特性
 
+### 具身智能
 
-**RLinf 的独特之处在于：**
-- 宏工作流到微执行流的映射机制（Macro-to-Micro Flow）：一种全新的 M2Flow 范式，通过微观层次的执行流来驱动宏观层次的逻辑流，实现逻辑工作流构建（可编程）与物理通信和调度（高效性）的解耦。
+<table style="width: 100%; table-layout: auto; border-collapse: collapse;">
+  <thead align="center" valign="bottom">
+    <tr>
+      <th style="min-width: 120px; text-align: left;">模拟器</th>
+      <th style="min-width: 120px;">真机</th>
+      <th style="min-width: 120px;">模型</th>
+      <th style="min-width: 120px;">算法</th>
+    </tr>
+  </thead>
+  <tbody valign="top">
+    <tr>
+      <td style="text-align: left; padding-left: 8px;">
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/maniskill.html">ManiSkill</a> ✅</li>
+          <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/libero.html">LIBERO</a> ✅</li>
+          <li>RoboTwin</li>
+          <li>RoboVerse</li>
+          <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/behavior.html">BEHAVIOR</a> ✅</li>
+          <li>IsaacLab</li>
+          <li>RoboCasa</li>
+          <li>More...</li>
+        </ul>
+      </td>
+      <td>
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li>Franka Arm</li>
+          <li>More...</li>
+        </ul>
+      </td>
+      <td>
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li><b>VLA 模型</b></li>
+          <ul>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/pi0.html">π₀</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/pi0.html">π₀.₅</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/maniskill.html">OpenVLA</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/libero.html">OpenVLA-OFT</a> ✅</li>
+            <li>GR00T</li>
+          </ul>
+          <li><b>VLM 模型</b></li>
+          <ul>
+            <li>Qwen2.5-VL</li>
+          </ul>
+        </ul>
+      </td>
+      <td>
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li><b>RL 算法</b></li>
+          <ul>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/tutorials/rlalg/grpo.html">GRPO</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/tutorials/rlalg/ppo.html">PPO</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/tutorials/rlalg/dapo.html">DAPO</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/tutorials/rlalg/reinforce.html">Reinforce++</a> ✅</li>
+            <li>SAC</li>
+          </ul>
+          <li><b>SFT</b></li>
+          <ul>
+            <li>全量微调</li>
+            <li>LoRA微调</li>
+          </ul>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
 
-- 灵活的执行模式
+如上表所示，RLinf支持主流VLA模型，通过标准的Worker接口支持主流的基于CPU或者GPU的模拟器，首次实现对带有 flow-matching action expert 的 $\pi_{0}$ 和 $\pi_{0.5}$ 模型家族的RL微调。
 
-  - 共享式（Collocated Mode）：用户可以配置组件是否同时常驻于 GPU 内存，或通过卸载 / 重新加载机制交替使用 GPU。
-  - 分离式（Disaggregated Mode）：组件既可以顺序运行（可能导致 GPU 空闲），也可以以流水线方式执行，从而确保所有 GPU 都处于忙碌状态。
-  - 混合式（Hybrid Mode）：进一步扩展了灵活性，支持自定义组合不同的放置形式。典型案例是 Generator 和 GPU-based Simulator 执行分离式细粒度流水，二者与 Inference 和 Trainer 执行共享式。
+### 智能体强化学习
 
-- 自动调度策略： 根据训练任务自动选择最合适的执行模式，无需手动分配资源。
-  
-- 具身智能体支持
-  - 主流 VLA 模型的快速自适应支持: [OpenVLA](https://github.com/openvla/openvla), [OpenVLA-OFT](https://github.com/moojink/openvla-oft), [π₀](https://github.com/Physical-Intelligence/openpi) 和 [π₀.₅](https://github.com/Physical-Intelligence/openpi).
-  - 支持主流基于 CPU 与 GPU 的模拟器（通过标准化 RL 接口）： [ManiSkill3](https://github.com/haosulab/ManiSkill), [LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO).
-  - 首次实现对带有 flow-matching action expert 的 $\pi_0$ 和 $\pi_{0.5}$ 模型家族的 RL 微调。
+智能体强化学习包括用于提升大语言模型推理能力的强化学习训练，例如[数学推理](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/reasoning.html)；也包括针对各类智能体的强化学习训练，例如[编程智能体的在线强化学习训练](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/coding_online_rl.html)。RLinf 框架能够很好地支持智能体强化学习。我们相信，未来的具身智能也必将融合智能体的能力，以完成更复杂的任务。
 
-**RLinf 的高效性体现在：**
+### 高灵活性、高效性与高可扩展性
 
-- 细粒度流水化的混合式模式： 相较于其他框架，实现了 120%+ 的吞吐量提升。
-- 秒级显卡自动扩缩： 可动态扩展训练资源，支持在数秒内完成 GPU 切换，在保持 RL 算法 on-policy 特性的同时，进一步提升 20–40% 的效率。
+除了上述丰富功能外，RLinf 还具有高度灵活性，可支持多种强化学习训练工作流（例如集成了模拟器的具身强化学习、PPO/RLHF），同时隐藏了分布式编程的复杂性。用户无需修改代码即可轻松将强化学习训练扩展至大量GPU节点，满足强化学习训练日益增长的计算需求。
 
-**RLinf 的灵活性与易用性体现在：**
+这种高灵活性使 RLinf 能够探索更高效的调度与执行模式。在具身强化学习中，混合执行模式相较于基线方案实现了100%以上的吞吐量提升。
 
-- 多后端集成
+多后端集成支持
 
-  - FSDP + Hugging Face： 快速适配新模型与新算法，非常适合初学者和快速原型开发。
-  - Megatron + SGLang： 针对大规模训练进行了优化，为专家用户提供最大化效率。
+- FSDP + HuggingFace/SGLang/vLLM: 快速适配新模型与新算法，非常适合初学者和快速原型验证。
+- Megatron + SGLang/vLLM: 针对大规模训练进行了优化，为专家用户提供最大化效率。
 
-- 自适应通信： 通过异步通信通道实现高效交互。
+## 快速开始
+**安装步骤：** 请参考我们的[安装指南](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/start/installation.html)安装RLinf。鉴于具身强化学习的环境配置较为复杂，我们推荐直接使用我们提供的Docker镜像（即[安装方法一：Docker镜像](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/start/installation.html#installation-method-1-docker-image)）。
 
-- 内置支持主流 RL 方法： 包括 [PPO](https://arxiv.org/abs/1707.06347), [GRPO](https://arxiv.org/abs/2402.03300), [DAPO](https://arxiv.org/abs/2503.14476), [Reinforce++](https://arxiv.org/abs/2501.03262) 等。
+**运行简单示例：** 环境配置完成后，用户可以参照[该文档](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/start/vla.html)的内容，运行基于ManiSkill3模拟器的具身强化学习基础示例。
+
+用户可以查阅我们的[官方文档](https://rlinf.readthedocs.io/zh-cn/latest/index.html)与[示例库](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/index.html)，来了解更多RLinf的使用教程与应用实例。
+
 
 ## 主要成果
 ### 具身智能
@@ -192,8 +254,8 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
     <th style="text-align:center;">Spatial</th>
     <th style="text-align:center;">Object</th>
     <th style="text-align:center;">Goal</th>
-    <th style="text-align:center;">LIBERO-10</th>
-    <th style="text-align:center;">LIBERO-90</th>
+    <th style="text-align:center;">Long</th>
+    <th style="text-align:center;">90</th>
     <th style="text-align:center;">Avg.</th>
   </tr>
   <tr>
@@ -226,26 +288,29 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 </table>
 </div>
 
-#### &pi;<sub>0</sub> 和 &pi;<sub>0.5</sub> 结果
+#### &pi;<sub>0</sub> and &pi;<sub>0.5</sub> Results
 
 <div align="center">
 <table style="text-align:center; width:80%; margin:0 auto;">
   <tr>
-    <th colspan="7" style="text-align:center;"><strong>在四个LIBERO任务组上的评测结果</strong></th>
+    <th colspan="8" style="text-align:center;"><strong>在四个LIBERO任务组上的评测结果</strong></th>
   </tr>
-    <tr>
+  <tr>
     <th rowspan="2" colspan="2" style="text-align:center;">Model</th>
-    <th colspan="5" style="text-align:center;">LIBERO</th>
+    <th colspan="6" style="text-align:center;">LIBERO</th>
   </tr>
   <tr>
     <th style="text-align:center;">Spatial</th>
     <th style="text-align:center;">Object</th>
     <th style="text-align:center;">Goal</th>
-    <th style="text-align:center;">10</th>
+    <th style="text-align:center;">Long</th>
     <th style="text-align:center;">Avg.</th>
+    <th style="text-align:center;">&Delta; Avg.</th>
   </tr>
+
+  <!-- Full Dataset SFT (6 rows) -->
   <tr>
-    <td colspan="7" style="text-align:center; font-style:italic;"><strong>Full Dataset SFT</strong></td>
+    <td colspan="8" style="text-align:center; font-style:italic;"><strong>Full Dataset SFT</strong></td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">Octo</td>
@@ -254,6 +319,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
     <td style="text-align:center;">84.6%</td>
     <td style="text-align:center;">51.1%</td>
     <td style="text-align:center;">75.1%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">OpenVLA</td>
@@ -262,6 +328,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
     <td style="text-align:center;">79.2%</td>
     <td style="text-align:center;">53.7%</td>
     <td style="text-align:center;">76.5%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">&pi;<sub>fast</sub></td>
@@ -270,6 +337,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
     <td style="text-align:center;">88.6%</td>
     <td style="text-align:center;">60.2%</td>
     <td style="text-align:center;">85.5%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">OpenVLA-OFT</td>
@@ -278,62 +346,105 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
     <td style="text-align:center;">90.6%</td>
     <td style="text-align:center;">86.5%</td>
     <td style="text-align:center;">91.0%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
-    <td colspan="7" style="text-align:center;font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
+    <td colspan="2" style="text-align:center;">&pi;<sub>0</sub></td>
+    <td style="text-align:center;">96.8%</td>
+    <td style="text-align:center;">98.8%</td>
+    <td style="text-align:center;">95.8%</td>
+    <td style="text-align:center;">85.2%</td>
+    <td style="text-align:center;">94.2%</td>
+    <td style="text-align:center;">—</td>
+  </tr>
+  <tr>
+    <td colspan="2" style="text-align:center;">&pi;<sub>0.5</sub></td>
+    <td style="text-align:center;">98.8%</td>
+    <td style="text-align:center;">98.2%</td>
+    <td style="text-align:center;">98.0%</td>
+    <td style="text-align:center;">92.4%</td>
+    <td style="text-align:center;">96.9%</td>
+    <td style="text-align:center;">—</td>
+  </tr>
+
+  <!-- Few-shot SFT + RL: pi_0 -->
+  <tr>
+    <td colspan="8" style="text-align:center; font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
   </tr>
   <tr>
     <td rowspan="3" style="text-align:center;">&pi;<sub>0</sub></td>
-    <td style="text-align:center;"><a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal"><img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;"></a><a href="https://huggingface.co/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal"><img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT</a></td>
+    <td style="text-align:center;">
+      <a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal">
+        <img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="ModelScope" width="16" height="16" style="vertical-align: middle;">
+      </a>
+      <a href="https://huggingface.co/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal">
+        <img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT
+      </a>
+    </td>
     <td style="text-align:center;">65.3%</td>
     <td style="text-align:center;">64.4%</td>
     <td style="text-align:center;">49.8%</td>
     <td style="text-align:center;">51.2%</td>
     <td style="text-align:center;">57.6%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
-    <td style="text-align:center;">+ GRPO</td>
-    <td style="text-align:center;">97.8%</td>
-    <td style="text-align:center;">97.8%</td>
-    <td style="text-align:center;">83.2%</td>
-    <td style="text-align:center;">81.4%</td>
-    <td style="text-align:center;">90.0%</td>
-  </tr>
-  <tr>
-    <td style="text-align:center;">+ PPO</td>
+    <td style="text-align:center;">Flow-SDE</td>
     <td style="text-align:center;">98.4%</td>
     <td style="text-align:center;">99.4%</td>
     <td style="text-align:center;">96.2%</td>
     <td style="text-align:center;">90.2%</td>
-    <td style="text-align:center;">96.0%</td>
+    <td style="text-align:center;">96.1%</td>
+    <td style="text-align:center;">+38.5</td>
   </tr>
   <tr>
-    <td colspan="7" style="text-align:center;font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
+    <td style="text-align:center;">Flow-Noise</td>
+    <td style="text-align:center;">99.0%</td>
+    <td style="text-align:center;">99.2%</td>
+    <td style="text-align:center;">98.2%</td>
+    <td style="text-align:center;">93.8%</td>
+    <td style="text-align:center;">97.6%</td>
+    <td style="text-align:center;"><b>+40.0</b></td>
+  </tr>
+
+  <!-- Few-shot SFT + RL: pi_0.5 -->
+  <tr>
+    <td colspan="8" style="text-align:center; font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
   </tr>
   <tr>
     <td rowspan="3" style="text-align:center;">&pi;<sub>0.5</sub></td>
-    <td style="text-align:center;"><a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi05-SFT"><img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;"></a><a href="https://huggingface.co/RLinf/RLinf-Pi05-SFT"><img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT</a></td>
+    <td style="text-align:center;">
+      <a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi05-SFT">
+        <img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="ModelScope" width="16" height="16" style="vertical-align: middle;">
+      </a>
+      <a href="https://huggingface.co/RLinf/RLinf-Pi05-SFT">
+        <img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT
+      </a>
+    </td>
     <td style="text-align:center;">84.6%</td>
     <td style="text-align:center;">95.4%</td>
     <td style="text-align:center;">84.6%</td>
-    <td style="text-align:center;">44.2%</td>
-    <td style="text-align:center;">77.2%</td>
+    <td style="text-align:center;">43.9%</td>
+    <td style="text-align:center;">77.1%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
-    <td style="text-align:center;">+ GRPO</td>
-    <td style="text-align:center;">97.4%</td>
-    <td style="text-align:center;">99.8%</td>
-    <td style="text-align:center;">91.2%</td>
-    <td style="text-align:center;">77.6%</td>
-    <td style="text-align:center;">91.5%</td>
-  </tr>
-  <tr>
-    <td style="text-align:center;">+ PPO</td>
+    <td style="text-align:center;">Flow-SDE</td>
     <td style="text-align:center;">99.6%</td>
     <td style="text-align:center;">100%</td>
-    <td style="text-align:center;">97.4%</td>
-    <td style="text-align:center;">90.6%</td>
-    <td style="text-align:center;">96.9%</td>
+    <td style="text-align:center;">98.8%</td>
+    <td style="text-align:center;">93.0%</td>
+    <td style="text-align:center;">97.9%</td>
+    <td style="text-align:center;">+20.8</td>
+  </tr>
+  <tr>
+    <td style="text-align:center;">Flow-Noise</td>
+    <td style="text-align:center;"><b>99.6%</b></td>
+    <td style="text-align:center;"><b>100%</b></td>
+    <td style="text-align:center;"><b>99.6%</b></td>
+    <td style="text-align:center;"><b>94.0%</b></td>
+    <td style="text-align:center;"><b>98.3%</b></td>
+    <td style="text-align:center;">+21.2</td>
   </tr>
 </table>
 </div>
@@ -445,63 +556,27 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
 - [ ] 支持深度搜索智能体训练
 
 - [ ] 支持多智能体训练
-- [ ] 支持更多具身模拟器的集成 (如 [Meta-World](https://github.com/Farama-Foundation/Metaworld), [GENESIS](https://github.com/Genesis-Embodied-AI/Genesis), [RoboTwin](https://github.com/RoboTwin-Platform/RoboTwin))  
+- [ ] 支持更多具身模拟器的集成 (如 [RoboCasa](https://github.com/robocasa/robocasa), [GENESIS](https://github.com/Genesis-Embodied-AI/Genesis), [RoboTwin](https://github.com/RoboTwin-Platform/RoboTwin))  
 - [ ] 支持更多VLA模型，比如 [GR00T](https://github.com/NVIDIA/Isaac-GR00T), [WALL-OSS](https://huggingface.co/x-square-robot/wall-oss-flow)
 - [ ] 支持世界模型（World Model）
 
 - [ ] 支持真实世界的具身智能强化学习
 
+# 持续集成测试状态
+RLinf 具有全面的 CI 测试，涵盖核心组件（通过单元测试）和具身、智能体和推理场景的端到端 RL 训练工作流。
+以下是主分支 CI 测试状态的摘要：
 
-## 快速开始 
-
-完整的 RLinf 文档请见[**这里**](https://rlinf.readthedocs.io/en/latest/).
-
-**快速上手**
-
-  - [安装指南](https://rlinf.readthedocs.io/en/latest/rst_source/start/installation.html)
-  - [快速上手 1：在 ManiSkill3 上进行 VLA 的 PPO 训练](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla.html)
-  - [快速上手 2：在 MATH 上进行 LLM 的 GRPO 训练](https://rlinf.readthedocs.io/en/latest/rst_source/start/llm.html)
-  - [多节点训练](https://rlinf.readthedocs.io/en/latest/rst_source/start/distribute.html)
-  - [模型评估](https://rlinf.readthedocs.io/en/latest/rst_source/start/eval.html)
-
-**关键设计**
-  - [统一用户接口使用](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/user/index.html)
-  - [灵活的执行模式](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/mode/index.html)
-  - [自动调度支持](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/scheduler/index.html)
-  - [弹性通信](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/communication/index.html)
-
-**示例库**
-
-  - [具身智能 VLA 模型训练](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied.html)
-  - [数学推理模型训练](https://rlinf.readthedocs.io/en/latest/rst_source/examples/reasoning.html)
-
-**高级特性**
-
-  - [Megatron-LM 的 5D 并行配置](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/5D.html)
-  - [LoRA 集成以实现高效微调](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/lora.html)
-  - [在不同版本的 SGLang 之间切换](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/version.html)
-  - [检查点恢复与重启支持](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/resume.html)
-
-**框架扩展**
-
-  - [添加新环境](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_env.html)
-  - [基于 FSDP+Hugging Face 后端添加新模型](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_model_fsdp.html)
-  - [基于 Megatron+SGLang 后端添加新模型](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_model_megatron.html)
-
-**博客**
-
-  - [与 VeRL 的对比](https://rlinf.readthedocs.io/en/latest/rst_source/blog/compare_with_verl.html)
-
-## 构建状态
-
-| Type             | Status |
-| :--------------: | :----: |
-| 推理 RL-MATH | [![Build Status](https://github.com/RLinf/RLinf/actions/workflows/math_e2e.yml/badge.svg)](https://github.com/RLinf/RLinf/actions/workflows/math_e2e.yml) |
-| 具身 RL-VLA   | [![Build Status](https://github.com/RLinf/RLinf/actions/workflows/embodied_e2e.yml/badge.svg)](https://github.com/RLinf/RLinf/actions/workflows/embodied_e2e.yml) |
-
+| 测试名 | 状态 |
+| -------- | ------ |
+| 单元测试 | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
+| 智能体/推理端到端测试 | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
+| 具身智能端到端测试 | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
+| 调度器测试 | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
 
 ## 贡献指南
-我们欢迎对 RLinf 的贡献。在参与之前，请先阅读 [贡献指南](https://rlinf.readthedocs.io/en/latest/index.html#contribution-guidelines)。
+我们欢迎对 RLinf 的贡献。在参与之前，请先阅读 [贡献指南](https://github.com/RLinf/RLinf?tab=contributing-ov-file#contributing-to-rlinf)。感谢以下贡献者，并诚邀更多开发者加入我们的开源项目，共建具身智能与强化学习系统。
+
+<a href="https://github.com/RLinf/RLinf/graphs/contributors"><img src="https://contrib.rocks/image?repo=RLinf/RLinf&max=240&columns=18" /></a>
 
 ## 引用与致谢
 
@@ -542,6 +617,18 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
   archivePrefix={arXiv},
   primaryClass={cs.LG},
   url={https://arxiv.org/abs/2505.19789}, 
+}
+```
+
+```bibtex
+@misc{chen2025pitextttrlonlinerlfinetuning,
+      title={$\pi_\texttt{RL}$: Online RL Fine-tuning for Flow-based Vision-Language-Action Models}, 
+      author={Kang Chen and Zhihao Liu and Tonghe Zhang and Zhen Guo and Si Xu and Hao Lin and Hongzhi Zang and Quanlu Zhang and Zhaofei Yu and Guoliang Fan and Tiejun Huang and Yu Wang and Chao Yu},
+      year={2025},
+      eprint={2510.25889},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2510.25889}, 
 }
 ```
 

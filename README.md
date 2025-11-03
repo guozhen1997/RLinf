@@ -30,7 +30,9 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
 
 
 ## What's NEW!
-- [2025/10] 🔥 RLinf supports reinforcement learning fine-tuning for Pi 0 and Pi0.5! Doc: [RL on π₀ and π₀.₅ Models](https://rlinf.readthedocs.io/en/latest/rst_source/examples/pi0.html) 
+- [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [Behavior 1k](https://github.com/StanfordVL/BEHAVIOR-1K). Doc: [RL on Behavior 1k](https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html) 
+- [2025/11] Add lora support to π₀ and π₀.₅.
+- [2025/10] 🔥 RLinf supports reinforcement learning fine-tuning for π₀ and π₀.₅! Doc: [RL on π₀ and π₀.₅ Models](https://rlinf.readthedocs.io/en/latest/rst_source/examples/pi0.html). For more technical details, refer to the [RL fine-tuning for π₀ and π₀.₅ technical report](https://arxiv.org/abs/2510.25889).
 - [2025/10] 🔥 RLinf now officially supports online reinforcement learning! Doc: [coding_online_rl](https://rlinf.readthedocs.io/en/latest/rst_source/examples/coding_online_rl.html), Blog post: [The first open-source agent online RL framework RLinf-Online](https://mp.weixin.qq.com/s/jmohmDokuWLhQHFueSHZIQ).
 - [2025/10] 🔥 The RLinf Algorithm Technical Report [RLinf-VLA: A Unified and Efficient Framework for VLA+RL Training](https://arxiv.org/abs/2510.06710) is released.
 - [2025/09] 🔥 [Example Gallery](https://rlinf.readthedocs.io/en/latest/rst_source/examples/index.html) is updated, users can find various off-the-shelf examples!
@@ -41,37 +43,98 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
 ## Key Features
 
 
-**RLinf is unique with:**
-- Macro-to-Micro Flow: a new paradigm M2Flow, which executes macro-level logical flows through micro-level execution flows, decoupling logical workflow construction (programmable) from physical communication and scheduling (efficiency).
+### Embodied Intelligence
 
-- Flexible Execution Modes
-
-  - Collocated mode: shares all GPUs across all workers.
-  - Disaggregated mode: enables fine-grained pipelining.
-  - Hybrid mode: a customizable combination of different placement modes, integrating both collocated and disaggregated modes.
-
-- Auto-scheduling Strategy: automatically selects the most suitable execution mode based on the training workload, without the need for manual resource allocation.
+<table style="width: 100%; table-layout: auto; border-collapse: collapse;">
+  <thead align="center" valign="bottom">
+    <tr>
+      <th style="min-width: 120px; text-align: left;">Simulators</th>
+      <th style="min-width: 120px;">Real-world Robotics</th>
+      <th style="min-width: 120px;">Models</th>
+      <th style="min-width: 120px;">Algorithms</th>
+    </tr>
+  </thead>
+  <tbody valign="top">
+    <tr>
+      <td style="text-align: left; padding-left: 8px;">
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/maniskill.html">ManiSkill</a> ✅</li>
+          <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/libero.html">LIBERO</a> ✅</li>
+          <li>RoboTwin</li>
+          <li>RoboVerse</li>
+          <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html">BEHAVIOR</a> ✅</li>
+          <li>IsaacLab</li>
+          <li>RoboCasa</li>
+          <li>More...</li>
+        </ul>
+      </td>
+      <td>
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li>Franka Arm</li>
+          <li>More...</li>
+        </ul>
+      </td>
+      <td>
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li><b>VLA</b></li>
+          <ul>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/pi0.html">π₀</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/pi0.html">π₀.₅</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/maniskill.html">OpenVLA</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/libero.html">OpenVLA-OFT</a> ✅</li>
+            <li>GR00T</li>
+          </ul>
+          <li><b>VLM</b></li>
+          <ul>
+            <li>Qwen2.5-VL</li>
+          </ul>
+        </ul>
+      </td>
+      <td>
+        <ul style="margin-left: 0; padding-left: 16px;">
+          <li><b>RL Algos</b></li>
+          <ul>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/rlalg/grpo.html">GRPO</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/rlalg/ppo.html">PPO</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/rlalg/dapo.html">DAPO</a> ✅</li>
+            <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/rlalg/reinforce.html">Reinforce++</a> ✅</li>
+            <li>SAC</li>
+          </ul>
+          <li><b>SFT</b></li>
+          <ul>
+            <li>Full-parameter SFT</li>
+            <li>LoRA SFT</li>
+          </ul>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
   
-- Embodied Agent Support
-  - Fast adaptation support for mainstream VLA models: [OpenVLA](https://github.com/openvla/openvla), [OpenVLA-OFT](https://github.com/moojink/openvla-oft), [π₀](https://github.com/Physical-Intelligence/openpi) and [π₀.₅](https://github.com/Physical-Intelligence/openpi).
-  - Support for mainstream CPU & GPU-based simulators via standardized RL interfaces: [ManiSkill3](https://github.com/haosulab/ManiSkill), [LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO).
-  - Enabling the first RL fine-tuning of the $\pi_0$ and $\pi_{0.5}$ model family with a flow-matching action expert.
+RLinf supports mainstream VLA models, mainstream CPU & GPU-based simulators via standardized Worker interfaces, and enables the first RL fine-tuning of the $\pi_{0}$ and $\pi_{0.5}$ model family with a flow-matching action expert, as shown in the above table.
 
-**RLinf is fast with:**
+### Agentic RL
 
-- Hybrid mode with fine-grained pipelining: achieves a **120%+** throughput improvement compared to other frameworks.
-- Automatic Online Scaling Strategy: dynamically scales training resources, with GPU switching completed within seconds, further improving efficiency by 20–40% while preserving the on-policy nature of RL algorithms.
+Agentic RL includes both RL training for improving LLM reasoning ability, such as [Math Reasoning](https://rlinf.readthedocs.io/en/latest/rst_source/examples/reasoning.html), and RL training for Agents, for example, [RL training of coding agent](https://rlinf.readthedocs.io/en/latest/rst_source/examples/coding_online_rl.html). RLinf can also well support agentic RL. We believe embodied intelligence will also integrate the ability of agents in the future to complete complex tasks.
 
-**RLinf is flexible and easy to use with:**
+### High flexibility, efficiency, and scalability
 
-- Multiple Backend Integrations
+Besides the rich functionalities introduced above, RLinf has high flexibility to support diverse RL training workflows (e.g., simulator integrated embodied RL, PPO/RLHF), while hiding the complexity of distributed programming. Users can easily scale RL training to a large number of GPU nodes without modifying code, meeting the increasing demand of computation for RL training.
 
-  - FSDP + Hugging Face: rapid adaptation to new models and algorithms, ideal for beginners and fast prototyping.
-  - Megatron + SGLang: optimized for large-scale training, delivering maximum efficiency for expert users with demanding workloads.
+The high flexibility allows RLinf to explore more efficient scheduling and execution. The hybrid execution mode for embodied RL achieves a **100%+** throughput improvement compared to baseline solutions.
 
-- Adaptive communication via the asynchronous communication channel
+Multiple Backend Integrations
 
-- Built-in support for popular RL methods, including [PPO](https://arxiv.org/abs/1707.06347), [GRPO](https://arxiv.org/abs/2402.03300), [DAPO](https://arxiv.org/abs/2503.14476), [Reinforce++](https://arxiv.org/abs/2501.03262), and more.
+- FSDP + HuggingFace/SGLang/vLLM: rapid adaptation to new models and algorithms, ideal for beginners and fast prototyping.
+- Megatron + SGLang/vLLM: optimized for large-scale training, delivering maximum efficiency for expert users with demanding workloads.
+
+## Quick Start
+**Installation:** Users can refer to our [installation guide](https://rlinf.readthedocs.io/en/latest/rst_source/start/installation.html) to install RLinf. We recommend users to use our provided docker image (i.e., [Installation Method 1](https://rlinf.readthedocs.io/en/latest/rst_source/start/installation.html#installation-method-1-docker-image)), as the environment and dependencies of embodied RL are complex.
+
+**Run a simple example:** After setting up the environment, users can run a simple example of embodied RL with ManiSkill3 simulator following [this document](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla.html).
+
+For more tutorials of RLinf and application examples, checkout our [documentation](https://rlinf.readthedocs.io/en/latest/index.html) and [example gallery](https://rlinf.readthedocs.io/en/latest/rst_source/examples/index.html).
+
 
 ## Main Results
 ### Embodied Intelligence
@@ -193,7 +256,7 @@ and exhibits greater stability.
     <th style="text-align:center;">Spatial</th>
     <th style="text-align:center;">Object</th>
     <th style="text-align:center;">Goal</th>
-    <th style="text-align:center;">10</th>
+    <th style="text-align:center;">Long</th>
     <th style="text-align:center;">90</th>
     <th style="text-align:center;">Avg.</th>
   </tr>
@@ -227,26 +290,29 @@ and exhibits greater stability.
 </table>
 </div>
 
-#### &pi;<sub>0</sub> and &pi;<sub>0.5</sub>  Results
+#### &pi;<sub>0</sub> and &pi;<sub>0.5</sub> Results
 
 <div align="center">
 <table style="text-align:center; width:80%; margin:0 auto;">
   <tr>
-    <th colspan="7" style="text-align:center;"><strong>Evaluation results on the four LIBERO task groups</strong></th>
+    <th colspan="8" style="text-align:center;"><strong>Evaluation results on the four LIBERO task groups</strong></th>
   </tr>
-    <tr>
+  <tr>
     <th rowspan="2" colspan="2" style="text-align:center;">Model</th>
-    <th colspan="5" style="text-align:center;">LIBERO</th>
+    <th colspan="6" style="text-align:center;">LIBERO</th>
   </tr>
   <tr>
     <th style="text-align:center;">Spatial</th>
     <th style="text-align:center;">Object</th>
     <th style="text-align:center;">Goal</th>
-    <th style="text-align:center;">10</th>
+    <th style="text-align:center;">Long</th>
     <th style="text-align:center;">Avg.</th>
+    <th style="text-align:center;">&Delta; Avg.</th>
   </tr>
+
+  <!-- Full Dataset SFT (6 rows) -->
   <tr>
-    <td colspan="7" style="text-align:center; font-style:italic;"><strong>Full Dataset SFT</strong></td>
+    <td colspan="8" style="text-align:center; font-style:italic;"><strong>Full Dataset SFT</strong></td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">Octo</td>
@@ -255,6 +321,7 @@ and exhibits greater stability.
     <td style="text-align:center;">84.6%</td>
     <td style="text-align:center;">51.1%</td>
     <td style="text-align:center;">75.1%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">OpenVLA</td>
@@ -263,6 +330,7 @@ and exhibits greater stability.
     <td style="text-align:center;">79.2%</td>
     <td style="text-align:center;">53.7%</td>
     <td style="text-align:center;">76.5%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">&pi;<sub>fast</sub></td>
@@ -271,6 +339,7 @@ and exhibits greater stability.
     <td style="text-align:center;">88.6%</td>
     <td style="text-align:center;">60.2%</td>
     <td style="text-align:center;">85.5%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
     <td colspan="2" style="text-align:center;">OpenVLA-OFT</td>
@@ -279,62 +348,105 @@ and exhibits greater stability.
     <td style="text-align:center;">90.6%</td>
     <td style="text-align:center;">86.5%</td>
     <td style="text-align:center;">91.0%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
-    <td colspan="7" style="text-align:center;font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
+    <td colspan="2" style="text-align:center;">&pi;<sub>0</sub></td>
+    <td style="text-align:center;">96.8%</td>
+    <td style="text-align:center;">98.8%</td>
+    <td style="text-align:center;">95.8%</td>
+    <td style="text-align:center;">85.2%</td>
+    <td style="text-align:center;">94.2%</td>
+    <td style="text-align:center;">—</td>
+  </tr>
+  <tr>
+    <td colspan="2" style="text-align:center;">&pi;<sub>0.5</sub></td>
+    <td style="text-align:center;">98.8%</td>
+    <td style="text-align:center;">98.2%</td>
+    <td style="text-align:center;">98.0%</td>
+    <td style="text-align:center;">92.4%</td>
+    <td style="text-align:center;">96.9%</td>
+    <td style="text-align:center;">—</td>
+  </tr>
+
+  <!-- Few-shot SFT + RL: pi_0 -->
+  <tr>
+    <td colspan="8" style="text-align:center; font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
   </tr>
   <tr>
     <td rowspan="3" style="text-align:center;">&pi;<sub>0</sub></td>
-    <td style="text-align:center;"><a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal"><img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;"></a><a href="https://huggingface.co/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal"><img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT</a></td>
+    <td style="text-align:center;">
+      <a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal">
+        <img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="ModelScope" width="16" height="16" style="vertical-align: middle;">
+      </a>
+      <a href="https://huggingface.co/RLinf/RLinf-Pi0-SFT-Spatial-Object-Goal">
+        <img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT
+      </a>
+    </td>
     <td style="text-align:center;">65.3%</td>
     <td style="text-align:center;">64.4%</td>
     <td style="text-align:center;">49.8%</td>
     <td style="text-align:center;">51.2%</td>
     <td style="text-align:center;">57.6%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
-    <td style="text-align:center;">+ GRPO</td>
-    <td style="text-align:center;">97.8%</td>
-    <td style="text-align:center;">97.8%</td>
-    <td style="text-align:center;">83.2%</td>
-    <td style="text-align:center;">81.4%</td>
-    <td style="text-align:center;">90.0%</td>
-  </tr>
-  <tr>
-    <td style="text-align:center;">+ PPO</td>
+    <td style="text-align:center;">Flow-SDE</td>
     <td style="text-align:center;">98.4%</td>
     <td style="text-align:center;">99.4%</td>
     <td style="text-align:center;">96.2%</td>
     <td style="text-align:center;">90.2%</td>
-    <td style="text-align:center;">96.0%</td>
+    <td style="text-align:center;">96.1%</td>
+    <td style="text-align:center;">+38.5</td>
   </tr>
   <tr>
-    <td colspan="7" style="text-align:center;font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
+    <td style="text-align:center;">Flow-Noise</td>
+    <td style="text-align:center;">99.0%</td>
+    <td style="text-align:center;">99.2%</td>
+    <td style="text-align:center;">98.2%</td>
+    <td style="text-align:center;">93.8%</td>
+    <td style="text-align:center;">97.6%</td>
+    <td style="text-align:center;"><b>+40.0</b></td>
+  </tr>
+
+  <!-- Few-shot SFT + RL: pi_0.5 -->
+  <tr>
+    <td colspan="8" style="text-align:center; font-style:italic;"><strong>Few-shot Dataset SFT + RL</strong></td>
   </tr>
   <tr>
     <td rowspan="3" style="text-align:center;">&pi;<sub>0.5</sub></td>
-    <td style="text-align:center;"><a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi05-SFT"><img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;"></a><a href="https://huggingface.co/RLinf/RLinf-Pi05-SFT"><img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT</a></td>
+    <td style="text-align:center;">
+      <a href="https://www.modelscope.cn/models/RLinf/RLinf-Pi05-SFT">
+        <img src="docs/source-en/_static/svg/modelscope-logo.svg" alt="ModelScope" width="16" height="16" style="vertical-align: middle;">
+      </a>
+      <a href="https://huggingface.co/RLinf/RLinf-Pi05-SFT">
+        <img src="docs/source-en/_static/svg/hf-logo.svg" alt="HF" width="16" height="16" style="vertical-align: middle;">SFT
+      </a>
+    </td>
     <td style="text-align:center;">84.6%</td>
     <td style="text-align:center;">95.4%</td>
     <td style="text-align:center;">84.6%</td>
-    <td style="text-align:center;">44.2%</td>
-    <td style="text-align:center;">77.2%</td>
+    <td style="text-align:center;">43.9%</td>
+    <td style="text-align:center;">77.1%</td>
+    <td style="text-align:center;">—</td>
   </tr>
   <tr>
-    <td style="text-align:center;">+ GRPO</td>
-    <td style="text-align:center;">97.4%</td>
-    <td style="text-align:center;">99.8%</td>
-    <td style="text-align:center;">91.2%</td>
-    <td style="text-align:center;">77.6%</td>
-    <td style="text-align:center;">91.5%</td>
-  </tr>
-  <tr>
-    <td style="text-align:center;">+ PPO</td>
+    <td style="text-align:center;">Flow-SDE</td>
     <td style="text-align:center;">99.6%</td>
     <td style="text-align:center;">100%</td>
-    <td style="text-align:center;">97.4%</td>
-    <td style="text-align:center;">90.6%</td>
-    <td style="text-align:center;">96.9%</td>
+    <td style="text-align:center;">98.8%</td>
+    <td style="text-align:center;">93.0%</td>
+    <td style="text-align:center;">97.9%</td>
+    <td style="text-align:center;">+20.8</td>
+  </tr>
+  <tr>
+    <td style="text-align:center;">Flow-Noise</td>
+    <td style="text-align:center;"><b>99.6%</b></td>
+    <td style="text-align:center;"><b>100%</b></td>
+    <td style="text-align:center;"><b>99.6%</b></td>
+    <td style="text-align:center;"><b>94.0%</b></td>
+    <td style="text-align:center;"><b>98.3%</b></td>
+    <td style="text-align:center;">+21.2</td>
   </tr>
 </table>
 </div>
@@ -440,62 +552,26 @@ and exhibits greater stability.
 - [X] Support for Vision-Language Models (VLMs) training  
 - [ ] Support for deep searcher agent training  
 - [ ] Support for multi-agent training  
-- [ ] Support for integration with more embodied simulators (e.g., [Meta-World](https://github.com/Farama-Foundation/Metaworld), [GENESIS](https://github.com/Genesis-Embodied-AI/Genesis), [RoboTwin](https://github.com/RoboTwin-Platform/RoboTwin))  
+- [ ] Support for integration with more embodied simulators (e.g., [RoboCasa](https://github.com/robocasa/robocasa), [GENESIS](https://github.com/Genesis-Embodied-AI/Genesis), [RoboTwin](https://github.com/RoboTwin-Platform/RoboTwin))  
 - [ ] Support for more Vision Language Action models (VLAs), such as [GR00T](https://github.com/NVIDIA/Isaac-GR00T), [WALL-OSS](https://huggingface.co/x-square-robot/wall-oss-flow)
 - [ ] Support for world model   
 - [ ] Support for real-world RL embodied intelligence
 
+# CI Test Status
+RLinf has comprehensive CI tests for both the core components (via unit tests) and end-to-end RL training workflows of embodied, agent, and reasoning scenarios.
+Below is the summary of the CI test status of the main branch:
 
-## Getting Started 
-
-Complete documentation for RLinf can be found [**Here**](https://rlinf.readthedocs.io/en/latest/).
-
-**Quickstart**
-
-  - [Installation](https://rlinf.readthedocs.io/en/latest/rst_source/start/installation.html)
-  - [Quickstart 1: PPO Training of VLAs on Maniskill3](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla.html)
-  - [Quickstart 2: GRPO Training of LLMs on MATH](https://rlinf.readthedocs.io/en/latest/rst_source/start/llm.html)
-  - [Multi-node Training](https://rlinf.readthedocs.io/en/latest/rst_source/start/distribute.html)
-  - [Model Evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/eval.html)
-
-**Key Design**
-  - [Unified User Interface Usage](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/user/index.html)
-  - [Flexible Execution Modes](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/mode/index.html)
-  - [Enable Automatic Scheduling](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/scheduler/index.html)
-  - [Elastic Communication](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/communication/index.html)
-
-**Example Gallery**
-
-  - [Embodied Intelligence Vision-Language-Action Model training](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied.html)
-  - [Math Reasoning Model Training](https://rlinf.readthedocs.io/en/latest/rst_source/examples/reasoning.html)
-
-**Advanced Features**
-
-  - [5D Parallelism Configuration for Megatron-LM](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/5D.html)
-  - [LoRA Integration for efficient fine-tuning](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/lora.html)
-  - [Switch between different versions of SGLang](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/version.html)
-  - [Checkpoint Resume and Recovery Support](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/resume.html)
-
-**Extending The Framework:**
-
-  - [Adding new Environments](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_env.html)
-  - [Adding new Models with FSDP+Huggingface backend](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_model_fsdp.html)
-  - [Adding new Models with Megatron+SGLang backend](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_model_megatron.html)
-
-**Blogs**
-
-  - [Comparison with VeRL](https://rlinf.readthedocs.io/en/latest/rst_source/blog/compare_with_verl.html)
-
-## Build Status
-
-| Type             | Status |
-| :--------------: | :----: |
-| Reasoning RL-MATH | [![Build Status](https://github.com/RLinf/RLinf/actions/workflows/math_e2e.yml/badge.svg)](https://github.com/RLinf/RLinf/actions/workflows/math_e2e.yml) |
-| Embodied RL-VLA   | [![Build Status](https://github.com/RLinf/RLinf/actions/workflows/embodied_e2e.yml/badge.svg)](https://github.com/RLinf/RLinf/actions/workflows/embodied_e2e.yml) |
-
+| Test Name | Status |
+| -------- | ------ |
+| unit-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
+| agent-reason-e2e-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
+| embodied-e2e-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
+| scheduler-tests | <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/RLinf/RLinf/ci-tests.yml?label=Status"> |
 
 ## Contribution Guidelines
-We welcome contributions to RLinf. Please read [contribution guide](https://rlinf.readthedocs.io/en/latest/index.html#contribution-guidelines) before taking action.
+We welcome contributions to RLinf. Please read [contribution guide](https://github.com/RLinf/RLinf?tab=contributing-ov-file#contributing-to-rlinf) before taking action. Thank the following contributors and welcome more developers to join us on this open source project.
+
+<a href="https://github.com/RLinf/RLinf/graphs/contributors"><img src="https://contrib.rocks/image?repo=RLinf/RLinf&max=240&columns=18" /></a>
 
 ## Citation and Acknowledgement
 
@@ -536,6 +612,18 @@ If you use RL+VLA in RLinf, you can also cite our technical report and empirical
   archivePrefix={arXiv},
   primaryClass={cs.LG},
   url={https://arxiv.org/abs/2505.19789}, 
+}
+```
+
+```bibtex
+@misc{chen2025pitextttrlonlinerlfinetuning,
+      title={$\pi_\texttt{RL}$: Online RL Fine-tuning for Flow-based Vision-Language-Action Models}, 
+      author={Kang Chen and Zhihao Liu and Tonghe Zhang and Zhen Guo and Si Xu and Hao Lin and Hongzhi Zang and Quanlu Zhang and Zhaofei Yu and Guoliang Fan and Tiejun Huang and Yu Wang and Chao Yu},
+      year={2025},
+      eprint={2510.25889},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2510.25889}, 
 }
 ```
 

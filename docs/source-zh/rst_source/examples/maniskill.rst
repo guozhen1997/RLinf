@@ -1,5 +1,5 @@
 基于ManiSkill模拟器的强化学习训练
-======================================================
+=============================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
    :width: 16px
@@ -110,13 +110,13 @@
 
 **2. 配置文件**
 
-   支持两种模型：**OpenVLA** 与 **OpenVLA-OFT**；两种算法：**PPO** 与 **GRPO**。  
-   对应配置文件：
+支持两种模型：**OpenVLA** 与 **OpenVLA-OFT**；两种算法：**PPO** 与 **GRPO**。  
+对应配置文件：
 
-   - **OpenVLA + PPO**：``examples/embodiment/config/maniskill_ppo_openvla.yaml``  
-   - **OpenVLA-OFT + PPO**：``examples/embodiment/config/maniskill_ppo_openvlaoft.yaml``  
-   - **OpenVLA + GRPO**：``examples/embodiment/config/maniskill_grpo_openvla.yaml``  
-   - **OpenVLA-OFT + GRPO**：``examples/embodiment/config/maniskill_grpo_openvlaoft.yaml``
+- **OpenVLA + PPO**：``examples/embodiment/config/maniskill_ppo_openvla.yaml``  
+- **OpenVLA-OFT + PPO**：``examples/embodiment/config/maniskill_ppo_openvlaoft.yaml``  
+- **OpenVLA + GRPO**：``examples/embodiment/config/maniskill_grpo_openvla.yaml``  
+- **OpenVLA-OFT + GRPO**：``examples/embodiment/config/maniskill_grpo_openvlaoft.yaml``
 
 **3. 启动命令**
 
@@ -208,11 +208,11 @@ ManiSkill3 结果
 每类任务最优模型以粗体标注。
 
 .. note::
-   为公平对比，这里采用与 ``rl4vla``（[论文链接](https://arxiv.org/abs/2505.19789)） 相同的 OOD 测试集。
+   为公平对比，这里采用与 `rl4vla` (`论文链接 <https://arxiv.org/abs/2505.19789>`_) 相同的 OOD 测试集。
 
 .. list-table:: **ManiSkill3 上 OpenVLA 与 OpenVLA-OFT 的模型结果**
    :header-rows: 1
-   :widths: 40 15 15 18 15
+   :widths: 40 15 15 15 15 15
 
    * - 模型
      - 训练场景
@@ -265,7 +265,7 @@ ManiSkill3 结果
    
 
 .. note::
-   ``rl4vla`` 指在 **小 batch** 条件下，使用 PPO + OpenVLA 的设置，仅应与我们在类似条件下的 PPO+OpenVLA 对比。  
+   `rl4vla` 指在 **小 batch** 条件下，使用 PPO + OpenVLA 的设置，仅应与我们在类似条件下的 PPO+OpenVLA 对比。  
    而我们的 PPO+OpenVLA 受益于 RLinf 的大规模基础设施，能够使用 **更大的 batch** 进行训练，我们观察到这能显著提升性能。
 
 下面的动图展示了在 RLinf 框架中，使用 PPO 在 ManiSkill3 多任务基准上训练 OpenVLA 模型的效果。

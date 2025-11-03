@@ -219,11 +219,11 @@ We evaluated on both training and OOD(out-of-distribution) scenarios. The OOD se
 The best-performing model for each task is highlighted in bold.
 
 .. note:: 
-   The same OOD test set used in ``rl4vla`` is adopted here for fair comparison.
+   The same OOD test set used in `rl4vla` (`paper link <https://arxiv.org/abs/2505.19789>`_) is adopted here for fair comparison.
 
 .. list-table:: **OpenVLA and OpenVLA-OFT model results on ManiSkill3**
    :header-rows: 1
-   :widths: 40 15 15 18 15
+   :widths: 40 15 15 15 15 15
 
    * - Model
      - Training Setting
@@ -275,7 +275,7 @@ The best-performing model for each task is highlighted in bold.
      - 60.64%
 
 .. note:: 
-   The ``rl4vla`` model refers to PPO combined with OpenVLA under a **small batch size**, and thus should only be compared with our PPO+OpenVLA trained under similar conditions. 
+   The `rl4vla` model refers to PPO combined with OpenVLA under a **small batch size**, and thus should only be compared with our PPO+OpenVLA trained under similar conditions. 
    In contrast, our PPO+OpenVLA benefits from RLinf's large-scale infrastructure, allowing training with **larger batch sizes**, which we found to significantly improve performance.
 
 

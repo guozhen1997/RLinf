@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import uuid
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -50,238 +52,148 @@ class RolloutRequest:
     input_ids: List of input token IDs for rollout
     n: Number of completions to generate for each input
     image_data: list of image data (bytes or URLs) for multimodal inputs
-    answers: Optional list of answers for the requests, if available
+    answers: List of answers for the requests, where each answer can be either a list of strings (for typical tasks) or a dict (for VQA tasks), if available.
     multi_modal_inputs: list of multi-modal inputs for the requests
     """
 
     n: int
     input_ids: List[List[int]]
     image_data: Union[List[List[bytes]], List[List[str]]]
-    answers: List[str]
-    multi_modal_inputs: List[Dict]
+    answers: List[Union[List[str], Dict]]
+    multi_modal_inputs: List[Optional[Dict]]
 
-    def repeat(self) -> "RolloutRequest":
-        """Repeat each input in the RolloutRequest a specified number of times.
-
-        Args:
-            times (int): The number of times to repeat each input.
+    def to_seq_group_infos(self) -> List["SeqGroupInfo"]:
+        """Convert the RolloutRequest into a list of SeqGroupInfo objects.
 
         Returns:
-            RolloutRequest: A new RolloutRequest with repeated inputs.
+            List[SeqGroupInfo]: A list of SeqGroupInfo objects.
         """
-        assert self.n > 0, "n must be greater than 0"
+        return [
+            SeqGroupInfo(
+                id=uuid.uuid4().int,
+                input_ids=input_ids,
+                answer=answer,
+                group_size=self.n,
+                image_data=image_data,
+                multi_modal_inputs=multi_modal_inputs,
+            )
+            for input_ids, answer, image_data, multi_modal_inputs in zip(
+                self.input_ids,
+                self.answers,
+                self.image_data,
+                self.multi_modal_inputs,
+                strict=True,
+            )
+        ]
 
-        input_ids, answers, image_data, multi_modal_inputs = zip(
-            *[
-                (input_id, answer, image_data, multi_modal_inputs)
-                for input_id, answer, image_data, multi_modal_inputs in zip(
-                    self.input_ids,
-                    self.answers,
-                    self.image_data,
-                    self.multi_modal_inputs,
-                )
-                for _ in range(self.n)
-            ]
-        )
-        return RolloutRequest(
-            n=self.n,
-            input_ids=list(input_ids),
-            answers=list(answers),
-            image_data=list(image_data),
-            multi_modal_inputs=list(multi_modal_inputs),
-        )
 
-    def split(self, num_splits: int) -> List["RolloutRequest"]:
-        """Split the RolloutRequest into multiple smaller requests.
+class FinishReasonEnum(str, Enum):
+    ABORT = "abort"
+    STOP = "stop"
+    LENGTH = "length"
+
+
+@dataclass
+class SeqGroupInfo:
+    """
+    SeqGroupInfo represents a group of sequences and tracks their processing status and results.
+
+    Each SeqGroupInfo instance corresponds to a single input sequence that is expanded into `group_size` sequences
+
+    Attributes:
+        id (int): Unique identifier for the sequence group.
+        input_ids (List[int]): List of input IDs of the original sequence.
+        answer (Union[List[str], Dict]): List of answers of the original sequence.(One sequence can have multiple equivalent answers), or a dict in case of vqa task.
+        group_size (int): Number of sequences in the group.
+        idx_completed (set[int]): Set of indices for sequences that have completed rollout and are ready for evaluation.
+        idx_aborted (set[int]): Set of indices for sequences that have been aborted. These sequences need to be re-rolled out before they can be evaluated.
+        results (List[Optional[Dict]]): List storing result dictionaries for each sequence, or None if not yet available.
+    """
+
+    id: int
+    input_ids: List[int]
+    answer: Union[List[str], Dict]
+    group_size: int
+    idx_completed: set[int] = field(init=False, compare=False)
+    idx_aborted: set[int] = field(init=False, compare=False)
+    results: List[Optional[Dict]] = field(init=False, compare=False)
+    image_data: Optional[List] = None
+    multi_modal_inputs: Optional[Dict] = None
+
+    def __post_init__(self):
+        assert self.group_size > 0, "group_size must be greater than 0"
+        self.idx_completed = set()
+        self.idx_aborted = set()
+        self.results = [None for _ in range(self.group_size)]
+
+    def record_sglang_result(self, idx: int, result: Dict, logger=None):
+        """Record a single sglang execution result and update internal tracking.
+
+        This method is responsible for updating the internal state of the SeqGroupInfo
+        instance based on the result of a single sglang execution. It accepts the index of the
+        sequence within the group and the result dictionary returned by sglang. Then it updates
+        the sets of completed and aborted indices based on the finish reason provided in the result.
+        If the result for the given index already exists, indicating that this is a re-rollout
+        sequence, this method will merge the new result with the previous one by concatenating the output IDs.
 
         Args:
-            num_splits (int): The number of splits to create.
-
-        Returns:
-            List[RolloutRequest]: A list of smaller RolloutRequest instances.
+            idx: int
+                The index of the sequence within the group (0 <= idx < group_size).
+            result: Dict
+                Result of SGLang. Expected to contain at least:
+                - "meta_info": {"finish_reason": {"type": FinishReasonEnum}}
+                - "output_ids": a list (or list-like) of output identifier elements
+            logger: optional
+                Optional logger for diagnostic messages.
         """
-        assert num_splits > 0, "num_splits must be greater than 0"
-        assert len(self.input_ids) % num_splits == 0, (
-            f"Input IDs length {len(self.input_ids)} is not divisible by num_splits {num_splits}"
-        )
 
-        input_ids_split_list = split_list(self.input_ids, num_splits)
-        answers_split_list = split_list(self.answers, num_splits)
-        image_data_split_list = split_list(self.image_data, num_splits)
-        multi_modal_inputs_split_list = split_list(self.multi_modal_inputs, num_splits)
-
-        splitted_requests = []
-        for (
-            input_ids_batch,
-            answers_batch,
-            image_data_batch,
-            multi_modal_inputs_batch,
-        ) in zip(
-            input_ids_split_list,
-            answers_split_list,
-            image_data_split_list,
-            multi_modal_inputs_split_list,
-        ):
-            request = RolloutRequest(
-                n=self.n,
-                input_ids=input_ids_batch,
-                answers=answers_batch,
-                image_data=image_data_batch,
-                multi_modal_inputs=multi_modal_inputs_batch,
-            )
-            splitted_requests.append(request)
-
-        return splitted_requests
-
-    def repeat_and_split(
-        self, rollout_batch_size: Optional[int] = None
-    ) -> List["RolloutRequest"]:
-        input_ids, answers, image_data, multi_modal_inputs = zip(
-            *[
-                (input_id, answer, image_data, multi_modal_inputs)
-                for input_id, answer, image_data, multi_modal_inputs in zip(
-                    self.input_ids,
-                    self.answers,
-                    self.image_data,
-                    self.multi_modal_inputs,
-                )
-                for _ in range(self.n)
-            ]
-        )
-        input_ids, answers, image_data, multi_modal_inputs = (
-            list(input_ids),
-            list(answers),
-            list(image_data),
-            list(multi_modal_inputs),
-        )
-
-        # Split input ids based on rollout_batch_size_per_gpu
-        if rollout_batch_size is None:
-            num_batches = 1
+        finished_reason = result["meta_info"]["finish_reason"]["type"]
+        match finished_reason:
+            case FinishReasonEnum.ABORT:
+                self.idx_aborted.add(idx)
+            case FinishReasonEnum.STOP | FinishReasonEnum.LENGTH:
+                self.idx_completed.add(idx)
+            case _:
+                raise ValueError(f"Unknown finish reason: {finished_reason}")
+        if self.results[idx] is None:
+            self.results[idx] = result
         else:
-            assert len(input_ids) % rollout_batch_size == 0, (
-                f"Input IDs length {len(input_ids)} is not divisible by rollout batch size {rollout_batch_size}"
-            )
-            num_batches = len(input_ids) // rollout_batch_size
+            prev_output_ids = self.results[idx]["output_ids"]
+            self.results[idx] = result
+            self.results[idx]["output_ids"] = prev_output_ids + result["output_ids"]
 
-        splitted_requests = []
-        input_ids_split_list = split_list(input_ids, num_batches)
-        answers_split_list = split_list(answers, num_batches)
-        image_data_split_list = split_list(image_data, num_batches)
-        multi_modal_inputs_split_list = split_list(multi_modal_inputs, num_batches)
+    def __hash__(self):
+        return self.id
 
-        for (
-            input_ids_batch,
-            answers_batch,
-            image_data_batch,
-            multi_modal_inputs_batch,
-        ) in zip(
-            input_ids_split_list,
-            answers_split_list,
-            image_data_split_list,
-            multi_modal_inputs_split_list,
-        ):
-            request = RolloutRequest(
-                n=self.n,
-                input_ids=input_ids_batch,
-                answers=answers_batch,
-                image_data=image_data_batch,
-                multi_modal_inputs=multi_modal_inputs_batch,
-            )
-            splitted_requests.append(request)
+    @property
+    def num_completed(self) -> int:
+        """Returns the number of completed sequences."""
+        return len(self.idx_completed)
 
-        return splitted_requests
+    @property
+    def num_aborted(self) -> int:
+        """Returns the number of aborted sequences."""
+        return len(self.idx_aborted)
 
+    @property
+    def num_returned(self) -> int:
+        """Returns the total number of sequences that have either completed or aborted."""
+        return self.num_completed + self.num_aborted
 
-class CompletionInfo:
-    def __init__(self, logger=None):
-        self.input_ids: Dict[int, List[int]] = {}  # hash -> input token IDs
-        self.complete_num: Dict[int, int] = {}  # hash -> completion count
-        self.results: Dict[int, List[Dict]] = {}  # hash -> list of results
+    @property
+    def num_running(self) -> int:
+        """Returns the number of sequences still running."""
+        return self.group_size - self.num_returned
 
-        self.num_requests: int = 0
-        self.num_completed: int = 0
-        self._num_returned: int = 0  # Number of results returned
-
-        self.n_result_each_request: int = 0
-
-        self.logger = logger
-
-    def hash(self, token_ids: List[int]) -> int:
-        """Generate a hash for the token IDs."""
-        return hash(tuple(token_ids))
-
-    def clear(self):
-        self.complete_num.clear()
-        self.input_ids.clear()
-        self.results.clear()
-        self.num_requests = 0
-        self.num_completed = 0
-        self._num_returned = 0
-
-    def add_request(self, req: RolloutRequest):
-        """Add a new request to the completion info."""
-        if self.n_result_each_request != 0:
-            assert self.n_result_each_request == req.n
-        else:
-            self.n_result_each_request = req.n
-
-        self.num_requests += len(req.input_ids)
-
-        for ids in req.input_ids:
-            hash_id = self.hash(ids)
-            if hash_id not in self.input_ids:
-                self.input_ids[hash_id] = ids
-                self.complete_num[hash_id] = 0
-                self.results[hash_id] = []
-            else:
-                assert self.input_ids[hash_id] == ids, (
-                    "Input IDs mismatch for existing hash ID"
-                )
-
-    def clear_and_set(self, req: RolloutRequest):
-        self.clear()
-        self.add_request(req)
-
-    def is_empty(self) -> bool:
-        return len(self.complete_num) == 0 and len(self.results) == 0
-
-    def record_result(self, token_ids: List[int], result: Dict) -> int:
-        hash_id = self.hash(token_ids)
-
-        self.complete_num[hash_id] += 1
-        self.results[hash_id].append(result)
-
-        if self.complete_num[hash_id] == self.n_result_each_request:
-            self.num_completed += 1
-            if self.logger is not None:
-                self.logger.debug(f"Completed all rollouts for hash: {hash_id}")
-
-        return self.complete_num[hash_id]
-
-    def is_completed(self, hash_id: int) -> bool:
-        return self.complete_num[hash_id] == self.n_result_each_request
-
-    def get_results(self, hash_id: int) -> List[Dict]:
-        """Get the results for the given token IDs."""
-        assert hash_id in self.results, "Hash ID not found in results"
-        assert self.complete_num[hash_id] == self.n_result_each_request, (
-            "Not all results for this hash ID are completed"
-        )
-        value = self.results.pop(hash_id)
-        return value
-
-    def record_returned(self):
-        """Record that a result has been returned."""
-        self._num_returned += 1
-        if self.logger is not None:
-            self.logger.debug(
-                f"Returned / Completed: {self._num_returned} / {self.num_completed}"
-            )
-
+    @property
     def all_returned(self) -> bool:
-        """Check if all results have been returned."""
-        return self._num_returned == self.num_requests
+        """Returns True if all sequences have either completed or aborted."""
+        return self.num_returned == self.group_size
+
+    @property
+    def all_completed(self) -> bool:
+        """Returns True if all sequences have completed."""
+        return self.num_completed == self.group_size
 
 
 @dataclass(kw_only=True)
@@ -305,9 +217,15 @@ class RolloutResult:
     image_data: Optional[Union[List[List[bytes]], List[List[str]]]] = None
     multi_modal_inputs: Optional[List[dict]] = None
     # Inference
-    # Only set when recompute_logprobs is False
+    # Logprobs returned by rollout engines
     rollout_logprobs: Optional[List[List[float]]] = None
+    # Logprobs recomputed by inference when rollout has returned logprobs
+    recompute_prev_logprobs: Optional[torch.Tensor] = None
+    # The final prev_logprobs used for training
+    # When rollout has returned logprobs, this is rollout_logprobs
+    # Otherwise, this is the logprobs recomputed by inference
     prev_logprobs: Optional[torch.Tensor] = None
+    # Reference logprobs for comparison
     ref_logprobs: Optional[torch.Tensor] = None
 
     @property
@@ -355,10 +273,24 @@ class RolloutResult:
     def from_vllm_results(
         group_size: int,
         results: List["VllmRequestOutput"],
-        answers: Optional[List[str]] = None,
+        answers: Optional[Union[List[str], Dict]] = None,
         multi_modal_inputs: Optional[List[Dict]] = None,
         return_logprobs: bool = False,
     ) -> "RolloutResult":
+        """
+        Create a RolloutResult from the given vLLM results.
+
+        Args:
+            group_size (int): The group size used during rollout.
+            results (list[VllmRequestOutput]): The rollout results from vLLM.
+            answers (Optional[Union[list[str], dict]]): The answers corresponding to the inputs, notably, if task type is vqa, answers is a dict.
+            multi_modal_inputs (Optional[list[Dict]]): The multi-modal inputs corresponding to the inputs.
+            return_logprobs (bool): Whether to return log probabilities.
+
+        Returns:
+            RolloutResult: The constructed RolloutResult object.
+        """
+
         def get_logprobs(
             response_ids: List[int], output: "CompletionOutput"
         ) -> List[float]:
@@ -379,6 +311,10 @@ class RolloutResult:
                 mm_inputs.extend([mm_input] * group_size)
         else:
             mm_inputs = None
+
+        # for VQA task, answers is a dict
+        if isinstance(answers, dict):
+            answers = [answers]
 
         prompt_lengths = []
         prompt_ids = []
@@ -477,6 +413,18 @@ class RolloutResult:
             result.rollout_logprobs = logprobs
         return result
 
+    @classmethod
+    def from_sglang_seq_group(cls, seq_group: SeqGroupInfo, return_logprobs: bool):
+        return cls.from_sglang_results(
+            seq_group.results,
+            seq_group.group_size,
+            [seq_group.input_ids] * seq_group.group_size,
+            [seq_group.answer] * seq_group.group_size,
+            image_data=[seq_group.image_data] * seq_group.group_size,
+            multi_modal_inputs=[seq_group.multi_modal_inputs] * seq_group.group_size,
+            return_logprobs=return_logprobs,
+        )
+
     @staticmethod
     def merge_result_list(
         rollout_results: List["RolloutResult"],
@@ -563,7 +511,10 @@ class RolloutResult:
                 merged_result.ref_logprobs = merge_tensor(
                     merged_result.ref_logprobs, res.ref_logprobs
                 )
-
+            if res.recompute_prev_logprobs is not None:
+                merged_result.recompute_prev_logprobs = merge_tensor(
+                    merged_result.recompute_prev_logprobs, res.recompute_prev_logprobs
+                )
         return merged_result
 
     @staticmethod
@@ -842,6 +793,9 @@ class RolloutResult:
         if self.ref_logprobs is not None:
             batch["ref_logprobs"] = self.ref_logprobs.cuda()
 
+        if self.recompute_prev_logprobs is not None:
+            batch["recompute_prev_logprobs"] = self.recompute_prev_logprobs.cuda()
+
         if self.rewards is not None:
             batch["rewards"] = self.rewards.cuda()
 
@@ -919,6 +873,20 @@ class BatchResizingIterator:
         self.prefetch_micro_batch = None  # Used for computing batch info
         self.global_batch_done = False
         self.batches = []
+        self.get_batch_fn_handler = None
+        self.global_batch_handler: Optional[Callable] = None
+
+    def register_get_batch_handler(self, handler: Callable):
+        """This enables processing a batch after calling self.get_batch_fn.
+
+        Args:
+            handler (Callable): The handler function to process the return value of self.get_batch_fn.
+        """
+        self.get_batch_fn_handler = handler
+
+    def reset_total_batch_size(self, total_batch_size: int):
+        self.total_batch_size = total_batch_size
+        self.global_batch_size = total_batch_size // self.num_global_batches
 
     def check_finished_global_batch(self):
         assert self.global_batch_done, (
@@ -965,14 +933,43 @@ class BatchResizingIterator:
                 )
         return micro_batch
 
+    def register_global_batch_handler(self, handler: Callable):
+        """This enables processing a global batch before it's splitting into microbatches and consumed.
+
+        Args:
+            handler (Callable): The handler function to process the global batch. This function will receive a single argument, which is the global batch to process, and returns the processed global batch.
+        """
+        self.global_batch_handler = handler
+
+    def _fill_global_batches(self, current_batch: Dict[str, torch.Tensor]):
+        """Keep getting batches until the batch size is multiple of a global batch if requires_global_batch."""
+        current_batch_size = current_batch[self.batch_tensor_key].shape[0]
+        while (
+            current_batch_size < self.global_batch_size
+            and current_batch_size % self.global_batch_size != 0
+        ):
+            new_batch, result = self.get_batch_fn()
+            if self.get_batch_fn_handler is not None:
+                new_batch = self.get_batch_fn_handler(new_batch)
+            current_batch = RolloutResult.merge_batches([current_batch, new_batch])
+            current_batch_size = current_batch[self.batch_tensor_key].shape[0]
+        return current_batch
+
     def _get_global_batches(self):
         """Split a batch into multiple global batches, each of which will be used for one step of inference/training."""
         batch, result = self.get_batch_fn()
+        if self.get_batch_fn_handler is not None:
+            batch = self.get_batch_fn_handler(batch)
         batch_size = result.num_sequence
         if batch_size % self.global_batch_size != 0:
-            # If the batch size is smaller than the global batch size per data parallel group,
-            # we can return the batch as is
-            return iter([batch])
+            if self.global_batch_handler is not None:
+                # No need to fill global batches if it's already filled by full batches
+                batch = self._fill_global_batches(batch)
+                batch_size = get_batch_size(batch, self.batch_tensor_key)
+            else:
+                # If the batch size is smaller than the global batch size per data parallel group,
+                # we can return the batch as is
+                return iter([batch])
         num_splits = batch_size // self.global_batch_size
         return get_iterator_k_split(
             batch,
@@ -996,6 +993,12 @@ class BatchResizingIterator:
                 # If both the current micro and global batch iterators are exhausted, fetch a new batch
                 self.global_batch_iter = self._get_global_batches()
                 global_batch = next(self.global_batch_iter)
+
+            if self.global_batch_handler is not None:
+                global_batch = self.global_batch_handler(global_batch)
+                assert global_batch is not None, (
+                    f"global batch handler {self.global_batch_handler} must not return None."
+                )
 
             global_batch_size = get_batch_size(global_batch, self.batch_tensor_key)
             self.micro_batch_iter = get_iterator_k_split(
@@ -1057,6 +1060,9 @@ class EnvOutput:
         elif self.simulator_type == "maniskill":
             image_tensor = obs["images"]
         elif self.simulator_type == "robotwin":
+            image_tensor = obs["images"]
+            wrist_image_tensor = obs["wrist_images"]
+        elif self.simulator_type == "behavior":
             image_tensor = obs["images"]
             wrist_image_tensor = obs["wrist_images"]
         else:

@@ -219,16 +219,9 @@ class CodingOnlineRLRunner:
                     infer_handle = None
                     inference_channel = self.dataloader_channel
 
-                # Advantages and returns
-                adv_handle: Handle = self.actor.compute_advantages_and_returns(
-                    input_channel=inference_channel,
-                    output_channel=self.actor_channel,
-                )
-
                 # Actor training
-                actor_input_channel = self.actor_channel
                 actor_handle: Handle = self.actor.run_training(
-                    input_channel=actor_input_channel,
+                    input_channel=inference_channel,
                 )
 
                 metrics = actor_handle.wait()
@@ -267,7 +260,6 @@ class CodingOnlineRLRunner:
 
             time_metrics = self.timer.consume_durations()
             time_metrics["training"] = actor_handle.consume_duration()
-            time_metrics["advantage"] = adv_handle.consume_duration()
             if infer_handle is not None:
                 # Inference time should be the min time across ranks, because different DP receive the rollout results differently
                 # But at the begin of the pp schedule, there is a timer barrier

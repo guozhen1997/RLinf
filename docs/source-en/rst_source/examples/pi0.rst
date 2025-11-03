@@ -1,5 +1,5 @@
 Reinforcement Learning on π\ :sub:`0`\  and π\ :sub:`0.5`\  Models
-===================================================
+==================================================================
 
 This example provides a complete guide to fine-tuning the 
 π\ :sub:`0`\  and π\ :sub:`0.5`\  algorithms with reinforcement learning in the **LIBERO** environment
@@ -139,6 +139,7 @@ Alternatively, you can also use ModelScope to download the model from https://ww
 - If you want to train **object, goal, or spatial** task on π\ :sub:`0`\  model, please use the `RLinf-Pi0-SFT-Spatial-Object-Goal` model.
 - If you want to train the **Long** task on π\ :sub:`0`\  model, please use the `RLinf-Pi0-SFT-Long` model.
 - If you want to train tasks on π\ :sub:`0.5`\  model, please use the `RLinf-Pi05-SFT` model.
+
 After downloading, please make sure to specify the model path correctly in your configuration yaml file.
 
 Running Scripts
@@ -192,6 +193,8 @@ interference, eliminating the need for offload functionality.
 
 **2. Model Key Parameter Configuration**
 
+**2.1 Model Parameters**
+
 .. code:: yaml
 
    openpi:
@@ -214,7 +217,17 @@ interference, eliminating the need for offload functionality.
 
 You can set ``pi05: True`` to enable π\ :sub:`0.5`\  mode, and set ``value_after_vlm`` to control the input path of state features: True to input to VLM part (π\ :sub:`0.5`\  default configuration), False to input to action expert (π\ :sub:`0`\  default configuration).
 
---------------
+**2.2 LoRA Settings**
+
+.. code:: yaml
+
+   model:
+     is_lora: True
+     lora_rank: 8
+     gradient_checkpointing: False
+
+If you want to use LoRA (Low-Rank Adaptation) to fine-tune the VLM part, please set ``is_lora: True`` and configure the ``lora_rank`` parameter. Note that gradient checkpointing is currently **not supported**, please keep ``gradient_checkpointing: False``.
+
 
 **3. Configuration Files**
 
@@ -320,58 +333,67 @@ The results achieved through our RL training are shown below:
 
    * - Model
      - Spatial 
+     - Object
      - Goal 
-     - Object 
      - Long 
      - Average
+     - Δ Avg.
 
    * - π\ :sub:`0`\ (few-shot)
      - 65.3%
-     - 50.0%
      - 64.4%
      - 49.8%
-     - 57.4%
+     - 51.2%
+     - 57.6%
+     - ---
 
-   * - PPO-π\ :sub:`0`\-RLinf
+   * - +GRPO
+     - 97.8%
+     - 97.8%
+     - 83.2%
+     - 81.4%
+     - 90.0%
+     - +32.4
+
+   * - +PPO
      - **98.4%**
      - **99.4%**
-     - **97.2%**
-     - **90.0%**
-     - **96.3%**
+     - **96.2%**
+     - **90.2%**
+     - **96.0%**
+     - **+38.4**
 
-   * - GRPO-π\ :sub:`0`\-RLinf
-     - 97.8%
-     - 97.8%
-     - 78.6%
-     - 81.4%
-     - 88.9%
 .. list-table:: **π**\ :sub:`0.5`\  **model results on LIBERO**
    :header-rows: 1
 
    * - Model
      - Spatial 
+     - Object
      - Goal 
-     - Object 
      - Long 
      - Average
+     - Δ Avg.
 
    * - π\ :sub:`0.5`\ (few-shot)
      - 84.6%
      - 95.4%
      - 84.6%
-     - 44.2%
-     - 77.2%
+     - 43.9%
+     - 77.1%
+     - ---
 
-   * - PPO-π\ :sub:`0.5`-RLinf
-     - **99.6%**
-     - **100%**
-     - **97.4%**
-     - **90.6%**
-     - **96.9%**
-
-   * - GRPO-π\ :sub:`0.5`-RLinf
+   * - +GRPO
      - 97.4%
      - 99.8%
      - 91.2%
      - 77.6%
      - 91.5%
+     - +14.4
+
+   * - +PPO
+     - **99.6%**
+     - **100%**
+     - **98.8%**
+     - **93.0%**
+     - **97.9%**
+     - **+20.8**

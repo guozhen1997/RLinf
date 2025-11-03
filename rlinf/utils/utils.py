@@ -98,31 +98,49 @@ def configure_batch_sizes(rank, mbs, gbs, dp=1):
     )
 
 
-def masked_mean(values, mask, axis=None):
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis=None):
     """Compute mean of tensor with a masked values."""
-    if (~mask).all():
+    if mask is None:
+        return values.mean(axis=axis)
+    elif (~mask).all():
         return (values * mask).sum(axis=axis)
     else:
         return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
 
 
-def masked_sum(values, mask, axis=None):
+def masked_sum(values: torch.Tensor, mask: torch.Tensor, axis=None):
     """Compute mean of tensor with a masked values."""
     return (values * mask).sum(axis=axis)
 
 
-def seq_mean_token_sum(values, mask):
+def seq_mean_token_sum(values: torch.Tensor, mask: torch.Tensor, dim: int = -1):
     seq_losses = torch.sum(values * mask, dim=-1)  # token-sum
     loss = torch.mean(seq_losses)  # seq-mean
     return loss
 
 
-def seq_mean_token_mean(values, mask):
+def seq_mean_token_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = -1):
     seq_losses = torch.sum(values * mask, dim=-1) / torch.sum(
         mask, dim=-1
     )  # token-mean
     loss = torch.mean(seq_losses)  # seq-mean
     return loss
+
+
+def masked_mean_ratio(
+    values: torch.Tensor, mask: torch.Tensor, loss_mask_ratio: torch.Tensor
+):
+    # for embodied tasks
+    return (values / loss_mask_ratio * mask).mean()
+
+
+def reshape_entropy(entropy, entropy_type, action_dim=7, batch_size=1):
+    if entropy is not None:
+        if entropy_type == "action_level":
+            entropy = entropy.reshape(batch_size, -1, action_dim).sum(dim=-1)
+        elif entropy_type == "chunk_level":
+            entropy = entropy.sum(dim=-1)
+    return entropy
 
 
 def logprobs_from_logits_flash_attn(logits, labels, inplace_backward=True):

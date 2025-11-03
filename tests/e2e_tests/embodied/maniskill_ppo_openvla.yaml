@@ -45,8 +45,8 @@ algorithm:
   num_group_envs: 8
   rollout_epoch: 1
 
-  adv_type: embodied_gae
-  loss_type: embodied_ppo
+  adv_type: gae
+  loss_type: actor_critic
   reward_type: chunk_level
   logprob_type: "action_level"
   entropy_type: "action_level"
@@ -164,6 +164,7 @@ actor:
     adam_beta2: 0.95
     adam_eps: 1.0e-05
     clip_grad: 1.0
+    critic_warmup_steps: 5
 
   fsdp_config:                  # below are fsdp configs, for more details, see https://pytorch.org/docs/stable/fsdp.html and https://huggingface.co/docs/accelerate/package_reference/fsdp
     forward_prefetch: True       # if True, FSDP will explicitly prefetches the next upcoming all-gather while executing in the forward pass. only use with static graphs. Overlaps communication with computation to improve performance.

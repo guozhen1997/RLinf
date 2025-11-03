@@ -42,8 +42,8 @@ RLinf 可以将不同的 *generation backends* 接入其强化学习流水线。
 
 从源码安装
 
-
 .. code-block:: bash
+
    # 安装 SGLang
    git clone https://github.com/sgl-project/sglang.git
    cd sglang

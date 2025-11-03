@@ -152,6 +152,7 @@ class CollectiveGroup:
         self._worker = Worker.current_worker
         self._coll_manager = CollectiveManager.get_proxy()
         self._logger = logging.getLogger(cur_worker_address.get_name())
+        self._lock = threading.Lock()
 
         if self._group_info is not None:
             self._init_group()
@@ -479,49 +480,50 @@ class CollectiveGroup:
 
     def _init_p2p_process_group(self) -> dist.ProcessGroup:
         """Initialize the process group for collective operations."""
-        self._init_group()
-        if self._mc_group.is_initialized:
-            return
+        with self._lock:
+            self._init_group()
+            if self._mc_group.is_initialized:
+                return
 
-        from ..cluster import Cluster
+            from ..cluster import Cluster
 
-        if self._rank == 0:
-            master_port = Cluster.find_free_port()
-            self._coll_manager.set_master_port_info(
-                self._group_info.group_name, master_port
-            )
-        else:
-            master_port = None
-            count = 0
-            while master_port is None:
-                master_port = self._coll_manager.get_master_port_info(
-                    self._group_info.group_name
+            if self._rank == 0:
+                master_port = Cluster.find_free_port()
+                self._coll_manager.set_master_port_info(
+                    self._group_info.group_name, master_port
                 )
-                time.sleep(0.001)
-                count += 1
-                if count % Cluster.TIMEOUT_WARN_TIME == 0:
-                    self._logger.warning(
-                        f"Waiting for master port for collective group {self._group_info.group_name} to be set for {count // 1000} seconds"
+            else:
+                master_port = None
+                count = 0
+                while master_port is None:
+                    master_port = self._coll_manager.get_master_port_info(
+                        self._group_info.group_name
                     )
+                    time.sleep(0.001)
+                    count += 1
+                    if count % Cluster.TIMEOUT_WARN_TIME == 0:
+                        self._logger.warning(
+                            f"Waiting for master port for collective group {self._group_info.group_name} to be set for {count // 1000} seconds"
+                        )
 
-        self._logger.debug(
-            f"Initializing process group for collective group {self._group_info.group_name}, master address {self._group_info.master_addr}, master port {master_port}, world size {self._group_info.world_size}, rank {self._rank}"
-        )
+            self._logger.debug(
+                f"Initializing process group for collective group {self._group_info.group_name}, master address {self._group_info.master_addr}, master port {master_port}, world size {self._group_info.world_size}, rank {self._rank}"
+            )
 
-        self._mc_group.init(
-            init_method=f"tcp://{self._group_info.master_addr}:{master_port}",
-            world_size=self._group_info.world_size,
-            rank=self._rank,
-            group_name=self._group_info.group_name,
-        )
+            self._mc_group.init(
+                init_method=f"tcp://{self._group_info.master_addr}:{master_port}",
+                world_size=self._group_info.world_size,
+                rank=self._rank,
+                group_name=self._group_info.group_name,
+            )
 
-        self._logger.debug(
-            f"Process group {self._group_info.group_name} initialized successfully."
-        )
+            self._logger.debug(
+                f"Process group {self._group_info.group_name} initialized successfully."
+            )
 
-        if self._rank == 0:
-            # Avoid using the same master port for the next group
-            self._coll_manager.reset_master_port_info(self._group_info.group_name)
+            if self._rank == 0:
+                # Avoid using the same master port for the next group
+                self._coll_manager.reset_master_port_info(self._group_info.group_name)
 
     def _get_object_device_type(self, object: torch.Tensor | Any) -> Tuple[str, int]:
         """Check the device type of the object. We also handle List of tensors, tuple of tensors, and Dict of tensors (all values must be tensors)."""

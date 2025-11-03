@@ -18,11 +18,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import gymnasium as gym
 import numpy as np
 import torch
-import torch.multiprocessing as mp
 from omegaconf import OmegaConf
 from robotwin.envs.vector_env import VectorEnv
-
-from .utils import put_info_on_image, save_rollout_video, tile_images
 
 __all__ = ["RoboTwinEnv"]
 
@@ -54,7 +51,6 @@ class RoboTwinEnv(gym.Env):
         self._init_env()
 
         self.prev_step_reward = torch.zeros(self.num_envs, dtype=torch.float32)
-        self.info_logging_keys = ["is_success"]
         if self.record_metrics:
             self._init_metrics()
             self._elapsed_steps = torch.zeros(
@@ -64,9 +60,13 @@ class RoboTwinEnv(gym.Env):
     def _init_env(self):
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
-        group_seeds = torch.randint(0, 30, (self.num_group,))
+
+        num_groups = self.num_envs // self.group_size
+        assert self.num_envs % self.group_size == 0, f"num_envs ({self.num_envs}) must be divisible by group_size ({self.group_size})"
+
+        group_seeds = torch.randint(0, 30, (num_groups,))
         env_seeds = group_seeds.repeat_interleave(self.group_size).tolist()
-        mp.set_start_method("spawn")
+
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
@@ -203,7 +203,7 @@ class RoboTwinEnv(gym.Env):
             assert self._is_start, "Actions must be provided after the first reset."
 
         if self.is_start:
-            extracted_obs, infos = self.reset()
+            extracted_obs, infos = self.reset(seed=self.seed)
             self._is_start = False
             terminations = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device

@@ -3,10 +3,10 @@ FAQs
 
 Below are RLinf’s frequently asked questions. This section will be continuously updated, and everyone is welcome to keep asking questions to help us improve!
 
-------
+------------------------------------
 
 RuntimeError: The MUJOCO_EGL_DEVICE_ID environment variable must be an integer between 0 and 0 (inclusive), got 1.
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Symptom:** The above error message when running simulators with MUJOCO_GL environment variable set to "egl".
 
@@ -37,10 +37,10 @@ RuntimeError: The MUJOCO_EGL_DEVICE_ID environment variable must be an integer b
 
    * Use **osmesa** for rendering, change the `MUJOCO_GL` and `PYOPENGL_PLATFORM` environment variables in our running script to "osmesa" for this. However, this may cause the rollout process to be 10x slower than EGL as it uses CPU for rendering.
 
-------
+------------------------------------
 
 NCCL “cuda invalid argument” During Task Transfer
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Symptom:** P2P task transmission fails with ``NCCL cuda invalid argument``.
 
@@ -50,10 +50,10 @@ NCCL “cuda invalid argument” During Task Transfer
 
    ray stop
 
-------
+------------------------------------
 
 NCCL “cuda invalid argument” When SGLang Loads parameters
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Symptom:** SGLang reports ``NCCL cuda invalid argument`` while loading weights.
 
@@ -63,10 +63,10 @@ trainer and generation actually run on different GPUs.
 **Fix:** Verify the placement strategy. Ensure trainer and generation groups are
 placed on the GPUs implied by your ``cluster.component_placement`` settings.
 
-------
+------------------------------------
 
 CUDA CUresult Error (result=2) in torch_memory_saver.cpp
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Symptom:**
 ``CUresult error result=2 file=csrc/torch_memory_saver.cpp func=cu_mem_create line=103``
@@ -80,10 +80,10 @@ buffers; often happens if inference weights were not unloaded before an update.
 - Ensure inference weights are properly released before reloading.
 
 
-------
+------------------------------------
 
 Gloo Timeout / "Global rank x is not part of group"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Symptoms:**
 
@@ -99,10 +99,10 @@ generation from completing. Megatron then waits until Gloo times out.
 2. Resolve the underlying SGLang restore/memory issue.
 3. Relaunch the job (and Ray, if needed).
 
-------
+------------------------------------
 
 Numerical Precision / Inference backend
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Tip:** By default, SGLang uses **flashinfer** for attention. For stability or
 compatibility, try **triton**:
@@ -112,7 +112,7 @@ compatibility, try **triton**:
    rollout:
      attention_backend: triton
 
-------
+------------------------------------
 
 Cannot Connect to GCS at ip:port
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

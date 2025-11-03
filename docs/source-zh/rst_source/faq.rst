@@ -3,10 +3,10 @@
 
 下面整理了 RLinf 的常见问题。该部分会持续更新，欢迎大家不断提问，帮助我们改进！
 
-------
+------------------------------------
 
 RuntimeError: The MUJOCO_EGL_DEVICE_ID environment variable must be an integer between 0 and 0 (inclusive), got 1.
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **现象：** 运行设置了 MUJOCO_GL 环境变量为 "egl" 的模拟器时出现上述错误信息。
 
@@ -39,10 +39,10 @@ RuntimeError: The MUJOCO_EGL_DEVICE_ID environment variable must be an integer b
 
 
 
-------
+------------------------------------
 
 任务迁移时出现 NCCL “cuda invalid argument”
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **现象：** P2P 任务传输失败，报错 ``NCCL cuda invalid argument``。
 
@@ -52,10 +52,10 @@ RuntimeError: The MUJOCO_EGL_DEVICE_ID environment variable must be an integer b
 
    ray stop
 
-------
+------------------------------------
 
 SGLang 加载参数时出现 NCCL “cuda invalid argument”
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **现象：** SGLang 在加载权重时报 ``NCCL cuda invalid argument``。
 
@@ -63,10 +63,10 @@ SGLang 加载参数时出现 NCCL “cuda invalid argument”
 
 **修复：** 检查 Placement 策略。确保训练组与生成组按照 ``cluster.component_placement`` 指定的 GPU 放置。
 
-------
+------------------------------------
 
 torch_memory_saver.cpp 中 CUDA CUresult Error（result=2）
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **现象：**
 ``CUresult error result=2 file=csrc/torch_memory_saver.cpp func=cu_mem_create line=103``
@@ -78,10 +78,10 @@ torch_memory_saver.cpp 中 CUDA CUresult Error（result=2）
 - 降低 SGLang 的静态显存占用（例如调低 ``static_mem_fraction``）。
 - 确保在重新加载前，已正确释放推理权重。
 
-------
+------------------------------------
 
 Gloo 超时 / “Global rank x is not part of group”
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **现象：**
 
@@ -96,7 +96,7 @@ Gloo 超时 / “Global rank x is not part of group”
 2. 先解决 SGLang 的恢复/显存问题。  
 3. 重新启动作业（必要时也重启 Ray）。
 
-------
+------------------------------------
 
 数值精度 / 推理后端
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -108,7 +108,7 @@ Gloo 超时 / “Global rank x is not part of group”
    rollout:
      attention_backend: triton
 
-------
+------------------------------------
 
 无法连接 GCS（ip:port）
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

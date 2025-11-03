@@ -64,6 +64,9 @@ class EmbodiedRunner:
         self.rollout.init_worker().wait()
         self.env.init_worker().wait()
 
+        if self.cfg.runner.get("resume_dir", None) is not None:
+            self.global_step = int(self.cfg.runner.resume_dir.split("global_step_")[-1])
+
     def update_rollout_weights(self):
         rollout_futures = self.rollout.sync_model_from_actor()
         actor_futures = self.actor.sync_model_to_rollout()
@@ -97,7 +100,7 @@ class EmbodiedRunner:
             initial=start_step,
             total=self.max_steps,
             desc="Global Step",
-            ncols=700,
+            ncols=800,
         )
         for _step in range(start_step, self.max_steps):
             # set global step
@@ -172,6 +175,7 @@ class EmbodiedRunner:
     def _save_checkpoint(self):
         base_output_dir = os.path.join(
             self.cfg.runner.logger.log_path,
+            self.cfg.runner.logger.experiment_name,
             f"checkpoints/global_step_{self.global_step}",
         )
         actor_save_path = os.path.join(base_output_dir, "actor")

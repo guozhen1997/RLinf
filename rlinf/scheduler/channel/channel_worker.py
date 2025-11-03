@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from ..worker import Worker, WorkerAddress
-from .channel import DEFAULT_QUEUE_NAME
+from .channel import DEFAULT_KEY
 
 
 @dataclass(order=True)
@@ -81,61 +81,69 @@ class LocalChannel:
         """
         self._queue_map: Dict[str, PeekQueue] = {}
 
-        self._queue_map[DEFAULT_QUEUE_NAME] = PeekQueue(maxsize=maxsize)
+        self._queue_map[DEFAULT_KEY] = PeekQueue(maxsize=maxsize)
 
-    def create_queue(self, queue_name: str, maxsize: int = 0):
+    def create_queue(self, key: Any, maxsize: int = 0):
         """Create a new queue in the channel. No effect if a queue with the same name already exists.
 
         Args:
-            queue_name (str): The name of the queue to create.
+            key (Any): The key of the queue to create.
             maxsize (int): The maximum size of the queue. Defaults to 0 (unbounded).
 
         """
-        if queue_name in self._queue_map:
+        if key in self._queue_map:
             return
-        self._queue_map[queue_name] = PeekQueue(maxsize=maxsize)
+        self._queue_map[key] = PeekQueue(maxsize=maxsize)
 
-    def qsize(self, queue_name: str = DEFAULT_QUEUE_NAME) -> int:
+    def qsize(self, key: Any = DEFAULT_KEY) -> int:
         """Get the size of the channel queue.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key of the queue to check.
 
         """
-        return self._queue_map[queue_name].qsize()
+        if key not in self._queue_map:
+            return 0
+        return self._queue_map[key].qsize()
 
-    def empty(self, queue_name: str = DEFAULT_QUEUE_NAME) -> bool:
+    def empty(self, key: Any = DEFAULT_KEY) -> bool:
         """Check if the channel queue is empty.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key of the queue to check.
 
         """
-        return self._queue_map[queue_name].empty()
+        if key not in self._queue_map:
+            return True
+        return self._queue_map[key].empty()
 
-    def full(self, queue_name: str = DEFAULT_QUEUE_NAME) -> bool:
+    def full(self, key: Any = DEFAULT_KEY) -> bool:
         """Check if the channel queue is full.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key of the queue to check.
 
         """
-        return self._queue_map[queue_name].full()
+        if key not in self._queue_map:
+            return False
+        return self._queue_map[key].full()
 
-    def maxsize(self, queue_name: str = DEFAULT_QUEUE_NAME) -> int:
+    def maxsize(self, key: Any = DEFAULT_KEY) -> int:
         """Get the maximum size of the channel queue.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key of the queue to check.
 
         """
-        return self._queue_map[queue_name].maxsize
+        if key not in self._queue_map:
+            return self._queue_map[DEFAULT_KEY].maxsize
+        return self._queue_map[key].maxsize
 
     def put(
         self,
         item: Any,
         weight: int,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: Any = DEFAULT_KEY,
         nowait: bool = False,
     ):
         """Put an item into the channel queue.
@@ -143,75 +151,79 @@ class LocalChannel:
         Args:
             item (Any): The item to be put into the queue.
             weight (int): The weight of the item to be put into the queue.
-            queue_name (str): The name of the queue to put the item into. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
             nowait (bool): If True, directly raise asyncio.QueueFull if the queue is full. Defaults to False.
 
         """
+        self.create_queue(key, maxsize=self.maxsize())
         item = WeightedItem(weight=weight, item=item)
         if nowait:
-            self._queue_map[queue_name].put_nowait(item)
+            self._queue_map[key].put_nowait(item)
         else:
-            while self._queue_map[queue_name].full():
+            while self._queue_map[key].full():
                 continue
-            self._queue_map[queue_name].put_nowait(item)
+            self._queue_map[key].put_nowait(item)
 
     def get(
         self,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: Any = DEFAULT_KEY,
         nowait: bool = False,
     ) -> Any:
         """Get an item from the channel queue.
 
         Args:
-            queue_name (str): The name of the queue to get the item from. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
             nowait (bool): If True, directly raise asyncio.QueueEmpty if the queue is empty. Defaults to False.
 
         """
+        self.create_queue(key, maxsize=self.maxsize())
         if nowait:
-            weighted_item: WeightedItem = self._queue_map[queue_name].get_nowait()
+            weighted_item: WeightedItem = self._queue_map[key].get_nowait()
         else:
-            while self._queue_map[queue_name].empty():
+            while self._queue_map[key].empty():
                 continue
-            weighted_item: WeightedItem = self._queue_map[queue_name].get_nowait()
+            weighted_item: WeightedItem = self._queue_map[key].get_nowait()
         return weighted_item.item
 
     async def get_batch(
         self,
         target_weight: int,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: Any = DEFAULT_KEY,
     ) -> List[Any]:
         """Get a batch of items from the channel queue based on the batch weight.
 
         Args:
             target_weight (int): The target weight for the batch. The batch will contain items until the total weight reaches this value.
-            queue_name (str): The name of the queue to get the batch from. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
 
         """
+        self.create_queue(key, maxsize=self.maxsize())
         batch = []
         current_weight = 0
-        items: List[WeightedItem] = self._queue_map[queue_name].peek_all()
+        items: List[WeightedItem] = self._queue_map[key].peek_all()
         for item in items:
             if current_weight + item.weight > target_weight:
                 break
             current_weight += item.weight
-            item: WeightedItem = self._queue_map[queue_name].get_nowait()
+            item: WeightedItem = self._queue_map[key].get_nowait()
             batch.append(item.item)
             if current_weight >= target_weight:
                 break
 
         return batch
 
-    def get_all(self, queue_name: str = DEFAULT_QUEUE_NAME) -> List[Any]:
+    def get_all(self, key: str = DEFAULT_KEY) -> List[Any]:
         """Get all items from the channel queue without removing them.
 
         Args:
-            queue_name (str): The name of the queue to get the items from. Defaults to DEFAULT_QUEUE_NAME.
+            key (str): The key to get the items from. A unique identifier for a specific set of items.
 
         Returns:
             List[Any]: A list of all items in the queue.
 
         """
-        return self._queue_map[queue_name].peek_all()
+        self.create_queue(key, maxsize=self.maxsize())
+        return self._queue_map[key].peek_all()
 
 
 class ChannelWorker(Worker):
@@ -226,61 +238,69 @@ class ChannelWorker(Worker):
         """
         super().__init__()
         self._queue_map: Dict[str, PeekQueue] = {}
-        self._queue_map[DEFAULT_QUEUE_NAME] = PeekQueue(maxsize=maxsize)
+        self._queue_map[DEFAULT_KEY] = PeekQueue(maxsize=maxsize)
 
-    def create_queue(self, queue_name: str, maxsize: int = 0):
+    def create_queue(self, key: Any, maxsize: int = 0):
         """Create a new queue in the channel. No effect if a queue with the same name already exists.
 
         Args:
-            queue_name (str): The name of the queue to create.
+            key (Any): The key of the queue to create.
             maxsize (int): The maximum size of the queue. Defaults to 0 (unbounded).
 
         """
-        if queue_name in self._queue_map:
+        if key in self._queue_map:
             return
-        self._queue_map[queue_name] = PeekQueue(maxsize=maxsize)
+        self._queue_map[key] = PeekQueue(maxsize=maxsize)
 
-    def qsize(self, queue_name: str = DEFAULT_QUEUE_NAME) -> int:
+    def qsize(self, key: Any = DEFAULT_KEY) -> int:
         """Get the size of the channel queue.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key to check the queue size for.
 
         """
-        return self._queue_map[queue_name].qsize()
+        if key not in self._queue_map:
+            return 0
+        return self._queue_map[key].qsize()
 
-    def empty(self, queue_name: str = DEFAULT_QUEUE_NAME) -> bool:
+    def empty(self, key: Any = DEFAULT_KEY) -> bool:
         """Check if the channel queue is empty.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key to check the queue emptiness for.
 
         """
-        return self._queue_map[queue_name].empty()
+        if key not in self._queue_map:
+            return True
+        return self._queue_map[key].empty()
 
-    def full(self, queue_name: str = DEFAULT_QUEUE_NAME) -> bool:
+    def full(self, key: Any = DEFAULT_KEY) -> bool:
         """Check if the channel queue is full.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key to check the queue fullness for.
 
         """
-        return self._queue_map[queue_name].full()
+        if key not in self._queue_map:
+            return False
+        return self._queue_map[key].full()
 
-    def maxsize(self, queue_name: str = DEFAULT_QUEUE_NAME) -> int:
+    def maxsize(self, key: Any = DEFAULT_KEY) -> int:
         """Get the maximum size of the channel queue.
 
         Args:
-            queue_name (str): The name of the queue to check.
+            key (Any): The key to check the maximum size for.
 
         """
-        return self._queue_map[queue_name].maxsize
+        if key not in self._queue_map:
+            return self._queue_map[DEFAULT_KEY].maxsize
+        return self._queue_map[key].maxsize
 
     async def put(
         self,
         src_addr: WorkerAddress,
         weight: int,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: Any = DEFAULT_KEY,
         nowait: bool = False,
     ):
         """Put an item into the channel queue.
@@ -288,22 +308,24 @@ class ChannelWorker(Worker):
         Args:
             src_addr (WorkerAddress): The address of the source worker.
             weight (int): The weight of the item to be put into the queue.
-            queue_name (str): The name of the queue to put the item into. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will put the item in the queue associated with that key.
             nowait (bool): If True, directly raise asyncio.QueueFull if the queue is full. Defaults to False.
 
         """
+        self.create_queue(key, self.maxsize())
         item = self.recv(src_addr.root_group_name, src_addr.rank_path)
         item = WeightedItem(weight=weight, item=item)
         if nowait:
-            self._queue_map[queue_name].put_nowait(item)
+            self._queue_map[key].put_nowait(item)
         else:
-            await self._queue_map[queue_name].put(item)
+            await self._queue_map[key].put(item)
 
     async def put_via_ray(
         self,
         item: Any,
         weight: int,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: Any = DEFAULT_KEY,
         nowait: bool = False,
     ):
         """Put an item into the channel queue via Ray's communication. Useful when there is no worker.
@@ -311,116 +333,139 @@ class ChannelWorker(Worker):
         Args:
             item (Any): The item to be put into the queue.
             weight (int): The weight of the item to be put into the queue.
-            queue_name (str): The name of the queue to put the item into. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will put the item in the queue associated with that key.
             nowait (bool): If True, directly raise asyncio.QueueFull if the queue is full. Defaults to False.
 
         """
+        self.create_queue(key, self.maxsize())
         weighted_item = WeightedItem(weight=weight, item=item)
         if nowait:
-            self._queue_map[queue_name].put_nowait(weighted_item)
+            self._queue_map[key].put_nowait(weighted_item)
         else:
-            await self._queue_map[queue_name].put(weighted_item)
+            await self._queue_map[key].put(weighted_item)
 
     async def get(
         self,
         dst_addr: WorkerAddress,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        query_id: int,
+        key: Any = DEFAULT_KEY,
         nowait: bool = False,
     ) -> Any:
         """Get an item from the channel queue.
 
         Args:
             dst_addr (WorkerAddress): The address of the destination worker.
-            queue_name (str): The name of the queue to get the item from. Defaults to DEFAULT_QUEUE_NAME.
+            query_id (int): The ID of this get query.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
             nowait (bool): If True, directly raise asyncio.QueueEmpty if the queue is empty. Defaults to False.
 
         """
+        self.create_queue(key, self.maxsize())
         if nowait:
-            weighted_item: WeightedItem = self._queue_map[queue_name].get_nowait()
+            try:
+                weighted_item: WeightedItem = self._queue_map[key].get_nowait()
+            except asyncio.QueueEmpty:
+                query_id = asyncio.QueueEmpty
+                weighted_item = WeightedItem(weight=0, item=None)
         else:
-            weighted_item: WeightedItem = await self._queue_map[queue_name].get()
+            weighted_item: WeightedItem = await self._queue_map[key].get()
         self.send(
-            weighted_item.item,
+            (query_id, weighted_item.item),
             dst_addr.root_group_name,
             dst_addr.rank_path,
             async_op=True,
         )
 
-    async def get_via_ray(
-        self, queue_name: str = DEFAULT_QUEUE_NAME, nowait: bool = False
-    ) -> Any:
+    async def get_via_ray(self, key: Any = DEFAULT_KEY, nowait: bool = False) -> Any:
         """Get an item from the channel queue via Ray's communication. Useful when there is no worker.
 
         Args:
-            queue_name (str): The name of the queue to get the item from. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
             nowait (bool): If True, directly raise asyncio.QueueEmpty if the queue is empty. Defaults to False.
 
         """
+        self.create_queue(key, self.maxsize())
         if nowait:
-            weighted_item: WeightedItem = self._queue_map[queue_name].get_nowait()
+            weighted_item: WeightedItem = self._queue_map[key].get_nowait()
         else:
-            weighted_item: WeightedItem = await self._queue_map[queue_name].get()
+            weighted_item: WeightedItem = await self._queue_map[key].get()
         return weighted_item.item
 
     async def get_batch(
         self,
         dst_addr: WorkerAddress,
+        query_id: int,
         target_weight: int,
-        queue_name: str = DEFAULT_QUEUE_NAME,
+        key: str = DEFAULT_KEY,
     ) -> List[Any]:
         """Get a batch of items from the channel queue based on the batch weight.
 
         Args:
             dst_addr (WorkerAddress): The address of the destination worker.
+            query_id (int): The ID of this get query.
             target_weight (int): The target weight for the batch. The batch will contain items until the total weight reaches this value.
-            queue_name (str): The name of the queue to get the batch from. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
 
         """
+        self.create_queue(key, self.maxsize())
         batch = []
         current_weight = 0
         while True:
-            next_item: WeightedItem = await self._queue_map[queue_name].peek()
+            next_item: WeightedItem = await self._queue_map[key].peek()
             if next_item is None or current_weight + next_item.weight > target_weight:
                 break
             current_weight += next_item.weight
-            item = await self._queue_map[queue_name].get()
+            item = await self._queue_map[key].get()
             batch.append(item.item)
             if current_weight >= target_weight:
                 break
 
-        self.send(batch, dst_addr.root_group_name, dst_addr.rank_path, async_op=True)
+        self.send(
+            (query_id, batch),
+            dst_addr.root_group_name,
+            dst_addr.rank_path,
+            async_op=True,
+        )
 
     async def get_batch_via_ray(
-        self, target_weight: int, queue_name: str = DEFAULT_QUEUE_NAME
+        self, target_weight: int, key: Any = DEFAULT_KEY
     ) -> List[Any]:
         """Get a batch of items from the channel queue via Ray's communication based on the batch weight.
 
         Args:
             target_weight (int): The target weight for the batch. The batch will contain items until the total weight reaches this value.
-            queue_name (str): The name of the queue to get the batch from. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
 
         """
+        self.create_queue(key, self.maxsize())
         batch = []
         current_weight = 0
         while True:
-            next_item: WeightedItem = await self._queue_map[queue_name].peek()
+            next_item: WeightedItem = await self._queue_map[key].peek()
             if next_item is None or current_weight + next_item.weight > target_weight:
                 break
             current_weight += next_item.weight
-            item = await self._queue_map[queue_name].get()
+            item = await self._queue_map[key].get()
             batch.append(item.item)
             if current_weight >= target_weight:
                 break
         return batch
 
-    def get_all(self, queue_name: str = DEFAULT_QUEUE_NAME) -> List[Any]:
+    def get_all(self, key: Any = DEFAULT_KEY) -> List[Any]:
         """Get all items from the channel queue without removing them.
 
         Args:
-            queue_name (str): The name of the queue to get the items from. Defaults to DEFAULT_QUEUE_NAME.
+            key (Any): The key to get the item from. A unique identifier for a specific set of items.
+            When a key is given, the channel will look for the item in the queue associated with that key.
 
         Returns:
             List[Any]: A list of all items in the queue.
 
         """
-        return self._queue_map[queue_name].peek_all()
+        self.create_queue(key, self.maxsize())
+        return self._queue_map[key].peek_all()

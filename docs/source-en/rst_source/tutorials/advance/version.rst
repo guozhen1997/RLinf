@@ -39,10 +39,12 @@ Install via pip
 
    # Install vLLM
    pip install vllm==0.8.5
+
 Install from Source
 ~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
+
    # Install SGLang
    git clone https://github.com/sgl-project/sglang.git
    cd sglang
@@ -54,6 +56,7 @@ Install from Source
    cd vllm
    git checkout v0.8.5          # pick the tag you need
    pip install -e .
+
 .. note::
 
    Building from source can be time-consuming and heavy on disk space;
