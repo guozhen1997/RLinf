@@ -21,6 +21,8 @@ import torch
 from omegaconf import OmegaConf
 from robotwin.envs.vector_env import VectorEnv
 
+from .utils import put_info_on_image, save_rollout_video, tile_images
+
 __all__ = ["RoboTwinEnv"]
 
 
@@ -60,9 +62,10 @@ class RoboTwinEnv(gym.Env):
     def _init_env(self):
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
-
         num_groups = self.num_envs // self.group_size
-        assert self.num_envs % self.group_size == 0, f"num_envs ({self.num_envs}) must be divisible by group_size ({self.group_size})"
+        assert self.num_envs % self.group_size == 0, (
+            f"num_envs ({self.num_envs}) must be divisible by group_size ({self.group_size})"
+        )
 
         group_seeds = torch.randint(0, 30, (num_groups,))
         env_seeds = group_seeds.repeat_interleave(self.group_size).tolist()
