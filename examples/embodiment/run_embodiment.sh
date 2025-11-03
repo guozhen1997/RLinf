@@ -13,8 +13,6 @@ export LIBERO_REPO_PATH="/opt/libero"
 export ROBOTWIN_PATH="/opt/RLinf_RoboTwin"
 export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
-export ASSETS_PATH="/mnt/public/guozhen/test_robotwin/robotwin_assets"
-
 # Base path to the BEHAVIOR dataset, which is the BEHAVIOR-1k repo's dataset folder
 # Only required when running the behavior experiment.
 export OMNIGIBSON_DATA_PATH=$OMNIGIBSON_DATA_PATH

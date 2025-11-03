@@ -30,7 +30,7 @@ runner:
 
   only_eval: False
   val_check_interval: -1
-  save_interval: 40
+  save_interval: 100
   seq_length: 4096
   max_prompt_length: 50
 
@@ -41,10 +41,10 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  n_chunk_steps: 10
+  n_chunk_steps: 20 # 10
   n_eval_chunk_steps: 10
   num_group_envs: 8
-  rollout_epoch: 1
+  rollout_epoch: 16 # 1
   reward_type: chunk_level
   logprob_type: token_level
   entropy_type: token_level
@@ -109,8 +109,8 @@ actor:
   training_backend: "fsdp"
   checkpoint_load_path: "/mnt/public/xusi/ckpt/downloaded_tokenizer/openvla-oft_ckpt/Optional--100000_chkpt"
   checkpoint_save_path: "../results"
-  micro_batch_size: 1
-  global_batch_size: 40
+  micro_batch_size: 4 # 1
+  global_batch_size: 640 # 0
   seed: 1234
   enable_offload: True
 
@@ -120,7 +120,7 @@ actor:
     action_dim: 14
     num_action_chunks: 8
     use_proprio: False
-    unnorm_key: bridge_orig
+    unnorm_key: aloha_place_shoe
     center_crop: True
 
     precision: "bf16"

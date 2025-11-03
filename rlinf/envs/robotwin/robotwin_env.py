@@ -19,7 +19,6 @@ import gymnasium as gym
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from robotwin.envs.vector_env import VectorEnv
 import torch.multiprocessing as mp
 
 from .utils import put_info_on_image, save_rollout_video, tile_images
@@ -62,7 +61,7 @@ class RoboTwinEnv(gym.Env):
 
     def _init_env(self):
         mp.set_start_method("spawn", force=True)
-        # os.environ["ASSETS_PATH"] = self.cfg.assets_path
+        os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
         num_groups = self.num_envs // self.group_size
         assert self.num_envs % self.group_size == 0, (
@@ -71,6 +70,8 @@ class RoboTwinEnv(gym.Env):
 
         group_seeds = torch.randint(0, 30, (num_groups,))
         env_seeds = group_seeds.repeat_interleave(self.group_size).tolist()
+
+        from robotwin.envs.vector_env import VectorEnv
 
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
