@@ -13,12 +13,11 @@
 # limitations under the License.
 
 import os
-from typing import ContextManager, Dict, Union
+from typing import ContextManager, Union
 
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
-from packaging import version
 from torch.amp.grad_scaler import GradScaler
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
@@ -26,23 +25,16 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Se
 
 from rlinf.config import torch_dtype_from_precision
 from rlinf.data.tokenizers import hf_tokenizer
-from rlinf.hybrid_engines.fsdp import FSDP, FSDPModule
+from rlinf.hybrid_engines.fsdp import (
+    FSDP,
+    FSDPModule,
+)
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     create_device_mesh,
     get_lr_scheduler,
 )
 from rlinf.utils.logging import get_logger
-
-if version.parse(torch.__version__) >= version.parse("2.6"):
-    from torch.distributed.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy
-elif version.parse(torch.__version__) >= version.parse("2.4"):
-    from torch.distributed._composable.fsdp import (
-        CPUOffloadPolicy,
-        MixedPrecisionPolicy,
-    )
-else:
-    MixedPrecisionPolicy, CPUOffloadPolicy = None, None
 
 
 class FSDPModelManager:
@@ -252,7 +244,7 @@ class FSDPModelManager:
             self._cfg.fsdp_config.amp.use_grad_scaler
         )
 
-    def get_rng_state(self) -> Dict:
+    def get_rng_state(self) -> dict:
         """
         Get rng state.
 
@@ -261,7 +253,7 @@ class FSDPModelManager:
         """
         return self._strategy.save_rng_state()
 
-    def load_rng_state(self, rng_state: Dict) -> None:
+    def load_rng_state(self, rng_state: dict) -> None:
         """
         Load rng state.
 
@@ -270,7 +262,7 @@ class FSDPModelManager:
         """
         self._strategy.load_rng_state(rng_state)
 
-    def get_model_state_dict(self) -> Dict:
+    def get_model_state_dict(self) -> dict:
         """
         Get full model state dict.
         """

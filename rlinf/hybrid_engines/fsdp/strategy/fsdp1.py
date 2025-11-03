@@ -14,7 +14,7 @@
 
 import os
 from contextlib import nullcontext
-from typing import ContextManager, Dict, Union
+from typing import ContextManager, Union
 
 import torch
 import torch.nn as nn
@@ -178,7 +178,7 @@ class FSDP1Strategy(FSDPStrategyBase):
         lr_scheduler.load_state_dict(extra["lr_scheduler"])
         torch.distributed.barrier()
 
-    def get_model_state_dict(self, model: FSDP) -> Dict:
+    def get_model_state_dict(self, model: FSDP) -> dict:
         """
         Get the full state dict of the FSDP wrapped model.
 
@@ -194,7 +194,7 @@ class FSDP1Strategy(FSDPStrategyBase):
             state_dict = model.state_dict()
         return state_dict
 
-    def get_optimizer_state_dict(self, model: FSDP, optimizer: Optimizer) -> Dict:
+    def get_optimizer_state_dict(self, model: FSDP, optimizer: Optimizer) -> dict:
         """
         Get the full state dict of the optimizer.
 

@@ -27,16 +27,16 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
 )
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import (
-    CPUOffloadPolicy,
-    MixedPrecisionPolicy,
-    OffloadPolicy,
-)
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
 from rlinf.config import torch_dtype_from_precision
-from rlinf.hybrid_engines.fsdp import FSDPModule
+from rlinf.hybrid_engines.fsdp import (
+    CPUOffloadPolicy,
+    FSDPModule,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     apply_fsdp2_to_model,

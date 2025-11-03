@@ -606,8 +606,8 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
     def _process_received_rollout_batch(
-        self, rollout_batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+        self, rollout_batch: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """
         original shape: [rollout_epoch x n_chunk_steps, bsz, num_action_chunks, ...]
         target shape: [n_chunk_steps, rollout_epoch x bsz, num_action_chunks, ...]

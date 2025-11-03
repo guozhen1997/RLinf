@@ -27,11 +27,10 @@
 # limitations under the License.
 
 import functools
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 import torch
 from accelerate import init_empty_weights
-from packaging import version
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp.wrap import (
     _module_wrap_policy,
@@ -40,29 +39,14 @@ from torch.distributed.fsdp.wrap import (
 from torch.optim import Optimizer
 from transformers.trainer_pt_utils import get_module_class_from_name
 
-try:
-    from torch.distributed.tensor import DTensor
-except ImportError:
-    from torch.distributed._tensor import DTensor
-
-if version.parse(torch.__version__) >= version.parse("2.6"):
-    from torch.distributed.fsdp import (
-        BackwardPrefetch,
-        CPUOffloadPolicy,
-        MixedPrecisionPolicy,
-        ShardingStrategy,
-        fully_shard,
-    )
-elif version.parse(torch.__version__) >= version.parse("2.4"):
-    from torch.distributed._composable.fsdp import (
-        BackwardPrefetch,
-        CPUOffloadPolicy,
-        MixedPrecisionPolicy,
-        ShardingStrategy,
-        fully_shard,
-    )
-else:
-    raise ImportError(f"Unsupport torch version: {version.parse(torch.__version__)}")
+from rlinf.hybrid_engines.fsdp import (
+    BackwardPrefetch,
+    CPUOffloadPolicy,
+    DTensor,
+    MixedPrecisionPolicy,
+    ShardingStrategy,
+    fully_shard,
+)
 
 
 def create_device_mesh(world_size, fsdp_size):
@@ -219,7 +203,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, is_vla_model=False)
 
 def apply_fsdp2_to_model(
     module,
-    config: Dict,
+    config: dict,
     device_mesh: DeviceMesh,
     mp_policy: MixedPrecisionPolicy,
     offload_policy: CPUOffloadPolicy,

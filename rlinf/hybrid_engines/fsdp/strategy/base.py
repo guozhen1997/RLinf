@@ -14,7 +14,7 @@
 
 import random
 from abc import ABC, abstractmethod
-from typing import ContextManager, Dict, Optional, Union
+from typing import ContextManager, Optional, Union
 
 import numpy as np
 import torch
@@ -106,7 +106,7 @@ class FSDPStrategyBase(ABC):
                 f"Unknown FSDP strategy '{strategy}'. Expected one of: 'fsdp', 'fsdp1', 'fsdp2'."
             )
 
-    def load_rng_state(self, rng_state: Dict) -> None:
+    def load_rng_state(self, rng_state: dict) -> None:
         """
         Load the RNG state from the provided state dictionary.
 
@@ -124,7 +124,7 @@ class FSDPStrategyBase(ABC):
         if torch.cuda.is_available() and "cuda" in rng_state:
             torch.cuda.set_rng_state(rng_state["cuda"])
 
-    def save_rng_state(self) -> Dict:
+    def save_rng_state(self) -> dict:
         """
         Save the current RNG state into a dictionary.
 

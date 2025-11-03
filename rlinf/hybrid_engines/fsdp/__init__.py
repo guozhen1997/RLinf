@@ -22,11 +22,26 @@ except ImportError:
     from torch.distributed._tensor import DTensor  # noqa: F401
 
 if version.parse(torch.__version__) >= version.parse("2.6.0"):
-    from torch.distributed.fsdp import FSDPModule
+    from torch.distributed.fsdp import (
+        BackwardPrefetch,
+        CPUOffloadPolicy,
+        FSDPModule,
+        MixedPrecisionPolicy,
+        OffloadPolicy,
+        ShardingStrategy,
+        fully_shard,
+    )
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 elif version.parse(torch.__version__) >= version.parse("2.4.0"):
-    from torch.distributed.fsdp import FSDPModule  # noqa: F401
+    from torch.distributed._composable.fsdp import (  # noqa: F401
+        CPUOffloadPolicy,
+        FSDPModule,
+        MixedPrecisionPolicy,
+        OffloadPolicy,
+        fully_shard,
+    )
+    from torch.distributed.fsdp import BackwardPrefetch, ShardingStrategy  # noqa: F401
     from torch.distributed.fsdp.fully_sharded_data_parallel import (
         FullyShardedDataParallel as FSDP,  # noqa: F401
     )
