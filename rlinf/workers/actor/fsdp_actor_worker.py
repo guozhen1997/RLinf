@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gc
 import os
 
 import numpy as np
@@ -564,22 +563,21 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         return super().model_provider_func()
 
     def sync_model_to_rollout(self):
+        if self.cfg.actor.get("enable_offload", False):
+            self.offload_optimizer()
+
         if next(self.model.parameters()).is_cpu:
-            self.load_param_and_grad(self.device)
-            self.load_optimizer(self.device)
+            if self.cfg.actor.get("enable_offload", False):
+                self.load_param_and_grad(self.device)
 
         state_dict = self.get_model_state_dict()
         if self._weight_dst_rank_in_rollout is not None:
             self.send(
                 state_dict, self._rollout_group_name, self._weight_dst_rank_in_rollout
             )
+
         if self.cfg.actor.get("enable_offload", False):
             self.offload_param_and_grad()
-            self.offload_optimizer()
-            torch.cuda.synchronize()
-            del state_dict
-            gc.collect()
-            torch.cuda.empty_cache()
 
     async def recv_rollout_batch(self) -> None:
         """
@@ -892,11 +890,12 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     "actor/grad_norm": grad_norm,
                     "actor/lr": lr_list[0],
                 }
-                if self.cfg.algorithm.adv_type == "embodied_gae":
+                if self.cfg.algorithm.adv_type == "gae":
                     data["critic/lr"] = lr_list[1]
                 append_to_dict(metrics, data)
         # put LR scheduler step here
         self.lr_scheduler.step()
+        self.optimizer.zero_grad()
         mean_metric_dict = {key: np.mean(value) for key, value in metrics.items()}
         mean_metric_dict = all_reduce_dict(
             mean_metric_dict, op=torch.distributed.ReduceOp.AVG

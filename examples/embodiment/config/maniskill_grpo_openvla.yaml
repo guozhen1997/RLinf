@@ -100,6 +100,7 @@ rollout:
   mode: "colocate"
   generation_backend: "huggingface"
   model_dir: "/path/to/model/rl4vla/openvla-7b-rlvla-warmup/"
+  precision: ${actor.model.precision}
   enable_offload: True
   pipeline_stage_num: 2
 

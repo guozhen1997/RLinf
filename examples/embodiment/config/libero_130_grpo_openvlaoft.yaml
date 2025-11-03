@@ -101,7 +101,7 @@ rollout:
   mode: "colocate"
   generation_backend: "huggingface"
   model_dir: "/path/to/model/RLinf-OpenVLAOFT-LIBERO-130-Base-Lora/"
-
+  precision: ${actor.model.precision}
   enable_offload: False
   pipeline_stage_num: 1
 

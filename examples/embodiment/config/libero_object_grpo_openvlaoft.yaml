@@ -101,6 +101,7 @@ rollout:
   mode: "colocate"
   generation_backend: "huggingface"
   model_dir: "/path/to/model/Openvla-oft-SFT-libero-object-traj1/"
+  precision: ${actor.model.precision}
   enable_offload: False
   pipeline_stage_num: 1
 

@@ -98,6 +98,7 @@ rollout:
   mode: "colocate"
   backend: "huggingface"
   model_dir: "/workspace/dataset/openvla-7b"
+  precision: ${actor.model.precision}
   recompute_logprobs: False
   gpu_memory_utilization: 0.5
   enforce_eager: True

@@ -101,6 +101,7 @@ rollout:
   mode: "colocate"
   generation_backend: "huggingface"
   model_dir: "/path/to/model/openpi"
+  precision: ${actor.model.precision}
   recompute_logprobs: False
   unnorm_key: libero_10
   enable_offload: False
