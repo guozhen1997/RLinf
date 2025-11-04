@@ -345,7 +345,6 @@ class FSDPModelManager:
             )
         else:
             self.grad_scaler.step(optimizer=self.optimizer)
-            self.lr_scheduler.step()
 
         self.grad_scaler.update()
 

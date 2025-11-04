@@ -156,7 +156,7 @@ actor:
   seed: 1234
 
   model:
-    precision: bf16
+    precision: fp32
     is_lora: False
 
     seq_length: ${runner.seq_length}
