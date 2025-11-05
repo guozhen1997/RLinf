@@ -165,7 +165,13 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
             num_action_chunks=cfg.num_action_chunks,
             trust_remote_code=True,
             add_value_head=cfg.add_value_head,
+            proprio_dim=cfg.proprio_dim,
+            use_proprio=cfg.use_proprio,
         )
+
+        if cfg.use_proprio:
+            # Load proprio projector weights if available
+            model.load_proprio_projector_weights(model_path)
 
         # oft add
         model.vision_backbone.set_num_images_in_input(cfg.get("num_images_in_input", 1))

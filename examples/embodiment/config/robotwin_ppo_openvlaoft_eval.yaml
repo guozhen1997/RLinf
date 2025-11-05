@@ -13,9 +13,8 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 0-7
-    env: 0-3
-    rollout: 4-7
+    env: 0
+    rollout: 1
 
 runner:
   task_type: embodied
@@ -28,7 +27,7 @@ runner:
   max_epochs: 1000
   max_steps: -1
 
-  only_eval: False
+  only_eval: True
   val_check_interval: -1
   save_interval: 100
   seq_length: 4096
@@ -43,7 +42,7 @@ algorithm:
   group_size: 1
   n_chunk_steps: 10 # 20
   n_eval_chunk_steps: 10
-  num_group_envs: 8
+  num_group_envs: 1
   rollout_epoch: 1 # 16
   reward_type: chunk_level
   logprob_type: token_level
@@ -68,7 +67,7 @@ algorithm:
   sampling_params:
     use_greedy: False
     temperature_train: 1.6
-    temperature_eval: 0.6
+    temperature_eval: 1.6
     top_k: 50
     top_p: 1.0
     repetition_penalty: 1.0
@@ -97,7 +96,7 @@ rollout:
   mode: "colocate"
   backend: "huggingface"
   model_dir: "/mnt/public/guozhen/test_robotwin/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
-  enable_offload: True
+  enable_offload: False
   pipeline_stage_num: 1
 
 actor:
@@ -109,8 +108,8 @@ actor:
   training_backend: "fsdp"
   checkpoint_load_path: "/mnt/public/guozhen/test_robotwin/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
   checkpoint_save_path: "../results"
-  micro_batch_size: 2 # 1
-  global_batch_size: 800 # 640
+  micro_batch_size: 1 # 1
+  global_batch_size: 40 # 640
   seed: 1234
   enable_offload: True
 
@@ -145,12 +144,12 @@ actor:
     gradient_checkpointing: True
 
   optim:
-    lr: 5.0e-6
-    value_lr: 5.0e-5
+    lr: 1.0e-4
+    value_lr: 3.0e-3
     adam_beta1: 0.9
     adam_beta2: 0.999
     adam_eps: 1.0e-05
-    clip_grad: 1.0
+    clip_grad: 10.0
 
   tokenizer:
     tokenizer_type: "HuggingFaceTokenizer"

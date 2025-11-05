@@ -34,6 +34,7 @@ def create_test_config():
             "assets_path": "/mnt/public/guozhen/test_robotwin/robotwin_assets",
             "auto_reset": True,
             "use_rel_reward": True,
+            "use_custom_reward": False,
             "ignore_terminations": False,
             "num_group": 1,
             "group_size": 1,
@@ -41,8 +42,8 @@ def create_test_config():
             "num_envs": 2,
             "max_step": 30,
             "video_cfg": {
-                "save_video": False,
-                "info_on_video": False,
+                "save_video": True,
+                "info_on_video": True,
                 "video_base_dir": "./videos",
             },
             "task_config": {
@@ -119,8 +120,10 @@ def test_robotwin_env():
         obs, reward, terminated, truncated, info = env.step(actions)
         print(
             f"  Step {step}: reward={reward}, "
-            f"terminated={terminated}, truncated={truncated}, info={info}"
+            f"terminated={terminated}, truncated={truncated}, info={info}, {obs['states']=}"
         )
+    
+    env.flush_video()
 
     # Test chunk_step
     print("Testing chunk_step...")
