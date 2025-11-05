@@ -17,6 +17,7 @@ from typing import Any, Optional
 import numpy as np
 import torch
 import torch.nn.functional as F
+from prismatic.models.projectors import ProprioProjector
 from prismatic.extern.hf.configuration_prismatic import (
     OpenVLAConfig as OpenVLAOFTConfig,
 )
@@ -33,18 +34,52 @@ from transformers.generation import TopKLogitsWarper
 from rlinf.models.embodiment.model_utils import (
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
+    find_checkpoint_file,
+    load_component_state_dict,
 )
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
 
+
+# ================ Robotwin-specific functions ================
+
+def normalize_proprio(proprio, norm_stats):
+    """Normalize proprioception data for Robotwin."""
+    if ACTION_PROPRIO_NORMALIZATION_TYPE == "bounds":
+        mask = norm_stats.get("mask", np.ones_like(norm_stats["min"], dtype=bool))
+        proprio_high, proprio_low = np.array(norm_stats["max"]), np.array(norm_stats["min"])
+    elif ACTION_PROPRIO_NORMALIZATION_TYPE == "bounds_q99":
+        mask = norm_stats.get("mask", np.ones_like(norm_stats["q01"], dtype=bool))
+        proprio_high, proprio_low = np.array(norm_stats["q99"]), np.array(norm_stats["q01"])
+    else:
+        raise ValueError("Unsupported action/proprio normalization type detected!")
+    
+    normalized_proprio = np.clip(
+        np.where(
+            mask,
+            2 * (proprio - proprio_low) / (proprio_high - proprio_low + 1e-8) - 1,
+            proprio,
+        ),
+        a_min=-1.0,
+        a_max=1.0,
+    )
+    return normalized_proprio
+
 class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
     def __init__(
-        self, config: OpenVLAOFTConfig, action_dim, num_action_chunks, add_value_head
+        self, config: OpenVLAOFTConfig, action_dim, num_action_chunks, add_value_head, proprio_dim, use_proprio=False,
     ) -> None:
         super().__init__(config)
 
         self.action_dim = action_dim
         self.num_action_chunks = num_action_chunks
+        self.use_proprio = use_proprio
+        self.proprio_projector = None
+        if self.use_proprio:
+            self.proprio_projector = ProprioProjector(
+                llm_dim=config.text_config.hidden_size,
+                proprio_dim=proprio_dim
+            )
 
         self.unnorm_key = config.unnorm_key
         if (
@@ -69,7 +104,21 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                 bias_last=False,
             )
 
-    def _build_embedding(self, input_ids, attention_mask, pixel_values):
+    def load_proprio_projector_weights(self, checkpoint_path_or_repo_id: str):
+        """
+        Load pre-trained weights for the proprio projector.
+        
+        Args:
+            checkpoint_path_or_repo_id: Either a local path to checkpoint file or HF Hub repo ID
+        """
+        if self.proprio_projector is None:
+            raise ValueError("Model was not initialized with use_proprio=True")
+
+        checkpoint_path = find_checkpoint_file(checkpoint_path_or_repo_id, "proprio_projector")
+        state_dict = load_component_state_dict(checkpoint_path)
+        self.proprio_projector.load_state_dict(state_dict)
+
+    def _build_embedding(self, input_ids, attention_mask, pixel_values, proprio=None):
         assert torch.all(input_ids[:, -1] == STOP_INDEX)
         assert input_ids.shape[0] == attention_mask.shape[0]
         assert input_ids.shape[1] == attention_mask.shape[1]
@@ -95,6 +144,15 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         projected_patch_embeddings = self._process_vision_features(
             pixel_values, None, use_film=False
         )
+        # Add proprioceptive features if provided
+        use_proprio = self.proprio_projector is not None and proprio is not None
+        if use_proprio:
+            proprio = torch.Tensor(proprio).to(projected_patch_embeddings.device, dtype=projected_patch_embeddings.dtype)
+            projected_patch_embeddings = self._process_proprio_features(
+                projected_patch_embeddings, proprio, self.proprio_projector
+            )
+            n_patch_tokens += 1
+
         # [B, 256 * num_images, D]
         assert projected_patch_embeddings.shape[1] == n_patch_tokens
 
@@ -200,6 +258,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         input_ids: torch.LongTensor = None,
         attention_mask: torch.Tensor = None,
         pixel_values: torch.FloatTensor = None,
+        proprio: torch.FloatTensor = None,
         env_obs=None,
         calulate_logprobs=True,
         calulate_values=True,
@@ -232,7 +291,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             inputs = self.input_processor(
                 text=task_descriptions,
                 images=images,
-                proprio_states=env_obs["states"],
+                proprio_states=None,
                 padding="max_length",
                 max_length=max_length,
             )
@@ -242,7 +301,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                     self.input_processor(
                         text=task_descriptions,
                         images={"images": wrist_image.unsqueeze(1)},
-                        proprio_states=env_obs["states"],
+                        proprio_states=None,
                         padding="max_length",
                         max_length=max_length,
                     )
@@ -267,10 +326,20 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             B, N, C, H, W = pixel_values.shape
             pixel_values = pixel_values.reshape(B, N * C, H, W)
 
+            # Process proprioception for Robotwin
+            if self.use_proprio:
+                batch_proprio = []
+                for state in env_obs["states"]:
+                    proprio_norm_stats = self.norm_stats[self.unnorm_key]["proprio"]
+                    norm_proprio = normalize_proprio(state, proprio_norm_stats)
+                    batch_proprio.append(torch.from_numpy(norm_proprio))
+                proprio = torch.stack(batch_proprio, dim=0).to(device)
+
         forward_inputs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "pixel_values": pixel_values,
+            "proprio": proprio,
         }
 
         # assert first token is 1
@@ -286,6 +355,9 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             self.vision_backbone.get_num_patches()
             * self.vision_backbone.get_num_images_in_input()
         )
+        use_proprio = self.proprio_projector is not None and proprio is not None
+        if use_proprio:
+            n_patches += 1
 
         # llm inputs
         input_ids, attention_mask = self._prepare_input_for_action_prediction(
@@ -298,7 +370,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
         # multimodal
         mm_embeddings, mm_attention_mask = self._build_embedding(
-            input_ids, attention_mask, pixel_values
+            input_ids, attention_mask, pixel_values, proprio=proprio
         )
         multimodal_position_ids = mm_attention_mask.cumsum(dim=1) - 1
 
@@ -447,6 +519,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         input_ids: torch.LongTensor = None,
         attention_mask: torch.Tensor = None,
         pixel_values: torch.FloatTensor = None,
+        proprio: torch.FloatTensor = None,
         output_hidden_states: bool = False,
         data: Optional[dict[str, torch.Tensor]] = None,
         compute_logprobs: bool = False,
@@ -460,7 +533,11 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             attention_mask = data["attention_mask"]
             pixel_values = data["pixel_values"]
 
+            proprio = data["proprio"]
+
             action_tokens = data["action_tokens"]
+
+        n_prompt_tokens = input_ids.shape[-1] - 1
 
         assert torch.all(input_ids[:, 0] == 1)
         assert torch.all(attention_mask[:, 0] == 1)
@@ -480,10 +557,19 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         assert torch.all(
             attention_mask[:, -2 - self.action_dim * self.num_action_chunks :] == 1
         )  # [B, L + act + 1]
+        
+        # Calculate number of patches (including proprio token and/or diffusion timestep embedding if present)
+        n_patches = (
+            self.vision_backbone.get_num_patches()
+            * self.vision_backbone.get_num_images_in_input()
+        )
+        use_proprio = self.proprio_projector is not None and proprio is not None
+        if use_proprio:
+            n_patches += 1
 
         # multimodal
         mm_embeddings, mm_attention_mask = self._build_embedding(
-            input_ids, attention_mask, pixel_values
+            input_ids, attention_mask, pixel_values, proprio=proprio
         )
         multimodal_position_ids = mm_attention_mask.cumsum(dim=1) - 1
 
@@ -509,8 +595,12 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
         if compute_logprobs:
             logits = outputs.logits[
-                :, -self.action_dim * self.num_action_chunks - 1 : -1
-            ]  # [B, action-dim, vocab-size]
+                :,
+                n_patches + n_prompt_tokens : n_patches
+                + n_prompt_tokens
+                + self.action_dim * self.num_action_chunks,
+                :,
+            ]  # [B, act, vocab_size + 64]
 
             processed_logits_tensor = logits / data["temperature"]
             top_k = min(data["top_k"], processed_logits_tensor.size(-1))  # Safety check

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import os
 import torch
 import torch.nn.functional as F
 
@@ -37,3 +38,55 @@ def compute_entropy_from_logits(logits, epsilon=1e-10):
     all_log_probs = torch.log(all_probs + epsilon)
     entropy = -torch.sum(all_probs * all_log_probs, dim=1)  # [B, seq-len]
     return entropy
+
+
+def find_checkpoint_file(pretrained_checkpoint, file_pattern) :
+    """
+    Find a specific checkpoint file matching a pattern.
+
+    Args:
+        pretrained_checkpoint: Path to the checkpoint directory
+        file_pattern: String pattern to match in filenames
+
+    Returns:
+        str: Path to the matching checkpoint file
+
+    Raises:
+        AssertionError: If no files or multiple files match the pattern
+    """
+    assert os.path.isdir(pretrained_checkpoint), f"Checkpoint path must be a directory: {pretrained_checkpoint}"
+
+    checkpoint_files = []
+    for filename in os.listdir(pretrained_checkpoint):
+        if file_pattern in filename and "checkpoint" in filename:
+            full_path = os.path.join(pretrained_checkpoint, filename)
+            checkpoint_files.append(full_path)
+
+    assert len(checkpoint_files) == 1, (
+        f"Expected exactly 1 {file_pattern} checkpoint but found {len(checkpoint_files)} in directory: {pretrained_checkpoint}"
+    )
+
+    return checkpoint_files[0]
+
+
+def load_component_state_dict(checkpoint_path) :
+    """
+    Load a component's state dict from checkpoint and handle DDP prefix if present.
+
+    Args:
+        checkpoint_path: Path to the checkpoint file
+
+    Returns:
+        Dict: The processed state dictionary for loading
+    """
+    state_dict = torch.load(checkpoint_path, weights_only=True)
+
+    # If the component was trained with DDP, elements in the state dict have prefix "module." which we must remove
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith("module."):
+            new_state_dict[k[7:]] = v
+        else:
+            new_state_dict[k] = v
+
+    return new_state_dict
