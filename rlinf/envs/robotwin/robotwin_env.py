@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import json
 from typing import Dict, List, Optional, Tuple, Union
 
 import gymnasium as gym
@@ -52,6 +53,8 @@ class RoboTwinEnv(gym.Env):
         self.num_envs = cfg.num_envs
 
         self._init_env()
+        self.trial_ids = self._get_trial_ids_from_files()
+        self.update_reset_state_ids()
 
         self.prev_step_reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         if self.record_metrics:
@@ -64,35 +67,9 @@ class RoboTwinEnv(gym.Env):
         mp.set_start_method("spawn", force=True)
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
-        num_groups = self.num_envs // self.group_size
-        assert self.num_envs % self.group_size == 0, (
-            f"num_envs ({self.num_envs}) must be divisible by group_size ({self.group_size})"
-        )
-
-        group_seeds = torch.randint(0, 30, (num_groups,))
-        env_seeds = group_seeds.repeat_interleave(self.group_size).tolist()
-
         from robotwin.envs.vector_env import VectorEnv
-        success_seeds = [
-            100000,
-            100004,
-            100006,
-            100007,
-            100011,
-            100012,
-            100014,
-            100017,
-            100022,
-            100027,
-            100030,
-            100034,
-            100036,
-            100040,
-            100041,
-            100043,
-        ]
         # success_seeds_eval = [100100000]
-        env_seeds = success_seeds[self.seed_offset * self.num_envs : (self.seed_offset + 1) * self.num_envs]
+        env_seeds = self.reset_state_ids
 
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
@@ -101,6 +78,17 @@ class RoboTwinEnv(gym.Env):
             env_seeds=env_seeds,
             num_images=self.cfg.num_images,
         )
+
+    def _get_trial_ids_from_files(self):
+        trial_ids = []
+
+        with open(self.cfg.seeds_path, "r") as f:
+            data = json.load(f)
+
+        if self.task_name in data and isinstance(data[self.task_name], dict):
+            trial_ids = data[self.task_name].get("success_seeds")
+
+        return np.array(trial_ids, dtype=np.int64)
 
     @property
     def device(self):
@@ -227,11 +215,12 @@ class RoboTwinEnv(gym.Env):
         options: Optional[dict] = {},
     ):
         if self._is_start:
-            raw_obs, _, _, _, infos = self.venv.init_process()
+            raw_obs, _, _, _, infos = self.venv.init_process(env_seeds=self.reset_state_ids)
             extracted_obs = self._extract_obs_image(raw_obs, infos)
             self._is_start = False
         else:
-            raw_obs, _, _, _, infos = self.venv.reset(env_idx=env_idx)
+            env_seeds = self._get_reset_state_ids(env_idx)
+            raw_obs, _, _, _, infos = self.venv.reset(env_idx=env_idx, env_seeds=env_seeds)
             self._reset_metrics(env_idx)
 
             extracted_obs = self._extract_obs_image(raw_obs, infos)
@@ -410,4 +399,17 @@ class RoboTwinEnv(gym.Env):
         self.render_images.append(full_image)
 
     def update_reset_state_ids(self):
-        pass
+
+        reset_state_ids = np.random.choice(self.trial_ids, size=self.num_group, replace=False)
+        self.reset_state_ids = reset_state_ids.repeat(self.group_size).tolist()
+
+    def _get_reset_state_ids(self, env_idx):
+
+        if env_idx is None:
+            return self.reset_state_ids
+
+        reset_state_ids = self.reset_state_ids.copy()
+        for env_id in env_idx:
+            reset_state_ids[env_id] = np.random.choice(self.trial_ids, size=1, replace=False)
+        self.reset_state_ids = reset_state_ids
+        return reset_state_ids.tolist()

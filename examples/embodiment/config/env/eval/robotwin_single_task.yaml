@@ -18,6 +18,7 @@ video_cfg:
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 num_images: 2
 
+seeds_path: ${EMBODIED_PATH}/config/env/robotwin2_eval_seeds.json
 assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
 
 task_config:
