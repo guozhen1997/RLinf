@@ -189,7 +189,7 @@ RUN uv venv openvla-oft --python=${PYTHON_VERSION}
 RUN source switch_env openvla-oft && UV_TORCH_BACKEND=auto uv sync --active
 RUN source switch_env openvla-oft && uv sync --extra embodied --active
 RUN source switch_env openvla-oft && cd /opt/BEHAVIOR-1K && UV_LINK_MODE=hardlink ./setup.sh --omnigibson --bddl --joylo --confirm-no-conda --accept-nvidia-eula --use-uv && cd -
-RUN source switch_env openvla-oft && uv pip install git+https://github.com/moojink/openvla-oft.git --no-build-isolation
+RUN source switch_env openvla-oft && uv pip install git+https://github.com/RLinf/openvla-oft.git@RLinf/v0.1 --no-build-isolation
 RUN source switch_env openvla-oft && uv pip install $FLASH_ATTENTION_WHEEL --no-build-isolation
 RUN source switch_env openvla-oft && uv pip install ml_dtypes==0.5.3 protobuf==3.20.3
 RUN source switch_env openvla-oft && cd && uv pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 && cd -

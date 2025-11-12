@@ -52,9 +52,11 @@ class RoboTwinEnv(gym.Env):
         self.task_name = cfg.task_config.task_name
         self.num_envs = cfg.num_envs
 
-        self._init_env()
         self.trial_ids = self._get_trial_ids_from_files()
         self.update_reset_state_ids()
+
+        self._init_env()
+        
 
         self.prev_step_reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         if self.record_metrics:
@@ -68,7 +70,7 @@ class RoboTwinEnv(gym.Env):
         os.environ["ASSETS_PATH"] = self.cfg.assets_path
 
         from robotwin.envs.vector_env import VectorEnv
-        # success_seeds_eval = [100100000]
+
         env_seeds = self.reset_state_ids
 
         self.venv = VectorEnv(
@@ -173,15 +175,16 @@ class RoboTwinEnv(gym.Env):
             states.append(obs["state"])
 
         images = torch.stack([torch.from_numpy(img) for img in images])
-        images = images.permute(0, 3, 1, 2).unsqueeze(
-            1
-        ) / 255.0  # [B, H, W, C] -> [B, 1, C, H, W]
+        # TODO: fix processor
+        # images = images.permute(0, 3, 1, 2).unsqueeze(
+        #     1
+        # ) / 255.0  # [B, H, W, C] -> [B, 1, C, H, W]
 
         if len(wrist_images) > 0:
             wrist_images = torch.stack([torch.from_numpy(img) for img in wrist_images])
-            wrist_images = wrist_images.permute(
-                0, 1, 4, 2, 3
-            ) / 255.0  # [B, N_IMG, H, W, C] -> [B, N_IMG, C, H, W]
+            # wrist_images = wrist_images.permute(
+            #     0, 1, 4, 2, 3
+            # ) / 255.0  # [B, N_IMG, H, W, C] -> [B, N_IMG, C, H, W]
         else:
             wrist_images = None
         states = torch.stack([torch.from_numpy(state) for state in states])
@@ -215,7 +218,8 @@ class RoboTwinEnv(gym.Env):
         options: Optional[dict] = {},
     ):
         if self._is_start:
-            raw_obs, _, _, _, infos = self.venv.init_process(env_seeds=self.reset_state_ids)
+            env_seeds = self.reset_state_ids
+            raw_obs, _, _, _, infos = self.venv.init_process(env_seeds=env_seeds)
             extracted_obs = self._extract_obs_image(raw_obs, infos)
             self._is_start = False
         else:
@@ -255,7 +259,7 @@ class RoboTwinEnv(gym.Env):
             actions = actions[:, None, :]
 
         self._elapsed_steps += 1
-        raw_obs, step_reward, truncations, terminations, infos = self.venv.step(actions)
+        raw_obs, step_reward, terminations, truncations, infos = self.venv.step(actions)
         extracted_obs = self._extract_obs_image(raw_obs, infos)
 
         if self.use_custom_reward:
@@ -412,4 +416,4 @@ class RoboTwinEnv(gym.Env):
         for env_id in env_idx:
             reset_state_ids[env_id] = np.random.choice(self.trial_ids, size=1, replace=False)
         self.reset_state_ids = reset_state_ids
-        return reset_state_ids.tolist()
+        return reset_state_ids

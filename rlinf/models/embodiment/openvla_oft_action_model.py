@@ -30,12 +30,16 @@ from prismatic.vla.constants import (
     NormalizationType,
 )
 from transformers.generation import TopKLogitsWarper
+from transformers import AutoProcessor
+from PIL import Image
+from torch.nn.utils.rnn import pad_sequence
 
 from rlinf.models.embodiment.model_utils import (
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
     find_checkpoint_file,
     load_component_state_dict,
+    center_crop_image
 )
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
@@ -123,8 +127,6 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         assert input_ids.shape[0] == attention_mask.shape[0]
         assert input_ids.shape[1] == attention_mask.shape[1]
 
-        input_ids = input_ids[:, :-1]
-        attention_mask = attention_mask[:, :-1]
 
         n_patch_tokens = (
             self.vision_backbone.get_num_patches()
@@ -133,7 +135,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
         # llm label & mask & embedding
         all_actions_mask = torch.zeros_like(input_ids, dtype=torch.bool)
-        all_actions_mask[:, -self.action_dim * self.num_action_chunks :] = (
+        all_actions_mask[:, -self.action_dim * self.num_action_chunks -1: -1] = (
             True  # [B, L + act + 1], [many x 0; act x 1; 0]
         )
 
@@ -267,73 +269,75 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         do_sample = kwargs.pop("do_sample")
 
         if env_obs is not None:
-            task_descriptions = [
-                f"In: What action should the robot take to {t.lower()}?\nOut: "
-                for t in env_obs["task_descriptions"]
-            ]
+            batchdata = {"input_ids": [], "attention_mask": [], "pixel_values": [], "proprio": []}
+            for i in range(len(env_obs["task_descriptions"])):
+                task_description = env_obs["task_descriptions"][i]
+                image = np.array(env_obs["images"][i])
+                
+                image = Image.fromarray(image).convert("RGB")
+                image = center_crop_image(image)
+                
+                prompt = f"In: What action should the robot take to {task_description.lower()}?\nOut:"
 
-            all_images = [env_obs["images"]]
-            if self.vision_backbone.get_num_images_in_input() > 1:
-                wrist_imgs = env_obs["wrist_images"]  # [B, N_IMG, C, H, W]
-                all_images.extend(
-                    [wrist_imgs[:, i] for i in range(wrist_imgs.shape[1])]
-                )
+                batch_feature = self.processor(prompt, image)
 
-            max_length = self.max_prompt_length
+                pixel_values_list = [batch_feature["pixel_values"]]
+                if self.vision_backbone.get_num_images_in_input() > 1:
+                    wrist_image = Image.fromarray(env_obs["wrist_images"][i]).convert("RGB")
+                    wrist_batch_feature = self.processor(prompt, wrist_image)
+                    pixel_values_list.append(wrist_batch_feature["pixel_values"])
+            
+                batch_feature["pixel_values"] = torch.cat(pixel_values_list, dim=1)
+            
+                input_ids = batch_feature["input_ids"]
+                attention_mask = batch_feature["attention_mask"]
+                pixel_values = batch_feature["pixel_values"]
+
+                if not torch.all(input_ids[:, -1] == 29871):
+                    input_ids = torch.cat(
+                        (input_ids, torch.unsqueeze(torch.Tensor([29871]).long(), dim=0).to(input_ids.device)), dim=1
+                    )
+                    attention_mask = torch.cat(
+                        (attention_mask, torch.unsqueeze(torch.Tensor([True]).bool(), dim=0).to(attention_mask.device)), dim=1
+                    )
+                batchdata["input_ids"].append(input_ids)
+                batchdata["attention_mask"].append(attention_mask)
+                batchdata["pixel_values"].append(pixel_values)
+                
+                # Process proprioception for Robotwin
+                if self.use_proprio:
+                    state = env_obs["states"][i]
+                    proprio_norm_stats = self.norm_stats[self.unnorm_key]["proprio"]
+                    norm_proprio = normalize_proprio(state, proprio_norm_stats)
+                    batchdata["proprio"].append(torch.from_numpy(norm_proprio))
+
             device = next(self.parameters()).device
             precision = next(self.parameters()).dtype
 
-            primary_image = all_images.pop(0)
-            if primary_image.ndim == 4:
-                primary_image = primary_image.unsqueeze(1)
-            assert primary_image.ndim == 5
-            images = {"images": primary_image}
-            inputs = self.input_processor(
-                text=task_descriptions,
-                images=images,
-                proprio_states=None,
-                padding="max_length",
-                max_length=max_length,
-            )
-
-            if all_images:
-                all_wrist_inputs = [
-                    self.input_processor(
-                        text=task_descriptions,
-                        images={"images": wrist_image.unsqueeze(1)},
-                        proprio_states=None,
-                        padding="max_length",
-                        max_length=max_length,
-                    )
-                    for wrist_image in all_images
-                ]
-
-                # Concatenate all images
-                primary_pixel_values = inputs["pixel_values"]
-                all_wrist_pixel_values = [
-                    wrist_inputs["pixel_values"] for wrist_inputs in all_wrist_inputs
-                ]
-                inputs["pixel_values"] = torch.cat(
-                    [primary_pixel_values] + all_wrist_pixel_values, dim=1
-                )
-
-            input_ids = inputs["input_ids"].to(device=device, dtype=torch.long)
-            attention_mask = inputs["attention_mask"].to(
-                device=device, dtype=torch.bool
-            )
-            pixel_values = inputs["pixel_values"].to(device=device, dtype=precision)
-
-            B, N, C, H, W = pixel_values.shape
-            pixel_values = pixel_values.reshape(B, N * C, H, W)
-
-            # Process proprioception for Robotwin
+            batchdata["input_ids"] = [x.transpose(0, 1) for x in batchdata["input_ids"]]
+            batchdata["attention_mask"] = [x.transpose(0, 1) for x in batchdata["attention_mask"]]
+            batchdata["input_ids"] = pad_sequence(batchdata["input_ids"], batch_first=True, padding_value=self.processor.tokenizer.pad_token_id).squeeze(-1).to(device)
+            batchdata["attention_mask"] = pad_sequence(batchdata["attention_mask"], batch_first=True, padding_value=0).squeeze(-1).to(device)
+            
+            padding_mask = batchdata["input_ids"].ne(self.processor.tokenizer.pad_token_id)
+            assert torch.all(padding_mask == batchdata["attention_mask"].ne(0))
+            padding_mask = ~padding_mask
+            padding_mask = padding_mask.int()
+            sorted_indices = torch.argsort(padding_mask, dim=1, descending=True, stable=True)
+            batchdata["input_ids"] = torch.gather(batchdata["input_ids"], 1, sorted_indices)
+            batchdata["attention_mask"] = torch.gather(batchdata["attention_mask"], 1, sorted_indices)
+            
+            batchdata["pixel_values"] = torch.cat(batchdata["pixel_values"], dim=0).to(device).to(precision)
+            
             if self.use_proprio:
-                batch_proprio = []
-                for state in env_obs["states"]:
-                    proprio_norm_stats = self.norm_stats[self.unnorm_key]["proprio"]
-                    norm_proprio = normalize_proprio(state, proprio_norm_stats)
-                    batch_proprio.append(torch.from_numpy(norm_proprio))
-                proprio = torch.stack(batch_proprio, dim=0).to(device)
+                batchdata["proprio"] = torch.stack(batchdata["proprio"], dim=0).to(device)
+                
+            assert torch.all(batchdata["attention_mask"].ne(0) == batchdata["input_ids"].ne(self.processor.tokenizer.pad_token_id))
+
+            input_ids = batchdata['input_ids']
+            attention_mask = batchdata['attention_mask']
+            pixel_values = batchdata["pixel_values"]
+            proprio = batchdata.get("proprio", None)
 
         forward_inputs = {
             "input_ids": input_ids,
@@ -372,7 +376,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         mm_embeddings, mm_attention_mask = self._build_embedding(
             input_ids, attention_mask, pixel_values, proprio=proprio
         )
-        multimodal_position_ids = mm_attention_mask.cumsum(dim=1) - 1
+        multimodal_position_ids = (mm_attention_mask.long().cumsum(-1) - 1).masked_fill(mm_attention_mask == 0, 1)
 
         # Forward pass through language model
         outputs = self.language_model(
@@ -401,7 +405,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         ]  # [B, act, vocab_size + 64]
 
         last_hidden_states = last_hidden_states[
-            :, -self.action_dim * self.num_action_chunks - 1 : -1
+            :, -self.action_dim * self.num_action_chunks - 2 : -2
         ]
 
         logits_tensor[..., : self.vocab_size - self.config.n_action_bins] = -torch.inf
@@ -448,10 +452,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         discretized_actions = np.clip(
             discretized_actions - 1, a_min=0, a_max=self.bin_centers.shape[0] - 1
         )
-        # normalized_actions = self.bin_centers[discretized_actions]
-        normalized_actions = np.asarray(
-            [self.bin_centers[da] for da in discretized_actions]
-        )  # [B, dim]
+        normalized_actions = self.bin_centers[discretized_actions] # [B, dim]
         normalized_actions = normalized_actions.reshape(-1, self.action_dim)
 
         # Unnormalize predicted actions
@@ -512,7 +513,9 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         self.policy_setup = cfg.actor.model.get("policy_setup", None)
         self.max_prompt_length = cfg.runner.max_prompt_length
 
-        self.input_processor = input_processor
+        # self.input_processor = input_processor
+        self.processor = AutoProcessor.from_pretrained(cfg.actor.checkpoint_load_path, trust_remote_code=True)
+
 
     def forward(
         self,
@@ -627,7 +630,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         if hasattr(self, "value_head") and compute_values:
             last_hidden_state = outputs.hidden_states[-1]
             hidden_features = last_hidden_state[
-                :, -self.action_dim * self.num_action_chunks - 1
+                :, -self.action_dim * self.num_action_chunks - 2
             ]  # [batch_size, hidden_dim]
             values = self.value_head(hidden_features)
         else:

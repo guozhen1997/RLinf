@@ -32,14 +32,16 @@ def create_test_config():
         {
             "seed": 42,
             "assets_path": "/mnt/public/guozhen/test_robotwin/robotwin_assets",
+            "seeds_path": "/mnt/public/guozhen/test_robotwin/RLinf/examples/embodiment/config/env/robotwin2_train_seeds.json",
             "auto_reset": True,
             "use_rel_reward": True,
             "use_custom_reward": False,
             "ignore_terminations": False,
+            "num_images": 2,
             "num_group": 1,
             "group_size": 1,
             "use_fixed_reset_state_ids": False,
-            "num_envs": 2,
+            "num_envs": 1,
             "max_step": 30,
             "video_cfg": {
                 "save_video": True,
@@ -108,7 +110,8 @@ def test_robotwin_env():
     obs, info = env.reset()
     print(f"✓ Reset successful, observation keys: {obs.keys()}")
     print(f"  Image shape: {obs['images'].shape}")
-    print(f"  Wrist image shape: {obs['wrist_images'].shape}")
+    if "wrist_images" in obs:
+        print(f"  Wrist image shape: {obs['wrist_images'].shape}")
     print(f"  State shape: {obs['states'].shape}")
 
     # Test step
