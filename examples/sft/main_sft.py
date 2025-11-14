@@ -46,7 +46,7 @@ def main(cfg) -> None:
     )
 
     # Initialize workers
-    sft_group.init_workers()
+    sft_group.init_worker().wait()
 
     # Start training
     sft_group.fit()

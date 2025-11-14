@@ -34,7 +34,7 @@ from rlinf.utils.placement import HybridComponentPlacement
 class FSDPSFTWorker(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig, placement: HybridComponentPlacement):
         Worker.__init__(self)
-        super().__init__(cfg.sft)
+        super().__init__(cfg.sft, world_size=self._world_size,rank=self._rank)
 
         self.cfg = cfg.sft
         self.placement = placement
@@ -59,11 +59,12 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
             pin_memory=getattr(self.cfg.data, "pin_memory", False),
             persistent_workers=getattr(self.cfg.data, "persistent_workers", False),
             prefetch_factor=getattr(self.cfg.data, "prefetch_factor", 2),
-            num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
+            #num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
         )
 
         if self._rank == 0:
-            self.metric_logger = MetricLogger(self.cfg.log_dir)
+            # XXX MegticLogger use cfg instead of dir
+            self.metric_logger = MetricLogger(self.cfg)
         else:
             self.metric_logger = None
 
@@ -74,7 +75,8 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         self.timer = ScopedTimer(reduction="max", sync_cuda=False)
 
     def model_provider_func(self):
-        model = get_model(self.cfg.sft.checkpoint_load_path, self.cfg.sft.model)
+        # XXX self.cfg = cfg.sft
+        model = get_model(self.cfg.checkpoint_load_path, self.cfg.model)
         if model is not None:
             return model
         return super().model_provider_func()
@@ -87,20 +89,21 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         num_epochs = getattr(self.cfg, "num_epochs", 1)
 
         self.gradient_accumulation = (
-            self.cfg.sft.global_batch_size
-            // self.cfg.sft.micro_batch_size
+            self.cfg.global_batch_size
+            // self.cfg.micro_batch_size
             // self._world_size
         )
 
         for epoch in range(num_epochs):
             self.epoch = epoch
             self.distributed_sampler.set_epoch(epoch)
-
+            print("DEBUG: Epoch:", epoch)
             for step, global_batch in enumerate(self.dataloader):
                 # split global_batch into micro_batches
+                print("DEBUG: Step:", step)
                 micro_batches = get_iterator_k_split(
                     global_batch,
-                    self.cfg.sft.global_batch_size // self.cfg.actor.micro_batch_size,
+                    self.cfg.global_batch_size // self.cfg.micro_batch_size,
                 )
 
                 metrics = {}
@@ -111,7 +114,7 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
                             is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
                         )
                         m_batch = self._prepare_batch(m_batch)
-
+                        print(m_batch)
                         outputs = self.model(**m_batch)
                         loss = (
                             outputs.loss
@@ -171,6 +174,8 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
 
     def _prepare_batch(self, batch):
         """Prepare batch for training"""
+        # FIXME: Input is : "input_ids", "attention_mask",  "position_ids", "loss_mask"
+
         if isinstance(batch, list):
             # Handle batched data
             batch = {
@@ -181,10 +186,13 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
                     [item["attention_mask"] for item in batch], dtype=torch.long
                 ),
                 "labels": torch.tensor(
-                    [item["labels"] for item in batch], dtype=torch.long
+                    [item["position_ids"] for item in batch], dtype=torch.long
+                    #[item["labels"] for item in batch], dtype=torch.long
                 ),
             }
-
+        else:
+            batch["labels"] = batch['position_ids']
+            batch = {"labels":batch["labels"], "input_ids":batch["input_ids"], "attention_mask":batch["attention_mask"]}
         # Move to device
         batch = {
             k: v.cuda() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
