@@ -14,11 +14,13 @@
 
 
 import os
+
+import numpy as np
+import tensorflow as tf
 import torch
 import torch.nn.functional as F
 from PIL import Image
-import tensorflow as tf
-import numpy as np
+
 
 def compute_logprobs_from_logits(logits, target):
     logprobs = -F.cross_entropy(
@@ -42,7 +44,7 @@ def compute_entropy_from_logits(logits, epsilon=1e-10):
     return entropy
 
 
-def find_checkpoint_file(pretrained_checkpoint, file_pattern) :
+def find_checkpoint_file(pretrained_checkpoint, file_pattern):
     """
     Find a specific checkpoint file matching a pattern.
 
@@ -56,7 +58,9 @@ def find_checkpoint_file(pretrained_checkpoint, file_pattern) :
     Raises:
         AssertionError: If no files or multiple files match the pattern
     """
-    assert os.path.isdir(pretrained_checkpoint), f"Checkpoint path must be a directory: {pretrained_checkpoint}"
+    assert os.path.isdir(pretrained_checkpoint), (
+        f"Checkpoint path must be a directory: {pretrained_checkpoint}"
+    )
 
     checkpoint_files = []
     for filename in os.listdir(pretrained_checkpoint):
@@ -70,7 +74,8 @@ def find_checkpoint_file(pretrained_checkpoint, file_pattern) :
 
     return checkpoint_files[0]
 
-def load_component_state_dict(checkpoint_path) :
+
+def load_component_state_dict(checkpoint_path):
     """
     Load a component's state dict from checkpoint and handle DDP prefix if present.
 
@@ -92,6 +97,7 @@ def load_component_state_dict(checkpoint_path) :
 
     return new_state_dict
 
+
 def crop_and_resize(image, crop_scale, batch_size):
     """
     Center-crops an image to have area `crop_scale` * (original image area), and then resizes back
@@ -104,8 +110,12 @@ def crop_and_resize(image, crop_scale, batch_size):
         image = tf.expand_dims(image, axis=0)
         expanded_dims = True
 
-    new_heights = tf.reshape(tf.clip_by_value(tf.sqrt(crop_scale), 0, 1), shape=(batch_size,))
-    new_widths = tf.reshape(tf.clip_by_value(tf.sqrt(crop_scale), 0, 1), shape=(batch_size,))
+    new_heights = tf.reshape(
+        tf.clip_by_value(tf.sqrt(crop_scale), 0, 1), shape=(batch_size,)
+    )
+    new_widths = tf.reshape(
+        tf.clip_by_value(tf.sqrt(crop_scale), 0, 1), shape=(batch_size,)
+    )
 
     height_offsets = (1 - new_heights) / 2
     width_offsets = (1 - new_widths) / 2
@@ -119,12 +129,15 @@ def crop_and_resize(image, crop_scale, batch_size):
         axis=1,
     )
 
-    image = tf.image.crop_and_resize(image, bounding_boxes, tf.range(batch_size), (224, 224))
+    image = tf.image.crop_and_resize(
+        image, bounding_boxes, tf.range(batch_size), (224, 224)
+    )
 
     if expanded_dims:
         image = image[0]
 
     return image
+
 
 def center_crop_image(image):
     batch_size = 1

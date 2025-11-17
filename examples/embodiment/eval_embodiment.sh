@@ -28,7 +28,7 @@ export CUDA_LAUNCH_BLOCKING=1
 export HYDRA_FULL_ERROR=1
 
 # NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
-export ROBOT_PLATFORM=$ROBOT_PLATFORM
+export ROBOT_PLATFORM=ALOHA # $ROBOT_PLATFORM
 
 if [ -z "$1" ]; then
     CONFIG_NAME="maniskill_ppo_openvlaoft"

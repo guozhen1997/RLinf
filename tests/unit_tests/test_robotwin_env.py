@@ -126,7 +126,7 @@ def test_robotwin_env():
             f"  Step {step}: reward={reward}, "
             f"terminated={terminated}, truncated={truncated}, info={info}, {obs['states']=}"
         )
-    
+
     env.flush_video()
 
     # Test chunk_step

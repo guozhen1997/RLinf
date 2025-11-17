@@ -86,7 +86,7 @@ embodied = [
     "open3d",
     "zarr",
     "openai",
-    "mplib==0.2.1",
+    "mplib==0.2.1", # conflict with maniskill requirements
 ]
 
 [tool.uv]
