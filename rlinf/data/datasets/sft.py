@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import json
-
+import os
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
@@ -27,12 +27,62 @@ class SFTDataset(Dataset):
     def __init__(self, cfg: DictConfig, tokenizer):
         self.tokenizer = tokenizer
         self.cfg = cfg
+        #self._load_data()
         self.data = self._load_data()
 
         self.prompt_key = cfg.prompt_key
         self.response_key = cfg.response_key
 
         self.max_length = cfg.max_length
+
+
+    def _expand_data_paths(self, inputs: list[str]) -> list[str]:
+        exts = {".jsonl", ".json", ".parquet"}
+        files: list[str] = []
+        for p in inputs:
+            if os.path.isdir(p):
+                for root, _, fnames in os.walk(p):
+                    for fn in fnames:
+                        ext = os.path.splitext(fn)[1].lower()
+                        if ext in exts:
+                            files.append(os.path.join(root, fn))
+            else:
+                files.append(p)
+        files = sorted(set(files))
+        return files
+
+    # TODO(tyr): Add lazy load in future.
+    def _eager_load_all(self) -> None:
+        merged: list[dict[str, Any]] = []
+        for path in self.data_paths:
+            fmt = os.path.splitext(path)[1].lower()
+            if fmt == ".jsonl":
+                with open(path, "r", encoding="utf-8") as f:
+                    merged.extend(json.loads(l) for l in f)
+            elif fmt == ".json":
+                with open(path, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    if isinstance(content, list):
+                        merged.extend(content)
+                    else:
+                        merged.append(content)
+            elif fmt == ".parquet":
+                try:
+                    merged.extend(pd.read_parquet(path).to_dict(orient="records"))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load parquet eagerly: {path}: {e}")
+            else:
+                logging.warning(f"Unsupported format {fmt} for path {path}, skipping.")
+        self._records = merged
+        # Build indices for consistency
+        self._indices = [("", "eager", i) for i in range(len(self._records))]
+
+    # Eager load
+    def _load_data_in(self):
+        """Load data from dirs or paths"""
+        raw_paths = [self.cfg.data_paths] if isinstance(self.cfg.data_paths, str) else self.cfg.data_paths
+        self.data_paths = self._expand_data_paths(raw_paths)
+        self._eager_load_all()
 
     def _load_data(self):
         """Load data from specified paths"""
