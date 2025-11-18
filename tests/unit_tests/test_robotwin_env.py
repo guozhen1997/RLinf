@@ -30,7 +30,6 @@ def create_test_config():
     """Create test configuration"""
     config = OmegaConf.create(
         {
-            "seed": 42,
             "assets_path": "/mnt/public/guozhen/test_robotwin/robotwin_assets",
             "seeds_path": "/mnt/public/guozhen/test_robotwin/RLinf/examples/embodiment/config/env/robotwin2_train_seeds.json",
             "auto_reset": True,
@@ -42,7 +41,6 @@ def create_test_config():
             "group_size": 1,
             "use_fixed_reset_state_ids": False,
             "num_envs": 1,
-            "max_step": 30,
             "video_cfg": {
                 "save_video": True,
                 "info_on_video": True,
@@ -50,6 +48,7 @@ def create_test_config():
             },
             "task_config": {
                 "task_name": "place_empty_cup",
+                "step_lim": 200,
                 "render_freq": 0,
                 "episode_num": 100,
                 "use_seed": False,
@@ -110,7 +109,7 @@ def test_robotwin_env():
     obs, info = env.reset()
     print(f"✓ Reset successful, observation keys: {obs.keys()}")
     print(f"  Image shape: {obs['images'].shape}")
-    if "wrist_images" in obs:
+    if obs["wrist_images"] is not None:
         print(f"  Wrist image shape: {obs['wrist_images'].shape}")
     print(f"  State shape: {obs['states'].shape}")
 
@@ -127,6 +126,8 @@ def test_robotwin_env():
             f"terminated={terminated}, truncated={truncated}, info={info}, {obs['states']=}"
         )
 
+    # Test flush_video
+    print("Testing flush_video...")
     env.flush_video()
 
     # Test chunk_step
@@ -147,7 +148,7 @@ def test_robotwin_env():
     print(f"✓ Partial reset successful, info: {info}")
 
     # Cleanup
-    env.clear()
+    env.close(clear_cache=True)
     print("✓ Environment cleaned up successfully")
 
     print("\n🎉 All tests passed!")
