@@ -22,7 +22,7 @@ assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
 
 task_config:
   task_name: place_empty_cup
-  step_lim: 200
+  step_lim: 250
   # if you want to modify the config, please check the following tutorial first:
   # https://robotwin-platform.github.io/doc/usage/configurations.html
   render_freq: 0

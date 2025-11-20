@@ -193,6 +193,9 @@ class EnvWorker(Worker):
                 dones.unsqueeze(1).repeat(1, self.cfg.actor.model.num_action_chunks)
             )
 
+            if self.cfg.env.enable_offload:
+                self.simulator_list[i].close()
+
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any]]:
