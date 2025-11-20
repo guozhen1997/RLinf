@@ -18,7 +18,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DistributedSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from rlinf.data.datasets.sft import SFTDataset
+from rlinf.data.datasets.sft import SFTDataset, LerobotSFTDataset, BehaviorLerobotSFTDataset
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
 from rlinf.scheduler import Worker
@@ -40,7 +40,12 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         self.placement = placement
 
         # Initialize dataset
-        self.dataset = SFTDataset(self.cfg.data, self.tokenizer)
+        if self.cfg.data.type == 'lerobot':
+            self.dataset = LerobotSFTDataset(self.cfg.data, self.tokenizer)
+        elif self.cfg.data.type == 'behavior':
+            self.dataset = BehaviorLerobotSFTDataset(self.cfg.data, self.tokenizer)
+        else:
+            self.dataset = SFTDataset(self.cfg.data, self.tokenizer)
 
         # Create distributed sampler
         self.distributed_sampler = DistributedSampler(
