@@ -1102,9 +1102,6 @@ class EnvOutput:
         else:
             raise NotImplementedError
 
-        states = None
-        if "images_and_states" in obs and "state" in obs["images_and_states"]:
-            states = obs["images_and_states"]["state"]
         if "state" in obs:
             states = obs["state"]
 

@@ -142,7 +142,7 @@ class EnvWorker(Worker):
                         cfg=self.cfg.env.eval,
                         seed_offset=self._rank,
                     )
-                    self.simulator_list.append(env)
+                    self.eval_simulator_list.append(env)
         elif self.cfg.env.train.simulator_type == "behavior":
             with open_dict(self.cfg):
                 # self.cfg.env.train.tasks.task_idx = self.cfg.env.train.tasks.activity_task_indices[self._rank]
@@ -420,7 +420,7 @@ class EnvWorker(Worker):
 
     def evaluate(self):
         for i in range(self.stage_num):
-            self.eval_simulator_list[i].start_simulator()
+            # self.eval_simulator_list[i].start_simulator()
             self.eval_simulator_list[i].is_start = True
             extracted_obs, _, _, _, infos = self.eval_simulator_list[i].step()
             env_output = EnvOutput(
@@ -446,8 +446,8 @@ class EnvWorker(Worker):
                 self.send_env_batch(env_output.to_dict(), mode="eval")
 
         self.finish_rollout(mode="eval")
-        for i in range(self.stage_num):
-            self.eval_simulator_list[i].stop_simulator()
+        # for i in range(self.stage_num):
+        #     self.eval_simulator_list[i].stop_simulator()
 
         for key, value in eval_metrics.items():
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()

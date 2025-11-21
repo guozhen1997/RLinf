@@ -13,9 +13,9 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 0-7
-    rollout: 0-7
-    env: 0-7
+    actor: 0-3
+    rollout: 0-3
+    env: 0-3
 
 runner:
   task_type: embodied
@@ -43,7 +43,7 @@ algorithm:
   group_size: 1
   n_chunk_steps: 10 # 20
   n_eval_chunk_steps: 10
-  num_group_envs: 16
+  num_group_envs: 4
   rollout_epoch: 1 # 16
   reward_type: chunk_level
   logprob_type: token_level
@@ -96,7 +96,7 @@ rollout:
     queue_size: 0
   mode: "colocate"
   backend: "huggingface"
-  model_dir: "/mnt/public/guozhen/test_robotwin/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+  model_dir: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k/"
   precision: ${actor.model.precision}
   enable_offload: True
   pipeline_stage_num: 1
@@ -108,10 +108,10 @@ actor:
     queue_name: "replay_buffer"
     queue_size: 0
   training_backend: "fsdp"
-  checkpoint_load_path: "/mnt/public/guozhen/test_robotwin/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+  checkpoint_load_path: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k/"
   checkpoint_save_path: "../results"
   micro_batch_size: 1 # 1
-  global_batch_size: 80 # 640
+  global_batch_size: 40 # 640
   seed: 1234
   enable_offload: True
 
@@ -154,7 +154,7 @@ actor:
 
   tokenizer:
     tokenizer_type: "HuggingFaceTokenizer"
-    tokenizer_model: "/mnt/public/guozhen/test_robotwin/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+    tokenizer_model: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k/"
     use_fast: False
     trust_remote_code: True
     padding_side: "right"
