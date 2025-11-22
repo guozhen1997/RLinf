@@ -14,7 +14,7 @@
 
 import json
 import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import gymnasium as gym
 import numpy as np
@@ -152,39 +152,43 @@ class RoboTwinEnv(gym.Env):
         return np.array(image)
 
     def _extract_obs_image(self, raw_obs):
-        images = []
-        wrist_images = []
-        states = []
-        instructions = []
+        batch_images = []
+        batch_wrist_images = []
+        batch_states = []
+        batch_instructions = []
         for obs in raw_obs:
-            images.append(self.center_and_crop(obs["full_image"]))
+            batch_images.append(self.center_and_crop(obs["full_image"]))
+            wrist_images = []
             if "left_wrist_image" in obs and obs["left_wrist_image"] is not None:
-                wrist_images.append(obs["left_wrist_image"])
+                wrist_images.append(self.center_and_crop(obs["left_wrist_image"]))
             if "right_wrist_image" in obs and obs["right_wrist_image"] is not None:
-                wrist_images.append(obs["right_wrist_image"])
-            states.append(obs["state"])
-            instructions.append(obs["instruction"])
+                wrist_images.append(self.center_and_crop(obs["right_wrist_image"]))
+            if len(wrist_images) > 0:
+                batch_wrist_images.append(
+                    torch.stack([torch.from_numpy(img) for img in wrist_images])
+                )
+            batch_states.append(obs["state"])
+            batch_instructions.append(obs["instruction"])
 
-        images = torch.stack([torch.from_numpy(img) for img in images])
+        batch_images = torch.stack([torch.from_numpy(img) for img in batch_images])
         # TODO: fix processor
         # images = images.permute(0, 3, 1, 2).unsqueeze(
         #     1
         # ) / 255.0  # [B, H, W, C] -> [B, 1, C, H, W]
-
-        if len(wrist_images) > 0:
-            wrist_images = torch.stack([torch.from_numpy(img) for img in wrist_images])
-            # wrist_images = wrist_images.permute(
+        if len(batch_wrist_images) > 0:
+            batch_wrist_images = torch.stack(batch_wrist_images)
+            # batch_wrist_images = batch_wrist_images.permute(
             #     0, 1, 4, 2, 3
             # ) / 255.0  # [B, N_IMG, H, W, C] -> [B, N_IMG, C, H, W]
         else:
-            wrist_images = None
-        states = torch.stack([torch.from_numpy(state) for state in states])
+            batch_wrist_images = None
+        batch_states = torch.stack([torch.from_numpy(state) for state in batch_states])
 
         extracted_obs = {
-            "images": images,
-            "wrist_images": wrist_images,
-            "states": states,
-            "task_descriptions": instructions,
+            "images": batch_images,
+            "wrist_images": batch_wrist_images,
+            "states": batch_states,
+            "task_descriptions": batch_instructions,
         }
         return extracted_obs
 
@@ -207,7 +211,7 @@ class RoboTwinEnv(gym.Env):
 
     def reset(
         self,
-        env_idx: Optional[Union[int, List[int]]] = None,
+        env_idx: Optional[Union[int, list[int]]] = None,
         env_seeds=None,
     ):
         if self._is_start:
@@ -226,8 +230,8 @@ class RoboTwinEnv(gym.Env):
         return extracted_obs, infos
 
     def step(
-        self, actions: Union[torch.Tensor, np.ndarray, Dict] = None, auto_reset=True
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict]:
+        self, actions: Union[torch.Tensor, np.ndarray, dict] = None, auto_reset=True
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         if actions is None:
             assert self._is_start, "Actions must be provided after the first reset."
 

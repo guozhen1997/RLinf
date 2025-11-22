@@ -84,6 +84,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         add_value_head,
         proprio_dim,
         use_proprio=False,
+        use_film=False,
     ) -> None:
         super().__init__(config)
 
@@ -95,6 +96,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             self.proprio_projector = ProprioProjector(
                 llm_dim=config.text_config.hidden_size, proprio_dim=proprio_dim
             )
+        self.use_film = use_film
 
         self.unnorm_key = config.unnorm_key
         if (
@@ -152,11 +154,15 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         )
 
         input_embeddings = self.get_input_embeddings()(input_ids)  # [B, L + act + 1, D]
+        # Extract language embeddings
+        language_embeddings = input_embeddings[~all_actions_mask].reshape(
+            input_embeddings.shape[0], -1, input_embeddings.shape[2]
+        )
         input_embeddings = input_embeddings * (~all_actions_mask.unsqueeze(-1))
 
         # vision
         projected_patch_embeddings = self._process_vision_features(
-            pixel_values, None, use_film=False
+            pixel_values, language_embeddings, use_film=self.use_film
         )
         # Add proprioceptive features if provided
         use_proprio = self.proprio_projector is not None and proprio is not None
@@ -302,11 +308,11 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
                 pixel_values_list = [batch_feature["pixel_values"]]
                 if self.vision_backbone.get_num_images_in_input() > 1:
-                    wrist_image = Image.fromarray(env_obs["wrist_images"][i]).convert(
-                        "RGB"
-                    )
-                    wrist_batch_feature = self.processor(prompt, wrist_image)
-                    pixel_values_list.append(wrist_batch_feature["pixel_values"])
+                    wrist_images = np.array(env_obs["wrist_images"][i])
+                    for idx in range(wrist_images.shape[0]):
+                        wrist_image = Image.fromarray(wrist_images[idx]).convert("RGB")
+                        wrist_batch_feature = self.processor(prompt, wrist_image)
+                        pixel_values_list.append(wrist_batch_feature["pixel_values"])
 
                 batch_feature["pixel_values"] = torch.cat(pixel_values_list, dim=1)
 

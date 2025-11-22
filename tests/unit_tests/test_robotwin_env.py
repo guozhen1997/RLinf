@@ -30,8 +30,9 @@ def create_test_config():
     """Create test configuration"""
     config = OmegaConf.create(
         {
+            "seed": 42,
             "assets_path": "/mnt/public/guozhen/test_robotwin/robotwin_assets",
-            "seeds_path": "/mnt/public/guozhen/test_robotwin/RLinf/examples/embodiment/config/env/robotwin2_train_seeds.json",
+            "seeds_path": "/mnt/public/guozhen/test_robotwin/RLinf/robotwin2_train_seeds_place_empty_cup_thread_test.json",
             "auto_reset": True,
             "use_rel_reward": True,
             "use_custom_reward": False,

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import imageio
 import numpy as np
@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 def save_rollout_video(
-    rollout_images: List[np.ndarray], output_dir: str, video_name: str, fps: int = 30
+    rollout_images: list[np.ndarray], output_dir: str, video_name: str, fps: int = 30
 ) -> None:
     """
     Saves an MP4 replay of an episode.
@@ -41,7 +41,7 @@ def save_rollout_video(
 
 
 def tile_images(
-    images: List[Union[np.ndarray, torch.Tensor]], nrows: int = 1
+    images: list[Union[np.ndarray, torch.Tensor]], nrows: int = 1
 ) -> Union[np.ndarray, torch.Tensor]:
     """
     Copied from maniskill https://github.com/haosulab/ManiSkill
@@ -57,7 +57,7 @@ def tile_images(
     if nrows == 1:
         images = sorted(images, key=lambda x: x.shape[0 + batched], reverse=True)
 
-    columns: List[List[Union[np.ndarray, torch.Tensor]]] = []
+    columns: list[list[Union[np.ndarray, torch.Tensor]]] = []
     if batched:
         max_h = images[0].shape[1] * nrows
         cur_h = 0
@@ -109,8 +109,8 @@ def tile_images(
 
 def put_info_on_image(
     image: np.ndarray,
-    info: Dict[str, float],
-    extras: Optional[List[str]] = None,
+    info: dict[str, float],
+    extras: Optional[list[str]] = None,
     overlay: bool = True,
 ) -> np.ndarray:
     """
@@ -132,7 +132,7 @@ def put_info_on_image(
 
 
 def put_text_on_image(
-    image: np.ndarray, lines: List[str], max_width: int = 200
+    image: np.ndarray, lines: list[str], max_width: int = 200
 ) -> np.ndarray:
     """
     Put text lines on an image with automatic line wrapping.
