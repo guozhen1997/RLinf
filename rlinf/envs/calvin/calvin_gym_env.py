@@ -160,8 +160,6 @@ class CalvinEnv(gym.Env):
         return np.array(task_ids), np.array(trial_ids)
 
     def _get_reset_states(self, env_idx):
-        if env_idx is None:
-            env_idx = np.arange(self.num_envs)
         init_state = [
             self.task_suite.get_task_init_states(self.trial_ids[env_id])
             for env_id in env_idx

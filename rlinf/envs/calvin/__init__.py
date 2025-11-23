@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from calvin_agent.evaluation.multistep_sequences import get_sequences
+from rlinf.envs.calvin.utils import get_sequences
 from calvin_agent.evaluation.utils import get_env_state_for_initial_condition
 import calvin_env
 from calvin_env.envs.play_table_env import get_env
@@ -23,12 +23,12 @@ from pathlib import Path
 from calvin_agent.evaluation.utils import get_env_state_for_initial_condition
 import numpy as np
 
-def _get_calvin_tasks_and_reward(num_sequences):
+def _get_calvin_tasks_and_reward(num_sequences, use_random_seed=True):
     conf_dir = pathlib.Path(calvin_env.__file__).absolute().parents[1] / "calvin_agent" / "conf"
     task_cfg = OmegaConf.load(conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml")
     task_oracle = hydra.utils.instantiate(task_cfg)
     val_annotations = OmegaConf.load(conf_dir / "annotations/new_playtable_validation.yaml")
-    eval_sequences = get_sequences(num_sequences)
+    eval_sequences = get_sequences(num_sequences, use_random_seed=use_random_seed)
     return eval_sequences, val_annotations, task_oracle
 
 def make_env():
@@ -49,8 +49,11 @@ class CalvinBenchmark:
             "calvin_d",
         ]
         self.task_suite_name = task_suite_name
+        self.use_random_seed = True # True for rollout and False for val
+        breakpoint()
         self.eval_sequences, self.val_annotations, self.task_oracle = _get_calvin_tasks_and_reward(
-            self.get_num_tasks() * self.get_task_num_trials()
+            self.get_num_tasks() * self.get_task_num_trials(),
+            self.use_random_seed
         )
             
     def get_num_tasks(self):
@@ -61,13 +64,13 @@ class CalvinBenchmark:
         if self.task_suite_name == "calvin_d":
             return 1000
 
-    def get_task_init_states(self, task_id):
+    def get_task_init_states(self, trial_id):
         if self.task_suite_name == "calvin_d":
-            return self.eval_sequences[task_id][0]
+            return self.eval_sequences[trial_id][0]
         
-    def get_task_sequence(self, task_id):
+    def get_task_sequence(self, trial_id):
         if self.task_suite_name == "calvin_d":
-            return self.eval_sequences[task_id][1]
+            return self.eval_sequences[trial_id][1]
 
     def get_obs_for_initial_condition(self, init_states):
         robot_obs_list = []
