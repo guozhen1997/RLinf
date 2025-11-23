@@ -29,7 +29,9 @@ from rlinf.models.embodiment.openpi.dataconfig.libero_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.metaworld_dataconfig import (
     LeRobotMetaworldDataConfig,
 )
-
+from rlinf.models.embodiment.openpi.dataconfig.calvin_dataconfig import (
+    LeRobotCalvinDataConfig,
+)
 _CONFIGS = [
     TrainConfig(
         name="pi0_libero",
@@ -104,6 +106,43 @@ _CONFIGS = [
         pytorch_weight_path="checkpoints/torch/pi05_base",
         num_train_steps=30_000,
     ),
+    TrainConfig(
+        name="pi0_calvin",
+        model=pi0_config.Pi0Config(action_horizon=5),
+        data=LeRobotCalvinDataConfig(
+            repo_id="InternRobotics/InternData-Calvin_ABC",
+            base_config=DataConfig(
+                prompt_from_task=True,
+                root="data/InternData-Calvin_ABC/"
+            ),
+            assets=AssetsConfig(
+                assets_dir="checkpoints/torch/pi0_calvin/assets"
+            ),
+            extra_delta_transform=False, 
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("checkpoints/jax/pi0_base/params"),
+        pytorch_weight_path="checkpoints/torch/pi0_base",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_calvin",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=5, discrete_state_input=False),
+        data=LeRobotCalvinDataConfig(
+            repo_id="InternRobotics/InternData-Calvin_ABC",
+            base_config=DataConfig(
+                prompt_from_task=True,
+                root="data/InternData-Calvin_ABC/"
+            ),
+            assets=AssetsConfig(
+                assets_dir="checkpoints/torch/pi0_calvin/assets"
+            ),
+            extra_delta_transform=False, 
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("checkpoints/jax/pi05_base/params"),
+        pytorch_weight_path="checkpoints/torch/pi05_base",
+        num_train_steps=30_000,
+    ),
+
 ]
 
 
