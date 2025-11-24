@@ -548,7 +548,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             self.offload_optimizer()
 
     def model_provider_func(self):
-        model = get_model(self.cfg.actor.checkpoint_load_path, self.cfg.actor.model)
+        model = get_model(self.cfg.actor.model)
         if model is not None:
             return model
         return super().model_provider_func()

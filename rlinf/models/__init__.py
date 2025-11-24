@@ -96,7 +96,8 @@ def get_vla_model_config_and_processor(cfg: DictConfig):
     return model_config, input_processor
 
 
-def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
+def get_model(cfg: DictConfig, override_config_kwargs=None):
+    model_path = cfg.model_dir
     torch_dtype = torch_dtype_from_precision(cfg.precision)
     if cfg.model_name == "openvla":
         from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
