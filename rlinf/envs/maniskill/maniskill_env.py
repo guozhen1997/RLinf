@@ -28,6 +28,7 @@ from mani_skill.utils.visualization.misc import (
     tile_images,
 )
 from omegaconf.omegaconf import OmegaConf
+from mani_skill.utils import common
 
 __all__ = ["ManiskillEnv"]
 
@@ -125,15 +126,15 @@ class ManiskillEnv(gym.Env):
         ).to(self.device)
 
     def _wrap_obs(self, raw_obs):
-        # 检查 wrap_obs_mode 配置，如果设置为 "simple"，使用简单模式（不调用 instruction）
+        obs_mode = self.env.unwrapped.obs_mode
         if getattr(self.cfg, "wrap_obs_mode", "vla") == "simple":
-            if self.env.obs_mode == "state":
+            if obs_mode == "state":
                 wrapped_obs = {
                     "images": None,
                     "task_description": None,
                     "states": raw_obs
                 }
-            elif self.env.obs_mode == "rgb":
+            elif obs_mode == "rgb":
                 from mani_skill.utils import common
                 sensor_data = raw_obs.pop("sensor_data")
                 raw_obs.pop("sensor_param")
@@ -143,12 +144,9 @@ class ManiskillEnv(gym.Env):
 
                 images = dict()
                 for camera_name in sensor_data.keys():
-                    # 获取图像并转换为 [B, C, H, W] 格式
                     img = sensor_data[camera_name]["rgb"]
                     if img.dim() == 4 and img.shape[-1] == 3:
-                        # [B, H, W, C] -> [B, C, H, W]
                         img = img.permute(0, 3, 1, 2)
-                    # 转换为 float32 并归一化到 [0, 1] 范围
                     if img.dtype == torch.uint8:
                         img = img.float() / 255.0
                     elif img.dtype != torch.float32:
@@ -160,11 +158,10 @@ class ManiskillEnv(gym.Env):
                     "states": state
                 }
             else:
-                raise NotImplementedError(f"obs_mode {self.env.obs_mode} not supported in simple mode")
+                raise NotImplementedError(f"obs_mode {obs_mode} not supported in simple mode")
         else:
-            # vla 模式：调用 _extract_obs_image，会使用 instruction
-            if self.env.obs_mode == "state":
-                wrapped_obs = {"images": None, "task_description": None, "state": raw_obs}
+            if obs_mode == "state":
+                wrapped_obs = {"images": None, "task_description": None, "states": raw_obs}
             else:
                 wrapped_obs = self._extract_obs_image(raw_obs)
         return wrapped_obs
@@ -172,12 +169,7 @@ class ManiskillEnv(gym.Env):
     def _extract_obs_image(self, raw_obs):
         obs_image = raw_obs["sensor_data"]["base_camera"]["rgb"].to(torch.uint8)
         obs_image = obs_image.permute(0, 3, 1, 2)  # [B, C, H, W]
-        # 返回字典格式的 images，键名 "base_camera" 匹配配置中的 image_keys
         extracted_obs = {"images": {"base_camera": obs_image}, "task_descriptions": self.instruction}
-        
-        # 提取 state：在 rgb 模式下，raw_obs 包含 agent、extra 等信息，需要提取 state
-        # 创建一个临时字典，包含除了 sensor_data 和 sensor_param 之外的所有信息
-        from mani_skill.utils import common
         state_dict = {k: v for k, v in raw_obs.items() if k not in ["sensor_data", "sensor_param"]}
         if state_dict:
             state = common.flatten_state_dict(

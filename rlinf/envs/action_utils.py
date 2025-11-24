@@ -43,8 +43,6 @@ def prepare_actions_for_maniskill(
 
     if policy == "google_robot":
         raise NotImplementedError
-    elif policy == "widowx_bridge":
-        actions["gripper"] = 2.0 * (raw_actions["open_gripper"] > 0.5) - 1.0  # [B, 1]
     else:
         # Default gripper handling for other policies
         actions["gripper"] = 2.0 * (raw_actions["open_gripper"] > 0.5) - 1.0  # [B, 1]

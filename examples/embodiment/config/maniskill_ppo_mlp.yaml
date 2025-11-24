@@ -40,6 +40,7 @@ algorithm:
   ignore_terminations: False
   use_fixed_reset_state_ids: False
   normalize_advantages: True
+  obs_mode: state
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
   n_chunk_steps: 50

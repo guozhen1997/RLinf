@@ -112,21 +112,6 @@ class CNNPolicy(BasePolicy):
         else:
             self.action_scale = None
 
-
-    # def preprocess_env_obs(self, env_obs):
-    #     device = next(self.parameters()).device
-    #     processed_env_obs = {}
-    #     for key, value in env_obs.items():
-    #         if key == "images":
-    #             continue
-    #         if value is not None:
-    #             if isinstance(value, torch.Tensor):
-    #                 processed_env_obs[key] = value.clone().to(device)
-    #             else:
-    #                 processed_env_obs[key] = value
-    #     for key, value in env_obs["images"].items():
-    #         processed_env_obs[f"images/{key}"] = value.clone().to(device).permute(0, 3, 1, 2)
-    #     return processed_env_obs
     def preprocess_env_obs(self, env_obs):
         device = next(self.parameters()).device
         processed_env_obs = {}
@@ -139,10 +124,8 @@ class CNNPolicy(BasePolicy):
                 else:
                     processed_env_obs[key] = value
         
-        # 处理 images，支持多种格式
         images = env_obs.get("images")
         if images is None:
-            # 提供更详细的错误信息，帮助调试
             available_keys = list(env_obs.keys())
             raise ValueError(
                 f"env_obs['images'] is None. Images are required for CNN policy. "
@@ -150,51 +133,37 @@ class CNNPolicy(BasePolicy):
             )
         
         if isinstance(images, dict):
-            # 如果 images 已经是字典格式
             for key, value in images.items():
                 if value is not None:
                     if isinstance(value, torch.Tensor):
-                        # 确保在正确的设备上
                         value = value.to(device)
                         
-                        # 检查是否需要 permute: 如果是 [B, H, W, C] 格式，需要转换为 [B, C, H, W]
                         if value.dim() == 4:
-                            # 检查最后一个维度是否是通道维度（通常是 3 或 4）
                             if value.shape[-1] in [1, 3, 4] and value.shape[1] not in [1, 3, 4]:
-                                # [B, H, W, C] 格式，需要 permute
                                 value = value.permute(0, 3, 1, 2)
                         
-                        # 转换为 float32 并归一化到 [0, 1] 范围（如果输入是 uint8）
                         if value.dtype == torch.uint8:
                             value = value.float() / 255.0
                         elif value.dtype != torch.float32:
                             value = value.float()
                         
-                        # 确保是 [B, C, H, W] 格式
                         if value.dim() != 4:
                             raise ValueError(f"Expected 4D tensor [B, C, H, W], got {value.dim()}D tensor with shape {value.shape}")
                         
                         processed_env_obs[f"images/{key}"] = value
         elif isinstance(images, torch.Tensor):
-            # 如果 images 是张量（单个相机），转换为字典格式
             if len(self.image_keys) == 0:
                 raise ValueError("image_keys is empty. Cannot convert tensor to dict format.")
-            # 使用第一个 image_key
             key = self.image_keys[0]
             
-            # 转换为 float32 并归一化到 [0, 1] 范围（如果输入是 uint8）
             if images.dtype == torch.uint8:
                 images = images.float() / 255.0
             elif images.dtype != torch.float32:
                 images = images.float()
             
-            # 检查是否需要 permute: maniskill_env 返回的已经是 [B, C, H, W] 格式
-            # 但如果遇到 [B, H, W, C] 格式（最后一个维度是通道），需要 permute
             if images.dim() == 4 and images.shape[-1] == 3:
-                # [B, H, W, C] 格式，需要 permute
                 processed_env_obs[f"images/{key}"] = images.clone().to(device).permute(0, 3, 1, 2)
             else:
-                # 已经是 [B, C, H, W] 格式（maniskill_env 返回的格式）
                 processed_env_obs[f"images/{key}"] = images.clone().to(device)
         else:
             raise ValueError(f"Unsupported images type: {type(images)}. Expected dict or torch.Tensor, got {type(images)}.")
@@ -208,9 +177,7 @@ class CNNPolicy(BasePolicy):
         visual_feature = torch.cat(visual_features, dim=-1)
         if detach_encoder:
             visual_feature = visual_feature.detach()
-        # 兼容 "states" 和 "state" 两种键名
-        state_key = "states" if "states" in obs else "state"
-        x = torch.cat([visual_feature, obs[state_key]], dim=1)
+        x = torch.cat([visual_feature, obs["states"]], dim=1)
         return self.mlp(x), visual_feature
     
     def get_feature(self, obs, detach_encoder=False):
@@ -220,14 +187,7 @@ class CNNPolicy(BasePolicy):
         visual_feature = torch.cat(visual_features, dim=-1)
         if detach_encoder:
             visual_feature = visual_feature.detach()
-        # 兼容 "states" 和 "state" 两种键名
-        if "states" in obs:
-            state_key = "states"
-        elif "state" in obs:
-            state_key = "state"
-        else:
-            raise KeyError(f"Neither 'states' nor 'state' found in obs. Available keys: {list(obs.keys())}")
-        state_embed = self.state_proj(obs[state_key])
+        state_embed = self.state_proj(obs["states"])
         x = torch.cat([visual_feature, state_embed], dim=1)
         return x, visual_feature
 
@@ -451,9 +411,7 @@ class CNNPolicy(BasePolicy):
             shared_feature = self.encoder(obs["images"])
         if detach_encoder:
             shared_feature = shared_feature.detach()
-        # 兼容 "states" 和 "state" 两种键名
-        state_key = "states" if "states" in obs else "state"
-        x = torch.cat([shared_feature, obs[state_key]], dim=1)
+        x = torch.cat([shared_feature, obs["states"]], dim=1)
         return self.q_head(x, actions)
 
     

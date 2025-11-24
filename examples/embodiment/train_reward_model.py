@@ -14,14 +14,15 @@
 
 """Training script for frame-based reward classifier model."""
 
-import argparse
 import os
 from pathlib import Path
 
+import hydra
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from PIL import Image
@@ -335,153 +336,73 @@ def visualize_positive_samples(dataset, output_dir="positive_samples_vis"):
     print(f"{'='*60}\n")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train reward classifier model")
-    parser.add_argument(
-        "--positive-dir",
-        type=str,
-        required=True,
-        help="Path to directory containing positive samples",
-    )
-    parser.add_argument(
-        "--negative-dir",
-        type=str,
-        required=True,
-        help="Path to directory containing negative samples",
-    )
-    parser.add_argument(
-        "--output-checkpoint",
-        type=str,
-        required=True,
-        help="Path to save the trained model checkpoint",
-    )
-    parser.add_argument(
-        "--backbone",
-        type=str,
-        default="resnet10",
-        help="Backbone architecture (resnet10, resnet18, etc.)",
-    )
-    parser.add_argument(
-        "--image-key",
-        type=str,
-        default="base_camera",
-        help="Image key to use",
-    )
-    parser.add_argument(
-        "--image-size",
-        type=int,
-        nargs=3,
-        default=[3, 64, 64],
-        help="Image size [C, H, W]",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=32,
-        help="Batch size",
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=100,
-        help="Number of training epochs",
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1e-4,
-        help="Learning rate",
-    )
-    parser.add_argument(
-        "--hidden-dim",
-        type=int,
-        default=256,
-        help="Hidden dimension for classifier",
-    )
-    parser.add_argument(
-        "--num-spatial-blocks",
-        type=int,
-        default=8,
-        help="Number of spatial blocks for pooling",
-    )
-    parser.add_argument(
-        "--pretrained-encoder-path",
-        type=str,
-        default=None,
-        help="Path to pretrained encoder weights",
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to train on",
-    )
-    parser.add_argument(
-        "--visualize-positive",
-        action="store_true",
-        help="Visualize all positive samples (label=1) before training",
-    )
-    parser.add_argument(
-        "--vis-output-dir",
-        type=str,
-        default="positive_samples_vis",
-        help="Output directory for positive sample visualizations",
-    )
-
-    args = parser.parse_args()
-
-    # Create output directory (argparse converts --arg-name to arg_name)
-    output_dir = os.path.dirname(args.output_checkpoint)
+@hydra.main(version_base="1.1", config_path="config", config_name="train_reward_model")
+def main(cfg: DictConfig) -> None:
+    """Train reward classifier model using Hydra configuration.
+    
+    Args:
+        cfg: Configuration object from Hydra
+    """
+    # Print configuration
+    print(OmegaConf.to_yaml(cfg))
+    
+    # Create output directory
+    output_dir = os.path.dirname(cfg.output_checkpoint)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
     # Create model (currently only supports ResNet10, but can be extended)
-    if args.backbone != "resnet10":
-        print(f"Warning: Only resnet10 is currently supported. Using resnet10 instead of {args.backbone}")
+    if cfg.backbone != "resnet10":
+        print(f"Warning: Only resnet10 is currently supported. Using resnet10 instead of {cfg.backbone}")
 
     model = BinaryRewardClassifier(
-        image_keys=[args.image_key],
-        image_size=args.image_size,
-        hidden_dim=args.hidden_dim,
-        num_spatial_blocks=args.num_spatial_blocks,
-        pretrained_encoder_path=args.pretrained_encoder_path,
-        use_pretrain=args.pretrained_encoder_path is not None,
+        image_keys=[cfg.image_key],
+        image_size=cfg.image_size,
+        hidden_dim=cfg.hidden_dim,
+        num_spatial_blocks=cfg.num_spatial_blocks,
+        pretrained_encoder_path=cfg.get("pretrained_encoder_path", None),
+        use_pretrain=cfg.get("pretrained_encoder_path", None) is not None,
         freeze_encoder=True,
     )
 
-    model = model.to(args.device)
+    # Auto-detect device if not specified
+    device = cfg.get("device")
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = model.to(device)
 
     # Create dataset
     train_dataset = RewardDataset(
-        positive_dir=args.positive_dir,
-        negative_dir=args.negative_dir,
-        image_key=args.image_key,
-        image_size=args.image_size,
-        device=args.device,
+        positive_dir=cfg.positive_dir,
+        negative_dir=cfg.negative_dir,
+        image_key=cfg.image_key,
+        image_size=cfg.image_size,
+        device=device,
     )
     
     # Visualize positive samples if requested
-    if args.visualize_positive:
-        visualize_positive_samples(train_dataset, args.vis_output_dir)
+    if cfg.get("visualize_positive", False):
+        vis_output_dir = cfg.get("vis_output_dir", "positive_samples_vis")
+        visualize_positive_samples(train_dataset, vis_output_dir)
     
     train_loader = DataLoader(
         train_dataset,
-        batch_size=args.batch_size,
+        batch_size=cfg.batch_size,
         shuffle=True,
-        num_workers=4,
-        pin_memory=True if args.device == "cuda" else False,
+        num_workers=cfg.get("num_workers", 4),
+        pin_memory=True if device == "cuda" else False,
     )
 
     # Loss and optimizer
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.lr)
 
     # Training loop
     best_train_acc = 0.0
-    for epoch in range(args.epochs):
-        print(f"\nEpoch {epoch + 1}/{args.epochs}")
+    for epoch in range(cfg.epochs):
+        print(f"\nEpoch {epoch + 1}/{cfg.epochs}")
         train_loss, train_acc = train_epoch(
-            model, train_loader, criterion, optimizer, args.device
+            model, train_loader, criterion, optimizer, device
         )
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
 
@@ -495,13 +416,14 @@ def main():
                 "train_loss": train_loss,
                 "train_acc": train_acc,
             }
-            torch.save(checkpoint, args.output_checkpoint)
-            print(f"Saved best model with train_acc: {train_acc:.4f} to {args.output_checkpoint}")
+            torch.save(checkpoint, cfg.output_checkpoint)
+            print(f"Saved best model with train_acc: {train_acc:.4f} to {cfg.output_checkpoint}")
 
     print("\nTraining completed!")
-    print(f"Best model saved to {args.output_checkpoint}")
+    print(f"Best model saved to {cfg.output_checkpoint}")
 
 
 if __name__ == "__main__":
     main()
+
 

@@ -13,6 +13,7 @@ docs/build
 dist
 logs/*
 *.so
+*.pt
 .venv
 uv.lock
 rlinf/envs/maniskill/assets

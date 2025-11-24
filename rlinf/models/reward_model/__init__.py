@@ -17,15 +17,15 @@
 This package contains:
 - RewardDataCollector: Collects trajectory data during RL training
 - BinaryRewardClassifier: Frame-based binary classifier for reward prediction
-- train_reward_model.py: Training script for reward classifier
+
+Note: The training script (train_reward_model.py) is located in examples/embodiment/
 """
 
-from rlinf.models.reward_model.reward_classifier import BinaryRewardClassifier, ResNetEncoderWrapper
+from rlinf.models.reward_model.reward_classifier import BinaryRewardClassifier
 from rlinf.models.reward_model.reward_data_collector import RewardDataCollector, create_reward_data_collector
 
 __all__ = [
     "BinaryRewardClassifier",
-    "ResNetEncoderWrapper",
     "RewardDataCollector",
     "create_reward_data_collector",
 ]

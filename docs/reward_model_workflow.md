@@ -1,6 +1,19 @@
 # Reward Model Workflow Documentation
 
-This document provides a comprehensive guide for the reward model workflow, including data collection, reward model training, and using the trained reward model to replace environment success signals for training RL policies (SAC or PPO).
+This document provides a comprehensive guide for the reward model workflow, including data collection, reward model training, and using the trained reward model to replace environment success signals for training RL policies. 
+
+## 🎯 Algorithm Support
+
+**This workflow supports both PPO and SAC algorithms** with the same unified approach:
+
+- ✅ **PPO** (Proximal Policy Optimization) - Use config: `maniskill_ppo_cnn.yaml`
+- ✅ **SAC** (Soft Actor-Critic) - Use config: `maniskill_sac_cnn.yaml`
+
+**Key Benefits**:
+- Same workflow and commands for both algorithms
+- Same reward model can be used for both PPO and SAC training
+- Only the config file name differs between algorithms
+- All scripts and configs are located in `examples/embodiment/` directory
 
 ## Table of Contents
 
@@ -15,11 +28,17 @@ This document provides a comprehensive guide for the reward model workflow, incl
 
 ## Overview
 
-The reward model workflow consists of three main stages:
+The reward model workflow consists of three main stages and **supports both PPO and SAC algorithms**:
 
-1. **Data Collection**: Collect trajectories using an initial RL policy, storing images and success labels
-2. **Reward Model Training**: Train a binary classifier to predict success from single frames
-3. **RL Policy Training**: Use the trained reward model to replace environment success signals
+1. **Data Collection**: Collect trajectories using an initial RL policy (PPO or SAC), storing images and success labels
+2. **Reward Model Training**: Train a binary classifier to predict success from single frames (algorithm-agnostic)
+3. **RL Policy Training**: Use the trained reward model to replace environment success signals (works for both PPO and SAC)
+
+**Key Points**:
+- The same reward model can be used for both PPO and SAC training
+- The workflow and commands are identical for both algorithms
+- Only the config file name differs: `maniskill_ppo_cnn.yaml` vs `maniskill_sac_cnn.yaml`
+- Both use the same unified `RewardWorker` for reward computation
 
 ## Key Files and Components
 
@@ -48,30 +67,32 @@ The reward model workflow consists of three main stages:
 
 ### Reward Model Training
 
-#### `rlinf/models/reward_model/train_reward_model.py`
+#### `examples/embodiment/train_reward_model.py`
 **Purpose**: Training script for reward model
-- **Main Function**: `main()`
+- **Main Function**: `main(cfg: DictConfig)` (uses Hydra decorator)
+- **Configuration**: Uses Hydra and OmegaConf, config file at `examples/embodiment/config/train_reward_model.yaml`
 - **Responsibilities**:
-  - Loads trajectory data from `positive_dir` and `negative_dir`
+  - Loads trajectory data from `positive_dir` and `negative_dir` (from config)
   - Creates `RewardDataset` for frame-level training
   - Trains `BinaryRewardClassifier` with BCE loss
   - Saves best model checkpoint
   - Optionally visualizes positive samples
 
-**Key Arguments**:
-- `--positive-dir`: Directory containing positive trajectory `.npy` files
-- `--negative-dir`: Directory containing negative trajectory `.npy` files
-- `--output-checkpoint`: Path to save trained model (e.g., `./checkpoints/reward_model.pt`)
-- `--pretrained-encoder-path`: Path to pretrained ResNet10 encoder weights (e.g., `./resnet10_pretrained.pt`)
-- `--image-key`: Image key to use (default: `base_camera`)
-- `--image-size`: Image size as `[C H W]` (default: `3 64 64`)
-- `--batch-size`: Training batch size (default: 32)
-- `--epochs`: Number of training epochs (default: 100)
-- `--lr`: Learning rate (default: 1e-4)
-- `--hidden-dim`: Hidden dimension for classifier (default: 256)
-- `--num-spatial-blocks`: Number of spatial blocks for pooling (default: 8)
-- `--visualize-positive`: Flag to visualize positive samples
-- `--vis-output-dir`: Output directory for visualizations (default: `positive_samples_vis`)
+**Key Configuration Parameters**:
+- `positive_dir`: Directory containing positive trajectory `.npy` files
+- `negative_dir`: Directory containing negative trajectory `.npy` files
+- `output_checkpoint`: Path to save trained model (e.g., `./checkpoints/reward_model.pt`)
+- `pretrained_encoder_path`: Path to pretrained ResNet10 encoder weights (e.g., `./resnet10_pretrained.pt`)
+- `image_key`: Image key to use (default: `base_camera`)
+- `image_size`: Image size as `[C, H, W]` (default: `[3, 64, 64]`)
+- `batch_size`: Training batch size (default: `32`)
+- `epochs`: Number of training epochs (default: `100`)
+- `lr`: Learning rate (default: `1e-4`)
+- `hidden_dim`: Hidden dimension for classifier (default: `256`)
+- `num_spatial_blocks`: Number of spatial blocks for pooling (default: `8`)
+- `visualize_positive`: Flag to visualize positive samples (default: `false`)
+- `vis_output_dir`: Output directory for visualizations (default: `positive_samples_vis`)
+- `device`: Device to train on (default: `null` for auto-detection)
 
 #### `rlinf/models/reward_model/reward_classifier.py`
 **Purpose**: Reward model architecture definition
@@ -102,30 +123,43 @@ The reward model workflow consists of three main stages:
 
 ### Reward Model Usage
 
-#### `rlinf/workers/reward/embodied_reward_worker.py`
-**Purpose**: Reward worker that loads and uses trained reward model
-- **Main Class**: `EmbodiedRewardWorker`
+#### `rlinf/workers/reward/reward_worker.py`
+**Purpose**: Unified reward worker that supports both text-based reasoning tasks and embodied tasks
+- **Main Class**: `RewardWorker`
+- **Task Type Detection**: Automatically detects task type (embodied vs text-based) based on config
+  - Checks for `cfg.runner.task_type == "embodied"`
+  - Checks for presence of `cfg.env` config
+  - Checks if reward_model config contains `image_keys` or `image_size`
 - **Responsibilities**:
-  - Loads `BinaryRewardClassifier` from checkpoint in `init_worker()`
-  - Computes rewards for rollout results in `compute_rewards()`
-  - Replaces environment success signals with model predictions
+  - For embodied tasks: Loads `BinaryRewardClassifier` from checkpoint and computes frame-based rewards
+  - For text-based tasks: Supports rule-based rewards (reward model for text tasks not yet implemented)
   - Handles batch processing across parallel environments
+  - Replaces environment success signals with model predictions for embodied tasks
 
-**Key Methods**:
+**Key Methods for Embodied Tasks**:
 - `init_worker()`: Initialize and load reward model
+  - Automatically detects if this is an embodied task
   - Creates `BinaryRewardClassifier` with config parameters
   - Loads checkpoint from `cfg.reward.reward_model.checkpoint_path`
   - Automatically infers `use_pretrain` from checkpoint if needed
   - Moves model to device and sets to eval mode
-- `_compute_rewards_with_model()`: Compute rewards using model
-  - Extracts images from observations
+- `_compute_embodied_rewards_with_model()`: Compute rewards using model for embodied tasks
+  - Extracts images from observations in `EmbodiedRolloutResult`
   - Runs forward pass through model
   - Converts logits to rewards based on `reward_type` (binary/continuous)
+- `compute_rewards()`: Unified method that handles both `RolloutResult` and `EmbodiedRolloutResult`
+  - Automatically detects input type and routes to appropriate processing
+
+**Key Methods for Text-Based Tasks**:
+- `init_worker()`: Initialize rule-based reward or text reward model (if implemented)
+- `_compute_rule_based_rewards()`: Compute rewards using rule-based methods
+- `compute_batch_rewards_with_model()`: Compute rewards using reward model (not yet implemented)
 
 #### `examples/embodiment/train_embodied_agent.py`
 **Purpose**: Main training script for embodied RL agents
-- **Integration**: Creates `EmbodiedRewardWorker` if `cfg.reward.use_reward_model=True`
+- **Integration**: Creates `RewardWorker` if `cfg.reward.use_reward_model=True`
 - **Usage**: Can run SAC or PPO training with or without reward model
+- **Note**: The unified `RewardWorker` automatically detects embodied tasks and handles them appropriately
 
 #### `rlinf/runners/embodied_runner.py`
 **Purpose**: Main runner that orchestrates training
@@ -134,7 +168,13 @@ The reward model workflow consists of three main stages:
 
 ## Stage 1: Data Collection
 
-### Configuration (Example: `maniskill_ppo_cnn.yaml`)
+### Configuration
+
+The reward model workflow works with both PPO and SAC algorithms. Use the appropriate config file:
+- **PPO**: `examples/embodiment/config/maniskill_ppo_cnn.yaml`
+- **SAC**: `examples/embodiment/config/maniskill_sac_cnn.yaml`
+
+Both configs use the same reward model configuration structure. Example configuration (same structure for both PPO and SAC):
 
 ```yaml
 reward:
@@ -159,16 +199,28 @@ reward:
 
 ### Startup Command
 
+The same command works for both PPO and SAC - just specify the appropriate config name:
+
 ```bash
-# Using the provided script
+# For PPO
 bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn
 
-# Or directly with python
+# For SAC
+bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn
+
+# Or directly with python (PPO example)
 export EMBODIED_PATH="/path/to/RLinf/examples/embodiment"
 export PYTHONPATH="/path/to/RLinf:$PYTHONPATH"
 python examples/embodiment/train_embodied_agent.py \
     --config-path examples/embodiment/config/ \
     --config-name maniskill_ppo_cnn \
+    reward.collect_data=True \
+    reward.use_reward_model=False
+
+# Or for SAC
+python examples/embodiment/train_embodied_agent.py \
+    --config-path examples/embodiment/config/ \
+    --config-name maniskill_sac_cnn \
     reward.collect_data=True \
     reward.use_reward_model=False
 ```
@@ -212,9 +264,9 @@ Otherwise, it is saved to `negative_dir`.
 
 1. **Pretrained ResNet10 Encoder** (Optional but recommended):
    - **File**: `resnet10_pretrained.pt`
-   - **Location**: Should be placed in the project root or specified via `--pretrained-encoder-path`
+   - **Location**: Should be placed in the project root or specified via `pretrained_encoder_path` in config
    - **Purpose**: Provides pretrained visual features for better initialization
-   - **Note**: If not provided, the encoder will be randomly initialized
+   - **Note**: If not provided (set to `null`), the encoder will be randomly initialized
 
 2. **Collected Data**:
    - Positive trajectories in `positive_dir`
@@ -222,7 +274,47 @@ Otherwise, it is saved to `negative_dir`.
 
 ### Configuration
 
-No YAML configuration needed for training. All settings are via command-line arguments.
+The training script uses Hydra and OmegaConf for configuration management. The default configuration file is located at `examples/embodiment/config/train_reward_model.yaml`.
+
+#### Default Configuration File
+
+```yaml
+defaults:
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+# Data paths
+positive_dir: ./reward_data/positive
+negative_dir: ./reward_data/negative
+
+# Model configuration
+backbone: resnet10  # Currently only resnet10 is supported
+image_key: base_camera
+image_size: [3, 64, 64]  # [C, H, W]
+hidden_dim: 256
+num_spatial_blocks: 8
+pretrained_encoder_path: null  # Path to pretrained encoder weights
+
+# Training configuration
+batch_size: 32
+epochs: 100
+lr: 1e-4
+num_workers: 4
+
+# Output configuration
+output_checkpoint: ./checkpoints/reward_model.pt
+
+# Visualization
+visualize_positive: false
+vis_output_dir: positive_samples_vis
+
+# Device (set to null for auto-detection)
+device: null  # Will auto-detect: "cuda" if available, else "cpu"
+```
 
 ### Startup Command
 
@@ -230,42 +322,50 @@ No YAML configuration needed for training. All settings are via command-line arg
 # Using the provided script (modify paths as needed)
 bash examples/embodiment/train_reward_model.sh
 
-# Or directly with python (using module syntax)
-python -m rlinf.models.reward_model.train_reward_model \
-    --positive-dir ./reward_data/positive \
-    --negative-dir ./reward_data/negative \
-    --output-checkpoint ./checkpoints/reward_model.pt \
-    --pretrained-encoder-path ./resnet10_pretrained.pt \
-    --backbone resnet10 \
-    --image-key base_camera \
-    --image-size 3 64 64 \
-    --batch-size 128 \
-    --epochs 30 \
-    --lr 1e-4 \
-    --hidden-dim 256 \
-    --num-spatial-blocks 8 \
-    --visualize-positive \
-    --vis-output-dir ./positive_samples_vis
+# Or directly with python (from examples/embodiment directory)
+cd examples/embodiment
+python train_reward_model.py
+
+# Override configuration parameters via command line
+python train_reward_model.py \
+    positive_dir=./reward_data/positive \
+    negative_dir=./reward_data/negative \
+    output_checkpoint=./checkpoints/reward_model.pt \
+    pretrained_encoder_path=./resnet10_pretrained.pt \
+    image_key=base_camera \
+    image_size=[3,64,64] \
+    batch_size=128 \
+    epochs=30 \
+    lr=1e-4 \
+    hidden_dim=256 \
+    num_spatial_blocks=8 \
+    visualize_positive=true \
+    vis_output_dir=./positive_samples_vis
+
+# Or modify the YAML file directly and run with defaults
+python train_reward_model.py
 ```
 
-### Command Arguments
+### Configuration Parameters
 
-| Argument | Default | Description | Example |
-|----------|---------|-------------|---------|
-| `--positive-dir` | Required | Directory containing positive `.npy` files | `./reward_data/positive` |
-| `--negative-dir` | Required | Directory containing negative `.npy` files | `./reward_data/negative` |
-| `--output-checkpoint` | Required | Path to save trained model | `./checkpoints/reward_model.pt` |
-| `--pretrained-encoder-path` | None | Path to pretrained ResNet10 encoder | `./resnet10_pretrained.pt` |
-| `--backbone` | `resnet10` | Backbone architecture (currently only resnet10) | `resnet10` |
-| `--image-key` | `base_camera` | Image key to use | `base_camera` |
-| `--image-size` | `3 64 64` | Image size as `[C H W]` | `3 64 64` |
-| `--batch-size` | 32 | Training batch size | 128 |
-| `--epochs` | 100 | Number of training epochs | 30 |
-| `--lr` | 1e-4 | Learning rate | 1e-4 |
-| `--hidden-dim` | 256 | Hidden dimension for classifier | 256 |
-| `--num-spatial-blocks` | 8 | Number of spatial blocks for pooling | 8 |
-| `--visualize-positive` | False | Visualize positive samples before training | (flag) |
-| `--vis-output-dir` | `positive_samples_vis` | Output directory for visualizations | `./show` |
+| Parameter | Default | Description | Example |
+|-----------|---------|-------------|---------|
+| `positive_dir` | `./reward_data/positive` | Directory containing positive `.npy` files | `./reward_data/positive` |
+| `negative_dir` | `./reward_data/negative` | Directory containing negative `.npy` files | `./reward_data/negative` |
+| `output_checkpoint` | `./checkpoints/reward_model.pt` | Path to save trained model | `./checkpoints/reward_model.pt` |
+| `pretrained_encoder_path` | `null` | Path to pretrained ResNet10 encoder | `./resnet10_pretrained.pt` |
+| `backbone` | `resnet10` | Backbone architecture (currently only resnet10) | `resnet10` |
+| `image_key` | `base_camera` | Image key to use | `base_camera` |
+| `image_size` | `[3, 64, 64]` | Image size as `[C, H, W]` | `[3, 64, 64]` |
+| `batch_size` | `32` | Training batch size | `128` |
+| `epochs` | `100` | Number of training epochs | `30` |
+| `lr` | `1e-4` | Learning rate | `1e-4` |
+| `hidden_dim` | `256` | Hidden dimension for classifier | `256` |
+| `num_spatial_blocks` | `8` | Number of spatial blocks for pooling | `8` |
+| `num_workers` | `4` | Number of data loading workers | `4` |
+| `visualize_positive` | `false` | Visualize positive samples before training | `true` |  (Optional)
+| `vis_output_dir` | `positive_samples_vis` | Output directory for visualizations | `./show` |  (Optional)
+| `device` | `null` | Device to train on (auto-detects if null) | `cuda` or `cpu` |
 
 ### Training Process
 
@@ -279,7 +379,7 @@ python -m rlinf.models.reward_model.train_reward_model \
 
 2. **Model Creation**:
    - Creates `BinaryRewardClassifier` with specified parameters
-   - If `--pretrained-encoder-path` is provided, loads pretrained ResNet10 weights
+   - If `pretrained_encoder_path` is provided in config, loads pretrained ResNet10 weights
    - Encoder weights are frozen by default (`freeze_encoder=True`)
 
 3. **Training Loop**:
@@ -300,7 +400,7 @@ python -m rlinf.models.reward_model.train_reward_model \
 
 ### Model Save Location
 
-**Default**: Specified by `--output-checkpoint` argument
+**Default**: Specified by `output_checkpoint` in configuration
 
 **Example Paths**:
 - `./checkpoints/reward_model.pt`
@@ -310,16 +410,22 @@ python -m rlinf.models.reward_model.train_reward_model \
 
 ### Visualization (Optional)
 
-If `--visualize-positive` is specified:
+If `visualize_positive: true` is set in the configuration:
 - All positive samples (label=1) are visualized
-- Images are saved to `--vis-output-dir`
+- Images are saved to `vis_output_dir`
 - Filename format: `{folder}_{traj_id}_frame{frame_idx}.png`
   - Example: `positive_000001_frame049.png`
 - Useful for verifying data quality and understanding success patterns
 
 ## Stage 3: Training RL Policy with Reward Model
 
-### Configuration (Example: `maniskill_ppo_cnn.yaml`)
+### Configuration
+
+The reward model workflow works with both PPO and SAC algorithms. Use the appropriate config file:
+- **PPO**: `examples/embodiment/config/maniskill_ppo_cnn.yaml`
+- **SAC**: `examples/embodiment/config/maniskill_sac_cnn.yaml`
+
+Both configs use the same reward model configuration structure. Example configuration (same structure for both PPO and SAC):
 
 ```yaml
 reward:
@@ -351,11 +457,16 @@ reward:
 
 ### Startup Command
 
+The same command works for both PPO and SAC - just specify the appropriate config name:
+
 ```bash
-# Using the provided script
+# For PPO
 bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn
 
-# Or directly with python
+# For SAC
+bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn
+
+# Or directly with python (PPO example)
 export EMBODIED_PATH="/path/to/RLinf/examples/embodiment"
 export PYTHONPATH="/path/to/RLinf:$PYTHONPATH"
 python examples/embodiment/train_embodied_agent.py \
@@ -364,49 +475,74 @@ python examples/embodiment/train_embodied_agent.py \
     reward.use_reward_model=True \
     reward.collect_data=False \
     reward.reward_model.checkpoint_path="./checkpoints/reward_model.pt"
+
+# Or for SAC
+python examples/embodiment/train_embodied_agent.py \
+    --config-path examples/embodiment/config/ \
+    --config-name maniskill_sac_cnn \
+    reward.use_reward_model=True \
+    reward.collect_data=False \
+    reward.reward_model.checkpoint_path="./checkpoints/reward_model.pt"
 ```
 
 ### Reward Model Loading Process
 
-1. **Initialization** (`EmbodiedRewardWorker.init_worker()`):
+1. **Task Type Detection** (`RewardWorker._is_embodied_task()`):
+   - Automatically detects if this is an embodied task based on config
+   - For embodied tasks, initializes image-based reward model
+   - For text-based tasks, initializes text-based reward handler
+
+2. **Initialization for Embodied Tasks** (`RewardWorker.init_worker()`):
    - Creates `BinaryRewardClassifier` with config parameters
    - Loads checkpoint from `checkpoint_path`
    - Automatically infers `use_pretrain` from checkpoint if there's a mismatch
    - Moves model to device (`torch.cuda.current_device()`)
    - Sets model to eval mode
 
-2. **Checkpoint Compatibility**:
+3. **Checkpoint Compatibility**:
    - If `use_pretrain` in config doesn't match the training config, the code will automatically infer the correct value from the checkpoint's pooling layer kernel shape
    - Warning messages will be printed if adjustments are made
 
 ### Reward Computation Process
 
-1. **During Rollout** (`EmbodiedRewardWorker._compute_rewards_with_model()`):
+1. **Unified Reward Computation** (`RewardWorker.compute_rewards()`):
+   - Automatically detects input type (`RolloutResult` vs `EmbodiedRolloutResult`)
+   - Routes to appropriate processing method based on input type
+
+2. **For Embodied Tasks** (`RewardWorker._compute_embodied_rewards_with_model()`):
    - Receives `EmbodiedRolloutResult` from rollout worker
    - Extracts observations (images) from `transitions` or `forward_inputs`
    - Processes each observation:
      - Extracts image using `_extract_images_from_obs()`
-     - Normalizes to `[0, 1]` and converts to `[C, H, W]` format
+     - Ensures images are in `[B, C, H, W]` format
      - Runs forward pass through reward model
      - Applies sigmoid to get success probability
      - Converts to reward based on `reward_type`:
        - `"binary"`: `(probs > 0.5).float()` → 0 or 1
        - `"continuous"`: Uses probability directly
 
-2. **Integration with RL Training**:
+3. **Integration with RL Training**:
    - Reward model predictions replace or supplement environment `success_frame` signals
    - For SAC: Used for Q-learning and policy optimization
    - For PPO: Used for advantage computation and policy updates
 
 ### Important Notes
 
-1. **Configuration Consistency**: All reward model parameters (`image_keys`, `image_size`, `hidden_dim`, `num_spatial_blocks`, `use_pretrain`, `freeze_encoder`) must match between training and usage configs
+1. **Unified RewardWorker**: The `RewardWorker` class now supports both embodied and text-based reasoning tasks. It automatically detects the task type based on configuration and routes to the appropriate processing methods. This unified design ensures backward compatibility with existing text-based tasks while supporting new embodied tasks.
 
-2. **Pretrained Encoder**: The `pretrained_encoder_path` in the config is used during model creation but may not be reloaded if the checkpoint already contains encoder weights. The checkpoint's encoder weights take precedence.
+2. **Configuration Consistency**: All reward model parameters (`image_keys`, `image_size`, `hidden_dim`, `num_spatial_blocks`, `use_pretrain`, `freeze_encoder`) must match between training and usage configs
 
-3. **Performance**: Reward model inference adds computational overhead. Consider using `freeze_encoder=True` to reduce memory and computation.
+3. **Pretrained Encoder**: The `pretrained_encoder_path` in the config is used during model creation but may not be reloaded if the checkpoint already contains encoder weights. The checkpoint's encoder weights take precedence.
 
-4. **Parallel Environments**: The reward model processes all environments in parallel batches for efficiency.
+4. **Performance**: Reward model inference adds computational overhead. Consider using `freeze_encoder=True` to reduce memory and computation.
+
+5. **Parallel Environments**: The reward model processes all environments in parallel batches for efficiency.
+
+6. **Task Type Detection**: The worker automatically determines if it's handling an embodied task by checking:
+   - `cfg.runner.task_type == "embodied"` 
+   - Presence of `cfg.env` configuration
+   - Reward model config containing `image_keys` or `image_size`
+   If none of these conditions are met, it treats the task as a text-based reasoning task.
 
 ## Complete Workflow Summary
 
@@ -418,9 +554,12 @@ python examples/embodiment/train_embodied_agent.py \
                               ▼
         ┌─────────────────────────────────────┐
         │  RL Policy Training (Initial Policy)│
+        │  - Supports both PPO and SAC        │
         │  - Config: reward.collect_data=True │
         │  - Config: reward.use_reward_model=False │
-        │  - Command: run_embodiment.sh maniskill_ppo_cnn │
+        │  - Command: run_embodiment.sh [config_name] │
+        │    * PPO: run_embodiment.sh maniskill_ppo_cnn │
+        │    * SAC: run_embodiment.sh maniskill_sac_cnn │
         │  - RewardDataCollector collects data│
         │  - Saves to positive/negative dirs  │
         └─────────────────────────────────────┘
@@ -437,10 +576,12 @@ python examples/embodiment/train_embodied_agent.py \
                               ▼
         ┌─────────────────────────────────────┐
         │  train_reward_model.py               │
-        │  - Input: positive_dir, negative_dir │
-        │  - Optional: pretrained_encoder_path │
+        │  - Location: examples/embodiment/    │
+        │  - Uses Hydra config: config/train_reward_model.yaml │
+        │  - Input: positive_dir, negative_dir (from config) │
+        │  - Optional: pretrained_encoder_path (from config) │
         │  - Output: reward_model.pt           │
-        │  - Command: train_reward_model.sh    │
+        │  - Command: python examples/embodiment/train_reward_model.py │
         └─────────────────────────────────────┘
                               │
                               ▼
@@ -454,18 +595,30 @@ python examples/embodiment/train_embodied_agent.py \
                               ▼
         ┌─────────────────────────────────────┐
         │  RL Policy Training (SAC/PPO)       │
+        │  - Supports both PPO and SAC        │
         │  - Config: reward.use_reward_model=True │
         │  - Config: reward.collect_data=False │
         │  - Config: checkpoint_path set      │
-        │  - Command: run_embodiment.sh maniskill_ppo_cnn │
-        │  - EmbodiedRewardWorker loads model │
-        │  - Replaces env success signals     │
+        │  - Command: run_embodiment.sh [config_name] │
+        │    * PPO: run_embodiment.sh maniskill_ppo_cnn │
+        │    * SAC: run_embodiment.sh maniskill_sac_cnn │
+        │  - RewardWorker automatically detects embodied task │
+        │  - RewardWorker loads BinaryRewardClassifier │
+        │  - Replaces env success signals with model predictions │
         └─────────────────────────────────────┘
 ```
 
 ## Configuration Examples
 
-### Complete Example: `maniskill_ppo_cnn.yaml`
+### Algorithm Support
+
+The reward model workflow works identically for both **PPO** and **SAC** algorithms. The only difference is the config file name:
+- **PPO**: `examples/embodiment/config/maniskill_ppo_cnn.yaml`
+- **SAC**: `examples/embodiment/config/maniskill_sac_cnn.yaml`
+
+Both configs share the same reward model configuration structure. The examples below use PPO config, but the same structure applies to SAC config.
+
+### Complete Example: `maniskill_ppo_cnn.yaml` (same for `maniskill_sac_cnn.yaml`)
 
 #### Stage 1: Data Collection Config
 
@@ -485,23 +638,35 @@ reward:
     max_negative_trajectories: 500
 ```
 
-#### Stage 2: Reward Model Training (Command-line)
+#### Stage 2: Reward Model Training (Hydra Configuration)
+
+**Note**: Reward model training is algorithm-agnostic. The same trained model can be used for both PPO and SAC.
 
 ```bash
-python -m rlinf.models.reward_model.train_reward_model \
-    --positive-dir ./reward_data/positive \
-    --negative-dir ./reward_data/negative \
-    --output-checkpoint ./checkpoints/reward_model.pt \
-    --pretrained-encoder-path ./resnet10_pretrained.pt \
-    --image-key base_camera \
-    --image-size 3 64 64 \
-    --batch-size 128 \
-    --epochs 30 \
-    --hidden-dim 256 \
-    --num-spatial-blocks 8
+# Using the provided script (modify paths as needed)
+bash examples/embodiment/train_reward_model.sh
+
+# Or directly with python (from examples/embodiment directory)
+cd examples/embodiment
+python train_reward_model.py
+
+# Or override parameters via command line
+python train_reward_model.py \
+    positive_dir=./reward_data/positive \
+    negative_dir=./reward_data/negative \
+    output_checkpoint=./checkpoints/reward_model.pt \
+    pretrained_encoder_path=./resnet10_pretrained.pt \
+    image_key=base_camera \
+    image_size=[3,64,64] \
+    batch_size=128 \
+    epochs=30 \
+    hidden_dim=256 \
+    num_spatial_blocks=8
 ```
 
 #### Stage 3: Training with Reward Model Config
+
+**PPO Example** (`maniskill_ppo_cnn.yaml`):
 
 ```yaml
 reward:
@@ -518,5 +683,74 @@ reward:
     use_pretrain: True
     freeze_encoder: True
     reward_type: "binary"
+```
+
+**SAC Example** (`maniskill_sac_cnn.yaml`):
+
+The reward model configuration is identical to PPO. The only differences are algorithm-specific parameters:
+
+```yaml
+reward:
+  group_name: "RewardGroup"
+  use_reward_model: True
+  collect_data: False
+  reward_model:
+    checkpoint_path: "./checkpoints/reward_model.pt"
+    image_keys: ["base_camera"]
+    image_size: [3, 64, 64]
+    hidden_dim: 256
+    num_spatial_blocks: 8
+    pretrained_encoder_path: "./resnet10_pretrained.pt"
+    use_pretrain: True
+    freeze_encoder: True
+    reward_type: "binary"
+
+# SAC-specific algorithm parameters (different from PPO)
+algorithm:
+  loss_type: embodied_sac
+  adv_type: embodied_sac
+  gamma: 0.8
+  tau: 0.005
+  alpha: 0.2
+  auto_entropy_tuning: True
+  replay_buffer_capacity: 300000
+  # ... other SAC-specific settings
+```
+
+### Complete Workflow Example (PPO or SAC)
+
+The workflow is identical for both algorithms. Here's a complete example:
+
+```bash
+# Step 1: Collect data (works for both PPO and SAC)
+# For PPO:
+bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn \
+    reward.collect_data=True \
+    reward.use_reward_model=False
+
+# For SAC:
+bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn \
+    reward.collect_data=True \
+    reward.use_reward_model=False
+
+# Step 2: Train reward model (same for both algorithms)
+cd examples/embodiment
+python train_reward_model.py \
+    positive_dir=./reward_data/positive \
+    negative_dir=./reward_data/negative \
+    output_checkpoint=./checkpoints/reward_model.pt
+
+# Step 3: Train with reward model
+# For PPO:
+bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn \
+    reward.use_reward_model=True \
+    reward.collect_data=False \
+    reward.reward_model.checkpoint_path=./checkpoints/reward_model.pt
+
+# For SAC:
+bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn \
+    reward.use_reward_model=True \
+    reward.collect_data=False \
+    reward.reward_model.checkpoint_path=./checkpoints/reward_model.pt
 ```
 

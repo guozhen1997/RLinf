@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import torch
 import torch.nn as nn
 from .utils import make_mlp
@@ -189,23 +190,52 @@ class SpatialLearnedEmbeddings(nn.Module):
         return out
 
 class ResNetEncoder(nn.Module):
-    def __init__(self, sample_x, out_dim=256):
+    """ResNet encoder with spatial learned embeddings.
+    
+    This class provides a unified ResNet encoder that can be used in both
+    policy networks and reward classifiers. It supports pretrained weights,
+    freezing, and configurable spatial pooling.
+    """
+    def __init__(
+        self, 
+        sample_x, 
+        out_dim=256,
+        num_spatial_blocks=8,
+        pretrained_encoder_path=None,
+        use_pretrain=True,
+        freeze_encoder=True,
+    ):
         super().__init__()
 
         self.out_dim = out_dim
-        
-        self.num_spatial_blocks = 8
+        self.num_spatial_blocks = num_spatial_blocks
+        self.use_pretrain = use_pretrain
+        self.freeze_encoder = freeze_encoder
+        self.pretrained_encoder_path = pretrained_encoder_path
         self.pooling_method = "spatial_learned_embeddings"
-        self.use_pretrain = True
         
+        # ResNet backbone
         self.resnet_backbone = ResNet10(pre_pooling=self.use_pretrain)
-        if self.use_pretrain:
+        
+        if self.use_pretrain and self.pretrained_encoder_path:
             self._load_pretrained_weights()
-            self._freeze_backbone_weights()
+            if self.freeze_encoder:
+                self._freeze_backbone_weights()
+        elif self.use_pretrain and not self.pretrained_encoder_path:
+            # Backward compatibility: try default path
+            default_path = "./resnet10_pretrained.pt"
+            if os.path.exists(default_path):
+                self.pretrained_encoder_path = default_path
+                self._load_pretrained_weights()
+                if self.freeze_encoder:
+                    self._freeze_backbone_weights()
 
-        sample_embed = self.resnet_backbone(sample_x)
-        _, channel, height, width = sample_embed.shape
-        # pooling
+        # Get output dimensions from sample
+        with torch.no_grad():
+            sample_embed = self.resnet_backbone(sample_x)
+            _, channel, height, width = sample_embed.shape
+
+        # Pooling layer
         if self.pooling_method == "spatial_learned_embeddings":
             self.pooling_layer = SpatialLearnedEmbeddings(
                 height=height,
@@ -215,7 +245,7 @@ class ResNetEncoder(nn.Module):
             )
             self.dropout = nn.Dropout(0.1)
         
-        # final linear
+        # Final MLP
         self.mlp = nn.Sequential(
             nn.Linear(in_features=channel*self.num_spatial_blocks, out_features=self.out_dim), 
             nn.LayerNorm(self.out_dim), 
@@ -223,18 +253,35 @@ class ResNetEncoder(nn.Module):
         )
 
     def _load_pretrained_weights(self):
-        pretrained_ckpt = "./resnet10_pretrained.pt"
-        model_dict = torch.load(pretrained_ckpt)
-        self.resnet_backbone.load_state_dict(model_dict)
+        """Load pretrained ResNet10 weights."""
+        if self.pretrained_encoder_path and os.path.exists(self.pretrained_encoder_path):
+            try:
+                model_dict = torch.load(self.pretrained_encoder_path, map_location="cpu")
+                self.resnet_backbone.load_state_dict(model_dict, strict=False)
+                print(f"Loaded pretrained weights from {self.pretrained_encoder_path}")
+            except Exception as e:
+                print(f"Warning: Failed to load pretrained weights: {e}")
+        else:
+            if self.pretrained_encoder_path:
+                print(f"Warning: Pretrained encoder path not found: {self.pretrained_encoder_path}")
 
     def _freeze_backbone_weights(self):
+        """Freeze the ResNet backbone weights."""
         for p in self.resnet_backbone.parameters():
             p.requires_grad = False
 
     def forward(self, x):
+        """Forward pass through encoder.
+        
+        Args:
+            x: Input image tensor [B, C, H, W]
+        
+        Returns:
+            feature: Encoded feature tensor [B, out_dim]
+        """
         x = self.resnet_backbone(x)
 
-        if self.use_pretrain:
+        if self.use_pretrain and self.freeze_encoder:
             x = x.detach()
         
         if self.pooling_method == "spatial_learned_embeddings":

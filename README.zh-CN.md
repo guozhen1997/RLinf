@@ -96,6 +96,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
           <li><b>自定义模型</b></li>
           <ul>
             <li>MLP-Policy ✅</li>
+            <li>MLP-Policy ✅</li>
           </ul>
         </ul>
       </td>
