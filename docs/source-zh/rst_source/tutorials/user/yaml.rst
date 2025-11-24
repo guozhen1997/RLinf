@@ -892,7 +892,6 @@ actor
       lora_path: /storage/models/oft-sft/lora_004000
       ckpt_path: null
       num_images_in_input: 1
-      use_wrist_image: False
       attn_implementation: "flash_attention_2"
       low_cpu_mem_usage: True
       trust_remote_code: True
@@ -960,8 +959,6 @@ actor
 ``actor.model.ckpt_path``：模型 checkpoint 路径。  
 
 ``actor.model.num_images_in_input``：输入的图像数量。  
-
-``actor.model.use_wrist_image``：是否使用机器人末端手腕（wrist）上的摄像头拍摄的图像。  
 
 ``actor.model.attn_implementation``：注意力实现（flash_attention_2）。  
 
@@ -1055,14 +1052,6 @@ actor
 ``group_size``：每个分组的环境数（继承自 algorithm.group_size）。  
 
 ``use_fixed_reset_state_ids``：是否使用固定 reset 状态（GRPO 为 True，PPO 默认 False）。
-
-**输入配置**
-
-.. code:: yaml
-
-  use_wrist_image: False
-
-``use_wrist_image``：是否使用机器人末端手腕（wrist）上的摄像头拍摄的图像。
 
 **环境规模**
 

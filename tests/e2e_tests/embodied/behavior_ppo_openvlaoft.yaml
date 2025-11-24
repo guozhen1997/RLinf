@@ -97,8 +97,6 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  checkpoint_load_path: "/workspace/dataset/RLinf-OpenVLAOFT-Behavior/"
-  checkpoint_save_path: "/workspace/results"
 
   micro_batch_size: 10
   global_batch_size: 40
@@ -106,6 +104,8 @@ actor:
   enable_offload: True
 
   model:
+    model_dir: "/workspace/dataset/RLinf-OpenVLAOFT-Behavior/"
+    ckpt_path: null
     model_name: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 23
@@ -123,8 +123,7 @@ actor:
     image_size: [224, 224]
     is_lora: False
     lora_rank: 32
-    ckpt_path: null
-    use_wrist_image: False
+
     num_images_in_input: 3
     attn_implementation: "flash_attention_2"
     low_cpu_mem_usage: True

@@ -101,14 +101,13 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  checkpoint_load_path: "/workspace/dataset/RLinf-Pi0-MetaWorld"
-  checkpoint_save_path: "../results"
-  micro_batch_size: 1
-  global_batch_size: 4 # maximum : global batch size = micro batch size * actor num_processes.
+  micro_batch_size: 16
+  global_batch_size: 256 # maximum : global batch size = micro batch size * actor num_processes.
   seed: 42
   enable_offload: False
 
   model:
+    model_dir: "/workspace/dataset/RLinf-Pi0-MetaWorld"
     model_name: "openpi"
     precision: null
     num_action_chunks: 5 # interface for the env
@@ -116,7 +115,6 @@ actor:
     is_lora: False
     lora_rank: 32
     gradient_checkpointing: False
-    use_wrist_image: False
     use_proprio: True
     num_steps: 5
     add_value_head: True

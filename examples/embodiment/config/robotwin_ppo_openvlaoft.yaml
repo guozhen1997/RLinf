@@ -102,6 +102,7 @@ actor:
 
   model:
     model_dir: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k/"
+    ckpt_path: null
 
     model_name: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
@@ -120,7 +121,6 @@ actor:
     image_size: [224, 224]
     is_lora: False
     lora_rank: 32
-    ckpt_path: null
     num_images_in_input: 1
     attn_implementation: "flash_attention_2"
     low_cpu_mem_usage: True

@@ -99,22 +99,14 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  checkpoint_load_path: "/workspace/dataset/openvla-7b"
-  checkpoint_save_path: "/workspace/results"
 
   micro_batch_size: 2
   global_batch_size: 8
   seed: 1234
   enable_offload: True
 
-  tokenizer:
-    tokenizer_type: "HuggingFaceTokenizer"
-    tokenizer_model: "/workspace/dataset/openvla-7b"
-    use_fast: False
-    trust_remote_code: True
-    padding_side: "right"
-
   model:
+    model_dir: "/workspace/dataset/openvla-7b"
     model_name: "openvla"
     action_dim: 7
     num_action_chunks: 1
@@ -139,10 +131,16 @@ actor:
     image_size: [224, 224]
     is_lora: True
     lora_rank: 32
-    use_wrist_image: False
     attn_implementation: "flash_attention_2"
     low_cpu_mem_usage: True
     trust_remote_code: True
+
+  tokenizer:
+    tokenizer_type: "HuggingFaceTokenizer"
+    tokenizer_model: "/workspace/dataset/openvla-7b"
+    use_fast: False
+    trust_remote_code: True
+    padding_side: "right"
 
   optim:
     lr: 1.0e-4
