@@ -28,8 +28,9 @@ from libero.libero.envs.venv import (
     SubprocVectorEnv,
     _setup_buf,
 )
+
 from rlinf.envs.calvin import make_env
-from typing import List, Tuple
+
 gym_old_venv_step_type = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 gym_new_venv_step_type = tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray
@@ -119,8 +120,9 @@ def _worker(
                 raise NotImplementedError
     except KeyboardInterrupt:
         p.close()
-    except Exception as e:
+    except Exception:
         import traceback
+
         traceback.print_exc()
         p.close()
     finally:
@@ -184,13 +186,12 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
         for j, i in enumerate(id):
             self.workers[i].reconfigure_env_fn(env_fns[j])
 
-
     def reset(
         self,
-        id: Optional[Union[int, List[int], np.ndarray]] = None,
-        robot_obs: Optional[Union[np.ndarray, List[np.ndarray]]] = None,
-        scene_obs: Optional[Union[np.ndarray, List[np.ndarray]]] = None,
-    ) -> Union[np.ndarray, Tuple[np.ndarray, Union[dict, List[dict]]]]:
+        id: Optional[Union[int, list[int], np.ndarray]] = None,
+        robot_obs: Optional[Union[np.ndarray, list[np.ndarray]]] = None,
+        scene_obs: Optional[Union[np.ndarray, list[np.ndarray]]] = None,
+    ) -> Union[np.ndarray, tuple[np.ndarray, Union[dict, list[dict]]]]:
         self._assert_is_not_closed()
         id = self._wrap_id(id)
         if self.is_async:
@@ -199,7 +200,9 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
         # send(None) == reset() in worker
         for i in id:
             if robot_obs is not None and scene_obs is not None:
-                self.workers[i].send(None, robot_obs=robot_obs[i], scene_obs=scene_obs[i])
+                self.workers[i].send(
+                    None, robot_obs=robot_obs[i], scene_obs=scene_obs[i]
+                )
             else:
                 self.workers[i].send(None)
         ret_list = [self.workers[i].recv() for i in id]
@@ -232,8 +235,8 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
 
     def get_obs(
         self,
-        id: Optional[Union[int, List[int], np.ndarray]] = None,
-    ) -> Union[dict, List[dict]]:
+        id: Optional[Union[int, list[int], np.ndarray]] = None,
+    ) -> Union[dict, list[dict]]:
         self._assert_is_not_closed()
         id = self._wrap_id(id)
         if self.is_async:
@@ -242,7 +245,7 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
         # Get observations from all specified workers
         # get_obs() already handles send and recv internally
         obs_list = [self.workers[i].get_obs() for i in id]
-        
+
         # If only one environment, return single observation
         if len(obs_list) == 1:
             return obs_list[0]
@@ -251,8 +254,8 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
 
     def get_info(
         self,
-        id: Optional[Union[int, List[int], np.ndarray]] = None,
-    ) -> Union[dict, List[dict]]:
+        id: Optional[Union[int, list[int], np.ndarray]] = None,
+    ) -> Union[dict, list[dict]]:
         """Get info from the environment(s)."""
         self._assert_is_not_closed()
         id = self._wrap_id(id)
@@ -262,7 +265,7 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
         # Get info from all specified workers
         # get_info() already handles send and recv internally
         info_list = [self.workers[i].get_info() for i in id]
-        
+
         # If only one environment, return single info
         if len(info_list) == 1:
             return info_list[0]
@@ -273,12 +276,13 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
 if __name__ == "__main__":
     from calvin_agent.evaluation.multistep_sequences import get_sequences
     from calvin_agent.evaluation.utils import get_env_state_for_initial_condition
+
     sequences = get_sequences(10)
     seq = sequences[0]
     robot_obs, scene_obs = get_env_state_for_initial_condition(seq[0])
     robot_obs_list = [robot_obs] * 10
     scene_obs_list = [scene_obs] * 10
-    env = ReconfigureSubprocEnv([make_env]*10)
+    env = ReconfigureSubprocEnv([make_env] * 10)
     obs = env.reset(robot_obs=robot_obs_list, scene_obs=scene_obs_list)
     print("reset over")
     for _ in range(10):

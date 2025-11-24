@@ -145,9 +145,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         if first_process:
             inputs.pop("prompt")
         else:
-            inputs = {
-                key: inputs[key] for key in inputs.keys() if "/" in key
-            }
+            inputs = {key: inputs[key] for key in inputs.keys() if "/" in key}
         # tensor -> numpy
         inputs = jax.tree.map(
             lambda x: np.asarray(x.detach().cpu()) if torch.is_tensor(x) else x, inputs

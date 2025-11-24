@@ -11,25 +11,34 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
-from rlinf.envs.calvin.utils import get_sequences
-from calvin_agent.evaluation.utils import get_env_state_for_initial_condition
-import calvin_env
-from calvin_env.envs.play_table_env import get_env
 import pathlib
-from omegaconf import OmegaConf
-import hydra
 from pathlib import Path
+
+import calvin_env
+import hydra
 from calvin_agent.evaluation.utils import get_env_state_for_initial_condition
-import numpy as np
+from calvin_env.envs.play_table_env import get_env
+from omegaconf import OmegaConf
+
+from rlinf.envs.calvin.utils import get_sequences
+
 
 def _get_calvin_tasks_and_reward(num_sequences, use_random_seed=True):
-    conf_dir = pathlib.Path(calvin_env.__file__).absolute().parents[1] / "calvin_agent" / "conf"
-    task_cfg = OmegaConf.load(conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml")
+    conf_dir = (
+        pathlib.Path(calvin_env.__file__).absolute().parents[1]
+        / "calvin_agent"
+        / "conf"
+    )
+    task_cfg = OmegaConf.load(
+        conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml"
+    )
     task_oracle = hydra.utils.instantiate(task_cfg)
-    val_annotations = OmegaConf.load(conf_dir / "annotations/new_playtable_validation.yaml")
+    val_annotations = OmegaConf.load(
+        conf_dir / "annotations/new_playtable_validation.yaml"
+    )
     eval_sequences = get_sequences(num_sequences, use_random_seed=use_random_seed)
     return eval_sequences, val_annotations, task_oracle
+
 
 def make_env():
     dataset_paths = [
@@ -43,19 +52,20 @@ def make_env():
             continue
     raise RuntimeError(f"Failed to create environment from all paths: {dataset_paths}")
 
+
 class CalvinBenchmark:
     def __init__(self, task_suite_name):
         assert task_suite_name in [
             "calvin_d",
         ]
         self.task_suite_name = task_suite_name
-        self.use_random_seed = True # True for rollout and False for val
-        breakpoint()
-        self.eval_sequences, self.val_annotations, self.task_oracle = _get_calvin_tasks_and_reward(
-            self.get_num_tasks() * self.get_task_num_trials(),
-            self.use_random_seed
+        self.use_random_seed = True  # True for rollout and False for val
+        self.eval_sequences, self.val_annotations, self.task_oracle = (
+            _get_calvin_tasks_and_reward(
+                self.get_num_tasks() * self.get_task_num_trials(), self.use_random_seed
+            )
         )
-            
+
     def get_num_tasks(self):
         if self.task_suite_name == "calvin_d":
             return 1
@@ -67,7 +77,7 @@ class CalvinBenchmark:
     def get_task_init_states(self, trial_id):
         if self.task_suite_name == "calvin_d":
             return self.eval_sequences[trial_id][0]
-        
+
     def get_task_sequence(self, trial_id):
         if self.task_suite_name == "calvin_d":
             return self.eval_sequences[trial_id][1]
@@ -80,7 +90,7 @@ class CalvinBenchmark:
             robot_obs_list.append(robot_obs)
             scene_obs_list.append(scene_obs)
         return robot_obs_list, scene_obs_list
-    
+
     def get_task_descriptions(self, task):
         return self.val_annotations[task][0]
 

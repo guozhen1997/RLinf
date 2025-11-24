@@ -68,12 +68,14 @@ def prepare_actions_for_libero(
         chunk_actions[..., -1] = np.sign(chunk_actions[..., -1]) * -1.0
     return chunk_actions
 
+
 def prepare_actions_for_calvin(
     raw_chunk_actions,
 ) -> np.ndarray:
     chunk_actions = raw_chunk_actions
     chunk_actions[..., -1] = np.sign(chunk_actions[..., -1])
     return chunk_actions
+
 
 def prepare_actions(
     raw_chunk_actions,

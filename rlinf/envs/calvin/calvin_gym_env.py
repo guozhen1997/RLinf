@@ -16,28 +16,26 @@ import copy
 import os
 
 # Ensure MW envs only register once
-import warnings
 from typing import Optional, Union
 
 import gymnasium as gym
-import metaworld
 import numpy as np
 import torch
 
+from rlinf.envs.calvin import CalvinBenchmark, make_env
+from rlinf.envs.calvin.venv import ReconfigureSubprocEnv
 from rlinf.envs.libero.utils import (
     put_info_on_image,
     save_rollout_video,
     tile_images,
 )
-from rlinf.envs.calvin import CalvinBenchmark
-from rlinf.envs.calvin.venv import ReconfigureSubprocEnv
 from rlinf.envs.utils import (
     list_of_dict_to_dict_of_list,
     to_tensor,
 )
-from rlinf.envs.calvin import make_env
 
 # TODO: now rollout is fixed on 1000 sequences
+
 
 class CalvinEnv(gym.Env):
     def __init__(self, cfg, seed_offset, total_num_processes):
@@ -57,9 +55,7 @@ class CalvinEnv(gym.Env):
         self._generator = np.random.default_rng(seed=self.seed)
         self._generator_ordered = np.random.default_rng(seed=0)
 
-        self.task_suite: CalvinBenchmark = CalvinBenchmark(
-            self.cfg.task_suite_name
-        )
+        self.task_suite: CalvinBenchmark = CalvinBenchmark(self.cfg.task_suite_name)
         self.num_tasks = self.task_suite.get_num_tasks()
         self.task_num_trials = self.task_suite.get_task_num_trials()
         self._compute_total_num_group_envs()
@@ -165,7 +161,7 @@ class CalvinEnv(gym.Env):
             for env_id in env_idx
         ]
         return init_state
-    
+
     def _get_task_sequence(self, env_idx):
         task_sequence = [
             self.task_suite.get_task_sequence(self.trial_ids[env_id])
@@ -237,7 +233,7 @@ class CalvinEnv(gym.Env):
         for obs in obs_list:
             images_and_states = self._extract_image_and_state(obs)
             images_and_states_list.append(images_and_states)
-        
+
         obs = {
             "images_and_states": to_tensor(
                 list_of_dict_to_dict_of_list(images_and_states_list)
@@ -267,12 +263,11 @@ class CalvinEnv(gym.Env):
         self.task_sequence = self._get_task_sequence(env_idx)
         self.current_task = [self.task_sequence[env_id][0] for env_id in env_idx]
         self.current_task_idx = [0] * len(env_idx)
-        self.previous_info = self.env.get_info(id=env_idx) 
+        self.previous_info = self.env.get_info(id=env_idx)
         self.task_descriptions = [
-                self.task_suite.get_task_descriptions(
-                    self.current_task[env_id]
-                ) for env_id in env_idx
-            ]
+            self.task_suite.get_task_descriptions(self.current_task[env_id])
+            for env_id in env_idx
+        ]
 
     def reset(
         self,
@@ -318,7 +313,7 @@ class CalvinEnv(gym.Env):
         self._elapsed_steps += 1
         raw_obs, _, _, info_lists = self.env.step(actions)
         subtask_success = self._check_subtask_success(info_lists)
-        self._reset_current_task(subtask_success,info_lists)
+        self._reset_current_task(subtask_success, info_lists)
         infos = list_of_dict_to_dict_of_list(info_lists)
         terminations = np.array(self.current_task_idx) == 5
         truncations = self.elapsed_steps >= self.cfg.max_episode_steps
@@ -464,17 +459,18 @@ class CalvinEnv(gym.Env):
             else:
                 subtask_success_list.append(False)
         return np.array(subtask_success_list)
-    
+
     def _reset_current_task(self, subtask_success, info_lists):
         for env_id, success in enumerate(subtask_success):
             if success:
                 self.current_task_idx[env_id] += 1
                 if self.current_task_idx[env_id] <= 4:
                     self.previous_info[env_id] = info_lists[env_id]
-                    self.current_task[env_id] = self.task_sequence[env_id][self.current_task_idx[env_id]]
-                    self.task_descriptions[env_id] = self.task_suite.get_task_descriptions(self.current_task[env_id])
+                    self.current_task[env_id] = self.task_sequence[env_id][
+                        self.current_task_idx[env_id]
+                    ]
+                    self.task_descriptions[env_id] = (
+                        self.task_suite.get_task_descriptions(self.current_task[env_id])
+                    )
                 else:
                     self.current_task_idx[env_id] = 5
-
-                    
-

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
+
 import einops
 import numpy as np
 from openpi import transforms
@@ -23,7 +24,9 @@ def make_calvin_example() -> dict:
     return {
         "observation/state": np.random.rand(7),
         "observation/image": np.random.randint(256, size=(200, 200, 3), dtype=np.uint8),
-        "observation/wrist_image": np.random.randint(256, size=(84, 84, 3), dtype=np.uint8),
+        "observation/wrist_image": np.random.randint(
+            256, size=(84, 84, 3), dtype=np.uint8
+        ),
         "prompt": "do something",
     }
 
@@ -59,7 +62,9 @@ class CalvinInputs(transforms.DataTransformFn):
             "image_mask": {
                 "base_0_rgb": np.True_,
                 "left_wrist_0_rgb": np.True_,
-                "right_wrist_0_rgb": np.True_ if self.model_type == _model.ModelType.PI0_FAST else np.False_,
+                "right_wrist_0_rgb": np.True_
+                if self.model_type == _model.ModelType.PI0_FAST
+                else np.False_,
             },
         }
 
@@ -70,8 +75,8 @@ class CalvinInputs(transforms.DataTransformFn):
             actions = np.concatenate([delta_ee_pos, delta_ee_rot, gripper], axis=1)
             inputs["actions"] = actions
 
-        if "prompt" in data:    
-            inputs["prompt"] = data["prompt"]   
+        if "prompt" in data:
+            inputs["prompt"] = data["prompt"]
 
         return inputs
 
