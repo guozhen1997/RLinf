@@ -273,10 +273,29 @@ class LiberoEnv(gym.Env):
             images_and_states = self._extract_image_and_state(obs)
             images_and_states_list.append(images_and_states)
 
+        images_and_states = to_tensor(
+            list_of_dict_to_dict_of_list(images_and_states_list)
+        )
+
+        image_tensor = torch.stack(
+            [
+                value.clone().permute(2, 0, 1)
+                for value in images_and_states["full_image"]
+            ]
+        )
+        wrist_image_tensor = torch.stack(
+            [
+                value.clone().permute(2, 0, 1)
+                for value in images_and_states["wrist_image"]
+            ]
+        )
+       
+        states = images_and_states["state"]
+
         obs = {
-            "images_and_states": to_tensor(
-                list_of_dict_to_dict_of_list(images_and_states_list)
-            ),
+            "images": image_tensor,
+            "wrist_images": wrist_image_tensor,
+            "states": states,
             "task_descriptions": self.task_descriptions,
         }
         return obs
