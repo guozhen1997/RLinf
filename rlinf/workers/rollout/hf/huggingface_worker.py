@@ -14,6 +14,7 @@
 
 import gc
 
+import copy
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
@@ -43,16 +44,12 @@ class MultiStepRolloutWorker(Worker):
         self.channel = self.connect_channel(cfg.rollout.channel.name)
 
     def init_worker(self):
-        # NOTE:
-        # because pi series have some different dtype params, we can not call `to`
-        # after get_model, here we simply change actor.model.precision to rollout.precision
-        # and after get_model we change it back. THIS CODE SHOULD BE REFACTORED SOON.
-        with open_dict(self.cfg):
-            original_precision = self.cfg.actor.model.precision
-            self.cfg.actor.model.precision = self.cfg.rollout.precision
-        self.hf_model = get_model(self.cfg.rollout.model_dir, self.cfg.actor.model)
-        with open_dict(self.cfg):
-            self.cfg.actor.model.precision = original_precision
+        rollout_model_config = copy.deepcopy(self.cfg.actor.model)
+        with open_dict(rollout_model_config):
+            rollout_model_config.precision = self.cfg.rollout.precision
+            rollout_model_config.model_dir = self.cfg.rollout.model_dir
+
+        self.hf_model = get_model(rollout_model_config)
 
         if self.cfg.actor.model.model_name in ["openvla", "openvla_oft"]:
             model_config, input_processor = get_vla_model_config_and_processor(

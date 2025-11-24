@@ -255,21 +255,9 @@ class LiberoEnv(gym.Env):
         return infos
 
     def _extract_image_and_state(self, obs):
-        if self.cfg.get("use_wrist_image", False):
-            return {
+        return {
                 "full_image": get_libero_image(obs),
                 "wrist_image": get_libero_wrist_image(obs),
-                "state": np.concatenate(
-                    [
-                        obs["robot0_eef_pos"],
-                        quat2axisangle(obs["robot0_eef_quat"]),
-                        obs["robot0_gripper_qpos"],
-                    ]
-                ),
-            }
-        else:
-            return {
-                "full_image": get_libero_image(obs),
                 "state": np.concatenate(
                     [
                         obs["robot0_eef_pos"],
