@@ -68,7 +68,7 @@ algorithm:
     use_greedy: False
     temperature_train: 1.6
     temperature_eval: 1.6
-    top_k: 50
+    top_k: -1
     top_p: 1.0
     repetition_penalty: 1.0
 
@@ -107,14 +107,13 @@ actor:
     queue_name: "replay_buffer"
     queue_size: 0
   training_backend: "fsdp"
-  checkpoint_load_path: "/mnt/public/wph/models/robotwin-oft-sft-place_empty_cup_rand-without_action_head/Optional--10000_chkpt"
-  checkpoint_save_path: "../results"
   micro_batch_size: 1 # 1
   global_batch_size: 40 # 640
   seed: 1234
   enable_offload: True
 
   model:
+    model_dir: "/mnt/public/wph/models/robotwin-oft-sft-place_empty_cup_rand-without_action_head/Optional--10000_chkpt"
     model_name: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14
@@ -122,12 +121,8 @@ actor:
     proprio_dim: 14
     use_film: True
 
-    checkpoint_load_path: "/mnt/public/wph/models/robotwin-oft-sft-place_empty_cup_rand-without_action_head/Optional--10000_chkpt"
-
-
     num_action_chunks: 25
-    # unnorm_key: place_empty_cup_1k
-    unnorm_key: aloha_place_empty_cup_rand
+    unnorm_key: place_empty_cup_1k
     center_crop: True
 
     precision: "bf16"
@@ -142,8 +137,7 @@ actor:
     lora_rank: 32
     lora_path: null
     ckpt_path: null
-    use_wrist_image: True
-    num_images_in_input: 3
+    num_images_in_input: 1
     attn_implementation: "flash_attention_2"
     low_cpu_mem_usage: True
     trust_remote_code: True

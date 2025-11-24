@@ -99,7 +99,8 @@ def get_vla_model_config_and_processor(cfg: DictConfig):
     return model_config, input_processor
 
 
-def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
+def get_model(cfg: DictConfig, override_config_kwargs=None):
+    model_path = cfg.model_dir
     torch_dtype = torch_dtype_from_precision(cfg.precision)
     if cfg.model_name == "openvla":
         from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
@@ -179,7 +180,7 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
 
         # If using FiLM, wrap the vision backbone to allow for infusion of language inputs
         if cfg.use_film:
-            vla = _apply_film_to_vla(model, cfg)
+            model = _apply_film_to_vla(model, cfg)
 
         # oft add
         model.vision_backbone.set_num_images_in_input(cfg.get("num_images_in_input", 1))
@@ -436,7 +437,6 @@ def _apply_film_to_vla(vla: torch.nn.Module, cfg) -> torch.nn.Module:
         ],
         init_lora_weights="gaussian",
     )
-    # print(f"{vla}", flush=True)
     vla = get_peft_model(vla, lora_config)
 
     # Create and apply FiLMed vision backbone
@@ -447,7 +447,7 @@ def _apply_film_to_vla(vla: torch.nn.Module, cfg) -> torch.nn.Module:
     vla.model.vision_backbone = new_vision_backbone
 
     # Load vision backbone checkpoint
-    checkpoint_path = find_checkpoint_file(cfg.checkpoint_load_path, "vision_backbone")
+    checkpoint_path = find_checkpoint_file(cfg.model_dir, "vision_backbone")
     state_dict = torch.load(checkpoint_path, weights_only=True)
     vla.model.vision_backbone.load_state_dict(state_dict)
 

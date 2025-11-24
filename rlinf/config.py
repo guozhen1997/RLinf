@@ -678,13 +678,6 @@ def validate_embodied_cfg(cfg):
             cfg.env.eval.init_params.control_mode = get_robot_control_mode(
                 cfg.actor.model.policy_setup
             )
-        elif cfg.env.train.simulator_type == "libero":
-            if cfg.actor.model.get("num_images_in_input", 1) > 1:
-                assert cfg.actor.model.get("use_wrist_image", False), (
-                    "Invalid config: Multiple input images are enabled "
-                    "(num_images_in_input > 1) but 'use_wrist_image' is set to False. "
-                    "Please enable wrist images by setting 'use_wrist_image=True'."
-                )
         elif cfg.env.train.simulator_type == "behavior":
             import omnigibson as og
 
