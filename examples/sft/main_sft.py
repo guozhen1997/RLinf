@@ -18,7 +18,7 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
-from rlinf.config import validate_cfg
+from rlinf.config import validate_sft_cfg
 from rlinf.scheduler import Cluster
 from rlinf.utils.placement import HybridComponentPlacement
 from rlinf.utils.utils import output_redirector
@@ -31,7 +31,7 @@ mp.set_start_method("spawn", force=True)
 @hydra.main(version_base="1.1")
 @output_redirector
 def main(cfg) -> None:
-    cfg = validate_cfg(cfg)
+    cfg = validate_sft_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 
     cluster = Cluster(num_nodes=cfg.cluster.num_nodes)

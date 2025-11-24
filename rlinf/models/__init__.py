@@ -171,7 +171,32 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
         model.vision_backbone.set_num_images_in_input(cfg.get("num_images_in_input", 1))
 
         model.to(torch_dtype)
+    elif cfg.model_name == "pi0":
+        from lerobot.common.datasets.lerobot_dataset import (
+            LeRobotDatasetMetadata,
+        )
+        from lerobot.common.policies.factory import make_policy
+        from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
+        from lerobot.configs.policies import PreTrainedConfig
 
+        from .embodiment.pi0_action_model import Pi0ForRLActionPrediction
+        AutoConfig.register("pi0", PI0Config)
+        # Load policy configuration from pretrained path
+        # actor_model_config: PI0Config = PreTrainedConfig.from_pretrained(model_path)
+        actor_model_config: PI0Config = PreTrainedConfig.from_pretrained(model_path)
+        actor_model_config.pretrained_path = model_path
+        override_config_kwargs = cfg
+        if override_config_kwargs is not None:
+            for key, val in override_config_kwargs.items():
+                setattr(actor_model_config, key, val)
+        model_dir_name = cfg.normalize_name
+        dataset_meta = LeRobotDatasetMetadata(
+            f"lerobot/{model_dir_name}", root=f"data/{model_dir_name}"
+        )
+        # TODO: replace the raw make_policy without the metadata. Create the Pi0 wrapper model and set the policy
+        model = make_policy(actor_model_config, policy_class=Pi0ForRLActionPrediction, ds_meta=dataset_meta)
+        # TODO: solve fsdp bug
+        model.model.paligemma_with_expert.replace_gemma_decoder_layer()
     elif cfg.model_name == "openpi":
         import openpi.shared.download as download
         import openpi.transforms as transforms

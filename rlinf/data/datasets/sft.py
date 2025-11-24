@@ -17,7 +17,7 @@ import os
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from datasets import load_dataset, load_from_disk
 
 try:
@@ -68,8 +68,8 @@ class LerobotSFTDataset(Dataset):
 
     def __getitem__(self, idx):
         """Get a single sample from the dataset"""
-        prompt = self.data[idx][self.prompt_key]
-        response = self.data[idx][self.response_key]
+        prompt = self.data['train'][idx][self.prompt_key]
+        response = self.data['train'][idx][self.response_key]
 
         # apply chat template
         prompt_chat = [{"role": "user", "content": prompt}]
