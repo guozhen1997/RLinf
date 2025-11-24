@@ -1096,46 +1096,9 @@ class EnvOutput:
             self.group_ids = list(range(self.num_groups))
 
     def prepare_observations(self, obs: dict[str, Any]) -> dict[str, Any]:
-        wrist_image_tensor = None
-        if self.env_type == "libero":
-            image_tensor = torch.stack(
-                [
-                    value.clone().permute(2, 0, 1)
-                    for value in obs["images_and_states"]["full_image"]
-                ]
-            )
-            if "wrist_image" in obs["images_and_states"]:
-                wrist_image_tensor = torch.stack(
-                    [
-                        value.clone().permute(2, 0, 1)
-                        for value in obs["images_and_states"]["wrist_image"]
-                    ]
-                )
-        elif self.env_type == "maniskill":
-            image_tensor = obs["images"]
-        elif self.env_type == "robotwin":
-            image_tensor = obs["images"]
-        elif self.env_type == "isaaclab":
-            return obs
-        elif self.env_type == "behavior":
-            image_tensor = obs["images"]
-            wrist_image_tensor = obs["wrist_images"]
-        elif self.env_type == "metaworld":
-            image_tensor = torch.stack(
-                [
-                    value.clone().permute(2, 0, 1)
-                    for value in obs["images_and_states"]["full_image"]
-                ]
-            )
-        else:
-            raise NotImplementedError
-
-        states = None
-        if "images_and_states" in obs and "state" in obs["images_and_states"]:
-            states = obs["images_and_states"]["state"]
-        if "state" in obs:
-            states = obs["state"]
-
+        image_tensor = obs["images"] if "images" in obs else None
+        wrist_image_tensor = obs["wrist_images"] if "wrist_images" in obs else None
+        states = obs["states"] if "states" in obs else None
         task_descriptions = (
             list(obs["task_descriptions"]) if "task_descriptions" in obs else None
         )
