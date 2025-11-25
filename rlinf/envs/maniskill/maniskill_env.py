@@ -167,9 +167,37 @@ class ManiskillEnv(gym.Env):
         return wrapped_obs
 
     def _extract_obs_image(self, raw_obs):
-        obs_image = raw_obs["sensor_data"]["base_camera"]["rgb"].to(torch.uint8)
+        # Get available cameras from sensor_data
+        sensor_data = raw_obs["sensor_data"]
+        available_cameras = list(sensor_data.keys())
+        
+        # Try to get camera name from task config, or use priority order
+        camera_name = None
+        if hasattr(self.env.unwrapped, "rgb_camera_name"):
+            camera_name = self.env.unwrapped.rgb_camera_name
+            if camera_name not in available_cameras:
+                # Fallback if configured camera not available
+                camera_name = None
+        
+        # Priority order: base_camera, 3rd_view_camera, or first available
+        if camera_name is None:
+            for preferred_camera in ["base_camera", "3rd_view_camera"]:
+                if preferred_camera in available_cameras:
+                    camera_name = preferred_camera
+                    break
+        
+        # Use first available camera if none of the preferred ones exist
+        if camera_name is None and available_cameras:
+            camera_name = available_cameras[0]
+        
+        if camera_name is None:
+            raise ValueError(
+                f"No cameras found in sensor_data. Available keys: {list(sensor_data.keys())}"
+            )
+        
+        obs_image = sensor_data[camera_name]["rgb"].to(torch.uint8)
         obs_image = obs_image.permute(0, 3, 1, 2)  # [B, C, H, W]
-        extracted_obs = {"images": {"base_camera": obs_image}, "task_descriptions": self.instruction}
+        extracted_obs = {"images": {camera_name: obs_image}, "task_descriptions": self.instruction}
         state_dict = {k: v for k, v in raw_obs.items() if k not in ["sensor_data", "sensor_param"]}
         if state_dict:
             state = common.flatten_state_dict(

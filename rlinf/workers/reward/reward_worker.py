@@ -104,7 +104,7 @@ class RewardWorker(Worker):
                 use_pretrain = reward_cfg.get("use_pretrain", True)
                 freeze_encoder = reward_cfg.get("freeze_encoder", True)
 
-                # Load checkpoint first to check configuration compatibility
+                # Load checkpoint if specified and check configuration compatibility
                 checkpoint_path = reward_cfg.get("checkpoint_path", None)
                 checkpoint_state = None
                 if checkpoint_path and os.path.exists(checkpoint_path):
@@ -142,12 +142,8 @@ class RewardWorker(Worker):
                     freeze_encoder=freeze_encoder,
                 )
 
-                # Load checkpoint if specified
-                if checkpoint_path and os.path.exists(checkpoint_path):
-                    if checkpoint_state is None:
-                        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-                        checkpoint_state = checkpoint.get("model_state_dict") or checkpoint.get("state_dict") or checkpoint
-                    
+                # Load checkpoint state dict if available
+                if checkpoint_state is not None:
                     self.reward_model.load_state_dict(checkpoint_state, strict=True)
                     print(f"Loaded reward model from {checkpoint_path}")
                 elif checkpoint_path:
@@ -236,20 +232,10 @@ class RewardWorker(Worker):
                                 "This should not happen if _is_embodied_task() is working correctly."
                             )
                         
-                        if self.cfg.reward.use_reward_model:
-                            with self.device_lock:
-                                batch = rollout_result.to_actor_batch(
-                                    self.cfg.data.max_prompt_length,
-                                    self.cfg.actor.model.encoder_seq_length,
-                                    self.tokenizer.eos_token_id,
-                                )
-                                rollout_result.rewards = (
-                                    self.compute_batch_rewards_with_model(batch)
-                                )
-                        else:
-                            rollout_result.rewards = self._compute_rule_based_rewards(
-                                rollout_result
-                            )
+                        # use_reward_model=True for text tasks would have raised in init_worker
+                        rollout_result.rewards = self._compute_rule_based_rewards(
+                            rollout_result
+                        )
 
             output_channel.put(rollout_result)
 
@@ -280,17 +266,29 @@ class RewardWorker(Worker):
             .flatten()
         )
 
-    def compute_batch_rewards_with_model(self, batch: dict[str, torch.Tensor]):
-        """Compute rewards for text-based tasks with reward model.
+    def _compute_reward_from_images(self, images: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Compute reward from images using the reward model.
         
         Args:
-            batch: Batch of text data for reward computation.
+            images: Dictionary of image tensors.
             
         Returns:
-            Rewards tensor.
+            Reward tensor.
         """
-        raise NotImplementedError("Reward model for text-based tasks is not implemented yet.")
-    
+        with torch.no_grad():
+            logits = self.reward_model(images, train=False)
+            probs = torch.sigmoid(logits)
+            reward_type = self.cfg.reward.reward_model.get("reward_type", "binary")
+            if reward_type == "binary":
+                rewards = (probs > 0.5).float()
+            else:  # continuous
+                rewards = probs
+
+            # Handle batch dimension
+            if rewards.dim() == 2 and rewards.shape[1] == 1:
+                rewards = rewards.squeeze(1)
+            return rewards.cpu()
+
     def _compute_embodied_rewards_with_model(
         self, rollout_result: EmbodiedRolloutResult
     ) -> list:
@@ -304,45 +302,12 @@ class RewardWorker(Worker):
         """
         all_rewards = []
 
-        # Process transitions (obs, next_obs pairs)
-        if hasattr(rollout_result, 'transitions') and rollout_result.transitions:
-            for obs, next_obs in rollout_result.transitions:
-                # Use next_obs for frame-based reward (current frame prediction)
-                images = self._extract_images_from_obs(next_obs)
-
-                # Get reward prediction
-                with torch.no_grad():
-                    logits = self.reward_model(images, train=False)
-                    probs = torch.sigmoid(logits)
-                    reward_type = self.cfg.reward.reward_model.get("reward_type", "binary")
-                    if reward_type == "binary":
-                        rewards = (probs > 0.5).float()
-                    else:  # continuous
-                        rewards = probs
-
-                    # Handle batch dimension
-                    if rewards.dim() == 2 and rewards.shape[1] == 1:
-                        rewards = rewards.squeeze(1)
-                    all_rewards.append(rewards.cpu())
-
         # Process forward_inputs (current observations)
         for forward_input in rollout_result.forward_inputs:
             obs = self._extract_obs_from_forward_inputs(forward_input)
             images = self._extract_images_from_obs(obs)
-
-            with torch.no_grad():
-                logits = self.reward_model(images, train=False)
-                probs = torch.sigmoid(logits)
-                reward_type = self.cfg.reward.reward_model.get("reward_type", "binary")
-                if reward_type == "binary":
-                    rewards = (probs > 0.5).float()
-                else:  # continuous
-                    rewards = probs
-
-                # Handle batch dimension
-                if rewards.dim() == 2 and rewards.shape[1] == 1:
-                    rewards = rewards.squeeze(1)
-                all_rewards.append(rewards.cpu())
+            rewards = self._compute_reward_from_images(images)
+            all_rewards.append(rewards)
 
         # Concatenate all rewards
         if len(all_rewards) > 0:

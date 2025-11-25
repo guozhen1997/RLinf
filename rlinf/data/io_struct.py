@@ -1093,7 +1093,7 @@ class EnvOutput:
                     ]
                 )
         elif self.simulator_type == "maniskill":
-            image_tensor = obs.get("images")
+            image_tensor = obs.get("images", None)
         elif self.simulator_type == "robotwin":
             image_tensor = obs["images"]
         elif self.simulator_type == "isaaclab":
@@ -1111,11 +1111,31 @@ class EnvOutput:
         else:
             raise NotImplementedError
 
+        # Extract states based on simulator type
         states = None
-        if "images_and_states" in obs and "state" in obs["images_and_states"]:
-            states = obs["images_and_states"]["state"]
-        if "states" in obs:
-            states = obs["states"]
+        if self.simulator_type in ["libero", "metaworld"]:
+            # libero and metaworld use nested structure: obs["images_and_states"]["state"]
+            if "images_and_states" in obs and "state" in obs["images_and_states"]:
+                states = obs["images_and_states"]["state"]
+        elif self.simulator_type == "maniskill":
+            # maniskill uses top-level key: obs["states"] (plural)
+            if "states" in obs:
+                states = obs["states"]
+        elif self.simulator_type == "robotwin":
+            # robotwin uses top-level key: obs["state"] (singular)
+            if "state" in obs:
+                states = obs["state"]
+        elif self.simulator_type == "behavior":
+            # behavior doesn't return state information
+            states = None
+        else:
+            # For unknown environments, try multiple possibilities for backward compatibility
+            if "images_and_states" in obs and "state" in obs["images_and_states"]:
+                states = obs["images_and_states"]["state"]
+            elif "states" in obs:
+                states = obs["states"]
+            elif "state" in obs:
+                states = obs["state"]
 
         task_descriptions = (
             list(obs["task_descriptions"]) if "task_descriptions" in obs else None

@@ -32,14 +32,9 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
 ## What's NEW!
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [IsaacLab](https://github.com/isaac-sim/IsaacLab). Doc: [RL on IsaacLab](https://rlinf.readthedocs.io/en/latest/rst_source/examples/isaaclab.html) 
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [Behavior 1k](https://github.com/StanfordVL/BEHAVIOR-1K). Doc: [RL on Behavior 1k](https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html) 
-<<<<<<< HEAD
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [GR00T-N1.5](https://github.com/NVIDIA/Isaac-GR00T). Doc: [RL on GR00T-N1.5](https://rlinf.readthedocs.io/en/latest/rst_source/examples/gr00t.html).
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [Metaworld](https://github.com/Farama-Foundation/Metaworld). Doc: [RL on Metaworld](https://rlinf.readthedocs.io/en/latest/rst_source/examples/metaworld.html).
 - [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [Behavior 1k](https://github.com/StanfordVL/BEHAVIOR-1K). Doc: [RL on Behavior 1k](https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html).
-=======
-- [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [GR00T N1.5](https://github.com/NVIDIA/GR00T). Doc: [RL on GR00T N1.5](https://rlinf.readthedocs.io/en/latest/rst_source/examples/gr00t.html)
-- [2025/11] 🔥 RLinf supports reinforcement learning fine-tuning for [MetaWorld](https://github.com/Farama-Foundation/Metaworld). Doc: [RL on MetaWorld](https://rlinf.readthedocs.io/en/latest/rst_source/examples/metaworld.html)
->>>>>>> bd62bd8 (feat(embodied): add maniskill_sac_cnn and fix some debug)
 - [2025/11] Add lora support to π₀ and π₀.₅.
 - [2025/10] 🔥 RLinf supports reinforcement learning fine-tuning for π₀ and π₀.₅! Doc: [RL on π₀ and π₀.₅ Models](https://rlinf.readthedocs.io/en/latest/rst_source/examples/pi0.html). For more technical details, refer to the [RL fine-tuning for π₀ and π₀.₅ technical report](https://arxiv.org/abs/2510.25889). The report on πRL by [Machine Heart](https://mp.weixin.qq.com/s/dFlpmqmE0qfhOQmGG25X9g) and [RoboTech](https://mp.weixin.qq.com/s/S51P-Y1UYXzumnZzon2N1g) are also released.
 - [2025/10] 🔥 RLinf now officially supports online reinforcement learning! Doc: [coding_online_rl](https://rlinf.readthedocs.io/en/latest/rst_source/examples/coding_online_rl.html), Blog post: [The first open-source agent online RL framework RLinf-Online](https://mp.weixin.qq.com/s/jmohmDokuWLhQHFueSHZIQ).
