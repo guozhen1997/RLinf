@@ -130,7 +130,7 @@ as well as reinforcement learning training examples on real robots.
 
    <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/NVIDIA/Isaac-GR00T/blob/main/media/model-architecture.png"
+       <img src="https://github.com/NVIDIA/Isaac-GR00T/raw/main/media/model-architecture.png"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
          <a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/gr00t.html" target="_blank" style="text-decoration: underline; color: blue;">
