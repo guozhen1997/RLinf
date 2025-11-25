@@ -4,6 +4,9 @@ ignore_terminations: ${algorithm.ignore_terminations}
 use_rel_reward: True
 reward_mode: raw
 seed: 0
+# wrap_obs_mode options:
+#   - "simple": Simplified mode, directly wraps observations, supports "state" and "rgb" only
+#   - "vla": VLA mode (default), uses complex observation extraction logic, supports all obs_mode including "rgb+segmentation"
 wrap_obs_mode: simple
 num_group: ${algorithm.num_group_envs}
 group_size: ${algorithm.group_size}
@@ -20,6 +23,10 @@ video_cfg:
 init_params:
   id: "PickCube-v1"
   num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
+  # obs_mode options:
+  #   - "state": State only, for MLP models (no images)
+  #   - "rgb": RGB images, for CNN models
+  #   - "rgb+segmentation": RGB images + segmentation masks
   obs_mode: ${algorithm.obs_mode}
   control_mode: None
   sim_backend: "gpu"

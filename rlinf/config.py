@@ -44,7 +44,7 @@ SUPPORTED_MODEL_ARCHS = [
     "openpi",
     "mlp_policy",
     "gr00t",
-    "cnn",
+    "cnn_policy",
 ]
 SUPPORTED_ROLLOUT_BACKENDS = ["sglang", "vllm"]
 SUPPORTED_TASK_TYPE = ["embodied", "reasoning", "coding_online_rl"]

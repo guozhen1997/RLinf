@@ -91,10 +91,18 @@ env:
   enable_offload: False
   train:
     init_params:
-      obs_mode: "rgb"  # Override obs_mode to rgb for CNN model
+      # obs_mode options:
+      #   - "state": State only, for MLP models (no images)
+      #   - "rgb": RGB images, for CNN models
+      #   - "rgb+segmentation": RGB images + segmentation masks
+      obs_mode: "rgb"
   eval:
     init_params:
-      obs_mode: "rgb"  # Override obs_mode to rgb for CNN model
+      # obs_mode options:
+      #   - "state": State only, for MLP models (no images)
+      #   - "rgb": RGB images, for CNN models
+      #   - "rgb+segmentation": RGB images + segmentation masks
+      obs_mode: "rgb"
 
 rollout:
   group_name: "RolloutGroup"
@@ -124,7 +132,7 @@ actor:
   enable_offload: False
 
   model:
-    model_name: "cnn"
+    model_name: "cnn_policy"
     policy_setup: "panda-ee"
     image_keys: ["base_camera", ]
     image_size: [3, 64, 64]
@@ -143,8 +151,6 @@ actor:
     ckpt_path: null
     gradient_checkpointing: False
     sharding_strategy: no_shard
-    vh_mode: "q_network"
-    q_network_separate_processing: True
   
 
   optim:
