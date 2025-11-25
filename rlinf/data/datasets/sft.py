@@ -17,7 +17,7 @@ import os
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 from datasets import load_dataset, load_from_disk
 
 try:
@@ -42,6 +42,11 @@ class BehaviorLerobotSFTDataset(Dataset):
     
     def __len__(self):
         return len(self.data)
+
+class TorchDataset(Dataset):
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
+        self.data = load_dataset(self.cfg.data_path)
 
 class LerobotSFTDataset(Dataset):
     def __init__(self, cfg: DictConfig, tokenizer):
@@ -68,6 +73,8 @@ class LerobotSFTDataset(Dataset):
 
     def __getitem__(self, idx):
         """Get a single sample from the dataset"""
+        print(self.data['train'][idx].keys())
+        print(self.data['train'][idx])
         prompt = self.data['train'][idx][self.prompt_key]
         response = self.data['train'][idx][self.response_key]
 

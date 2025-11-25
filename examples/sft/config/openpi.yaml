@@ -22,7 +22,7 @@ runner:
   output_dir: ../results
 
 data:
-  type: lerobot
+  type: openpi
   dataset_name: robo2vlm
   max_prompt_length: 1024
   filter_prompt_by_length: True
@@ -42,7 +42,8 @@ data:
   shuffle: True
   validation_shuffle: True
   seed: 1234
-  data_path: "/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
+    #data_path: "/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
+  data_path: "/mnt/public/shiliangzhi/.cache/huggingface/lerobot/slzhta/pick_to_plate_real" #"/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
     #data_paths: ["/mnt/public/tangyueran/keplerccc/Robo2VLM-1/"]
     #data_paths: ["/mnt/public/guozhen/data/boba_106k_0319_prompt_1024.jsonl"]
     #data_paths: ["/mnt/public/guozhen/data/test.jsonl"]

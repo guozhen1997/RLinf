@@ -18,7 +18,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DistributedSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from rlinf.data.datasets.sft import SFTDataset, LerobotSFTDataset, BehaviorLerobotSFTDataset
+from rlinf.data.datasets.sft import SFTDataset, LerobotSFTDataset, BehaviorLerobotSFTDataset, TorchDataset
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
 from rlinf.scheduler import Worker
@@ -29,7 +29,6 @@ from rlinf.utils.metric_utils import (
     append_to_dict,
 )
 from rlinf.utils.placement import HybridComponentPlacement
-
 
 class FSDPSFTWorker(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig, placement: HybridComponentPlacement):
@@ -44,6 +43,12 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
             self.dataset = LerobotSFTDataset(self.cfg.data, self.tokenizer)
         elif self.cfg.data.type == 'behavior':
             self.dataset = BehaviorLerobotSFTDataset(self.cfg.data, self.tokenizer)
+        elif self.cfg.data.type == 'openpi':
+            #import openpi.training.data_loader as openpi_data_loader
+            #import openpi.training.config as openpi_config
+            #dataloader_config = openpi_config.get_config("pi0_maniskill")
+            #self.dataloader = openpi_data_loader.create_data_loader(dataloader_config, framework='pytorch', shuffle=True)
+            self.dataset = TorchDataset(self.cfg.data)
         else:
             self.dataset = SFTDataset(self.cfg.data, self.tokenizer)
 
@@ -57,15 +62,15 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
 
         # Initialize dataloader
         self.dataloader = StatefulDataLoader(
-            dataset=self.dataset,
-            batch_size=self.cfg.batch_size,
-            sampler=self.distributed_sampler,
-            num_workers=getattr(self.cfg.data, "num_workers", 0),
-            pin_memory=getattr(self.cfg.data, "pin_memory", False),
-            persistent_workers=getattr(self.cfg.data, "persistent_workers", False),
-            prefetch_factor=getattr(self.cfg.data, "prefetch_factor", 2),
-            #num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
-        )
+                dataset=self.dataset,
+                batch_size=self.cfg.batch_size,
+                sampler=self.distributed_sampler,
+                num_workers=getattr(self.cfg.data, "num_workers", 0),
+                pin_memory=getattr(self.cfg.data, "pin_memory", False),
+                persistent_workers=getattr(self.cfg.data, "persistent_workers", False),
+                prefetch_factor=getattr(self.cfg.data, "prefetch_factor", 2),
+                num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
+            )
 
         if self._rank == 0:
             # XXX MegticLogger use cfg instead of dir
