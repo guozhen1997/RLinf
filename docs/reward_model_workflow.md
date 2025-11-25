@@ -4,15 +4,12 @@ This document provides a comprehensive guide for the reward model workflow, incl
 
 ## 🎯 Algorithm Support
 
-**This workflow supports both PPO and SAC algorithms** with the same unified approach:
+**This workflow supports PPO (Proximal Policy Optimization)** algorithm:
 
 - ✅ **PPO** (Proximal Policy Optimization) - Use config: `maniskill_ppo_cnn.yaml`
-- ✅ **SAC** (Soft Actor-Critic) - Use config: `maniskill_sac_cnn.yaml`
 
 **Key Benefits**:
-- Same workflow and commands for both algorithms
-- Same reward model can be used for both PPO and SAC training
-- Only the config file name differs between algorithms
+- Simple and unified workflow
 - All scripts and configs are located in `examples/embodiment/` directory
 
 ## Table of Contents
@@ -28,17 +25,15 @@ This document provides a comprehensive guide for the reward model workflow, incl
 
 ## Overview
 
-The reward model workflow consists of three main stages and **supports both PPO and SAC algorithms**:
+The reward model workflow consists of three main stages:
 
-1. **Data Collection**: Collect trajectories using an initial RL policy (PPO or SAC), storing images and success labels
+1. **Data Collection**: Collect trajectories using an initial RL policy (PPO), storing images and success labels
 2. **Reward Model Training**: Train a binary classifier to predict success from single frames (algorithm-agnostic)
-3. **RL Policy Training**: Use the trained reward model to replace environment success signals (works for both PPO and SAC)
+3. **RL Policy Training**: Use the trained reward model to replace environment success signals for PPO training
 
 **Key Points**:
-- The same reward model can be used for both PPO and SAC training
-- The workflow and commands are identical for both algorithms
-- Only the config file name differs: `maniskill_ppo_cnn.yaml` vs `maniskill_sac_cnn.yaml`
-- Both use the same unified `RewardWorker` for reward computation
+- The workflow uses PPO algorithm for RL policy training
+- Uses unified `RewardWorker` for reward computation
 
 ## Key Files and Components
 
@@ -158,7 +153,7 @@ The reward model workflow consists of three main stages and **supports both PPO 
 #### `examples/embodiment/train_embodied_agent.py`
 **Purpose**: Main training script for embodied RL agents
 - **Integration**: Creates `RewardWorker` if `cfg.reward.use_reward_model=True`
-- **Usage**: Can run SAC or PPO training with or without reward model
+- **Usage**: Can run PPO training with or without reward model
 - **Note**: The unified `RewardWorker` automatically detects embodied tasks and handles them appropriately
 
 #### `rlinf/runners/embodied_runner.py`
@@ -170,11 +165,10 @@ The reward model workflow consists of three main stages and **supports both PPO 
 
 ### Configuration
 
-The reward model workflow works with both PPO and SAC algorithms. Use the appropriate config file:
+The reward model workflow uses PPO algorithm. Use the config file:
 - **PPO**: `examples/embodiment/config/maniskill_ppo_cnn.yaml`
-- **SAC**: `examples/embodiment/config/maniskill_sac_cnn.yaml`
 
-Both configs use the same reward model configuration structure. Example configuration (same structure for both PPO and SAC):
+Example configuration:
 
 ```yaml
 reward:
@@ -199,28 +193,16 @@ reward:
 
 ### Startup Command
 
-The same command works for both PPO and SAC - just specify the appropriate config name:
-
 ```bash
 # For PPO
 bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn
 
-# For SAC
-bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn
-
-# Or directly with python (PPO example)
+# Or directly with python
 export EMBODIED_PATH="/path/to/RLinf/examples/embodiment"
 export PYTHONPATH="/path/to/RLinf:$PYTHONPATH"
 python examples/embodiment/train_embodied_agent.py \
     --config-path examples/embodiment/config/ \
     --config-name maniskill_ppo_cnn \
-    reward.collect_data=True \
-    reward.use_reward_model=False
-
-# Or for SAC
-python examples/embodiment/train_embodied_agent.py \
-    --config-path examples/embodiment/config/ \
-    --config-name maniskill_sac_cnn \
     reward.collect_data=True \
     reward.use_reward_model=False
 ```
@@ -421,11 +403,10 @@ If `visualize_positive: true` is set in the configuration:
 
 ### Configuration
 
-The reward model workflow works with both PPO and SAC algorithms. Use the appropriate config file:
+The reward model workflow uses PPO algorithm. Use the config file:
 - **PPO**: `examples/embodiment/config/maniskill_ppo_cnn.yaml`
-- **SAC**: `examples/embodiment/config/maniskill_sac_cnn.yaml`
 
-Both configs use the same reward model configuration structure. Example configuration (same structure for both PPO and SAC):
+Example configuration:
 
 ```yaml
 reward:
@@ -457,29 +438,16 @@ reward:
 
 ### Startup Command
 
-The same command works for both PPO and SAC - just specify the appropriate config name:
-
 ```bash
 # For PPO
 bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn
 
-# For SAC
-bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn
-
-# Or directly with python (PPO example)
+# Or directly with python
 export EMBODIED_PATH="/path/to/RLinf/examples/embodiment"
 export PYTHONPATH="/path/to/RLinf:$PYTHONPATH"
 python examples/embodiment/train_embodied_agent.py \
     --config-path examples/embodiment/config/ \
     --config-name maniskill_ppo_cnn \
-    reward.use_reward_model=True \
-    reward.collect_data=False \
-    reward.reward_model.checkpoint_path="./checkpoints/reward_model.pt"
-
-# Or for SAC
-python examples/embodiment/train_embodied_agent.py \
-    --config-path examples/embodiment/config/ \
-    --config-name maniskill_sac_cnn \
     reward.use_reward_model=True \
     reward.collect_data=False \
     reward.reward_model.checkpoint_path="./checkpoints/reward_model.pt"
@@ -523,7 +491,6 @@ python examples/embodiment/train_embodied_agent.py \
 
 3. **Integration with RL Training**:
    - Reward model predictions replace or supplement environment `success_frame` signals
-   - For SAC: Used for Q-learning and policy optimization
    - For PPO: Used for advantage computation and policy updates
 
 ### Important Notes
@@ -554,12 +521,10 @@ python examples/embodiment/train_embodied_agent.py \
                               ▼
         ┌─────────────────────────────────────┐
         │  RL Policy Training (Initial Policy)│
-        │  - Supports both PPO and SAC        │
+        │  - Uses PPO algorithm               │
         │  - Config: reward.collect_data=True │
         │  - Config: reward.use_reward_model=False │
-        │  - Command: run_embodiment.sh [config_name] │
-        │    * PPO: run_embodiment.sh maniskill_ppo_cnn │
-        │    * SAC: run_embodiment.sh maniskill_sac_cnn │
+        │  - Command: run_embodiment.sh maniskill_ppo_cnn │
         │  - RewardDataCollector collects data│
         │  - Saves to positive/negative dirs  │
         └─────────────────────────────────────┘
@@ -594,14 +559,12 @@ python examples/embodiment/train_embodied_agent.py \
                               │
                               ▼
         ┌─────────────────────────────────────┐
-        │  RL Policy Training (SAC/PPO)       │
-        │  - Supports both PPO and SAC        │
+        │  RL Policy Training (PPO)            │
+        │  - Uses PPO algorithm                │
         │  - Config: reward.use_reward_model=True │
         │  - Config: reward.collect_data=False │
         │  - Config: checkpoint_path set      │
-        │  - Command: run_embodiment.sh [config_name] │
-        │    * PPO: run_embodiment.sh maniskill_ppo_cnn │
-        │    * SAC: run_embodiment.sh maniskill_sac_cnn │
+        │  - Command: run_embodiment.sh maniskill_ppo_cnn │
         │  - RewardWorker automatically detects embodied task │
         │  - RewardWorker loads BinaryRewardClassifier │
         │  - Replaces env success signals with model predictions │
@@ -612,13 +575,10 @@ python examples/embodiment/train_embodied_agent.py \
 
 ### Algorithm Support
 
-The reward model workflow works identically for both **PPO** and **SAC** algorithms. The only difference is the config file name:
+The reward model workflow uses **PPO** algorithm:
 - **PPO**: `examples/embodiment/config/maniskill_ppo_cnn.yaml`
-- **SAC**: `examples/embodiment/config/maniskill_sac_cnn.yaml`
 
-Both configs share the same reward model configuration structure. The examples below use PPO config, but the same structure applies to SAC config.
-
-### Complete Example: `maniskill_ppo_cnn.yaml` (same for `maniskill_sac_cnn.yaml`)
+### Complete Example: `maniskill_ppo_cnn.yaml`
 
 #### Stage 1: Data Collection Config
 
@@ -640,7 +600,7 @@ reward:
 
 #### Stage 2: Reward Model Training (Hydra Configuration)
 
-**Note**: Reward model training is algorithm-agnostic. The same trained model can be used for both PPO and SAC.
+**Note**: Reward model training is algorithm-agnostic.
 
 ```bash
 # Using the provided script (modify paths as needed)
@@ -685,55 +645,17 @@ reward:
     reward_type: "binary"
 ```
 
-**SAC Example** (`maniskill_sac_cnn.yaml`):
+### Complete Workflow Example
 
-The reward model configuration is identical to PPO. The only differences are algorithm-specific parameters:
-
-```yaml
-reward:
-  group_name: "RewardGroup"
-  use_reward_model: True
-  collect_data: False
-  reward_model:
-    checkpoint_path: "./checkpoints/reward_model.pt"
-    image_keys: ["base_camera"]
-    image_size: [3, 64, 64]
-    hidden_dim: 256
-    num_spatial_blocks: 8
-    pretrained_encoder_path: "./resnet10_pretrained.pt"
-    use_pretrain: True
-    freeze_encoder: True
-    reward_type: "binary"
-
-# SAC-specific algorithm parameters (different from PPO)
-algorithm:
-  loss_type: embodied_sac
-  adv_type: embodied_sac
-  gamma: 0.8
-  tau: 0.005
-  alpha: 0.2
-  auto_entropy_tuning: True
-  replay_buffer_capacity: 300000
-  # ... other SAC-specific settings
-```
-
-### Complete Workflow Example (PPO or SAC)
-
-The workflow is identical for both algorithms. Here's a complete example:
+Here's a complete example:
 
 ```bash
-# Step 1: Collect data (works for both PPO and SAC)
-# For PPO:
+# Step 1: Collect data
 bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn \
     reward.collect_data=True \
     reward.use_reward_model=False
 
-# For SAC:
-bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn \
-    reward.collect_data=True \
-    reward.use_reward_model=False
-
-# Step 2: Train reward model (same for both algorithms)
+# Step 2: Train reward model
 cd examples/embodiment
 python train_reward_model.py \
     positive_dir=./reward_data/positive \
@@ -741,14 +663,7 @@ python train_reward_model.py \
     output_checkpoint=./checkpoints/reward_model.pt
 
 # Step 3: Train with reward model
-# For PPO:
 bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn \
-    reward.use_reward_model=True \
-    reward.collect_data=False \
-    reward.reward_model.checkpoint_path=./checkpoints/reward_model.pt
-
-# For SAC:
-bash examples/embodiment/run_embodiment.sh maniskill_sac_cnn \
     reward.use_reward_model=True \
     reward.collect_data=False \
     reward.reward_model.checkpoint_path=./checkpoints/reward_model.pt

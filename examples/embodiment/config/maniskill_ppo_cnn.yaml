@@ -143,7 +143,6 @@ actor:
     
     precision: "32"
     add_value_head: True
-    add_q_head: False
     backbone: resnet # ["resnet", "plane_conv"]
     
     is_lora: False

@@ -263,7 +263,6 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
             hidden_dim=cfg.hidden_dim,
             num_action_chunks=cfg.num_action_chunks,
             add_value_head=cfg.add_value_head,
-            add_q_head=cfg.get("add_q_head", False),
             backbone=cfg.backbone,
         )
     elif cfg.model_name == "gr00t":

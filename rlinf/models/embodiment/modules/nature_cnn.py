@@ -19,6 +19,7 @@ from .utils import make_mlp
 from functools import partial
 from torchvision.models.resnet import ResNet, BasicBlock
 
+
 class PlainConv(nn.Module):
     def __init__(self,
                  in_channels=3,

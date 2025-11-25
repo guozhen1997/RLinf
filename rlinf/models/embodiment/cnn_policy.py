@@ -17,9 +17,8 @@ import torch.nn as nn
 from torch.distributions.normal import Normal
 
 from .modules.nature_cnn import PlainConv, ResNetEncoder
-from .modules.utils import make_mlp, LOG_STD_MAX, LOG_STD_MIN
+from .modules.utils import make_mlp
 from .modules.value_head import ValueHead
-from .modules.q_head import MultiQHead
 from .base_policy import BasePolicy
 
 class CNNPolicy(BasePolicy):
@@ -28,9 +27,9 @@ class CNNPolicy(BasePolicy):
             # observation space and action space info
             image_keys, image_size, state_dim, action_dim, 
             hidden_dim, num_action_chunks, 
-            add_value_head, add_q_head,
+            add_value_head,
             backbone, 
-            independent_std=True, final_tanh=False, action_scale=None
+            independent_std=True
         ):
         super().__init__()
         self.backbone = backbone # ["plain_conv", ]
@@ -76,40 +75,19 @@ class CNNPolicy(BasePolicy):
 
         self.actor_mean = nn.Linear(256, self.action_dim) 
 
-        assert add_value_head + add_q_head <= 1
         if add_value_head:
             self.value_head = ValueHead(
                 input_dim=256, 
                 hidden_sizes=(256, 256, 256), 
                 activation="relu"
             )
-        if add_q_head:
-            independent_std = False
-            action_scale = 1, -1
-            final_tanh = True
-            self.q_head = MultiQHead(
-                # hidden_size=self.encoder.out_dim+self.state_dim,
-                hidden_size=encoder_out_dim+self.state_latent_dim,
-                hidden_dims=[256, 256, 256], 
-                num_q_heads=2, 
-                action_dim=action_dim,
-                use_separate_processing=False
-            )
         
         self.independent_std = independent_std
-        self.final_tanh = final_tanh
 
         if independent_std:
             self.actor_logstd = nn.Parameter(torch.ones(1, action_dim) * -0.5)
         else:
             self.actor_logstd = nn.Linear(256, action_dim)
-
-        if action_scale is not None:
-            h, l = action_scale
-            self.register_buffer("action_scale", torch.tensor((h - l) / 2.0, dtype=torch.float32))
-            self.register_buffer("action_bias", torch.tensor((h + l) / 2.0, dtype=torch.float32))
-        else:
-            self.action_scale = None
 
     def preprocess_env_obs(self, env_obs):
         device = next(self.parameters()).device
@@ -190,13 +168,25 @@ class CNNPolicy(BasePolicy):
             **kwargs
         ):
         obs = dict()
+        images = dict()
         for key, value in data.items():
             if key.startswith("obs/"):
-                obs[key[len("obs/"):]] = value
+                stripped_key = key[len("obs/"):]
+                if stripped_key.startswith("images/"):
+                    # Extract camera name from "images/camera_name"
+                    camera_name = stripped_key[len("images/"):]
+                    images[camera_name] = value
+                else:
+                    obs[stripped_key] = value
+        
+        # Reconstruct images dict structure expected by preprocess_env_obs
+        if images:
+            obs["images"] = images
 
         action = data["action"]
 
-        full_feature, visual_feature = self.get_feature(obs)
+        processed_obs = self.preprocess_env_obs(obs)
+        full_feature, visual_feature = self.get_feature(processed_obs)
         mix_feature = self.mix_proj(full_feature)
         action_mean = self.actor_mean(mix_feature)
         if self.independent_std:
@@ -221,31 +211,6 @@ class CNNPolicy(BasePolicy):
             else:
                 raise NotImplementedError
         return output_dict
-    
-    def sac_forward(
-        self, obs, **kwargs
-    ):
-        
-        full_feature, visual_feature = self.get_feature(obs)
-        mix_feature = self.mix_proj(full_feature)
-        action_mean = self.actor_mean(mix_feature)
-        action_logstd = self.actor_logstd(mix_feature)
-        action_logstd = torch.tanh(action_logstd)
-        action_logstd = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)
-
-        action_std = torch.exp(action_logstd)
-        probs = Normal(action_mean, action_std)
-        raw_action = probs.rsample()
-        
-
-        # for sac
-        action_normalized = torch.tanh(raw_action)
-        action = action_normalized * self.action_scale + self.action_bias
-        
-        chunk_logprobs = probs.log_prob(raw_action)
-        chunk_logprobs = chunk_logprobs - torch.log(self.action_scale * (1 - action_normalized.pow(2)) + 1e-6)
-
-        return action, chunk_logprobs, full_feature
 
     def predict_action_batch(
             self, env_obs, 
@@ -266,21 +231,10 @@ class CNNPolicy(BasePolicy):
         else:
             action_logstd = self.actor_logstd(mix_feature)
 
-        if self.final_tanh:
-            action_logstd = torch.tanh(action_logstd)
-            action_logstd = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (action_logstd + 1)  # From SpinUp / Denis Yarats
-
         action_std = action_logstd.exp()
         probs = torch.distributions.Normal(action_mean, action_std)
-        raw_action = probs.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        chunk_logprobs = probs.log_prob(raw_action)
-        if self.action_scale is not None:
-            action_normalized = torch.tanh(raw_action)
-            action = action_normalized * self.action_scale + self.action_bias
-
-            chunk_logprobs = chunk_logprobs - torch.log(self.action_scale * (1 - action_normalized.pow(2)) + 1e-6)
-        else:
-            action = raw_action
+        action = probs.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        chunk_logprobs = probs.log_prob(action)
 
         if return_action_type == "numpy_chunk":
             chunk_actions = action.reshape(-1, self.num_action_chunks, self.action_dim)
@@ -309,12 +263,4 @@ class CNNPolicy(BasePolicy):
         if return_shared_feature:
             result["shared_feature"] = full_feature
         return chunk_actions, result
-    
-    def get_q_values(self, obs, actions, shared_feature=None, detach_encoder=False):
-        if shared_feature is None:
-            shared_feature, visual_feature = self.get_feature(obs)
-        if detach_encoder:
-            shared_feature = shared_feature.detach()
-        return self.q_head(shared_feature, actions)
-    
 

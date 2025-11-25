@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Data collector for reward model training data during SAC training."""
+"""Data collector for reward model training data."""
 
 import os
 from pathlib import Path
@@ -26,7 +26,7 @@ from rlinf.data.io_struct import EnvOutput
 
 
 class RewardDataCollector:
-    """Collects frame-based reward training data during SAC training.
+    """Collects frame-based reward training data.
     
     Collects images and success_frame labels, organizing them into positive
     (success_once=1) and negative (success_once=0) directories.

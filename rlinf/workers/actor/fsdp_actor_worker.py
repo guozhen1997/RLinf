@@ -28,7 +28,6 @@ from rlinf.algorithms.utils import (
     kl_penalty,
 )
 from rlinf.data.io_struct import RolloutResult
-from rlinf.data.replay_buffer import SACReplayBuffer
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import (
     FSDPModelManager,
 )
@@ -548,34 +547,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         self.stage_num = cfg.rollout.pipeline_stage_num
 
         self.channel = self.connect_channel(cfg.actor.channel.name)
-        
-        # SAC-specific initialization
-        self.is_sac = cfg.algorithm.loss_type == "embodied_sac"
-        if self.is_sac:
-            self.replay_buffer = None
-            self.target_model = None
-            self.target_model_initialized = False
-            self.base_alpha = None
-            self.demo_buffer = None
-            self.alpha_optimizer = None
-            self.qf_optimizer = None
-            self.update_step = 0
 
     def init_worker(self):
-        if self.is_sac:
-            self.setup_model_and_optimizer(initialize_target=True)
-            self.setup_sac_components()
-            self.soft_update_target_model(tau=1.0)
-        else:
-            self.setup_model_and_optimizer()
+        self.setup_model_and_optimizer()
 
         if self.cfg.actor.get("enable_offload", False):
             self.offload_param_and_grad()
             self.offload_optimizer()
-            if self.is_sac:
-                torch.cuda.synchronize()
-                gc.collect()
-                torch.cuda.empty_cache()
 
     def model_provider_func(self):
         model = get_model(self.cfg.actor.checkpoint_load_path, self.cfg.actor.model)
@@ -624,10 +602,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             )
 
         self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
-        
-        # For SAC: add rollout batch to replay buffer
-        if self.is_sac and hasattr(self, 'replay_buffer') and self.replay_buffer is not None:
-            self.replay_buffer.add_rollout_batch(self.rollout_batch)
 
     def _process_received_rollout_batch(
         self, rollout_batch: dict[str, torch.Tensor]
@@ -719,13 +693,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         self.rollout_batch["logprob"] = self.rollout_batch["prev_logprobs"]
 
     def compute_advantages_and_returns(self):
-        # SAC doesn't compute advantages/returns like PPO
-        if self.is_sac:
-            # Just compute basic rollout metrics without advantages/returns
-            rollout_metrics = compute_rollout_metrics(self.rollout_batch)
-            return rollout_metrics
-        
-        # PPO/other algorithms: compute advantages and returns
+        # Compute advantages and returns
         stage_num = self.cfg.rollout.pipeline_stage_num
         env_world_size = self._component_placement.get_world_size("env")
         actor_world_size = self._component_placement.get_world_size("actor")
@@ -764,364 +732,11 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         rollout_metrics = compute_rollout_metrics(self.rollout_batch)
         return rollout_metrics
 
-    # ========== SAC-specific methods ==========
-    def setup_sac_components(self):
-        """Initialize SAC-specific components (replay buffer, etc.)"""
-        if not self.is_sac:
-            return
-        
-        buffer_capacity = self.cfg.algorithm.get("replay_buffer_capacity", 100000)
-        seed = self.cfg.actor.get("seed", 1234)
-        self.replay_buffer = SACReplayBuffer(
-            capacity=buffer_capacity,
-            device=self.device,
-            seed=seed
-        )
-        self.critic_actor_ratio = self.cfg.algorithm.get("critic_actor_ratio", 1)
-        self.critic_subsample_size = self.cfg.algorithm.get("critic_subsample_size", -1)
-        self.critic_sample_generator = torch.Generator()
-        self.critic_sample_generator.manual_seed(seed)
-
-    def setup_model_and_optimizer(self, initialize_target=False):
-        """Setup model and optimizer, with optional target network initialization for SAC"""
-        # For SAC: build separate optimizers first, then call parent
-        if self.is_sac:
-            # Call parent to setup model
-            super().setup_model_and_optimizer()
-            # Build separate optimizers for actor and critic (Q-network)
-            self.build_sac_optimizers()
-            # Initialize target network
-            if initialize_target:
-                if not hasattr(self, 'target_model') or self.target_model is None:
-                    # Create target model (copy of online model)
-                    target_state_dict = self.get_model_state_dict()
-                    # Note: target model should use same FSDP strategy
-                    # For now, we'll keep it simple and just copy state dict when needed
-                    self.target_model_initialized = False  # Will be set after first sync
-        else:
-            # Original behavior for PPO/other algorithms
-            super().setup_model_and_optimizer()
-
-    def build_sac_optimizers(self):
-        """Build separate optimizers for actor and Q-network (critic) for SAC"""
-        if not self.is_sac:
-            return
-        
-        betas = (self._cfg.optim.adam_beta1, self._cfg.optim.adam_beta2)
-        params_actor = []
-        params_critic = []
-        
-        for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                if "q_head" in name:
-                    params_critic.append(param)
-                else:
-                    params_actor.append(param)
-        
-        assert len(params_critic) > 0, "No Q-network parameters found!"
-        
-        # Create separate optimizers
-        self.optimizer = torch.optim.Adam(
-            [{"params": params_actor, "lr": self._cfg.optim.lr, "betas": betas}]
-        )
-        self.qf_optimizer = torch.optim.Adam(
-            [{"params": params_critic, "lr": self._cfg.optim.value_lr, "betas": betas}]
-        )
-        
-        # Initialize temperature parameter for automatic entropy tuning
-        if self.cfg.algorithm.get("auto_entropy_tuning", False):
-            target_entropy = self.cfg.algorithm.get(
-                "target_entropy", -self.cfg.actor.model.action_dim
-            )
-            self.target_entropy = target_entropy
-            self.alpha_type = "exp"  # or "softplus"
-            if self.alpha_type == "exp":
-                self.base_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-            elif self.alpha_type == "softplus":
-                self.base_alpha = torch.nn.Parameter(
-                    np.log(np.exp(1)-1) * torch.ones(1, device=self.device), requires_grad=True
-                )
-            else:
-                raise NotImplementedError(f"Alpha type {self.alpha_type} not supported")
-            self.alpha_optimizer = torch.optim.Adam(
-                [self.base_alpha], 
-                lr=self.cfg.algorithm.get("alpha_lr", 3e-4)
-            )
-
-    def compute_alpha(self):
-        """Compute current alpha (temperature) value"""
-        if not self.is_sac or not self.cfg.algorithm.get("auto_entropy_tuning", False):
-            return torch.tensor(self.cfg.algorithm.get("alpha", 0.2), device=self.device)
-        
-        if self.alpha_type == "exp":
-            return self.base_alpha.exp()
-        elif self.alpha_type == "softplus":
-            return torch.nn.functional.softplus(self.base_alpha)
-        else:
-            raise NotImplementedError
-
-    @property
-    def alpha(self):
-        """Get alpha value as float"""
-        if not self.is_sac:
-            return self.cfg.algorithm.get("alpha", 0.2)
-        return self.compute_alpha().item()
-
-    def soft_update_target_model(self, tau=None):
-        """Soft update target model parameters (for SAC)"""
-        if not self.is_sac:
-            return
-        
-        if tau is None:
-            tau = self.cfg.algorithm.get("tau", 0.005)
-        
-        # Initialize target model on first call
-        if not self.target_model_initialized:
-            # For FSDP, we'll sync state dict instead of maintaining separate model
-            # Store target state dict instead
-            if not hasattr(self, '_target_state_dict'):
-                self._target_state_dict = {}
-            online_state_dict = self.get_model_state_dict()
-            for key, value in online_state_dict.items():
-                self._target_state_dict[key] = value.clone()
-            self.target_model_initialized = True
-            return
-        
-        # Soft update: get online state dict and update target
-        online_state_dict = self.get_model_state_dict()
-        with torch.no_grad():
-            for key in online_state_dict.keys():
-                if key in self._target_state_dict:
-                    self._target_state_dict[key].mul_(1.0 - tau)
-                    self._target_state_dict[key].add_(online_state_dict[key] * tau)
-    
-    def get_target_model_state_dict(self):
-        """Get target model state dict (for SAC)"""
-        if not self.is_sac or not hasattr(self, '_target_state_dict'):
-            return None
-        return self._target_state_dict
-
-    def run_sac_training(self):
-        """SAC training using replay buffer"""
-        if self.cfg.actor.get("enable_offload", False):
-            # self.device is already an int (from torch.cuda.current_device())
-            self.load_param_and_grad(self.device)
-            self.load_optimizer(self.device)
-            # Note: qf_optimizer is a separate optimizer, not managed by FSDP
-            # So it doesn't need to be loaded/offloaded separately (it's already on device)
-
-        # Check if replay buffer has enough samples
-        min_buffer_size = self.cfg.algorithm.get("min_buffer_size", 100)
-        if not self.replay_buffer.is_ready(min_buffer_size):
-            if self._rank == 0:
-                print(f"Replay buffer size {len(self.replay_buffer)} < {min_buffer_size}, skipping training")
-            return {}
-
-        self.model.train()
-        metrics = {}
-        
-        # Number of gradient updates per training call
-        num_updates = self.cfg.algorithm.get("num_updates_per_step", 1)
-        batch_size = self.cfg.actor.global_batch_size
-        
-        for update_idx in range(num_updates):
-            # Sample batch from replay buffer
-            if self.demo_buffer is not None:
-                if update_idx % 2 == 0:
-                    batch = self.replay_buffer.sample(batch_size)
-                else:
-                    batch = self.demo_buffer.sample(batch_size)
-            else:
-                batch = self.replay_buffer.sample(batch_size)
-            
-            # Move batch to device
-            for k, v in batch.items():
-                if isinstance(v, torch.Tensor):
-                    batch[k] = v.to(self.device)
-                elif isinstance(v, dict):
-                    batch[k] = {
-                        sub_k: sub_v.to(self.device) if isinstance(sub_v, torch.Tensor) else sub_v
-                        for sub_k, sub_v in v.items()
-                    }
-            
-            # Extract current and next observations from replay buffer
-            # The keys in replay buffer come from forward_inputs:
-            # - "obs/images/base_camera" or "obs/state" for observations
-            # - "action" for actions
-            # - "rewards" for rewards (from rollout_result_dict)
-            curr_obs = {}
-            next_obs = {}
-            
-            # Extract action and rewards
-            # Action is stored as "action" in forward_inputs
-            action = batch.get("action", None)
-            # Rewards are stored separately in rollout_result_dict
-            rewards = batch.get("rewards", None)
-            
-            # Extract observations from forward_inputs format ("obs/...")
-            for key, value in batch.items():
-                # Skip non-obs keys
-                if key in ["action", "rewards", "dones", "prev_logprobs", "prev_values"]:
-                    continue
-                
-                # Check for current obs (from forward_inputs: "obs/images/base_camera" or "obs/state")
-                if key.startswith("obs/"):
-                    # Remove "obs/" prefix to get the actual key (e.g., "images/base_camera" or "state")
-                    obs_key = key[4:]  # Remove "obs/"
-                    curr_obs[obs_key] = value
-                    # For now, next_obs is same as curr_obs (will need proper transition construction later)
-                    # In proper implementation, next_obs should come from next step's forward_inputs
-                    next_obs[obs_key] = value.clone() if isinstance(value, torch.Tensor) else value
-            
-            # Validate that we have the required keys
-            if not curr_obs:
-                available_keys = list(batch.keys())
-                raise ValueError(
-                    f"No obs data found in replay buffer batch. "
-                    f"Expected keys starting with 'obs/' (e.g., 'obs/images/base_camera', 'obs/state'). "
-                    f"Available keys: {available_keys}"
-                )
-            
-            # Ensure we have action and rewards
-            if action is None:
-                available_keys = list(batch.keys())
-                raise ValueError(
-                    f"No 'action' key found in replay buffer batch. "
-                    f"Available keys: {available_keys}"
-                )
-            if rewards is None:
-                available_keys = list(batch.keys())
-                raise ValueError(
-                    f"No 'rewards' key found in replay buffer batch. "
-                    f"Available keys: {available_keys}"
-                )
-            
-
-            # Compute target Q-values
-            with torch.no_grad():
-                # Sample next actions using online model
-                pi_next, log_pi_next, shared_feature_next = self.model(
-                    forward_type="sac_forward", obs=next_obs
-                )
-                next_state_log_pi = log_pi_next.sum(dim=-1, keepdim=True)
-                
-                # Compute Q-values using target model state dict
-                # For FSDP, we use a simplified approach: compute Q with current model
-                # and apply soft update periodically (target Q will stabilize over time)
-                all_qf_next_target = self.model(
-                    forward_type="sac_q_forward", 
-                    obs=next_obs, actions=pi_next, shared_feature=shared_feature_next
-                )
-                
-                if self.critic_subsample_size > 0:
-                    sample_idx = torch.randint(
-                        0, all_qf_next_target.shape[0], self.critic_subsample_size, 
-                        generator=self.critic_sample_generator, device=self.device
-                    )
-                    all_qf_next_target = all_qf_next_target[sample_idx]
-                    
-                min_qf_next_target, _ = torch.min(all_qf_next_target, dim=1, keepdim=True)
-
-                if self.cfg.algorithm.get("backup_entropy", True):
-                    min_qf_next_target = min_qf_next_target - self.compute_alpha() * next_state_log_pi
-                target_q_values = rewards + self.cfg.algorithm.gamma * min_qf_next_target
-            
-            # Update Q-network (critic)
-            all_data_q_values = self.model(
-                forward_type="sac_q_forward", obs=curr_obs, actions=action
-            )
-            critic_loss = F.mse_loss(all_data_q_values, target_q_values) * all_data_q_values.shape[0]
-            self.qf_optimizer.zero_grad()
-            critic_loss.backward()
-            self.qf_optimizer.step()
-
-            # Update actor (policy) and temperature
-            actor_loss = torch.tensor(0.0, device=self.device)
-            min_qf_pi = torch.tensor(0.0, device=self.device)
-            if update_idx % self.critic_actor_ratio == 0:
-                pi, log_pi, shared_feature = self.model(
-                    forward_type="sac_forward", obs=curr_obs
-                )
-                log_pi = log_pi.sum(dim=-1, keepdim=True)
-                all_qf_pi = self.model(
-                    forward_type="sac_q_forward", 
-                    obs=curr_obs, actions=pi, 
-                    shared_feature=shared_feature, 
-                    detach_encoder=True
-                )
-                min_qf_pi = torch.mean(all_qf_pi, dim=1, keepdim=True)
-                actor_loss = ((self.compute_alpha() * log_pi) - min_qf_pi).mean()
-                
-                self.optimizer.zero_grad()
-                actor_loss.backward()
-                self.optimizer.step()
-                
-                # Update temperature parameter if using automatic entropy tuning
-                if hasattr(self, 'base_alpha') and self.base_alpha is not None:
-                    with torch.no_grad():
-                        _, log_pi_new, _ = self.model(forward_type="sac_forward", obs=curr_obs)
-                        log_pi_new = log_pi_new.sum(dim=-1, keepdim=True)
-
-                    alpha_loss = (-self.compute_alpha() * (log_pi_new.mean() + self.target_entropy))
-                    self.alpha_optimizer.zero_grad()
-                    alpha_loss.backward()
-                    torch.distributed.all_reduce(self.base_alpha.grad, op=torch.distributed.ReduceOp.AVG)
-                    self.alpha_optimizer.step()
-            
-            # Soft update target network
-            if self.target_model_initialized and self.update_step % self.cfg.algorithm.get("target_update_freq", 1) == 0:
-                self.soft_update_target_model()
-                
-            loss = actor_loss + critic_loss
-            
-            # Collect metrics
-            metrics_data = {
-                "sac/total_loss": loss.detach().item(),
-                "sac/alpha": self.alpha, 
-                "actor/lr": self.optimizer.param_groups[0]["lr"],
-                "critic/lr": self.qf_optimizer.param_groups[0]["lr"], 
-                "sac/actor_loss": actor_loss.detach().item(), 
-                "sac/critic_loss": critic_loss.detach().item(), 
-                "sac/qf_values": all_data_q_values.mean().detach().item(), 
-                "sac/current_q": min_qf_pi.mean().detach().item(), 
-                "replay_buffer/size": len(self.replay_buffer),
-                "replay_buffer/utilization": len(self.replay_buffer) / self.replay_buffer.capacity
-            }
-            
-            append_to_dict(metrics, metrics_data)
-            self.update_step += 1
-
-        # Average metrics across updates
-        mean_metric_dict = {}
-        for key, value in metrics.items():
-            if isinstance(value, list) and len(value) > 0:
-                cpu_values = []
-                for v in value:
-                    if isinstance(v, torch.Tensor):
-                        cpu_values.append(v.detach().cpu().item())
-                    else:
-                        cpu_values.append(v)
-                mean_metric_dict[key] = np.mean(cpu_values)
-            else:
-                if isinstance(value, torch.Tensor):
-                    mean_metric_dict[key] = value.detach().cpu().item()
-                else:
-                    mean_metric_dict[key] = value
-        
-        mean_metric_dict = all_reduce_dict(
-            mean_metric_dict, op=torch.distributed.ReduceOp.AVG
-        )
-
-        torch.cuda.synchronize()
-        torch.distributed.barrier()
-        torch.cuda.empty_cache()
-        return mean_metric_dict
-    # ========== End SAC-specific methods ==========
+    def setup_model_and_optimizer(self):
+        """Setup model and optimizer"""
+        super().setup_model_and_optimizer()
 
     def run_training(self):
-        # Use SAC training if configured
-        if self.is_sac:
-            return self.run_sac_training()
         
         # Original PPO training
         if self.cfg.actor.get("enable_offload", False):

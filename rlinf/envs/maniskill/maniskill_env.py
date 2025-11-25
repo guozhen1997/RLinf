@@ -145,12 +145,13 @@ class ManiskillEnv(gym.Env):
                 images = dict()
                 for camera_name in sensor_data.keys():
                     img = sensor_data[camera_name]["rgb"]
+                    # Convert to uint8 and permute to [B, C, H, W] format
+                    # Normalization (dividing by 255) is done in model preprocessing phase
                     if img.dim() == 4 and img.shape[-1] == 3:
                         img = img.permute(0, 3, 1, 2)
-                    if img.dtype == torch.uint8:
-                        img = img.float() / 255.0
-                    elif img.dtype != torch.float32:
-                        img = img.float()
+                    # Ensure uint8 format for consistency with _extract_obs_image
+                    if img.dtype != torch.uint8:
+                        img = img.to(torch.uint8)
                     images[camera_name] = img
                 wrapped_obs = {
                     "images": images,
@@ -179,9 +180,13 @@ class ManiskillEnv(gym.Env):
                 # Fallback if configured camera not available
                 camera_name = None
         
-        # Priority order: base_camera, 3rd_view_camera, or first available
+        # Get preferred cameras from config, with default fallback
         if camera_name is None:
-            for preferred_camera in ["base_camera", "3rd_view_camera"]:
+            preferred_cameras = getattr(self.cfg, "preferred_cameras", ["base_camera", "3rd_view_camera"])
+            if not isinstance(preferred_cameras, list):
+                preferred_cameras = [preferred_cameras]
+            
+            for preferred_camera in preferred_cameras:
                 if preferred_camera in available_cameras:
                     camera_name = preferred_camera
                     break
