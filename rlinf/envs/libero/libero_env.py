@@ -256,16 +256,16 @@ class LiberoEnv(gym.Env):
 
     def _extract_image_and_state(self, obs):
         return {
-                "full_image": get_libero_image(obs),
-                "wrist_image": get_libero_wrist_image(obs),
-                "state": np.concatenate(
-                    [
-                        obs["robot0_eef_pos"],
-                        quat2axisangle(obs["robot0_eef_quat"]),
-                        obs["robot0_gripper_qpos"],
-                    ]
-                ),
-            }
+            "full_image": get_libero_image(obs),
+            "wrist_image": get_libero_wrist_image(obs),
+            "state": np.concatenate(
+                [
+                    obs["robot0_eef_pos"],
+                    quat2axisangle(obs["robot0_eef_quat"]),
+                    obs["robot0_gripper_qpos"],
+                ]
+            ),
+        }
 
     def _wrap_obs(self, obs_list):
         images_and_states_list = []
@@ -289,7 +289,7 @@ class LiberoEnv(gym.Env):
                 for value in images_and_states["wrist_image"]
             ]
         )
-       
+
         states = images_and_states["state"]
 
         obs = {

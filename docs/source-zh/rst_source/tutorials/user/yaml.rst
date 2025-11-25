@@ -190,7 +190,7 @@ rollout
     gpu_memory_utilization: 0.55
 
     model_dir: ../../model/DeepSeek-R1-Distill-Qwen-1.5B/
-    model_arch: qwen2.5
+    model_type: qwen2.5
 
     recompute_logprobs: True
 
@@ -200,7 +200,7 @@ rollout
 
 ``rollout.model_dir``：生成后端所用 HF 模型路径。  
 
-``rollout.model_arch``：后端内部使用的模型架构标记（如 qwen2.5）。  
+``rollout.model_type``：后端内部使用的模型架构标记（如 qwen2.5）。  
 
 ``rollout.recompute_logprobs``：是否为采样序列重新计算对数概率。
 
@@ -870,7 +870,7 @@ actor
     enable_offload: True
 
     model:
-      model_name: "openvla_oft"
+      model_type: "openvla_oft"
       action_dim: 7
       num_action_chunks: 8
       use_proprio: False
@@ -926,7 +926,7 @@ actor
 
 **模型配置：**
 
-``actor.model.model_name``：模型结构名（openvla_oft）。  
+``actor.model.model_type``：模型结构名（openvla_oft）。  
 
 ``actor.model.action_dim``：动作空间维度。  
 
