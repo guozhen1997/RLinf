@@ -104,7 +104,7 @@ actor:
     model_dir: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k/"
     ckpt_path: null
 
-    model_name: "openvla_oft"
+    model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14
     num_action_chunks: 8

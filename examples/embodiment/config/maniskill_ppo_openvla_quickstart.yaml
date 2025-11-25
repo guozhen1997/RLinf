@@ -114,7 +114,7 @@ actor:
   model:
     model_dir: "/path/to/model/openvla-7b-rlvla-warmup/"
     ckpt_path: null
-    model_name: "openvla"
+    model_type: "openvla"
     action_dim: 7
     num_action_chunks: 1
     use_proprio: False

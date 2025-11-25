@@ -103,7 +103,7 @@ actor:
   model:
     model_dir: ""
     ckpt_path: null
-    model_name: "mlp_policy"
+    model_type: "mlp_policy"
     policy_setup: "panda-qpos"
     obs_dim: 42
     action_dim: 8

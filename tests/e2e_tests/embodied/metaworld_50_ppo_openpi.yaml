@@ -108,7 +108,7 @@ actor:
 
   model:
     model_dir: "/workspace/dataset/RLinf-Pi0-MetaWorld"
-    model_name: "openpi"
+    model_type: "openpi"
     precision: null
     num_action_chunks: 5 # interface for the env
     action_dim: 4

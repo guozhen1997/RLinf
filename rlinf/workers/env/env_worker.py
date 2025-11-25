@@ -143,7 +143,7 @@ class EnvWorker(Worker):
         chunk_actions = prepare_actions(
             raw_chunk_actions=chunk_actions,
             env_type=self.env_type,
-            model_name=self.cfg.actor.model.model_name,
+            model_type=self.cfg.actor.model.model_type,
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
             action_dim=self.cfg.actor.model.action_dim,
             policy=self.cfg.actor.model.get("policy_setup", None),
@@ -193,7 +193,7 @@ class EnvWorker(Worker):
         chunk_actions = prepare_actions(
             raw_chunk_actions=raw_actions,
             env_type=self.env_type,
-            model_name=self.cfg.actor.model.model_name,
+            model_type=self.cfg.actor.model.model_type,
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
             action_dim=self.cfg.actor.model.action_dim,
             policy=self.cfg.actor.model.get("policy_setup", None),

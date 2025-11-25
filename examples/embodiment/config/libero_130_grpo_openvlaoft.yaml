@@ -107,7 +107,7 @@ actor:
   model:
     model_dir: "/path/to/model/RLinf-OpenVLAOFT-LIBERO-130-Base-Lora/"
     ckpt_path: null
-    model_name: "openvla_oft"
+    model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 7
     num_action_chunks: 8

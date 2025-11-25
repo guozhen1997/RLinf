@@ -197,7 +197,7 @@ rollout
     gpu_memory_utilization: 0.55
 
     model_dir: ../../model/DeepSeek-R1-Distill-Qwen-1.5B/
-    model_arch: qwen2.5
+    model_type: qwen2.5
 
     recompute_logprobs: True
 
@@ -207,7 +207,7 @@ rollout
 
 ``rollout.model_dir``: Path to the HF model used by the generation backend.
 
-``rollout.model_arch``: Internal architecture tag used by the backend (e.g., qwen2.5).
+``rollout.model_type``: Internal architecture tag used by the backend (e.g., qwen2.5).
 
 ``rollout.recompute_logprobs``: Recompute log-probs for sampled sequences.
 
@@ -927,7 +927,7 @@ actor
     enable_offload: True
 
     model:
-      model_name: "openvla_oft"
+      model_type: "openvla_oft"
       action_dim: 7
       num_action_chunks: 8
       use_proprio: False
@@ -984,7 +984,7 @@ actor
 
 **Model Configuration:**
 
-``actor.model.model_name``: Model architecture name (openvla_oft).
+``actor.model.model_type``: Model architecture name (openvla_oft).
 
 ``actor.model.action_dim``: Action space dimensionality.
 

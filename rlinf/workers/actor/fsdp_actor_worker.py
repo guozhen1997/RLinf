@@ -25,6 +25,7 @@ from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
 from rlinf.algorithms.utils import (
     kl_penalty,
 )
+from rlinf.config import SupportedModel
 from rlinf.data.io_struct import RolloutResult
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import (
     FSDPModelManager,
@@ -811,14 +812,14 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         loss_mask = data.get("loss_mask", None)
                         loss_mask_sum = data.get("loss_mask_sum", None)
 
-                        if self.cfg.actor.model.model_name in [
-                            "openvla",
-                            "openvla_oft",
-                        ]:
-                            data["temperature"] = (
-                                self.cfg.algorithm.sampling_params.temperature_train
-                            )
-                            data["top_k"] = self.cfg.algorithm.sampling_params.top_k
+                    if (
+                        SupportedModel(self.cfg.actor.model.model_type).family
+                        == "openvla"
+                    ):
+                        data["temperature"] = (
+                            self.cfg.algorithm.sampling_params.temperature_train
+                        )
+                        data["top_k"] = self.cfg.algorithm.sampling_params.top_k
 
                         compute_values = (
                             True if self.cfg.algorithm.adv_type == "gae" else False
@@ -833,8 +834,10 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                                 use_cache=False,
                             )
 
-                        if self.cfg.actor.model.model_name in ["gr00t"]:
-                            prev_logprobs = output_dict["prev_logprobs"]
+                    if SupportedModel(self.cfg.actor.model.model_type) in [
+                        SupportedModel.GR00T
+                    ]:
+                        prev_logprobs = output_dict["prev_logprobs"]
 
                         kwargs = {
                             "loss_type": self.cfg.algorithm.loss_type,

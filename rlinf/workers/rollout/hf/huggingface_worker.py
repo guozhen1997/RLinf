@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import gc
 
-import copy
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
+from rlinf.config import SupportedModel
 from rlinf.data.io_struct import EmbodiedRolloutResult, EnvOutput
 from rlinf.models import get_model, get_vla_model_config_and_processor
 from rlinf.scheduler import Cluster, Worker
@@ -74,7 +75,7 @@ class MultiStepRolloutWorker(Worker):
 
         self.hf_model = get_model(rollout_model_config)
 
-        if self.cfg.actor.model.model_name in ["openvla", "openvla_oft"]:
+        if SupportedModel(self.cfg.actor.model.model_type).family == "openvla":
             model_config, input_processor = get_vla_model_config_and_processor(
                 self.cfg.actor
             )
@@ -122,7 +123,11 @@ class MultiStepRolloutWorker(Worker):
         )
         kwargs["do_sample"] = do_sample
 
-        if self.cfg.actor.model.model_name in ["openpi", "mlp_policy", "gr00t"]:
+        if SupportedModel(self.cfg.actor.model.model_type) in [
+            SupportedModel.OPENPI,
+            SupportedModel.MLP_POLICY,
+            SupportedModel.GR00T,
+        ]:
             kwargs = {"mode": mode}
 
         with torch.no_grad():

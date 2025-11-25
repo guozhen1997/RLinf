@@ -106,7 +106,7 @@ actor:
 
   model:
     model_dir: "/workspace/dataset/Openvla-oft-SFT-libero-goal-traj1/"
-    model_name: "openvla_oft"
+    model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 7
     num_action_chunks: 8

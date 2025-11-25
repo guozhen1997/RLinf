@@ -107,7 +107,7 @@ actor:
 
   model:
     model_dir: "/workspace/dataset/openvla-7b"
-    model_name: "openvla"
+    model_type: "openvla"
     action_dim: 7
     num_action_chunks: 1
     use_proprio: False
