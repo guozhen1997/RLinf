@@ -17,7 +17,6 @@ import os
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
-import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 from datasets import load_dataset, load_from_disk
 
 try:
@@ -28,123 +27,10 @@ except ImportError as e:
 def compute_position_id_with_mask(mask):
     return torch.clip(torch.cumsum(mask, dim=-1) - 1, min=0, max=None)
 
-class BehaviorLerobotSFTDataset(Dataset):
-    def __init__(self, cfg: DictConfig, tokenizer):
-        self.cfg = cfg
-        self.data = BehaviorLeRobotDataset(cfg.data_path)
-        self.prompt_key = cfg.prompt_key
-        self.response_key = cfg.response_key
-    
-    def __getitem__(self, idx):
-        item = self.data.__getitem__(idx)
-        print(item.keys())
-        return item
-    
-    def __len__(self):
-        return len(self.data)
-
 class TorchDataset(Dataset):
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
         self.data = load_dataset(self.cfg.data_path)
-
-class LerobotSFTDataset(Dataset):
-    def __init__(self, cfg: DictConfig, tokenizer):
-        self.tokenizer = tokenizer
-        self.cfg = cfg
-        #self._load_data()
-        self.data = self._load_data()
-
-        self.prompt_key = cfg.prompt_key
-        self.response_key = cfg.response_key
-
-        self.max_length = cfg.max_length
-    
-    def _load_data(self):
-        assert type(self.cfg.data_path) == str, f"Type of LerobotSFTDataset path should be string instead of {type(self.cfg.data_path)} : '{self.cfg.data_path}'"
-        if not os.path.exists(self.cfg.data_path):
-            raise FileNotFoundError(f"Dataset {self.cfg.data_path} not Exist")
-        dataset = load_dataset(self.cfg.data_path)
-        return dataset
-
-    def __len__(self):
-        """Return the length of the dataset"""
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        """Get a single sample from the dataset"""
-        print(self.data['train'][idx].keys())
-        print(self.data['train'][idx])
-        prompt = self.data['train'][idx][self.prompt_key]
-        response = self.data['train'][idx][self.response_key]
-
-        # apply chat template
-        prompt_chat = [{"role": "user", "content": prompt}]
-
-        # string
-        prompt_chat_str = self.tokenizer.apply_chat_template(
-            prompt_chat, add_generation_prompt=True, tokenize=False
-        )
-        response_chat_str = response + self.tokenizer.eos_token
-
-        # tokenize
-        prompt_ids_output = self.tokenizer(
-            prompt_chat_str, return_tensors="pt", add_special_tokens=False
-        )
-        prompt_ids = prompt_ids_output["input_ids"][0]
-        prompt_attention_mask = prompt_ids_output["attention_mask"][0]
-
-        response_ids_output = self.tokenizer(
-            response_chat_str, return_tensors="pt", add_special_tokens=False
-        )
-        response_ids = response_ids_output["input_ids"][0]
-        response_attention_mask = response_ids_output["attention_mask"][0]
-
-        prompt_length = prompt_ids.shape[0]
-        response_length = response_ids.shape[0]
-
-        input_ids = torch.cat((prompt_ids, response_ids), dim=-1)
-        attention_mask = torch.cat(
-            (prompt_attention_mask, response_attention_mask), dim=-1
-        )
-
-        # padding to max length
-        sequence_length = input_ids.shape[0]
-        if sequence_length < self.max_length:
-            padded_input_ids = (
-                torch.ones(
-                    size=(self.max_length - sequence_length,), dtype=input_ids.dtype
-                )
-                * self.tokenizer.pad_token_id
-            )
-            padded_attention_mask = torch.zeros(
-                size=(self.max_length - sequence_length,), dtype=attention_mask.dtype
-            )
-
-            input_ids = torch.cat((input_ids, padded_input_ids))
-            attention_mask = torch.cat((attention_mask, padded_attention_mask))
-        elif sequence_length > self.max_length:
-            raise NotImplementedError(
-                f"{sequence_length=} is larger than {self.max_length=}"
-            )
-
-        position_ids = compute_position_id_with_mask(attention_mask)
-
-        loss_mask = attention_mask.clone()
-        if prompt_length > 1:
-            # mask out prompt for SFT.
-            loss_mask[: min(prompt_length, loss_mask.size(0)) - 1] = 0
-        # mask out the last token in response
-        loss_mask[min(prompt_length + response_length, loss_mask.size(0)) - 1] = 0
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "position_ids": position_ids,
-            "loss_mask": loss_mask,
-        }
-
-
 class SFTDataset(Dataset):
     def __init__(self, cfg: DictConfig, tokenizer):
         self.tokenizer = tokenizer

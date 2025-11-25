@@ -18,7 +18,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DistributedSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from rlinf.data.datasets.sft import SFTDataset, LerobotSFTDataset, BehaviorLerobotSFTDataset, TorchDataset
+from rlinf.data.datasets.sft import SFTDataset, TorchDataset
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
 from rlinf.scheduler import Worker
@@ -39,10 +39,6 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         self.placement = placement
 
         # Initialize dataset
-        if self.cfg.data.type == 'lerobot':
-            self.dataset = LerobotSFTDataset(self.cfg.data, self.tokenizer)
-        elif self.cfg.data.type == 'behavior':
-            self.dataset = BehaviorLerobotSFTDataset(self.cfg.data, self.tokenizer)
         elif self.cfg.data.type == 'openpi':
             #import openpi.training.data_loader as openpi_data_loader
             #import openpi.training.config as openpi_config
