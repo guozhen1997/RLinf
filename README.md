@@ -96,6 +96,7 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
           <li><b>Custom Models</b></li>
           <ul>
             <li>MLP-Policy ✅</li>
+            <li>CNN-Policy ✅</li>
           </ul>
         </ul>
       </td>
