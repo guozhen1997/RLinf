@@ -68,7 +68,7 @@
 
 **用途**：奖励模型训练脚本
 
-- **主函数**：``main(cfg: DictConfig)``（使用 Hydra 装饰器）
+- **主函数**：``main(cfg: DictConfig)`` （使用 Hydra 装饰器）
 - **配置**：使用 Hydra 和 OmegaConf，配置文件位于 ``examples/embodiment/config/train_reward_model.yaml``
 - **职责**：
   - 从 ``positive_dir`` 和 ``negative_dir`` 加载轨迹数据（来自配置）
@@ -282,8 +282,8 @@
    - 将轨迹级数据扩展到帧级样本
    - 每个样本 = ``(trajectory_path, frame_index, label)``
    - 报告统计信息：
-     - 每个目录中的轨迹和帧数
-     - 每个目录中标签的分布（label=1 vs label=0）
+      - 每个目录中的轨迹和帧数
+      - 每个目录中标签的分布（label=1 vs label=0）
 
 2. **模型创建**：
    - 使用指定参数创建 ``BinaryRewardClassifier``

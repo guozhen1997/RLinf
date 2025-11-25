@@ -98,6 +98,10 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
             <li>MLP-Policy ✅</li>
             <li>CNN-Policy ✅</li>
           </ul>
+          <li><b>Reward Model</b></li>
+          <ul>
+            <li>CNN ✅</li>
+          </ul>
         </ul>
       </td>
       <td>
