@@ -321,8 +321,9 @@ Training Process
    - Expands trajectory-level data to frame-level samples
    - Each sample = ``(trajectory_path, frame_index, label)``
    - Reports statistics:
-      - Number of trajectories and frames in each directory
-      - Distribution of labels (label=1 vs label=0) in each directory
+
+     - Number of trajectories and frames in each directory
+     - Distribution of labels (label=1 vs label=0) in each directory
 
 2. **Model Creation**:
    - Creates ``BinaryRewardClassifier`` with specified parameters
@@ -422,13 +423,15 @@ Reward Computation Process
    - Receives ``EmbodiedRolloutResult`` from rollout worker
    - Extracts observations (images) from ``transitions`` or ``forward_inputs``
    - Processes each observation:
-      - Extracts image using ``_extract_images_from_obs()``
-      - Ensures images are in ``[B, C, H, W]`` format
-      - Runs forward pass through reward model
-      - Applies sigmoid to get success probability
-      - Converts to reward based on ``reward_type``:
-         - ``"binary"``: ``(probs > 0.5).float()`` → 0 or 1
-         - ``"continuous"``: Uses probability directly
+
+     - Extracts image using ``_extract_images_from_obs()``
+     - Ensures images are in ``[B, C, H, W]`` format
+     - Runs forward pass through reward model
+     - Applies sigmoid to get success probability
+     - Converts to reward based on ``reward_type``:
+
+       - ``"binary"``: ``(probs > 0.5).float()`` → 0 or 1
+       - ``"continuous"``: Uses probability directly
 
 3. **Integration with RL Training**:
    - Reward model predictions replace or supplement environment ``success_frame`` signals

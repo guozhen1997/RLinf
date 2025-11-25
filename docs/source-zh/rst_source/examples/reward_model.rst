@@ -282,8 +282,9 @@
    - 将轨迹级数据扩展到帧级样本
    - 每个样本 = ``(trajectory_path, frame_index, label)``
    - 报告统计信息：
-      - 每个目录中的轨迹和帧数
-      - 每个目录中标签的分布（label=1 vs label=0）
+
+     - 每个目录中的轨迹和帧数
+     - 每个目录中标签的分布（label=1 vs label=0）
 
 2. **模型创建**：
    - 使用指定参数创建 ``BinaryRewardClassifier``
