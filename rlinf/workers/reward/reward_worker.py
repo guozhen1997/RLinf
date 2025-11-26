@@ -104,7 +104,8 @@ class RewardWorker(Worker):
                     env_batch_size = cfg.get("data", {}).get("rollout_batch_size", 256)
                     if env_batch_size == 256:
                         print(
-                            f"Warning: Could not find batch size config for embodied task, using default {env_batch_size}")
+                            f"Warning: Could not find batch size config for embodied task, using default {env_batch_size}"
+                        )
 
                 self.total_batch_size_per_dp = (
                     env_batch_size
@@ -300,12 +301,12 @@ class RewardWorker(Worker):
                 raise NotImplementedError(
                     "Only reward model is supported for embodiment tasks. Set reward.use_reward_model=True"
                 )
-            else:
-                # Text-based reasoning task initialization
-                if self.cfg.reward.use_reward_model:
-                    raise NotImplementedError(
-                        "Reward model for text-based tasks is not implemented yet."
-                    )
+        else:
+            # Text-based reasoning task initialization
+            if self.cfg.reward.use_reward_model:
+                raise NotImplementedError(
+                    "Reward model for text-based tasks is not implemented yet."
+                )
             else:
                 self.reward = get_reward_class(self.cfg.reward.reward_type)(
                     self.cfg.reward

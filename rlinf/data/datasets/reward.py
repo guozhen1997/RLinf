@@ -99,7 +99,11 @@ class RewardDataset(Dataset):
         positive_files = sorted(self.positive_dir.glob("*.npy"))
         for traj_path in positive_files:
             traj_data = np.load(traj_path, allow_pickle=True).item()
-            if isinstance(traj_data, dict) and "images" in traj_data and "labels" in traj_data:
+            if (
+                isinstance(traj_data, dict)
+                and "images" in traj_data
+                and "labels" in traj_data
+            ):
                 if self.image_key in traj_data["images"]:
                     # Each trajectory file contains multiple frames
                     num_frames = traj_data["images"][self.image_key].shape[0]
@@ -118,7 +122,11 @@ class RewardDataset(Dataset):
         negative_files = sorted(self.negative_dir.glob("*.npy"))
         for traj_path in negative_files:
             traj_data = np.load(traj_path, allow_pickle=True).item()
-            if isinstance(traj_data, dict) and "images" in traj_data and "labels" in traj_data:
+            if (
+                isinstance(traj_data, dict)
+                and "images" in traj_data
+                and "labels" in traj_data
+            ):
                 if self.image_key in traj_data["images"]:
                     # Each trajectory file contains multiple frames
                     num_frames = traj_data["images"][self.image_key].shape[0]

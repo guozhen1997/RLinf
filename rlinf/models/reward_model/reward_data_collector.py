@@ -424,7 +424,9 @@ class RewardDataCollector:
                         return True
         return False
 
-    def _determine_trajectory_label(self, env_idx: int, trajectory_buffer: list[dict]) -> bool:
+    def _determine_trajectory_label(
+        self, env_idx: int, trajectory_buffer: list[dict]
+    ) -> bool:
         """Determine if trajectory is positive (success) or negative.
 
         Args:
@@ -458,7 +460,9 @@ class RewardDataCollector:
         else:
             return bool(success_once) or has_success_frame
 
-    def _extract_step_labels(self, success_frame, step_idx: int, env_idx: int, is_positive: bool) -> list[float]:
+    def _extract_step_labels(
+        self, success_frame, step_idx: int, env_idx: int, is_positive: bool
+    ) -> list[float]:
         """Extract labels from success_frame for a single step.
 
         Args:
@@ -528,7 +532,9 @@ class RewardDataCollector:
 
         return None
 
-    def _collect_trajectory_data(self, trajectory_buffer: list[dict], env_idx: int, is_positive: bool) -> dict:
+    def _collect_trajectory_data(
+        self, trajectory_buffer: list[dict], env_idx: int, is_positive: bool
+    ) -> dict:
         """Collect all frames and labels for a trajectory.
 
         Args:
