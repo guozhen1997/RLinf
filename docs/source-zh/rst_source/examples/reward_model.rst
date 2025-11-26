@@ -64,18 +64,18 @@
 奖励模型训练
 ~~~~~~~~~~~~
 
-**``examples/embodiment/train_reward_model.py``**
+**``examples/embodiment/main_reward.py``**
 
-**用途**：奖励模型训练脚本
+**用途**：使用 Ray 和 WorkerGroup 进行奖励模型训练
 
 - **主函数**：``main(cfg: DictConfig)`` （使用 Hydra 装饰器）
 - **配置**：使用 Hydra 和 OmegaConf，配置文件位于 ``examples/embodiment/config/train_reward_model.yaml``
+- **架构**：使用 Ray 进行分布式执行，``RewardWorker`` 带有 ``fit()`` 方法进行训练
 - **职责**：
-  - 从 ``positive_dir`` 和 ``negative_dir`` 加载轨迹数据（来自配置）
-  - 创建 ``RewardDataset`` 进行帧级训练
-  - 使用 BCE 损失训练 ``BinaryRewardClassifier``
-  - 保存最佳模型检查点
-  - 可选地可视化正样本
+  - 使用 Ray 创建 ``RewardWorker`` 组
+  - 初始化工作器和数据集
+  - 使用简单 PyTorch 训练（无 FSDP）训练 ``BinaryRewardClassifier``
+  - 按固定间隔保存检查点（按步数，非按 epoch）
 
 **``rlinf/models/reward_model/reward_classifier.py``**
 
@@ -205,96 +205,104 @@
 
 训练脚本使用 Hydra 和 OmegaConf 进行配置管理。默认配置文件位于 ``examples/embodiment/config/train_reward_model.yaml``。
 
-默认配置文件
-~~~~~~~~~~~~
+默认配置文件结构
+~~~~~~~~~~~~~~~~
 
 .. code-block:: yaml
 
    defaults:
      - override hydra/job_logging: stdout
 
-   hydra:
-     run:
-       dir: .
-     output_subdir: null
+   cluster:
+     num_nodes: 1
+     component_placement:
+       reward: all
 
-   # 数据路径
-   positive_dir: ./reward_data/positive
-   negative_dir: ./reward_data/negative
+   runner:
+     task_type: embodied
+     output_dir: ../results
+     experiment_name: reward-model-training
 
-   # 模型配置
-   backbone: resnet10  # 目前仅支持 resnet10
-   image_key: base_camera
-   image_size: [3, 64, 64]  # [C, H, W]
-   hidden_dim: 256
-   num_spatial_blocks: 8
-   pretrained_encoder_path: null  # 预训练编码器权重路径
-
-   # 训练配置
-   batch_size: 32
-   epochs: 100
-   lr: 1e-4
-   num_workers: 4
-
-   # 输出配置
-   output_checkpoint: ./checkpoints/reward_model.pt
-
-   # 可视化
-   visualize_positive: false
-   vis_output_dir: positive_samples_vis
-
-   # 设备（设置为 null 以自动检测）
-   device: null  # 将自动检测：如果可用则为 "cuda"，否则为 "cpu"
+   reward:
+     group_name: "RewardGroup"
+     training_backend: simple  # 简单训练模式（无 FSDP）
+     gpu_id: 0  # 用于训练的 GPU 设备 ID
+     
+     global_batch_size: 32
+     num_epochs: 100
+     log_interval: 100
+     save_interval: 1000  # 每 N 步保存一次检查点
+     save_dir: ${runner.output_dir}/${runner.experiment_name}/checkpoints
+     
+     model:
+       image_keys: ["base_camera"]
+       image_size: [3, 64, 64]
+       hidden_dim: 256
+       num_spatial_blocks: 8
+       pretrained_encoder_path: null
+       use_pretrain: true
+       freeze_encoder: true
+     
+     optim:
+       optimizer: adam
+       lr: 1e-4
+       clip_grad: 1.0
+     
+     data:
+       positive_dir: ./reward_data/positive
+       negative_dir: ./reward_data/negative
+       image_key: base_camera
+       num_workers: 4
 
 启动命令
 ~~~~~~~~
 
 .. code-block:: bash
 
-   # 使用提供的脚本（根据需要修改路径）
-   bash examples/embodiment/train_reward_model.sh
+   # 使用提供的脚本（推荐）
+   bash examples/embodiment/train_reward_model.sh train_reward_model
 
-   # 或直接使用 python（从 examples/embodiment 目录）
-   cd examples/embodiment
-   python train_reward_model.py
+   # 或直接使用 python
+   python examples/embodiment/main_reward.py \
+       --config-path examples/embodiment/config \
+       --config-name train_reward_model
 
    # 通过命令行覆盖配置参数
-   python train_reward_model.py \
-       positive_dir=./reward_data/positive \
-       negative_dir=./reward_data/negative \
-       output_checkpoint=./checkpoints/reward_model.pt \
-       pretrained_encoder_path=./resnet10_pretrained.pt \
-       image_key=base_camera \
-       image_size=[3,64,64] \
-       batch_size=128 \
-       epochs=30 \
-       lr=1e-4 \
-       hidden_dim=256 \
-       num_spatial_blocks=8 \
-       visualize_positive=true \
-       vis_output_dir=./positive_samples_vis
+   bash examples/embodiment/train_reward_model.sh train_reward_model \
+       reward.gpu_id=1 \
+       reward.global_batch_size=64 \
+       reward.num_epochs=50 \
+       reward.save_interval=500
 
 训练过程
 ~~~~~~~~
 
-1. **数据加载**：
-   - 从 ``positive_dir`` 和 ``negative_dir`` 加载所有 ``.npy`` 文件
-   - 将轨迹级数据扩展到帧级样本
-   - 每个样本 = ``(trajectory_path, frame_index, label)``
+1. **初始化**：
+   - 创建 Ray 集群和 ``RewardWorker`` 组
+   - 从 ``reward.data.positive_dir`` 和 ``reward.data.negative_dir`` 初始化数据集
+   - 加载所有 ``.npy`` 文件并将轨迹级数据扩展到帧级样本
    - 报告统计信息：
-
      - 每个目录中的轨迹和帧数
      - 每个目录中标签的分布（label=1 vs label=0）
 
 2. **模型创建**：
-   - 使用指定参数创建 ``BinaryRewardClassifier``
-   - 如果配置中提供了 ``pretrained_encoder_path``，加载预训练 ResNet10 权重
+   - 使用 ``reward.model`` 中的指定参数创建 ``BinaryRewardClassifier``
+   - 如果提供了 ``pretrained_encoder_path``，加载预训练 ResNet10 权重
    - 编码器权重默认冻结（``freeze_encoder=True``）
+   - 将模型移动到指定的 GPU（``gpu_id``）
 
 3. **训练循环**：
-   - 使用带 logits 的 BCE 损失
-   - Adam 优化器
-   - 根据训练准确率保存最佳模型
+   - 使用带 logits 的 BCE 损失（``F.binary_cross_entropy_with_logits``）
+   - AdamW 优化器（在 ``reward.optim`` 中配置）
+   - 学习率调度器（在 ``reward.lr_sched`` 中配置）
+   - 梯度裁剪（如果 ``reward.optim.clip_grad > 0``）
+   - 每 ``log_interval`` 步记录指标
+   - 每 ``save_interval`` 步保存检查点
+
+4. **检查点保存**：
+   - 按**步数**（非按 epoch）保存，由 ``reward.save_interval`` 控制
+   - 保存路径：``{save_dir}/step_{global_step}/checkpoint.pt``
+   - 示例：``../results/reward-model-training/checkpoints/step_1000/checkpoint.pt``
 
 阶段 3：使用奖励模型训练 RL 策略
 -----------------------------------
@@ -365,11 +373,9 @@
        reward.use_reward_model=False
 
    # 步骤 2：训练奖励模型
-   cd examples/embodiment
-   python train_reward_model.py \
-       positive_dir=./reward_data/positive \
-       negative_dir=./reward_data/negative \
-       output_checkpoint=./checkpoints/reward_model.pt
+   bash examples/embodiment/train_reward_model.sh train_reward_model \
+       reward.data.positive_dir=./reward_data/positive \
+       reward.data.negative_dir=./reward_data/negative
 
    # 步骤 3：使用奖励模型训练
    bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn \

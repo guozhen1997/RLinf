@@ -62,32 +62,34 @@ The reward model workflow consists of three main stages:
 
 ### Reward Model Training
 
-#### `examples/embodiment/train_reward_model.py`
-**Purpose**: Training script for reward model
+#### `examples/embodiment/main_reward.py`
+**Purpose**: Training script for reward model using Ray and WorkerGroup
 - **Main Function**: `main(cfg: DictConfig)` (uses Hydra decorator)
 - **Configuration**: Uses Hydra and OmegaConf, config file at `examples/embodiment/config/train_reward_model.yaml`
+- **Architecture**: Uses Ray for distributed execution, `RewardWorker` with `fit()` method for training
 - **Responsibilities**:
-  - Loads trajectory data from `positive_dir` and `negative_dir` (from config)
-  - Creates `RewardDataset` for frame-level training
-  - Trains `BinaryRewardClassifier` with BCE loss
-  - Saves best model checkpoint
-  - Optionally visualizes positive samples
+  - Creates `RewardWorker` group using Ray
+  - Initializes workers and datasets
+  - Trains `BinaryRewardClassifier` with BCE loss using simple PyTorch training (no FSDP)
+  - Saves checkpoints at regular intervals (by step, not epoch)
 
-**Key Configuration Parameters**:
-- `positive_dir`: Directory containing positive trajectory `.npy` files
-- `negative_dir`: Directory containing negative trajectory `.npy` files
-- `output_checkpoint`: Path to save trained model (e.g., `./checkpoints/reward_model.pt`)
-- `pretrained_encoder_path`: Path to pretrained ResNet10 encoder weights (e.g., `./resnet10_pretrained.pt`)
-- `image_key`: Image key to use (default: `base_camera`)
-- `image_size`: Image size as `[C, H, W]` (default: `[3, 64, 64]`)
-- `batch_size`: Training batch size (default: `32`)
-- `epochs`: Number of training epochs (default: `100`)
-- `lr`: Learning rate (default: `1e-4`)
-- `hidden_dim`: Hidden dimension for classifier (default: `256`)
-- `num_spatial_blocks`: Number of spatial blocks for pooling (default: `8`)
-- `visualize_positive`: Flag to visualize positive samples (default: `false`)
-- `vis_output_dir`: Output directory for visualizations (default: `positive_samples_vis`)
-- `device`: Device to train on (default: `null` for auto-detection)
+**Key Configuration Parameters** (in `reward` section):
+- `training_backend`: Training backend (set to `simple` for small models, no FSDP)
+- `gpu_id`: GPU device ID to use for training (default: `0`)
+- `global_batch_size`: Training batch size (default: `32`)
+- `num_epochs`: Number of training epochs (default: `100`)
+- `save_interval`: Save checkpoint every N steps (default: `1000`)
+- `log_interval`: Log metrics every N steps (default: `100`)
+- `save_dir`: Directory to save checkpoints (default: `${runner.output_dir}/${runner.experiment_name}/checkpoints`)
+- `log_dir`: Directory to save logs (default: `${runner.output_dir}/${runner.experiment_name}/logs`)
+- `reward.data.positive_dir`: Directory containing positive trajectory `.npy` files
+- `reward.data.negative_dir`: Directory containing negative trajectory `.npy` files
+- `reward.model.image_keys`: Image keys to use (default: `["base_camera"]`)
+- `reward.model.image_size`: Image size as `[C, H, W]` (default: `[3, 64, 64]`)
+- `reward.model.hidden_dim`: Hidden dimension for classifier (default: `256`)
+- `reward.model.num_spatial_blocks`: Number of spatial blocks for pooling (default: `8`)
+- `reward.model.pretrained_encoder_path`: Path to pretrained ResNet10 encoder weights (default: `null`)
+- `reward.optim.lr`: Learning rate (default: `1e-4`)
 
 #### `rlinf/models/reward_model/reward_classifier.py`
 **Purpose**: Reward model architecture definition
@@ -258,7 +260,7 @@ Otherwise, it is saved to `negative_dir`.
 
 The training script uses Hydra and OmegaConf for configuration management. The default configuration file is located at `examples/embodiment/config/train_reward_model.yaml`.
 
-#### Default Configuration File
+#### Default Configuration File Structure
 
 ```yaml
 defaults:
@@ -269,135 +271,166 @@ hydra:
     dir: .
   output_subdir: null
 
-# Data paths
-positive_dir: ./reward_data/positive
-negative_dir: ./reward_data/negative
+cluster:
+  num_nodes: 1
+  component_placement:
+    reward: all
 
-# Model configuration
-backbone: resnet10  # Currently only resnet10 is supported
-image_key: base_camera
-image_size: [3, 64, 64]  # [C, H, W]
-hidden_dim: 256
-num_spatial_blocks: 8
-pretrained_encoder_path: null  # Path to pretrained encoder weights
+runner:
+  task_type: embodied
+  logger:
+    log_path: ${runner.output_dir}/${runner.experiment_name}
+    project_name: rlinf
+    experiment_name: reward-model-training
+    logger_backends: ["tensorboard"]
+  output_dir: ../results
+  experiment_name: reward-model-training
 
-# Training configuration
-batch_size: 32
-epochs: 100
-lr: 1e-4
-num_workers: 4
-
-# Output configuration
-output_checkpoint: ./checkpoints/reward_model.pt
-
-# Visualization
-visualize_positive: false
-vis_output_dir: positive_samples_vis
-
-# Device (set to null for auto-detection)
-device: null  # Will auto-detect: "cuda" if available, else "cpu"
+reward:
+  group_name: "RewardGroup"
+  training_backend: simple  # Simple training mode (no FSDP)
+  gpu_id: 0  # GPU device ID to use for training
+  
+  global_batch_size: 32
+  num_epochs: 100
+  log_interval: 100
+  save_interval: 1000  # Save checkpoint every N steps
+  log_dir: ${runner.output_dir}/${runner.experiment_name}/logs
+  save_dir: ${runner.output_dir}/${runner.experiment_name}/checkpoints
+  
+  model:
+    image_keys: ["base_camera"]
+    image_size: [3, 64, 64]  # [C, H, W]
+    hidden_dim: 256
+    num_spatial_blocks: 8
+    pretrained_encoder_path: null
+    use_pretrain: true
+    freeze_encoder: true
+  
+  optim:
+    optimizer: adam
+    lr: 1e-4
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-05
+    weight_decay: 0.0
+    clip_grad: 1.0
+  
+  lr_sched:
+    lr_warmup_iters: 0
+    max_lr: 1.0e-4
+    min_lr: 0.0
+    lr_decay_style: constant
+  
+  data:
+    positive_dir: ./reward_data/positive
+    negative_dir: ./reward_data/negative
+    image_key: base_camera
+    image_size: [3, 64, 64]
+    shuffle: true
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: false
+    prefetch_factor: 2
 ```
 
 ### Startup Command
 
 ```bash
-# Using the provided script (modify paths as needed)
-bash examples/embodiment/train_reward_model.sh
+# Using the provided script (recommended)
+bash examples/embodiment/train_reward_model.sh train_reward_model
 
-# Or directly with python (from examples/embodiment directory)
-cd examples/embodiment
-python train_reward_model.py
+# Or directly with python
+python examples/embodiment/main_reward.py \
+    --config-path examples/embodiment/config \
+    --config-name train_reward_model
 
 # Override configuration parameters via command line
-python train_reward_model.py \
-    positive_dir=./reward_data/positive \
-    negative_dir=./reward_data/negative \
-    output_checkpoint=./checkpoints/reward_model.pt \
-    pretrained_encoder_path=./resnet10_pretrained.pt \
-    image_key=base_camera \
-    image_size=[3,64,64] \
-    batch_size=128 \
-    epochs=30 \
-    lr=1e-4 \
-    hidden_dim=256 \
-    num_spatial_blocks=8 \
-    visualize_positive=true \
-    vis_output_dir=./positive_samples_vis
-
-# Or modify the YAML file directly and run with defaults
-python train_reward_model.py
+bash examples/embodiment/train_reward_model.sh train_reward_model \
+    reward.gpu_id=1 \
+    reward.global_batch_size=64 \
+    reward.num_epochs=50 \
+    reward.save_interval=500 \
+    reward.data.positive_dir=./reward_data/positive \
+    reward.data.negative_dir=./reward_data/negative
 ```
 
 ### Configuration Parameters
 
 | Parameter | Default | Description | Example |
 |-----------|---------|-------------|---------|
-| `positive_dir` | `./reward_data/positive` | Directory containing positive `.npy` files | `./reward_data/positive` |
-| `negative_dir` | `./reward_data/negative` | Directory containing negative `.npy` files | `./reward_data/negative` |
-| `output_checkpoint` | `./checkpoints/reward_model.pt` | Path to save trained model | `./checkpoints/reward_model.pt` |
-| `pretrained_encoder_path` | `null` | Path to pretrained ResNet10 encoder | `./resnet10_pretrained.pt` |
-| `backbone` | `resnet10` | Backbone architecture (currently only resnet10) | `resnet10` |
-| `image_key` | `base_camera` | Image key to use | `base_camera` |
-| `image_size` | `[3, 64, 64]` | Image size as `[C, H, W]` | `[3, 64, 64]` |
-| `batch_size` | `32` | Training batch size | `128` |
-| `epochs` | `100` | Number of training epochs | `30` |
-| `lr` | `1e-4` | Learning rate | `1e-4` |
-| `hidden_dim` | `256` | Hidden dimension for classifier | `256` |
-| `num_spatial_blocks` | `8` | Number of spatial blocks for pooling | `8` |
-| `num_workers` | `4` | Number of data loading workers | `4` |
-| `visualize_positive` | `false` | Visualize positive samples before training | `true` |  (Optional)
-| `vis_output_dir` | `positive_samples_vis` | Output directory for visualizations | `./show` |  (Optional)
-| `device` | `null` | Device to train on (auto-detects if null) | `cuda` or `cpu` |
+| `reward.training_backend` | `simple` | Training backend (use `simple` for small models) | `simple` |
+| `reward.gpu_id` | `0` | GPU device ID to use for training | `0`, `1`, `2`, etc. |
+| `reward.global_batch_size` | `32` | Training batch size | `64`, `128` |
+| `reward.num_epochs` | `100` | Number of training epochs | `50`, `100` |
+| `reward.save_interval` | `1000` | Save checkpoint every N steps | `500`, `1000`, `2000` |
+| `reward.log_interval` | `100` | Log metrics every N steps | `50`, `100` |
+| `reward.save_dir` | `${runner.output_dir}/${runner.experiment_name}/checkpoints` | Directory to save checkpoints | `./checkpoints` |
+| `reward.data.positive_dir` | `./reward_data/positive` | Directory containing positive `.npy` files | `./reward_data/positive` |
+| `reward.data.negative_dir` | `./reward_data/negative` | Directory containing negative `.npy` files | `./reward_data/negative` |
+| `reward.model.image_keys` | `["base_camera"]` | Image keys to use | `["base_camera"]` |
+| `reward.model.image_size` | `[3, 64, 64]` | Image size as `[C, H, W]` | `[3, 64, 64]` |
+| `reward.model.hidden_dim` | `256` | Hidden dimension for classifier | `256`, `512` |
+| `reward.model.num_spatial_blocks` | `8` | Number of spatial blocks for pooling | `8`, `16` |
+| `reward.model.pretrained_encoder_path` | `null` | Path to pretrained ResNet10 encoder | `./resnet10_pretrained.pt` |
+| `reward.model.use_pretrain` | `true` | Whether to use pretrained encoder | `true`, `false` |
+| `reward.model.freeze_encoder` | `true` | Whether to freeze encoder weights | `true`, `false` |
+| `reward.optim.lr` | `1e-4` | Learning rate | `1e-4`, `5e-5` |
+| `reward.optim.clip_grad` | `1.0` | Gradient clipping threshold | `1.0`, `0.5` |
+| `reward.data.num_workers` | `4` | Number of data loading workers | `4`, `8` |
 
 ### Training Process
 
-1. **Data Loading**:
-   - Loads all `.npy` files from `positive_dir` and `negative_dir`
-   - Expands trajectory-level data to frame-level samples
-   - Each sample = `(trajectory_path, frame_index, label)`
+1. **Initialization**:
+   - Creates Ray cluster and `RewardWorker` group
+   - Initializes dataset from `reward.data.positive_dir` and `reward.data.negative_dir`
+   - Loads all `.npy` files and expands trajectory-level data to frame-level samples
    - Reports statistics:
      - Number of trajectories and frames in each directory
      - Distribution of labels (label=1 vs label=0) in each directory
 
 2. **Model Creation**:
-   - Creates `BinaryRewardClassifier` with specified parameters
-   - If `pretrained_encoder_path` is provided in config, loads pretrained ResNet10 weights
+   - Creates `BinaryRewardClassifier` with specified parameters in `reward.model`
+   - If `pretrained_encoder_path` is provided, loads pretrained ResNet10 weights
    - Encoder weights are frozen by default (`freeze_encoder=True`)
+   - Moves model to specified GPU (`gpu_id`)
 
 3. **Training Loop**:
-   - Uses BCE loss with logits
-   - Adam optimizer
-   - Saves best model based on training accuracy
+   - Uses BCE loss with logits (`F.binary_cross_entropy_with_logits`)
+   - AdamW optimizer (configured in `reward.optim`)
+   - Learning rate scheduler (configured in `reward.lr_sched`)
+   - Gradient clipping (if `reward.optim.clip_grad > 0`)
+   - Logs metrics every `log_interval` steps
+   - Saves checkpoint every `save_interval` steps
 
 4. **Checkpoint Format**:
    ```python
    {
        'epoch': int,
+       'global_step': int,
        'model_state_dict': dict,
        'optimizer_state_dict': dict,
-       'train_loss': float,
-       'train_acc': float
+       'lr_scheduler_state_dict': dict,  # if lr_scheduler exists
+       'loss': float,
+       'accuracy': float
    }
    ```
 
 ### Model Save Location
 
-**Default**: Specified by `output_checkpoint` in configuration
+**Default**: Specified by `reward.save_dir` in configuration
+
+**Save Path Format**: `{save_dir}/step_{global_step}/checkpoint.pt`
 
 **Example Paths**:
-- `./checkpoints/reward_model.pt`
-- `/path/to/project/toolkits/reward_model/checkpoints/reward_model.pt`
+- `../results/reward-model-training/checkpoints/step_1000/checkpoint.pt`
+- `../results/reward-model-training/checkpoints/step_2000/checkpoint.pt`
+- `../results/reward-model-training/checkpoints/step_3000/checkpoint.pt`
 
-**Note**: The directory will be created automatically if it doesn't exist.
-
-### Visualization (Optional)
-
-If `visualize_positive: true` is set in the configuration:
-- All positive samples (label=1) are visualized
-- Images are saved to `vis_output_dir`
-- Filename format: `{folder}_{traj_id}_frame{frame_idx}.png`
-  - Example: `positive_000001_frame049.png`
-- Useful for verifying data quality and understanding success patterns
+**Note**: 
+- Checkpoints are saved by **step** (not epoch), controlled by `reward.save_interval`
+- The directory structure is created automatically
+- Each checkpoint is saved in its own subdirectory named `step_{global_step}`
 
 ## Stage 3: Training RL Policy with Reward Model
 
@@ -540,17 +573,18 @@ python examples/embodiment/train_embodied_agent.py \
                               │
                               ▼
         ┌─────────────────────────────────────┐
-        │  train_reward_model.py               │
+        │  main_reward.py                     │
         │  - Location: examples/embodiment/    │
         │  - Uses Hydra config: config/train_reward_model.yaml │
-        │  - Input: positive_dir, negative_dir (from config) │
-        │  - Optional: pretrained_encoder_path (from config) │
-        │  - Output: reward_model.pt           │
-        │  - Command: python examples/embodiment/train_reward_model.py │
+        │  - Uses Ray and RewardWorker        │
+        │  - Input: reward.data.positive_dir, reward.data.negative_dir │
+        │  - Optional: reward.model.pretrained_encoder_path │
+        │  - Output: checkpoints/step_{N}/checkpoint.pt │
+        │  - Command: bash examples/embodiment/train_reward_model.sh │
         └─────────────────────────────────────┘
                               │
                               ▼
-        Output: ./checkpoints/reward_model.pt
+        Output: {save_dir}/step_{N}/checkpoint.pt
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -655,12 +689,10 @@ bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn \
     reward.collect_data=True \
     reward.use_reward_model=False
 
-# Step 2: Train reward model
-cd examples/embodiment
-python train_reward_model.py \
-    positive_dir=./reward_data/positive \
-    negative_dir=./reward_data/negative \
-    output_checkpoint=./checkpoints/reward_model.pt
+   # Step 2: Train reward model
+   bash examples/embodiment/train_reward_model.sh train_reward_model \
+       reward.data.positive_dir=./reward_data/positive \
+       reward.data.negative_dir=./reward_data/negative
 
 # Step 3: Train with reward model
 bash examples/embodiment/run_embodiment.sh maniskill_ppo_cnn \

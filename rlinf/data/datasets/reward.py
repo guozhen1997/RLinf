@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from omegaconf import DictConfig
 from torch.utils.data import Dataset
 
 
@@ -34,25 +35,38 @@ class RewardDataset(Dataset):
 
     def __init__(
         self,
-        positive_dir: str,
-        negative_dir: str,
-        image_key: str,
-        image_size: list,
+        cfg: DictConfig = None,
+        positive_dir: str = None,
+        negative_dir: str = None,
+        image_key: str = None,
+        image_size: list = None,
         device: str = "cpu",
     ):
         """
         Args:
+            cfg: Configuration dict (preferred). If provided, other args are ignored.
             positive_dir: Path to directory containing positive trajectory files
             negative_dir: Path to directory containing negative trajectory files
             image_key: Image key to use (e.g., "base_camera")
             image_size: Image size [C, H, W]
             device: Device to load data on
         """
-        self.positive_dir = Path(positive_dir)
-        self.negative_dir = Path(negative_dir)
-        self.image_key = image_key
-        self.image_size = image_size
-        self.device = device
+        if cfg is not None:
+            # Use config if provided
+            self.positive_dir = Path(cfg.positive_dir)
+            self.negative_dir = Path(cfg.negative_dir)
+            self.image_key = cfg.image_key
+            self.image_size = cfg.image_size
+            self.device = getattr(cfg, "device", device)
+        else:
+            # Fallback to individual args
+            if positive_dir is None or negative_dir is None or image_key is None or image_size is None:
+                raise ValueError("Either cfg or all individual args (positive_dir, negative_dir, image_key, image_size) must be provided")
+            self.positive_dir = Path(positive_dir)
+            self.negative_dir = Path(negative_dir)
+            self.image_key = image_key
+            self.image_size = image_size
+            self.device = device
 
         if not self.positive_dir.exists():
             raise ValueError(f"Positive directory not found: {self.positive_dir}")
@@ -118,28 +132,31 @@ class RewardDataset(Dataset):
         total_label_0_count = positive_dir_label_0_count + negative_dir_label_0_count
         
         # Print statistics
-        print(f"\n{'='*60}")
-        print(f"Dataset Statistics:")
-        print(f"{'='*60}")
-        print(f"Trajectories: {positive_traj_count} positive, {negative_traj_count} negative")
-        print(f"\nFrom positive_dir ({self.positive_dir}):")
-        print(f"  Total frames: {positive_dir_frame_count}")
-        print(f"  Frames with label=1 (success): {positive_dir_label_1_count}")
-        print(f"  Frames with label=0 (failure): {positive_dir_label_0_count}")
+        import sys
+        print(f"\n{'='*60}", flush=True)
+        print(f"Dataset Statistics:", flush=True)
+        print(f"{'='*60}", flush=True)
+        import sys
+        print(f"Trajectories: {positive_traj_count} positive, {negative_traj_count} negative", flush=True)
+        print(f"\nFrom positive_dir ({self.positive_dir}):", flush=True)
+        print(f"  Total frames: {positive_dir_frame_count}", flush=True)
+        print(f"  Frames with label=1 (success): {positive_dir_label_1_count}", flush=True)
+        print(f"  Frames with label=0 (failure): {positive_dir_label_0_count}", flush=True)
         if positive_dir_frame_count > 0:
-            print(f"  Label ratio (1/0): {positive_dir_label_1_count}/{positive_dir_label_0_count} = {positive_dir_label_1_count/max(positive_dir_label_0_count, 1):.3f}")
-        print(f"\nFrom negative_dir ({self.negative_dir}):")
-        print(f"  Total frames: {negative_dir_frame_count}")
-        print(f"  Frames with label=1 (success): {negative_dir_label_1_count}")
-        print(f"  Frames with label=0 (failure): {negative_dir_label_0_count}")
+            print(f"  Label ratio (1/0): {positive_dir_label_1_count}/{positive_dir_label_0_count} = {positive_dir_label_1_count/max(positive_dir_label_0_count, 1):.3f}", flush=True)
+        print(f"\nFrom negative_dir ({self.negative_dir}):", flush=True)
+        print(f"  Total frames: {negative_dir_frame_count}", flush=True)
+        print(f"  Frames with label=1 (success): {negative_dir_label_1_count}", flush=True)
+        print(f"  Frames with label=0 (failure): {negative_dir_label_0_count}", flush=True)
         if negative_dir_frame_count > 0:
-            print(f"  Label ratio (1/0): {negative_dir_label_1_count}/{negative_dir_label_0_count} = {negative_dir_label_1_count/max(negative_dir_label_0_count, 1):.3f}")
-        print(f"\nOverall:")
-        print(f"  Total frames: {self.num_samples}")
-        print(f"  Total frames with label=1 (success): {total_label_1_count}")
-        print(f"  Total frames with label=0 (failure): {total_label_0_count}")
-        print(f"  Overall label ratio (1/0): {total_label_1_count}/{total_label_0_count} = {total_label_1_count/max(total_label_0_count, 1):.3f}")
-        print(f"{'='*60}\n")
+            print(f"  Label ratio (1/0): {negative_dir_label_1_count}/{negative_dir_label_0_count} = {negative_dir_label_1_count/max(negative_dir_label_0_count, 1):.3f}", flush=True)
+        print(f"\nOverall:", flush=True)
+        print(f"  Total frames: {self.num_samples}", flush=True)
+        print(f"  Total frames with label=1 (success): {total_label_1_count}", flush=True)
+        print(f"  Total frames with label=0 (failure): {total_label_0_count}", flush=True)
+        print(f"  Overall label ratio (1/0): {total_label_1_count}/{total_label_0_count} = {total_label_1_count/max(total_label_0_count, 1):.3f}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+        sys.stdout.flush()
 
     def __len__(self):
         return self.num_samples

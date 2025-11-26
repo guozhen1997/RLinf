@@ -20,32 +20,80 @@ hydra:
     dir: .
   output_subdir: null
 
-# Data paths
-positive_dir: ./reward_data/positive
-negative_dir: ./reward_data/negative
+cluster:
+  num_nodes: 1
+  component_placement:
+    reward: all
 
-# Model configuration
-backbone: resnet10  # Currently only resnet10 is supported
-image_key: base_camera
-image_size: [3, 64, 64]  # [C, H, W]
-hidden_dim: 256
-num_spatial_blocks: 8
-pretrained_encoder_path: null  # Path to pretrained encoder weights
+runner:
+  task_type: embodied
+  logger:
+    log_path: ${runner.output_dir}/${runner.experiment_name}
+    project_name: rlinf
+    experiment_name: ${runner.experiment_name}
+    logger_backends: ["tensorboard"]
 
-# Training configuration
-batch_size: 32
-epochs: 100
-lr: 1e-4
-num_workers: 4
+  max_epochs: 100
+  max_steps: -1
 
-# Output configuration
-output_checkpoint: ./checkpoints/reward_model.pt
+  val_check_interval: 1
+  save_interval: 1000
 
-# Visualization
-visualize_positive: false
-vis_output_dir: positive_samples_vis
+  resume_dir: null
+  experiment_name: reward-model-training
+  output_dir: ../results
 
-# Device (set to null for auto-detection)
-device: null  # Will auto-detect: "cuda" if available, else "cpu"
+reward:
+  group_name: "RewardGroup"
+  training_backend: simple  # Training backend (not used for FSDP, just a flag)
+  gpu_id: 0  # GPU device ID to use for training
+
+  checkpoint_load_path: null
+
+  global_batch_size: 32
+
+  num_epochs: 100
+  log_interval: 100
+  save_interval: 1000
+  log_dir: ${runner.output_dir}/${runner.experiment_name}/logs
+  save_dir: ${runner.output_dir}/${runner.experiment_name}/checkpoints
+
+  seed: 1234
+
+  model:
+    image_keys: ["base_camera"]
+    image_size: [3, 64, 64]  # [C, H, W]
+    hidden_dim: 256
+    num_spatial_blocks: 8
+    pretrained_encoder_path: null
+    use_pretrain: true
+    freeze_encoder: true
+
+  optim:
+    optimizer: adam
+    lr: 1e-4
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-05
+    weight_decay: 0.0
+    clip_grad: 1.0
+
+  lr_sched:
+    lr_warmup_iters: 0
+    max_lr: 1.0e-4
+    min_lr: 0.0
+    lr_decay_style: constant
+
+  data:
+    positive_dir: ./reward_data/positive
+    negative_dir: ./reward_data/negative
+    image_key: base_camera
+    image_size: [3, 64, 64]
+    shuffle: true
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: false
+    prefetch_factor: 2
+    num_prefetch_batches: 1
 
 
