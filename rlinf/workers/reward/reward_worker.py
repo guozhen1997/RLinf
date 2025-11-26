@@ -412,7 +412,9 @@ class RewardWorker(Worker):
             .flatten()
         )
 
-    def _compute_reward_from_images(self, images: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _compute_reward_from_images(
+        self, images: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
         """Compute reward from images using the reward model.
 
         Args:
