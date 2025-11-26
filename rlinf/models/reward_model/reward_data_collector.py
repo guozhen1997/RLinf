@@ -765,7 +765,6 @@ class RewardDataCollector:
         return image_np.astype(np.float32)
 
 
-
 def create_reward_data_collector(cfg: DictConfig) -> Optional[RewardDataCollector]:
     """Create a reward data collector if enabled in config.
 

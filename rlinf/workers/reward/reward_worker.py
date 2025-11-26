@@ -52,6 +52,7 @@ class RewardWorker(Worker):
             self.placement = placement
             # Initialize dataset for training
             import sys
+
             print("Initializing dataset...", flush=True)
             sys.stdout.flush()
             self.dataset = RewardDataset(cfg.reward.data, device="cpu")
@@ -67,7 +68,9 @@ class RewardWorker(Worker):
                 shuffle=getattr(cfg.reward.data, "shuffle", True),
                 num_workers=getattr(cfg.reward.data, "num_workers", 0),
                 pin_memory=getattr(cfg.reward.data, "pin_memory", False),
-                persistent_workers=getattr(cfg.reward.data, "persistent_workers", False),
+                persistent_workers=getattr(
+                    cfg.reward.data, "persistent_workers", False
+                ),
                 prefetch_factor=getattr(cfg.reward.data, "prefetch_factor", 2),
             )
 
@@ -147,6 +150,7 @@ class RewardWorker(Worker):
         if self.is_training_mode:
             # Training mode: setup model and optimizer
             import sys
+
             print("Initializing model and optimizer...", flush=True)
             sys.stdout.flush()
 
@@ -202,6 +206,7 @@ class RewardWorker(Worker):
                 self.lr_scheduler = None
 
             import sys
+
             print("Model and optimizer initialized", flush=True)
             sys.stdout.flush()
             return
@@ -254,15 +259,18 @@ class RewardWorker(Worker):
                         if kernel_shape[1] == 1 and kernel_shape[2] == 1:
                             inferred_use_pretrain = False
                             print(
-                                f"Inferred use_pretrain=False from checkpoint (pooling kernel shape: {kernel_shape})")
+                                f"Inferred use_pretrain=False from checkpoint (pooling kernel shape: {kernel_shape})"
+                            )
                         else:
                             inferred_use_pretrain = True
                             print(
-                                f"Inferred use_pretrain=True from checkpoint (pooling kernel shape: {kernel_shape})")
+                                f"Inferred use_pretrain=True from checkpoint (pooling kernel shape: {kernel_shape})"
+                            )
 
                         if inferred_use_pretrain != use_pretrain:
                             print(
-                                f"Warning: use_pretrain mismatch! Config says {use_pretrain}, but checkpoint suggests {inferred_use_pretrain}. Using inferred value.")
+                                f"Warning: use_pretrain mismatch! Config says {use_pretrain}, but checkpoint suggests {inferred_use_pretrain}. Using inferred value."
+                            )
                             use_pretrain = inferred_use_pretrain
 
                 # Create reward model
@@ -282,7 +290,8 @@ class RewardWorker(Worker):
                     print(f"Loaded reward model from {checkpoint_path}")
                 elif checkpoint_path:
                     print(
-                        f"Warning: Reward model checkpoint not found at {checkpoint_path}")
+                        f"Warning: Reward model checkpoint not found at {checkpoint_path}"
+                    )
 
                 # Move to device
                 self.reward_model = self.reward_model.to(self.device)
@@ -291,11 +300,12 @@ class RewardWorker(Worker):
                 raise NotImplementedError(
                     "Only reward model is supported for embodiment tasks. Set reward.use_reward_model=True"
                 )
-        else:
-            # Text-based reasoning task initialization
-            if self.cfg.reward.use_reward_model:
-                raise NotImplementedError(
-                    "Reward model for text-based tasks is not implemented yet.")
+            else:
+                # Text-based reasoning task initialization
+                if self.cfg.reward.use_reward_model:
+                    raise NotImplementedError(
+                        "Reward model for text-based tasks is not implemented yet."
+                    )
             else:
                 self.reward = get_reward_class(self.cfg.reward.reward_type)(
                     self.cfg.reward
@@ -532,7 +542,9 @@ class RewardWorker(Worker):
 
                 images[key] = image_tensor
             else:
-                raise ValueError(f"Image {key} is not a torch.Tensor: {type(image_tensor)}")
+                raise ValueError(
+                    f"Image {key} is not a torch.Tensor: {type(image_tensor)}"
+                )
 
         return images
 
@@ -541,12 +553,12 @@ class RewardWorker(Worker):
         if not self.is_training_mode:
             raise RuntimeError("fit() can only be called in training mode")
 
-        print(f"\n{'='*60}", flush=True)
-        print(f"Starting training...", flush=True)
+        print(f"\n{'=' * 60}", flush=True)
+        print("Starting training...", flush=True)
         print(f"Total epochs: {getattr(self.cfg.reward, 'num_epochs', 1)}", flush=True)
         print(f"Global batch size: {self.cfg.reward.global_batch_size}", flush=True)
         print(f"Device: {self.device}", flush=True)
-        print(f"{'='*60}\n", flush=True)
+        print(f"{'=' * 60}\n", flush=True)
         sys.stdout.flush()
 
         num_epochs = getattr(self.cfg.reward, "num_epochs", 1)

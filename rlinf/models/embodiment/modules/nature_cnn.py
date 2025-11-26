@@ -124,6 +124,7 @@ class ResNet10(ResNet):
         x = self.avgpool(x)
         return x
 
+
 class SpatialLearnedEmbeddings(nn.Module):
     def __init__(self, height, width, channel, num_features=5):
         super().__init__()

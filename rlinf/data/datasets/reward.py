@@ -141,11 +141,10 @@ class RewardDataset(Dataset):
 
         # Print statistics
         import sys
-        print(f"
-{'=' * 60}", flush=True)
+
+        print(f"\n{'=' * 60}", flush=True)
         print("Dataset Statistics:", flush=True)
         print(f"{'=' * 60}", flush=True)
-        import sys
         print(
             f"Trajectories: {positive_traj_count} positive, {negative_traj_count} negative",
             flush=True,
@@ -176,8 +175,7 @@ class RewardDataset(Dataset):
                 f"  Label ratio (1/0): {negative_dir_label_1_count}/{negative_dir_label_0_count} = {negative_dir_label_1_count / max(negative_dir_label_0_count, 1):.3f}",
                 flush=True,
             )
-        print("
-Overall:", flush=True)
+        print("\nOverall:", flush=True)
         print(f"  Total frames: {self.num_samples}", flush=True)
         print(
             f"  Total frames with label=1 (success): {total_label_1_count}", flush=True
@@ -189,8 +187,7 @@ Overall:", flush=True)
             f"  Overall label ratio (1/0): {total_label_1_count}/{total_label_0_count} = {total_label_1_count / max(total_label_0_count, 1):.3f}",
             flush=True,
         )
-        print(f"{'=' * 60}
-", flush=True)
+        print(f"{'=' * 60}\n", flush=True)
         sys.stdout.flush()
 
     def __len__(self):

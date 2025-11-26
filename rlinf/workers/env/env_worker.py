@@ -79,7 +79,6 @@ class EnvWorker(Worker):
 
             self.data_collector = create_reward_data_collector(self.cfg)
 
-
     def init_worker(self):
         enable_offload = self.cfg.env.enable_offload
         only_eval = getattr(self.cfg.runner, "only_eval", False)

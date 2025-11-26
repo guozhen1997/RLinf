@@ -21,6 +21,7 @@ from .modules.nature_cnn import PlainConv, ResNetEncoder
 from .modules.utils import make_mlp
 from .modules.value_head import ValueHead
 
+
 class CNNPolicy(BasePolicy):
     def __init__(
         self,
@@ -67,7 +68,7 @@ class CNNPolicy(BasePolicy):
                 self.state_latent_dim,
             ],
             act_builder=nn.Tanh,
-            use_layer_norm=True
+            use_layer_norm=True,
         )
 
         # self.mlp = make_mlp(self.encoder.out_dim+self.state_dim, [512, 256], last_act=True)
