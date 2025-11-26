@@ -798,4 +798,3 @@ def create_reward_data_collector(cfg: DictConfig) -> Optional[RewardDataCollecto
         max_positive_trajectories=max_positive_trajectories,
         max_negative_trajectories=max_negative_trajectories,
     )
-

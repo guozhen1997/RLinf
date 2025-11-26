@@ -21,7 +21,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import LambdaLR
 
 from rlinf.algorithms.rewards import get_reward_class
 from rlinf.data.datasets.reward import RewardDataset
@@ -613,7 +612,6 @@ class RewardWorker(Worker):
                     self.global_step % getattr(self.cfg.reward, "log_interval", 100)
                     == 0
                 ):
-
                     print(
                         f"Epoch {epoch}, Step {step}, Loss: {mean_metric_dict['loss']:.4f}, Acc: {mean_metric_dict['accuracy']:.4f}",
                         flush=True,

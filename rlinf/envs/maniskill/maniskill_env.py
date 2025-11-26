@@ -523,4 +523,3 @@ class ManiskillEnv(gym.Env):
         )
         self.video_cnt += 1
         self.render_images = []
-

@@ -642,7 +642,7 @@ def validate_embodied_cfg(cfg):
     # Skip actor validation if this is reward training only mode
     if hasattr(cfg, "reward") and hasattr(cfg.reward, "training_backend") and not hasattr(cfg, "actor"):
         return cfg
-    
+
     if hasattr(cfg, "actor"):
         assert cfg.actor.model.model_name in SUPPORTED_MODEL_ARCHS, (
             f"Model {cfg.actor.model.model_name} is not supported"
@@ -858,7 +858,7 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
     assert cfg.runner.task_type in SUPPORTED_TASK_TYPE, (
         f"task_type must be one of {SUPPORTED_TASK_TYPE}"
     )
-    
+
     # Check if this is reward model training mode (only reward training, no actor)
     is_reward_training_only = (
         hasattr(cfg, "reward")
@@ -866,7 +866,7 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
         and cfg.reward.training_backend in SUPPORTED_TRAINING_BACKENDS
         and not hasattr(cfg, "actor")
     )
-    
+
     if cfg.runner.task_type == "embodied":
         # Only validate embodied cfg if not reward training only
         if not is_reward_training_only:

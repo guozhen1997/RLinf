@@ -76,7 +76,7 @@ class RewardDataset(Dataset):
 
         # Collect all trajectory files from both directories
         self.samples = []
-        
+
         # Statistics
         positive_traj_count = 0
         negative_traj_count = 0
@@ -87,7 +87,7 @@ class RewardDataset(Dataset):
         positive_dir_label_0_count = 0  # Frames with label == 0 in positive_dir
         negative_dir_label_1_count = 0  # Frames with label == 1 in negative_dir
         negative_dir_label_0_count = 0  # Frames with label == 0 in negative_dir
-        
+
         # Load positive trajectories
         positive_files = sorted(self.positive_dir.glob("*.npy"))
         for traj_path in positive_files:
@@ -106,7 +106,7 @@ class RewardDataset(Dataset):
                             positive_dir_label_1_count += 1
                         else:
                             positive_dir_label_0_count += 1
-        
+
         # Load negative trajectories
         negative_files = sorted(self.negative_dir.glob("*.npy"))
         for traj_path in negative_files:
@@ -127,11 +127,11 @@ class RewardDataset(Dataset):
                             negative_dir_label_0_count += 1
 
         self.num_samples = len(self.samples)
-        
+
         # Calculate totals
         total_label_1_count = positive_dir_label_1_count + negative_dir_label_1_count
         total_label_0_count = positive_dir_label_0_count + negative_dir_label_0_count
-        
+
         # Print statistics
         import sys
         print(f"\n{'='*60}", flush=True)
@@ -173,16 +173,16 @@ class RewardDataset(Dataset):
 
         # Load trajectory data
         traj_data = np.load(traj_path, allow_pickle=True).item()
-        
+
         if not isinstance(traj_data, dict) or 'images' not in traj_data:
             raise ValueError(f"Invalid trajectory file format: {traj_path}")
-        
+
         if self.image_key not in traj_data['images']:
             raise ValueError(f"Image key {self.image_key} not found in trajectory file: {traj_path}")
-        
+
         # Extract frame image: [T, C, H, W] -> [C, H, W]
         frame_image = traj_data['images'][self.image_key][frame_idx]
-        
+
         # Convert to torch tensor
         if isinstance(frame_image, np.ndarray):
             img = torch.from_numpy(frame_image).float()
@@ -207,9 +207,8 @@ class RewardDataset(Dataset):
             ).squeeze(0)
 
         images = {self.image_key: img}
-        
+
         # Use label from success_frame (which may differ from trajectory label)
         label_tensor = torch.tensor(label, dtype=torch.float32)
 
         return images, label_tensor
-

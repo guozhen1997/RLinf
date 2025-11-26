@@ -278,4 +278,3 @@ class CNNPolicy(BasePolicy):
         if return_shared_feature:
             result["shared_feature"] = full_feature
         return chunk_actions, result
-

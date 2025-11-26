@@ -116,4 +116,3 @@ class BinaryRewardClassifier(nn.Module):
         # Binary classification
         logits = self.classifier(combined_feature)
         return logits
-
