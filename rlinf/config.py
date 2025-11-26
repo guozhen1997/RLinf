@@ -39,21 +39,20 @@ logging.getLogger().setLevel(logging.INFO)
 
 class SupportedModel(Enum):
     # Reasoning models
-    QWEN2_5 = ("qwen2.5", "qwen", "reasoning")
-    QWEN2_5_VL = ("qwen2.5_vl", "qwen", "reasoning")
-    QWEN3_MOE = ("qwen3_moe", "qwen", "reasoning")
+    QWEN2_5 = ("qwen2.5", "reasoning")
+    QWEN2_5_VL = ("qwen2.5_vl", "reasoning")
+    QWEN3_MOE = ("qwen3_moe", "reasoning")
 
     # Embodied models
-    OPENVLA = ("openvla", "openvla", "embodied")
-    OPENVLA_OFT = ("openvla_oft", "openvla", "embodied")
-    OPENPI = ("openpi", "pi", "embodied")
-    MLP_POLICY = ("mlp_policy", "mlp", "embodied")
-    GR00T = ("gr00t", "gr00t", "embodied")
+    OPENVLA = ("openvla", "embodied")
+    OPENVLA_OFT = ("openvla_oft", "embodied")
+    OPENPI = ("openpi", "embodied")
+    MLP_POLICY = ("mlp_policy", "embodied")
+    GR00T = ("gr00t", "embodied")
 
-    def __new__(cls, value, family, category):
+    def __new__(cls, value, category):
         obj = object.__new__(cls)
         obj._value_ = value
-        obj.family = family
         obj.category = category
         return obj
 
