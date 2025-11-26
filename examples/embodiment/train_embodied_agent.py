@@ -24,8 +24,8 @@ from rlinf.scheduler import Cluster
 from rlinf.utils.placement import HybridComponentPlacement
 from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
 from rlinf.workers.env.env_worker import EnvWorker
-from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 from rlinf.workers.reward.reward_worker import RewardWorker
+from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 mp.set_start_method("spawn", force=True)
 
@@ -69,7 +69,7 @@ def main(cfg) -> None:
         actor=actor_group,
         rollout=rollout_group,
         env=env_group,
-        reward=reward_group
+        reward=reward_group,
     )
 
     runner.init_workers()

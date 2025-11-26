@@ -640,7 +640,11 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
 
 def validate_embodied_cfg(cfg):
     # Skip actor validation if this is reward training only mode
-    if hasattr(cfg, "reward") and hasattr(cfg.reward, "training_backend") and not hasattr(cfg, "actor"):
+    if (
+        hasattr(cfg, "reward")
+        and hasattr(cfg.reward, "training_backend")
+        and not hasattr(cfg, "actor")
+    ):
         return cfg
 
     if hasattr(cfg, "actor"):
@@ -881,7 +885,9 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
         # Validate reward config if it exists
         if hasattr(cfg, "reward") and hasattr(cfg.reward, "training_backend"):
             if cfg.reward.training_backend == "fsdp":
-                cfg.reward = validate_fsdp_cfg(cfg.reward, cfg.runner.get("resume_dir", None))
+                cfg.reward = validate_fsdp_cfg(
+                    cfg.reward, cfg.runner.get("resume_dir", None)
+                )
         return cfg
 
     # Original validation for actor/critic (for normal training)
@@ -896,7 +902,9 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
 
         if cfg.actor.training_backend == "megatron":
             cfg.actor = validate_megatron_cfg(cfg.actor)
-            cfg.actor = validate_model_cfg_by_hf_config(cfg.actor, cfg.rollout.model_dir)
+            cfg.actor = validate_model_cfg_by_hf_config(
+                cfg.actor, cfg.rollout.model_dir
+            )
             # TODO. Need actually pad padded_vocab_size.
             assert (
                 cfg.actor.model.padded_vocab_size
@@ -911,7 +919,9 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
     if hasattr(cfg, "critic") and cfg.critic.use_critic_model:
         if cfg.critic.training_backend == "megatron":
             cfg.critic = validate_megatron_cfg(cfg.critic)
-            cfg.critic = validate_model_cfg_by_hf_config(cfg.critic, cfg.rollout.model_dir)
+            cfg.critic = validate_model_cfg_by_hf_config(
+                cfg.critic, cfg.rollout.model_dir
+            )
         elif cfg.critic.training_backend == "fsdp":
             cfg.critic = validate_fsdp_cfg(cfg.critic)
 
