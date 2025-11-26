@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -22,7 +22,7 @@ from rlinf.models.embodiment.modules.nature_cnn import ResNetEncoder
 
 class BinaryRewardClassifier(nn.Module):
     """Frame-based binary classifier for reward prediction.
-    
+
     This model takes a single frame (image observation) and predicts
     whether the task is completed successfully at that moment.
     """
@@ -33,7 +33,7 @@ class BinaryRewardClassifier(nn.Module):
         image_size: list,  # [c, h, w]
         hidden_dim: int = 256,
         num_spatial_blocks: int = 8,
-        pretrained_encoder_path: str = None,
+        pretrained_encoder_path: Optional[str] = None,
         use_pretrain: bool = True,
         freeze_encoder: bool = True,
     ):
@@ -49,7 +49,7 @@ class BinaryRewardClassifier(nn.Module):
         # Create encoders for each image key
         self.encoders = nn.ModuleDict()
         encoder_out_dim = 0
-        
+
         sample_x = torch.randn(1, *image_size)
         for key in image_keys:
             encoder = self._create_encoder(sample_x)
@@ -79,19 +79,21 @@ class BinaryRewardClassifier(nn.Module):
 
     def forward(self, images: dict, train: bool = False):
         """Forward pass.
-        
+
         Args:
             images: Dict of image tensors, keyed by image_keys.
                    Each tensor should be [B, C, H, W]
             train: Whether in training mode.
-        
+
         Returns:
             logits: [B, 1] tensor of binary classification logits
         """
         visual_features = []
         for key in self.image_keys:
             if key not in images:
-                raise ValueError(f"Missing image key: {key}. Available keys: {list(images.keys())}")
+                raise ValueError(
+                    f"Missing image key: {key}. Available keys: {list(images.keys())}"
+                )
             img = images[key]
             # Ensure images are in [B, C, H, W] format
             if img.dim() == 4:
@@ -100,17 +102,17 @@ class BinaryRewardClassifier(nn.Module):
                 img = img.unsqueeze(0)
             else:
                 raise ValueError(f"Unexpected image shape: {img.shape}")
-            
+
             # Normalize to [0, 1] if needed
             if img.max() > 1.0:
                 img = img / 255.0
-            
+
             feature = self.encoders[key](img)
             visual_features.append(feature)
-        
+
         # Concatenate features from all image keys
         combined_feature = torch.cat(visual_features, dim=-1)
-        
+
         # Binary classification
         logits = self.classifier(combined_feature)
         return logits

@@ -13,35 +13,45 @@
 # limitations under the License.
 
 import os
+from functools import partial
+
 import torch
 import torch.nn as nn
+from torchvision.models.resnet import BasicBlock, ResNet
+
 from .utils import make_mlp
-from functools import partial
-from torchvision.models.resnet import ResNet, BasicBlock
 
 
 class PlainConv(nn.Module):
-    def __init__(self,
-                 in_channels=3,
-                 out_dim=256,
-                 pool_feature_map=False,
-                 last_act=True, # True for ConvBody, False for CNN
-                 image_size=[128, 128]
-                 ):
+    def __init__(
+        self,
+        in_channels=3,
+        out_dim=256,
+        pool_feature_map=False,
+        last_act=True,  # True for ConvBody, False for CNN
+        image_size=[128, 128],
+    ):
         super().__init__()
         # assume input image size is 128x128 or 64x64
 
         self.out_dim = out_dim
         self.cnn = nn.Sequential(
-            nn.Conv2d(in_channels, 16, 3, padding=1, bias=True), nn.ReLU(inplace=True),
-            nn.MaxPool2d(4, 4) if image_size[0] == 128 and image_size[1] == 128 else nn.MaxPool2d(2, 2),  # [32, 32]
-            nn.Conv2d(16, 32, 3, padding=1, bias=True), nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels, 16, 3, padding=1, bias=True),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(4, 4)
+            if image_size[0] == 128 and image_size[1] == 128
+            else nn.MaxPool2d(2, 2),  # [32, 32]
+            nn.Conv2d(16, 32, 3, padding=1, bias=True),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(2, 2),  # [16, 16]
-            nn.Conv2d(32, 64, 3, padding=1, bias=True), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, 3, padding=1, bias=True),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(2, 2),  # [8, 8]
-            nn.Conv2d(64, 64, 3, padding=1, bias=True), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, 3, padding=1, bias=True),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(2, 2),  # [4, 4]
-            nn.Conv2d(64, 64, 1, padding=0, bias=True), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, 1, padding=0, bias=True),
+            nn.ReLU(inplace=True),
         )
 
         if pool_feature_map:
@@ -70,24 +80,34 @@ class PlainConv(nn.Module):
 
 class MyGroupNorm(nn.GroupNorm):
     """
-    Reorganize the order of params to keep compatible to ResNet. 
+    Reorganize the order of params to keep compatible to ResNet.
     """
-    def __init__(self, num_channels, num_groups, eps = 0.00001, affine = True, device=None, dtype=None):
+
+    def __init__(
+        self,
+        num_channels,
+        num_groups,
+        eps=0.00001,
+        affine=True,
+        device=None,
+        dtype=None,
+    ):
         super().__init__(num_groups, num_channels, eps, affine, device, dtype)
-    
+
+
 class ResNet10(ResNet):
     def __init__(self, pre_pooling=True):
         self.pre_pooling = pre_pooling
         super().__init__(
-            block=BasicBlock, 
-            layers=[1, 1, 1, 1], 
-            num_classes=1000, 
-            norm_layer=partial(MyGroupNorm, num_groups=4, eps=1e-5)
+            block=BasicBlock,
+            layers=[1, 1, 1, 1],
+            num_classes=1000,
+            norm_layer=partial(MyGroupNorm, num_groups=4, eps=1e-5),
         )
-    
+
     def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Remove the last linear. 
+        Remove the last linear.
         """
         x = self.conv1(x)
         x = self.bn1(x)
@@ -114,7 +134,7 @@ class SpatialLearnedEmbeddings(nn.Module):
 
         self.kernel = nn.Parameter(
             torch.randn(channel, height, width, num_features)
-        ) # TODO: In SeRL, this is lecun_normal initialization
+        )  # TODO: In SeRL, this is lecun_normal initialization
 
     def forward(self, features):
         """
@@ -130,16 +150,18 @@ class SpatialLearnedEmbeddings(nn.Module):
 
         return out
 
+
 class ResNetEncoder(nn.Module):
     """ResNet encoder with spatial learned embeddings.
-    
+
     This class provides a unified ResNet encoder that can be used in both
     policy networks and reward classifiers. It supports pretrained weights,
     freezing, and configurable spatial pooling.
     """
+
     def __init__(
-        self, 
-        sample_x, 
+        self,
+        sample_x,
         out_dim=256,
         num_spatial_blocks=8,
         pretrained_encoder_path=None,
@@ -154,10 +176,10 @@ class ResNetEncoder(nn.Module):
         self.freeze_encoder = freeze_encoder
         self.pretrained_encoder_path = pretrained_encoder_path
         self.pooling_method = "spatial_learned_embeddings"
-        
+
         # ResNet backbone
         self.resnet_backbone = ResNet10(pre_pooling=self.use_pretrain)
-        
+
         if self.use_pretrain and self.pretrained_encoder_path:
             self._load_pretrained_weights()
             if self.freeze_encoder:
@@ -185,26 +207,34 @@ class ResNetEncoder(nn.Module):
                 num_features=self.num_spatial_blocks,
             )
             self.dropout = nn.Dropout(0.1)
-        
+
         # Final MLP
         self.mlp = nn.Sequential(
-            nn.Linear(in_features=channel*self.num_spatial_blocks, out_features=self.out_dim), 
-            nn.LayerNorm(self.out_dim), 
-            nn.Tanh()
+            nn.Linear(
+                in_features=channel * self.num_spatial_blocks, out_features=self.out_dim
+            ),
+            nn.LayerNorm(self.out_dim),
+            nn.Tanh(),
         )
 
     def _load_pretrained_weights(self):
         """Load pretrained ResNet10 weights."""
-        if self.pretrained_encoder_path and os.path.exists(self.pretrained_encoder_path):
+        if self.pretrained_encoder_path and os.path.exists(
+            self.pretrained_encoder_path
+        ):
             try:
-                model_dict = torch.load(self.pretrained_encoder_path, map_location="cpu")
+                model_dict = torch.load(
+                    self.pretrained_encoder_path, map_location="cpu"
+                )
                 self.resnet_backbone.load_state_dict(model_dict, strict=False)
                 print(f"Loaded pretrained weights from {self.pretrained_encoder_path}")
             except Exception as e:
                 print(f"Warning: Failed to load pretrained weights: {e}")
         else:
             if self.pretrained_encoder_path:
-                print(f"Warning: Pretrained encoder path not found: {self.pretrained_encoder_path}")
+                print(
+                    f"Warning: Pretrained encoder path not found: {self.pretrained_encoder_path}"
+                )
 
     def _freeze_backbone_weights(self):
         """Freeze the ResNet backbone weights."""
@@ -213,10 +243,10 @@ class ResNetEncoder(nn.Module):
 
     def forward(self, x):
         """Forward pass through encoder.
-        
+
         Args:
             x: Input image tensor [B, C, H, W]
-        
+
         Returns:
             feature: Encoded feature tensor [B, out_dim]
         """
@@ -224,10 +254,10 @@ class ResNetEncoder(nn.Module):
 
         if self.use_pretrain and self.freeze_encoder:
             x = x.detach()
-        
+
         if self.pooling_method == "spatial_learned_embeddings":
             x = self.pooling_layer(x)
             x = self.dropout(x)
-        
+
         x = self.mlp(x)
         return x

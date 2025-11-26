@@ -12,12 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gc
 import os
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from omegaconf import DictConfig
 from torch.distributed.device_mesh import init_device_mesh
 from torch.multiprocessing.reductions import reduce_tensor
@@ -737,7 +735,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         super().setup_model_and_optimizer()
 
     def run_training(self):
-        
         # Original PPO training
         if self.cfg.actor.get("enable_offload", False):
             self.load_param_and_grad(self.device)

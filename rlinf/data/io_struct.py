@@ -1073,7 +1073,9 @@ class EnvOutput:
             self.rewards.cpu().contiguous() if self.rewards is not None else None
         )
         self.success_frame = (
-            self.success_frame.cpu().contiguous() if self.success_frame is not None else None
+            self.success_frame.cpu().contiguous()
+            if self.success_frame is not None
+            else None
         )
 
     def prepare_observations(self, obs: dict[str, Any]) -> dict[str, Any]:

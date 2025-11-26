@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -32,7 +33,10 @@ def get_act_func(activation):
         raise ValueError(f"Unsupported activation: {activation}")
     return act
 
-def make_mlp(in_channels, mlp_channels, act_builder=nn.ReLU, last_act=True, use_layer_norm=False):
+
+def make_mlp(
+    in_channels, mlp_channels, act_builder=nn.ReLU, last_act=True, use_layer_norm=False
+):
     c_in = in_channels
     module_list = []
     for idx, c_out in enumerate(mlp_channels):

@@ -14,14 +14,14 @@
 
 
 import os
-from typing import Dict
+import sys
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LambdaLR
 
 from rlinf.algorithms.rewards import get_reward_class
 from rlinf.data.datasets.reward import RewardDataset
@@ -31,21 +31,20 @@ from rlinf.models.reward_model.reward_classifier import BinaryRewardClassifier
 from rlinf.scheduler import Channel, Worker
 from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.placement import ModelParallelComponentPlacement
 
 
 class RewardWorker(Worker):
     def __init__(self, cfg: DictConfig, placement=None):
         Worker.__init__(self)
         self.cfg = cfg
-        
+
         # Check if this is training mode (has reward.training_backend config)
         self.is_training_mode = (
             hasattr(cfg, "reward")
             and hasattr(cfg.reward, "training_backend")
             and cfg.reward.training_backend is not None
         )
-        
+
         if self.is_training_mode:
             # Training mode: regular PyTorch training
             if placement is None:
@@ -54,12 +53,12 @@ class RewardWorker(Worker):
             self.placement = placement
             # Initialize dataset for training
             import sys
-            print(f"Initializing dataset...", flush=True)
+            print("Initializing dataset...", flush=True)
             sys.stdout.flush()
             self.dataset = RewardDataset(cfg.reward.data, device="cpu")
             print(f"Dataset initialized with {len(self.dataset)} samples", flush=True)
             sys.stdout.flush()
-            
+
             # Initialize dataloader (simple mode, single GPU)
             # Use default collate_fn like train_reward_model.py
             # Default collate_fn handles tuple returns (images_dict, label_tensor) correctly
@@ -72,15 +71,15 @@ class RewardWorker(Worker):
                 persistent_workers=getattr(cfg.reward.data, "persistent_workers", False),
                 prefetch_factor=getattr(cfg.reward.data, "prefetch_factor", 2),
             )
-            
+
             # MetricLogger expects the full cfg object, not just log_dir
             self.metric_logger = MetricLogger(cfg)
-            
+
             # Training state
             self.global_step = 0
             self.epoch = 0
             self.timer = ScopedTimer(reduction="max", sync_cuda=False)
-            
+
             self.tokenizer = None
             self.reward = None
             self.reward_model = None
@@ -89,10 +88,10 @@ class RewardWorker(Worker):
             if placement is None:
                 raise ValueError("placement is required for inference mode")
             self.component_placement = placement
-            
+
             # Determine if this is an embodied task
             self.is_embodied_task = self._is_embodied_task()
-            
+
             if self.is_embodied_task:
                 # For embodied tasks, batch size is based on env config
                 if hasattr(cfg, "env") and hasattr(cfg.env, "train"):
@@ -102,8 +101,9 @@ class RewardWorker(Worker):
                 else:
                     env_batch_size = cfg.get("data", {}).get("rollout_batch_size", 256)
                     if env_batch_size == 256:
-                        print(f"Warning: Could not find batch size config for embodied task, using default {env_batch_size}")
-                
+                        print(
+                            f"Warning: Could not find batch size config for embodied task, using default {env_batch_size}")
+
                 self.total_batch_size_per_dp = (
                     env_batch_size
                     * cfg.algorithm.get("group_size", 1)
@@ -128,11 +128,11 @@ class RewardWorker(Worker):
         # Check for runner type
         if hasattr(self.cfg, "runner") and hasattr(self.cfg.runner, "task_type"):
             return self.cfg.runner.task_type == "embodied"
-        
+
         # Check for env config (embodied tasks have env config)
         if hasattr(self.cfg, "env"):
             return True
-        
+
         # Check if reward config specifies embodied reward model
         if hasattr(self.cfg, "reward"):
             reward_cfg = self.cfg.reward
@@ -141,16 +141,16 @@ class RewardWorker(Worker):
                 # If reward_model config has image_keys or image_size, it's likely embodied
                 if "image_keys" in reward_model_cfg or "image_size" in reward_model_cfg:
                     return True
-        
+
         return False
 
     def init_worker(self):
         if self.is_training_mode:
             # Training mode: setup model and optimizer
             import sys
-            print(f"Initializing model and optimizer...", flush=True)
+            print("Initializing model and optimizer...", flush=True)
             sys.stdout.flush()
-            
+
             # Simple mode: create model and optimizer directly
             # Get GPU device from config, default to 0
             gpu_id = getattr(self.cfg.reward, "gpu_id", 0)
@@ -159,18 +159,20 @@ class RewardWorker(Worker):
                 torch.cuda.set_device(gpu_id)
             else:
                 self.device = torch.device("cpu")
-            
+
             self.model = BinaryRewardClassifier(
                 image_keys=self.cfg.reward.model.image_keys,
                 image_size=self.cfg.reward.model.image_size,
                 hidden_dim=self.cfg.reward.model.hidden_dim,
                 num_spatial_blocks=self.cfg.reward.model.num_spatial_blocks,
-                pretrained_encoder_path=self.cfg.reward.model.get("pretrained_encoder_path", None),
+                pretrained_encoder_path=self.cfg.reward.model.get(
+                    "pretrained_encoder_path", None
+                ),
                 use_pretrain=self.cfg.reward.model.get("use_pretrain", True),
                 freeze_encoder=self.cfg.reward.model.get("freeze_encoder", True),
             )
             self.model = self.model.to(self.device)
-            
+
             # Create optimizer
             optim_cfg = self.cfg.reward.optim
             self.optimizer = optim.AdamW(
@@ -180,45 +182,51 @@ class RewardWorker(Worker):
                 eps=optim_cfg.adam_eps,
                 weight_decay=optim_cfg.weight_decay,
             )
-            
+
             # Create learning rate scheduler if needed
             lr_sched_cfg = self.cfg.reward.get("lr_sched", {})
             if lr_sched_cfg.get("lr_decay_style") != "constant":
                 from torch.optim.lr_scheduler import LambdaLR
-                total_steps = self.cfg.reward.num_epochs * len(self.dataloader)
+
                 num_warmup_steps = int(lr_sched_cfg.get("lr_warmup_iters", 0))
                 min_lr = lr_sched_cfg.get("min_lr", 0.0)
                 max_lr = lr_sched_cfg.get("max_lr", optim_cfg.lr)
-                
+
                 def lr_lambda(current_step):
                     if current_step < num_warmup_steps:
                         return float(current_step) / float(max(1, num_warmup_steps))
                     else:
                         return max(min_lr / max_lr, 0.0)
-                
+
                 self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda)
             else:
                 self.lr_scheduler = None
-            
+
             import sys
-            print(f"Model and optimizer initialized", flush=True)
+            print("Model and optimizer initialized", flush=True)
             sys.stdout.flush()
             return
-        
+
         # Inference mode: original logic
         # Set device first (needed before using self.device)
         self.device = torch.cuda.current_device()
-        
+
         if self.is_embodied_task:
             # Embodied task initialization
             if self.cfg.reward.use_reward_model:
                 # Get model configuration
                 reward_cfg = self.cfg.reward.reward_model
-                image_keys = reward_cfg.get("image_keys", self.cfg.actor.model.image_keys)
-                image_size = reward_cfg.get("image_size", self.cfg.actor.model.image_size)
+                image_keys = reward_cfg.get(
+                    "image_keys", self.cfg.actor.model.image_keys
+                )
+                image_size = reward_cfg.get(
+                    "image_size", self.cfg.actor.model.image_size
+                )
                 hidden_dim = reward_cfg.get("hidden_dim", 256)
                 num_spatial_blocks = reward_cfg.get("num_spatial_blocks", 8)
-                pretrained_encoder_path = reward_cfg.get("pretrained_encoder_path", None)
+                pretrained_encoder_path = reward_cfg.get(
+                    "pretrained_encoder_path", None
+                )
                 use_pretrain = reward_cfg.get("use_pretrain", True)
                 freeze_encoder = reward_cfg.get("freeze_encoder", True)
 
@@ -226,27 +234,36 @@ class RewardWorker(Worker):
                 checkpoint_path = reward_cfg.get("checkpoint_path", None)
                 checkpoint_state = None
                 if checkpoint_path and os.path.exists(checkpoint_path):
-                    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-                    checkpoint_state = checkpoint.get("model_state_dict") or checkpoint.get("state_dict") or checkpoint
-                    
+                    checkpoint = torch.load(
+                        checkpoint_path, map_location="cpu", weights_only=False
+                    )
+                    checkpoint_state = (
+                        checkpoint.get("model_state_dict")
+                        or checkpoint.get("state_dict")
+                        or checkpoint
+                    )
+
                     # Try to infer use_pretrain from checkpoint if possible
                     pooling_key = None
                     for key in checkpoint_state.keys():
                         if "pooling_layer.kernel" in key:
                             pooling_key = key
                             break
-                    
+
                     if pooling_key is not None:
                         kernel_shape = checkpoint_state[pooling_key].shape
                         if kernel_shape[1] == 1 and kernel_shape[2] == 1:
                             inferred_use_pretrain = False
-                            print(f"Inferred use_pretrain=False from checkpoint (pooling kernel shape: {kernel_shape})")
+                            print(
+                                f"Inferred use_pretrain=False from checkpoint (pooling kernel shape: {kernel_shape})")
                         else:
                             inferred_use_pretrain = True
-                            print(f"Inferred use_pretrain=True from checkpoint (pooling kernel shape: {kernel_shape})")
-                        
+                            print(
+                                f"Inferred use_pretrain=True from checkpoint (pooling kernel shape: {kernel_shape})")
+
                         if inferred_use_pretrain != use_pretrain:
-                            print(f"Warning: use_pretrain mismatch! Config says {use_pretrain}, but checkpoint suggests {inferred_use_pretrain}. Using inferred value.")
+                            print(
+                                f"Warning: use_pretrain mismatch! Config says {use_pretrain}, but checkpoint suggests {inferred_use_pretrain}. Using inferred value.")
                             use_pretrain = inferred_use_pretrain
 
                 # Create reward model
@@ -265,7 +282,8 @@ class RewardWorker(Worker):
                     self.reward_model.load_state_dict(checkpoint_state, strict=True)
                     print(f"Loaded reward model from {checkpoint_path}")
                 elif checkpoint_path:
-                    print(f"Warning: Reward model checkpoint not found at {checkpoint_path}")
+                    print(
+                        f"Warning: Reward model checkpoint not found at {checkpoint_path}")
 
                 # Move to device
                 self.reward_model = self.reward_model.to(self.device)
@@ -277,18 +295,21 @@ class RewardWorker(Worker):
         else:
             # Text-based reasoning task initialization
             if self.cfg.reward.use_reward_model:
-                raise NotImplementedError("Reward model for text-based tasks is not implemented yet.")
+                raise NotImplementedError(
+                    "Reward model for text-based tasks is not implemented yet.")
             else:
-                self.reward = get_reward_class(self.cfg.reward.reward_type)(self.cfg.reward)
+                self.reward = get_reward_class(self.cfg.reward.reward_type)(
+                    self.cfg.reward
+                )
 
     def get_batch(
         self, channel: Channel
     ) -> tuple[dict[str, torch.Tensor], RolloutResult]:
         """Get batch from channel. Only used for text-based reasoning tasks.
-        
+
         Args:
             channel: Channel to read from.
-            
+
         Returns:
             Tuple of (batch, rollout_result).
         """
@@ -297,7 +318,7 @@ class RewardWorker(Worker):
                 "get_batch is not used for embodied tasks. "
                 "Use compute_rewards directly instead."
             )
-        
+
         result: RolloutResult = channel.get()
         batch = result.to_actor_batch(
             self.cfg.data.max_prompt_length,
@@ -309,7 +330,7 @@ class RewardWorker(Worker):
     def compute_rewards(self, input_channel: Channel, output_channel: Channel):
         """Compute rewards.
 
-        This method supports both text-based reasoning tasks (RolloutResult) 
+        This method supports both text-based reasoning tasks (RolloutResult)
         and embodied tasks (EmbodiedRolloutResult).
 
         Args:
@@ -319,22 +340,29 @@ class RewardWorker(Worker):
         recv_batch_size = 0
         while recv_batch_size < self.total_batch_size_per_dp:
             rollout_result = input_channel.get()
-            
+
             # Determine result type and count batch size accordingly
             if isinstance(rollout_result, EmbodiedRolloutResult):
                 recv_batch_size += len(rollout_result.forward_inputs)
             elif isinstance(rollout_result, RolloutResult):
                 recv_batch_size += rollout_result.num_sequence
             else:
-                raise ValueError(f"Unexpected rollout result type: {type(rollout_result)}")
-            
+                raise ValueError(
+                    f"Unexpected rollout result type: {type(rollout_result)}"
+                )
+
             with self.worker_timer():
                 if isinstance(rollout_result, EmbodiedRolloutResult):
                     # Handle embodied task rewards
-                    if rollout_result.rewards is None or len(rollout_result.rewards) == 0:
+                    if (
+                        rollout_result.rewards is None
+                        or len(rollout_result.rewards) == 0
+                    ):
                         if self.cfg.reward.use_reward_model:
                             with self.device_lock:
-                                rewards = self._compute_embodied_rewards_with_model(rollout_result)
+                                rewards = self._compute_embodied_rewards_with_model(
+                                    rollout_result
+                                )
                                 rollout_result.rewards = rewards
                         else:
                             raise NotImplementedError(
@@ -349,7 +377,7 @@ class RewardWorker(Worker):
                                 "Tokenizer is required for text-based reasoning tasks. "
                                 "This should not happen if _is_embodied_task() is working correctly."
                             )
-                        
+
                         # use_reward_model=True for text tasks would have raised in init_worker
                         rollout_result.rewards = self._compute_rule_based_rewards(
                             rollout_result
@@ -386,10 +414,10 @@ class RewardWorker(Worker):
 
     def _compute_reward_from_images(self, images: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Compute reward from images using the reward model.
-        
+
         Args:
             images: Dictionary of image tensors.
-            
+
         Returns:
             Reward tensor.
         """
@@ -434,8 +462,8 @@ class RewardWorker(Worker):
             return [all_rewards_tensor[i] for i in range(len(all_rewards_tensor))]
         else:
             return []
-    
-    def _extract_obs_from_forward_inputs(self, forward_input: Dict) -> Dict:
+
+    def _extract_obs_from_forward_inputs(self, forward_input: dict) -> dict:
         """Extract observation dictionary from forward_inputs.
 
         Args:
@@ -447,11 +475,11 @@ class RewardWorker(Worker):
         obs = {}
         for key, value in forward_input.items():
             if key.startswith("obs/"):
-                new_key = key[len("obs/"):]
+                new_key = key[len("obs/") :]
                 obs[new_key] = value
         return obs
 
-    def _extract_images_from_obs(self, obs: Dict) -> Dict[str, torch.Tensor]:
+    def _extract_images_from_obs(self, obs: dict) -> dict[str, torch.Tensor]:
         """Extract and format images from observation dictionary.
 
         Args:
@@ -511,8 +539,7 @@ class RewardWorker(Worker):
         """Main training loop for reward model"""
         if not self.is_training_mode:
             raise RuntimeError("fit() can only be called in training mode")
-        
-        import sys
+
         print(f"\n{'='*60}", flush=True)
         print(f"Starting training...", flush=True)
         print(f"Total epochs: {getattr(self.cfg.reward, 'num_epochs', 1)}", flush=True)
@@ -520,9 +547,9 @@ class RewardWorker(Worker):
         print(f"Device: {self.device}", flush=True)
         print(f"{'='*60}\n", flush=True)
         sys.stdout.flush()
-        
+
         num_epochs = getattr(self.cfg.reward, "num_epochs", 1)
-        
+
         for epoch in range(num_epochs):
             self.epoch = epoch
 
@@ -538,12 +565,14 @@ class RewardWorker(Worker):
                 # Backward pass
                 self.optimizer.zero_grad()
                 loss.backward()
-                
+
                 # Gradient clipping if configured
-                if hasattr(self.cfg.reward.optim, "clip_grad") and self.cfg.reward.optim.clip_grad > 0:
+                if (
+                    hasattr(self.cfg.reward.optim, "clip_grad")
+                    and self.cfg.reward.optim.clip_grad > 0
+                ):
                     torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), 
-                        self.cfg.reward.optim.clip_grad
+                        self.model.parameters(), self.cfg.reward.optim.clip_grad
                     )
 
                 # Optimizer step
@@ -564,8 +593,8 @@ class RewardWorker(Worker):
                     if p.grad is not None:
                         param_norm = p.grad.data.norm(2)
                         total_norm += param_norm.item() ** 2
-                grad_norm = total_norm ** (1. / 2)
-                lr_list = [group['lr'] for group in self.optimizer.param_groups]
+                grad_norm = total_norm ** (1.0 / 2)
+                lr_list = [group["lr"] for group in self.optimizer.param_groups]
 
                 # Aggregate metrics
                 mean_metric_dict = {
@@ -578,19 +607,27 @@ class RewardWorker(Worker):
                 self.global_step += 1
 
                 # Logging
-                if self.global_step % getattr(self.cfg.reward, "log_interval", 100) == 0:
-                    import sys
+                if (
+                    self.global_step % getattr(self.cfg.reward, "log_interval", 100)
+                    == 0
+                ):
+
                     print(
                         f"Epoch {epoch}, Step {step}, Loss: {mean_metric_dict['loss']:.4f}, Acc: {mean_metric_dict['accuracy']:.4f}",
-                        flush=True
+                        flush=True,
                     )
                     sys.stdout.flush()
 
                 # Save checkpoint
-                if self.global_step % getattr(self.cfg.reward, "save_interval", 1000) == 0:
-                    save_base_path = getattr(self.cfg.reward, "save_dir", "./checkpoints")
+                if (
+                    self.global_step % getattr(self.cfg.reward, "save_interval", 1000)
+                    == 0
+                ):
+                    save_base_path = getattr(
+                        self.cfg.reward, "save_dir", "./checkpoints"
+                    )
                     save_path = f"{save_base_path}/step_{self.global_step}"
-                    import os
+
                     os.makedirs(save_path, exist_ok=True)
                     # Get model state dict
                     checkpoint = {
@@ -602,7 +639,9 @@ class RewardWorker(Worker):
                         "accuracy": mean_metric_dict["accuracy"],
                     }
                     if self.lr_scheduler is not None:
-                        checkpoint["lr_scheduler_state_dict"] = self.lr_scheduler.state_dict()
+                        checkpoint["lr_scheduler_state_dict"] = (
+                            self.lr_scheduler.state_dict()
+                        )
                     torch.save(checkpoint, f"{save_path}/checkpoint.pt")
                     print(f"Saved checkpoint to {save_path}/checkpoint.pt", flush=True)
 
@@ -621,11 +660,11 @@ class RewardWorker(Worker):
         #      - merged_images_dict[key] = tensor (already stacked) or list of tensors
         #      - labels_tensor = tensor (already stacked) or list of tensors
         #   2. list: [images_dict, labels_tensor] (same as tuple but as list)
-        
+
         # Handle both tuple and list formats
         if isinstance(batch, (tuple, list)) and len(batch) == 2:
             images_part, labels_part = batch
-            
+
             # Process images_dict
             if isinstance(images_part, dict):
                 images_dict = {}
@@ -637,10 +676,14 @@ class RewardWorker(Worker):
                         # Already stacked tensor (default collate_fn may stack dict values)
                         images_dict[key] = value
                     else:
-                        raise ValueError(f"Unexpected value type for key {key}: {type(value)}")
+                        raise ValueError(
+                            f"Unexpected value type for key {key}: {type(value)}"
+                        )
             else:
-                raise ValueError(f"Expected images_part to be dict, got {type(images_part)}")
-            
+                raise ValueError(
+                    f"Expected images_part to be dict, got {type(images_part)}"
+                )
+
             # Process labels
             if isinstance(labels_part, list):
                 if len(labels_part) > 0 and isinstance(labels_part[0], torch.Tensor):
@@ -651,7 +694,9 @@ class RewardWorker(Worker):
                 # Already stacked tensor
                 labels = labels_part
             else:
-                raise ValueError(f"Expected labels_part to be list or tensor, got {type(labels_part)}")
+                raise ValueError(
+                    f"Expected labels_part to be list or tensor, got {type(labels_part)}"
+                )
         else:
             raise ValueError(
                 f"Unexpected batch format: {type(batch)}, expected tuple or list of length 2. "

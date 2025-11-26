@@ -79,19 +79,19 @@ def extract_success_frame_from_infos(
 ) -> torch.Tensor:
     """
     Extract success_frame from environment infos dictionary.
-    
+
     Priority: use success_frame if available (contains per-step success for all chunk steps),
     otherwise fall back to success (only represents last step).
-    
+
     Args:
         infos: Dictionary containing environment information, potentially with "success_frame" or "success" keys
         chunk_rewards: Reward tensor with shape [num_envs] or [num_envs, chunk_steps] used to determine output shape
-        
+
     Returns:
         success_frame: Tensor with shape [num_envs] or [num_envs, chunk_steps] containing success signals
     """
     success_frame = None
-    
+
     if "success_frame" in infos:
         # If environment already provides success_frame per step (from chunk_step)
         # This is the preferred source as it contains success for each step in the chunk
@@ -129,7 +129,7 @@ def extract_success_frame_from_infos(
             success_frame = torch.tensor(
                 success_tensor, dtype=torch.float32, device=chunk_rewards.device
             )
-    
+
     if success_frame is None:
         # Default to zeros if no success info available
         if chunk_rewards.dim() == 2:
@@ -145,5 +145,5 @@ def extract_success_frame_from_infos(
                 dtype=torch.float32,
                 device=chunk_rewards.device,
             )
-    
+
     return success_frame

@@ -15,6 +15,7 @@
 """Dataset for training reward classifier with trajectory-level data."""
 
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -35,11 +36,11 @@ class RewardDataset(Dataset):
 
     def __init__(
         self,
-        cfg: DictConfig = None,
-        positive_dir: str = None,
-        negative_dir: str = None,
-        image_key: str = None,
-        image_size: list = None,
+        cfg: Optional[DictConfig] = None,
+        positive_dir: Optional[str] = None,
+        negative_dir: Optional[str] = None,
+        image_key: Optional[str] = None,
+        image_size: Optional[list] = None,
         device: str = "cpu",
     ):
         """
@@ -88,7 +89,7 @@ class RewardDataset(Dataset):
         negative_dir_label_0_count = 0  # Frames with label == 0 in negative_dir
         
         # Load positive trajectories
-        positive_files = sorted(list(self.positive_dir.glob("*.npy")))
+        positive_files = sorted(self.positive_dir.glob("*.npy"))
         for traj_path in positive_files:
             traj_data = np.load(traj_path, allow_pickle=True).item()
             if isinstance(traj_data, dict) and 'images' in traj_data and 'labels' in traj_data:
@@ -107,7 +108,7 @@ class RewardDataset(Dataset):
                             positive_dir_label_0_count += 1
         
         # Load negative trajectories
-        negative_files = sorted(list(self.negative_dir.glob("*.npy")))
+        negative_files = sorted(self.negative_dir.glob("*.npy"))
         for traj_path in negative_files:
             traj_data = np.load(traj_path, allow_pickle=True).item()
             if isinstance(traj_data, dict) and 'images' in traj_data and 'labels' in traj_data:

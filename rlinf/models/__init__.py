@@ -252,7 +252,7 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
             num_action_chunks=cfg.num_action_chunks,
             add_value_head=cfg.add_value_head,
         )
-    elif cfg.model_name == "cnn_policy": 
+    elif cfg.model_name == "cnn_policy":
         from .embodiment.cnn_policy import CNNPolicy
 
         model = CNNPolicy(

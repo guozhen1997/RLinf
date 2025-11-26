@@ -24,7 +24,6 @@ from rlinf.envs.action_utils import prepare_actions
 from rlinf.envs.env_manager import EnvManager
 from rlinf.envs.utils import extract_success_frame_from_infos
 from rlinf.scheduler import Cluster, Worker
-from rlinf.models.reward_model.reward_data_collector import RewardDataCollector
 from rlinf.utils.placement import HybridComponentPlacement
 
 
@@ -70,11 +69,14 @@ class EnvWorker(Worker):
             self.channel = self.create_channel(cfg.env.channel.name)
         else:
             self.channel = self.connect_channel(cfg.env.channel.name)
-                
+
         # Initialize reward data collector if enabled
         self.data_collector = None
         if self.cfg.get("reward", {}).get("collect_data", False):
-            from rlinf.models.reward_model.reward_data_collector import create_reward_data_collector
+            from rlinf.models.reward_model.reward_data_collector import (
+                create_reward_data_collector,
+            )
+
             self.data_collector = create_reward_data_collector(self.cfg)
 
 
@@ -293,10 +295,10 @@ class EnvWorker(Worker):
             self.simulator_list[stage_id].chunk_step(chunk_actions)
         )
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
-        
+
         # Extract success_frame from infos
         success_frame = extract_success_frame_from_infos(infos, chunk_rewards)
-        
+
         if not self.cfg.env.train.auto_reset:
             if self.cfg.env.train.ignore_terminations:
                 if chunk_truncations[:, -1].any():
@@ -346,7 +348,7 @@ class EnvWorker(Worker):
             self.eval_simulator_list[stage_id].chunk_step(chunk_actions)
         )
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
-        
+
         # Extract success_frame from infos
         success_frame = extract_success_frame_from_infos(infos, chunk_rewards)
 
@@ -473,7 +475,9 @@ class EnvWorker(Worker):
                 self.send_env_batch(env_output.to_dict())
 
             for chunk_step_idx in range(self.cfg.algorithm.n_chunk_steps):
-                is_last_chunk_step = (chunk_step_idx == self.cfg.algorithm.n_chunk_steps - 1)
+                is_last_chunk_step = (
+                    chunk_step_idx == self.cfg.algorithm.n_chunk_steps - 1
+                )
                 for stage_id in range(self.stage_num):
                     raw_chunk_actions = self.recv_chunk_actions()
                     env_output, env_info = self.env_interact_step(
@@ -481,7 +485,7 @@ class EnvWorker(Worker):
                     )
                     self.send_env_batch(env_output.to_dict())
                     env_output_list[stage_id] = env_output
-                    
+
                     # Collect data for reward model training if enabled
                     if self.data_collector is not None:
                         # Check if trajectory is done
@@ -491,15 +495,17 @@ class EnvWorker(Worker):
                                 is_trajectory_done = env_output.dones.any().item()
                             elif env_output.dones.dim() == 2:
                                 # Check last step in chunk
-                                is_trajectory_done = env_output.dones[:, -1].any().item()
-                        
+                                is_trajectory_done = (
+                                    env_output.dones[:, -1].any().item()
+                                )
+
                         # Add env_output to collector
                         self.data_collector.add_env_output(
                             env_output=env_output,
                             env_info=env_info,
                             is_last_step=is_trajectory_done or is_last_chunk_step,
                         )
-                    
+
                     for key, value in env_info.items():
                         if (
                             not self.cfg.env.train.auto_reset
@@ -514,7 +520,7 @@ class EnvWorker(Worker):
 
             self.last_obs_list = [env_output.obs for env_output in env_output_list]
             self.last_dones_list = [env_output.dones for env_output in env_output_list]
-            
+
             # Note: Don't save trajectories at epoch end here
             # Trajectories should only be saved when they are actually done
             # The save_trajectory() call is handled within add_env_output when is_last_step=True
@@ -523,7 +529,7 @@ class EnvWorker(Worker):
             # even if trajectories are not done, which is incorrect
             # if self.data_collector is not None:
             #     self.data_collector.save_trajectory()
-            
+
             self.finish_rollout()
 
         for simulator in self.simulator_list:
