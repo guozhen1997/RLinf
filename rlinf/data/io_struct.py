@@ -1061,7 +1061,9 @@ class EnvOutput:
     final_obs: Optional[dict[str, Any]] = None
     dones: Optional[torch.Tensor] = None  # [B]
     rewards: Optional[torch.Tensor] = None  # [B]
-    success_frame: Optional[torch.Tensor] = None  # [B] or [B, chunk_steps] - frame-based success signal (1/0)
+    success_frame: Optional[torch.Tensor] = (
+        None  # [B] or [B, chunk_steps] - frame-based success signal (1/0)
+    )
 
     def __post_init__(self):
         self.obs = put_tensor_cpu(self.obs)
