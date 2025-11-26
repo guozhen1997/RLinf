@@ -65,7 +65,10 @@ def prepare_actions_for_libero(
     model_type,
 ) -> np.ndarray:
     chunk_actions = raw_chunk_actions
-    if SupportedModel(model_type).family == "openvla":
+    if SupportedModel(model_type) in [
+        SupportedModel.OPENVLA,
+        SupportedModel.OPENVLA_OFT,
+    ]:
         chunk_actions[..., -1] = 2 * chunk_actions[..., -1] - 1
         chunk_actions[..., -1] = np.sign(chunk_actions[..., -1]) * -1.0
     return chunk_actions
@@ -80,7 +83,10 @@ def prepare_actions_for_isaaclab(
     For example, in `RLinf/rlinf/models/embodiment/gr00t/simulation_io.py`
     """
     chunk_actions = torch.from_numpy(raw_chunk_actions)
-    if SupportedModel(model_type).family == "openvla":
+    if SupportedModel(model_type) in [
+        SupportedModel.OPENVLA,
+        SupportedModel.OPENVLA_OFT,
+    ]:
         chunk_actions[..., -1] = 2 * chunk_actions[..., -1] - 1
         chunk_actions[..., -1] = torch.sign(chunk_actions[..., -1]) * -1.0
     return chunk_actions

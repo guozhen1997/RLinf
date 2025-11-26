@@ -812,10 +812,10 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         loss_mask = data.get("loss_mask", None)
                         loss_mask_sum = data.get("loss_mask_sum", None)
 
-                    if (
-                        SupportedModel(self.cfg.actor.model.model_type).family
-                        == "openvla"
-                    ):
+                    if SupportedModel(self.cfg.actor.model.model_type) in [
+                        SupportedModel.OPENVLA,
+                        SupportedModel.OPENVLA_OFT,
+                    ]:
                         data["temperature"] = (
                             self.cfg.algorithm.sampling_params.temperature_train
                         )

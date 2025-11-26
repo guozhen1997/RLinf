@@ -69,8 +69,8 @@ class FSDPStrategy(FSDPStrategyBase):
             module=model,
             config=None,
             is_lora=self.cfg.model.is_lora,
-            is_openvla_model=SupportedModel(self.cfg.model.model_type).family
-            == "openvla",
+            is_openvla_model=SupportedModel(self.cfg.model.model_type)
+            in [SupportedModel.OPENVLA, SupportedModel.OPENVLA_OFT],
         )
 
         backward_prefetch = get_backward_prefetch_strategy(

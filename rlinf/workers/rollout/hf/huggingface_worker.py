@@ -75,7 +75,10 @@ class MultiStepRolloutWorker(Worker):
 
         self.hf_model = get_model(rollout_model_config)
 
-        if SupportedModel(self.cfg.actor.model.model_type).family == "openvla":
+        if SupportedModel(self.cfg.actor.model.model_type) in [
+            SupportedModel.OPENVLA,
+            SupportedModel.OPENVLA_OFT,
+        ]:
             model_config, input_processor = get_vla_model_config_and_processor(
                 self.cfg.actor
             )
