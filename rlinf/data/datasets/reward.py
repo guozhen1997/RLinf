@@ -61,8 +61,15 @@ class RewardDataset(Dataset):
             self.device = getattr(cfg, "device", device)
         else:
             # Fallback to individual args
-            if positive_dir is None or negative_dir is None or image_key is None or image_size is None:
-                raise ValueError("Either cfg or all individual args (positive_dir, negative_dir, image_key, image_size) must be provided")
+            if (
+                positive_dir is None
+                or negative_dir is None
+                or image_key is None
+                or image_size is None
+            ):
+                raise ValueError(
+                    "Either cfg or all individual args (positive_dir, negative_dir, image_key, image_size) must be provided"
+                )
             self.positive_dir = Path(positive_dir)
             self.negative_dir = Path(negative_dir)
             self.image_key = image_key
@@ -92,15 +99,15 @@ class RewardDataset(Dataset):
         positive_files = sorted(self.positive_dir.glob("*.npy"))
         for traj_path in positive_files:
             traj_data = np.load(traj_path, allow_pickle=True).item()
-            if isinstance(traj_data, dict) and 'images' in traj_data and 'labels' in traj_data:
-                if self.image_key in traj_data['images']:
+            if isinstance(traj_data, dict) and "images" in traj_data and "labels" in traj_data:
+                if self.image_key in traj_data["images"]:
                     # Each trajectory file contains multiple frames
-                    num_frames = traj_data['images'][self.image_key].shape[0]
+                    num_frames = traj_data["images"][self.image_key].shape[0]
                     positive_dir_frame_count += num_frames
                     positive_traj_count += 1
                     for frame_idx in range(num_frames):
                         # Use frame's own label from success_frame (even in positive trajectories)
-                        label = float(traj_data['labels'][frame_idx])
+                        label = float(traj_data["labels"][frame_idx])
                         self.samples.append((traj_path, frame_idx, label))
                         if label >= 0.5:  # Treat >= 0.5 as positive
                             positive_dir_label_1_count += 1
@@ -111,15 +118,15 @@ class RewardDataset(Dataset):
         negative_files = sorted(self.negative_dir.glob("*.npy"))
         for traj_path in negative_files:
             traj_data = np.load(traj_path, allow_pickle=True).item()
-            if isinstance(traj_data, dict) and 'images' in traj_data and 'labels' in traj_data:
-                if self.image_key in traj_data['images']:
+            if isinstance(traj_data, dict) and "images" in traj_data and "labels" in traj_data:
+                if self.image_key in traj_data["images"]:
                     # Each trajectory file contains multiple frames
-                    num_frames = traj_data['images'][self.image_key].shape[0]
+                    num_frames = traj_data["images"][self.image_key].shape[0]
                     negative_dir_frame_count += num_frames
                     negative_traj_count += 1
                     for frame_idx in range(num_frames):
                         # Use frame's own label from success_frame
-                        label = float(traj_data['labels'][frame_idx])
+                        label = float(traj_data["labels"][frame_idx])
                         self.samples.append((traj_path, frame_idx, label))
                         if label >= 0.5:  # Treat >= 0.5 as positive
                             negative_dir_label_1_count += 1
@@ -134,29 +141,56 @@ class RewardDataset(Dataset):
 
         # Print statistics
         import sys
-        print(f"\n{'='*60}", flush=True)
-        print(f"Dataset Statistics:", flush=True)
-        print(f"{'='*60}", flush=True)
+        print(f"
+{'=' * 60}", flush=True)
+        print("Dataset Statistics:", flush=True)
+        print(f"{'=' * 60}", flush=True)
         import sys
-        print(f"Trajectories: {positive_traj_count} positive, {negative_traj_count} negative", flush=True)
+        print(
+            f"Trajectories: {positive_traj_count} positive, {negative_traj_count} negative",
+            flush=True,
+        )
         print(f"\nFrom positive_dir ({self.positive_dir}):", flush=True)
         print(f"  Total frames: {positive_dir_frame_count}", flush=True)
-        print(f"  Frames with label=1 (success): {positive_dir_label_1_count}", flush=True)
-        print(f"  Frames with label=0 (failure): {positive_dir_label_0_count}", flush=True)
+        print(
+            f"  Frames with label=1 (success): {positive_dir_label_1_count}", flush=True
+        )
+        print(
+            f"  Frames with label=0 (failure): {positive_dir_label_0_count}", flush=True
+        )
         if positive_dir_frame_count > 0:
-            print(f"  Label ratio (1/0): {positive_dir_label_1_count}/{positive_dir_label_0_count} = {positive_dir_label_1_count/max(positive_dir_label_0_count, 1):.3f}", flush=True)
+            print(
+                f"  Label ratio (1/0): {positive_dir_label_1_count}/{positive_dir_label_0_count} = {positive_dir_label_1_count / max(positive_dir_label_0_count, 1):.3f}",
+                flush=True,
+            )
         print(f"\nFrom negative_dir ({self.negative_dir}):", flush=True)
         print(f"  Total frames: {negative_dir_frame_count}", flush=True)
-        print(f"  Frames with label=1 (success): {negative_dir_label_1_count}", flush=True)
-        print(f"  Frames with label=0 (failure): {negative_dir_label_0_count}", flush=True)
+        print(
+            f"  Frames with label=1 (success): {negative_dir_label_1_count}", flush=True
+        )
+        print(
+            f"  Frames with label=0 (failure): {negative_dir_label_0_count}", flush=True
+        )
         if negative_dir_frame_count > 0:
-            print(f"  Label ratio (1/0): {negative_dir_label_1_count}/{negative_dir_label_0_count} = {negative_dir_label_1_count/max(negative_dir_label_0_count, 1):.3f}", flush=True)
-        print(f"\nOverall:", flush=True)
+            print(
+                f"  Label ratio (1/0): {negative_dir_label_1_count}/{negative_dir_label_0_count} = {negative_dir_label_1_count / max(negative_dir_label_0_count, 1):.3f}",
+                flush=True,
+            )
+        print("
+Overall:", flush=True)
         print(f"  Total frames: {self.num_samples}", flush=True)
-        print(f"  Total frames with label=1 (success): {total_label_1_count}", flush=True)
-        print(f"  Total frames with label=0 (failure): {total_label_0_count}", flush=True)
-        print(f"  Overall label ratio (1/0): {total_label_1_count}/{total_label_0_count} = {total_label_1_count/max(total_label_0_count, 1):.3f}", flush=True)
-        print(f"{'='*60}\n", flush=True)
+        print(
+            f"  Total frames with label=1 (success): {total_label_1_count}", flush=True
+        )
+        print(
+            f"  Total frames with label=0 (failure): {total_label_0_count}", flush=True
+        )
+        print(
+            f"  Overall label ratio (1/0): {total_label_1_count}/{total_label_0_count} = {total_label_1_count / max(total_label_0_count, 1):.3f}",
+            flush=True,
+        )
+        print(f"{'=' * 60}
+", flush=True)
         sys.stdout.flush()
 
     def __len__(self):
@@ -174,14 +208,16 @@ class RewardDataset(Dataset):
         # Load trajectory data
         traj_data = np.load(traj_path, allow_pickle=True).item()
 
-        if not isinstance(traj_data, dict) or 'images' not in traj_data:
+        if not isinstance(traj_data, dict) or "images" not in traj_data:
             raise ValueError(f"Invalid trajectory file format: {traj_path}")
 
-        if self.image_key not in traj_data['images']:
-            raise ValueError(f"Image key {self.image_key} not found in trajectory file: {traj_path}")
+        if self.image_key not in traj_data["images"]:
+            raise ValueError(
+                f"Image key {self.image_key} not found in trajectory file: {traj_path}"
+            )
 
         # Extract frame image: [T, C, H, W] -> [C, H, W]
-        frame_image = traj_data['images'][self.image_key][frame_idx]
+        frame_image = traj_data["images"][self.image_key][frame_idx]
 
         # Convert to torch tensor
         if isinstance(frame_image, np.ndarray):
