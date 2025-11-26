@@ -358,8 +358,9 @@ Training Process
    - Initializes dataset from ``reward.data.positive_dir`` and ``reward.data.negative_dir``
    - Loads all ``.npy`` files and expands trajectory-level data to frame-level samples
    - Reports statistics:
-     - Number of trajectories and frames in each directory
-     - Distribution of labels (label=1 vs label=0) in each directory
+
+     * Number of trajectories and frames in each directory
+     * Distribution of labels (label=1 vs label=0) in each directory
 
 2. **Model Creation**:
    - Creates ``BinaryRewardClassifier`` with specified parameters in ``reward.model``

@@ -282,8 +282,9 @@
    - 从 ``reward.data.positive_dir`` 和 ``reward.data.negative_dir`` 初始化数据集
    - 加载所有 ``.npy`` 文件并将轨迹级数据扩展到帧级样本
    - 报告统计信息：
-     - 每个目录中的轨迹和帧数
-     - 每个目录中标签的分布（label=1 vs label=0）
+
+     * 每个目录中的轨迹和帧数
+     * 每个目录中标签的分布（label=1 vs label=0）
 
 2. **模型创建**：
    - 使用 ``reward.model`` 中的指定参数创建 ``BinaryRewardClassifier``
