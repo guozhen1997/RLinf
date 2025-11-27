@@ -220,7 +220,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                     raise ValueError("env_obs['images'] is an empty dict")
                 # Extract the first camera's image tensor
                 images = next(iter(images.values()))
-            
+
             all_images = [images]
             if self.vision_backbone.get_num_images_in_input() > 1:
                 wrist_imgs = env_obs.get("wrist_images", None)  # [B, N_IMG, C, H, W]
