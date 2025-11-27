@@ -15,9 +15,12 @@
 import json
 import os
 import torch
+import jax
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
 from datasets import load_dataset, load_from_disk
+import lerobot.common.datasets.lerobot_dataset as lerobot_datasets
+import openpi.models.model as _model
 
 try:
     from omnigibson.learning.datas.lerobot_dataset import BehaviorLeRobotDataset
@@ -27,10 +30,38 @@ except ImportError as e:
 def compute_position_id_with_mask(mask):
     return torch.clip(torch.cumsum(mask, dim=-1) - 1, min=0, max=None)
 
-class TorchDataset(Dataset):
+class LeRobotDataset(Dataset):
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
-        self.data = load_dataset(self.cfg.data_path)
+        self.data = lerobot_datasets.LeRobotDataset(self.cfg.data_id, self.cfg.data_path)
+        #if jax_format:
+        #    self.data = jax.tree.map(lambda x: self.data[x], self.data)
+        print(self.data)
+    
+    def __getitem__(self, idx):
+        return self.data[idx]
+        data = self.data[idx]
+        data = {'image':{'image':data['observation.images.image']}, 'image_mask':{}, 'state':data['state'], 'actions':data['actions']}
+        print(data)
+        not_tensor_keys = ['task']
+        item = _model.Observation.from_dict({k:v for k,v in data.items() if k not in not_tensor_keys})
+        #item = jax.tree.map(lambda x: torch.as_tensor(x) if type(x) is not str else x, self.data[idx])
+        print(item)
+        return item, {k:v for k,v in data.items() if k in not_tensor_keys}
+        #item = self.data[idx]
+        #frames = []
+        #pts = []
+        #for frame in item['video']:
+        #    frames.append(frame['data'])
+        #    pts.append(torch.tensor(frame['pts']))
+        #label = item['label']
+        #return {"data":torch.stack(frames), "pts":torch.stack(pts), "label":label}
+    
+    def __len__(self):
+        """Return the length of the dataset"""
+        return len(self.data)
+
+
 class SFTDataset(Dataset):
     def __init__(self, cfg: DictConfig, tokenizer):
         self.tokenizer = tokenizer

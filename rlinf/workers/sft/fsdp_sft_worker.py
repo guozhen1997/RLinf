@@ -18,7 +18,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DistributedSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from rlinf.data.datasets.sft import SFTDataset, TorchDataset
+from rlinf.data.datasets.sft import SFTDataset, LeRobotDataset
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
 from rlinf.scheduler import Worker
@@ -39,12 +39,12 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         self.placement = placement
 
         # Initialize dataset
-        elif self.cfg.data.type == 'openpi':
+        if self.cfg.data.type == 'openpi':
             #import openpi.training.data_loader as openpi_data_loader
             #import openpi.training.config as openpi_config
             #dataloader_config = openpi_config.get_config("pi0_maniskill")
             #self.dataloader = openpi_data_loader.create_data_loader(dataloader_config, framework='pytorch', shuffle=True)
-            self.dataset = TorchDataset(self.cfg.data)
+            self.dataset = LeRobotDataset(self.cfg.data)
         else:
             self.dataset = SFTDataset(self.cfg.data, self.tokenizer)
 
@@ -65,7 +65,7 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
                 pin_memory=getattr(self.cfg.data, "pin_memory", False),
                 persistent_workers=getattr(self.cfg.data, "persistent_workers", False),
                 prefetch_factor=getattr(self.cfg.data, "prefetch_factor", 2),
-                num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
+                #num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
             )
 
         if self._rank == 0:
@@ -93,6 +93,7 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
     def fit(self):
         """Main training loop"""
         num_epochs = getattr(self.cfg, "num_epochs", 1)
+        self.model.train()
 
         self.gradient_accumulation = (
             self.cfg.global_batch_size
@@ -104,6 +105,7 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
             self.epoch = epoch
             self.distributed_sampler.set_epoch(epoch)
             print("DEBUG: Epoch:", epoch)
+            
             for step, global_batch in enumerate(self.dataloader):
                 # split global_batch into micro_batches
                 print("DEBUG: Step:", step)
@@ -119,9 +121,13 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
                             self.model,
                             is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
                         )
-                        m_batch = self._prepare_batch(m_batch)
-                        print(m_batch)
-                        outputs = self.model(**m_batch)
+                        observation, actions = self._prepare_batch(m_batch)
+                        # TODO: m_batch is : {"observation.images.image": tensor, "observation.images.wrist_image": tensor, "image": Tensor, "wrist_image": Tensor, "state":Tensor, "actions":Tensor, "time_stamp":tensor, "frame_index": tensor,
+                        #                     "episode_index": tensor, "index": tensor, "task_index": tensor, "task": [str]} 
+                        # Find the right way to preprocess it
+                        # FIXME: USE JAX to map it.
+                        m_data = dict(observation=observation, actions=actions)
+                        outputs = self.model(data=m_data, mode='sft')
                         loss = (
                             outputs.loss
                             if hasattr(outputs, "loss")
@@ -180,8 +186,21 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
 
     def _prepare_batch(self, batch):
         """Prepare batch for training"""
+        if self.cfg.data.type == 'openpi':
+            import openpi.models.model as _model
+            data = batch
+            actions = data['actions']
+            data = {'image':{'base_0_rgb':data['observation.images.image'].cuda(), #.permute(0,2,3,1), # 1 3 480 640 -> 1 640 3 480, to fit the openpi shape. Openpi get NCHW input and permute to NHWC, thus, 1 640 3 480 -> 1 3 480 640
+                             "left_wrist_0_rgb":data['observation.images.wrist_image'].cuda(),#.permute(0,2,3,1),
+                             'right_wrist_0_rgb':data['observation.images.wrist_image'].cuda(),#.permute(0,2,3,1),
+                             },
+                    'image_mask':{'base_0_rgb':torch.tensor([True]).cuda(),'left_wrist_0_rgb':torch.tensor([True]).cuda(), 'right_wrist_0_rgb':torch.tensor([True]).cuda()},
+                    'state':data['state']} # 'actions':data['actions']}
+            not_tensor_keys = ['task']
+            item = _model.Observation.from_dict({k:v for k,v in data.items() if k not in not_tensor_keys})
+            return item, actions
+            #return batch[0] # only return first tensor dict. skip the non-tensor items
         # FIXME: Input is : "input_ids", "attention_mask",  "position_ids", "loss_mask"
-
         if isinstance(batch, list):
             # Handle batched data
             batch = {

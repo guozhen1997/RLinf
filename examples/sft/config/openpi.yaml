@@ -2,7 +2,7 @@ defaults:
   - override hydra/job_logging: stdout
 
 TASK_NAME: PandaPutOnPlateInScene25Simple-v1
-CKPT_PATH: "/mnt/public/shiliangzhi/work-space/sft-pretrained/sim-real/${TASK_NAME}"
+CKPT_PATH: "/mnt/mnt/public/shiliangzhi/work-space/sft-pretrained/sim-real/${TASK_NAME}"
 hydra:
   run:
     dir: .
@@ -23,12 +23,13 @@ runner:
 
 data:
   type: openpi
+  data_id: slzhta/pick_to_plate_real 
   dataset_name: robo2vlm
   max_prompt_length: 1024
   filter_prompt_by_length: True
-  rollout_batch_size: 8
+  rollout_batch_size: 1
   val_rollout_batch_size: null
-  num_workers: 2
+  num_workers: 1
   # XXX Missing max_length
   max_length: 1024
   prompt_key: "question"
@@ -42,15 +43,15 @@ data:
   shuffle: True
   validation_shuffle: True
   seed: 1234
-    #data_path: "/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
-  data_path: "/mnt/public/shiliangzhi/.cache/huggingface/lerobot/slzhta/pick_to_plate_real" #"/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
+    #data_path: "/mnt/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
+  data_path: "/mnt/mnt/public/shiliangzhi/.cache/huggingface/lerobot/slzhta/pick_to_plate_real" #"/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
     #data_paths: ["/mnt/public/tangyueran/keplerccc/Robo2VLM-1/"]
     #data_paths: ["/mnt/public/guozhen/data/boba_106k_0319_prompt_1024.jsonl"]
     #data_paths: ["/mnt/public/guozhen/data/test.jsonl"]
     # XXX 1:robo2vlm has no train/val datasests.
     # XXX 2:sft cannot create rl dataset, train and val dataset not set
-  train_data_paths: ["/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data/train/"]
-  val_data_paths: ["/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data/val/"]
+  train_data_paths: ["/mnt/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data/train/"]
+  val_data_paths: ["/mnt/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data/val/"]
 
 
 sft:
@@ -59,16 +60,16 @@ sft:
   training_backend: fsdp
 
   checkpoint_load_path: ${CKPT_PATH} # null
-  checkpoint_save_path: "/mnt/public/tangyueran/result"
-  global_batch_size: 8
+  checkpoint_save_path: "/mnt/mnt/public/tangyueran/result"
+  global_batch_size: 1
   micro_batch_size: 1
 
   # XXX Missing batch_size
-  batch_size: 8
+  batch_size: 1
   seed: 1234
   model:
     model_name: "openpi"
-    precision: "bf16"
+    precision: "fp32"
     num_action_chunks: 5 # interface for the env
     action_dim: 7
     is_lora: False
@@ -99,7 +100,7 @@ sft:
   runner: ${runner}
   optim:
     optimizer: adam
-    bf16: True #False
+    bf16: False #False
     fp16: False #True
     lr: 2e-05
     value_lr: 3.0e-3
@@ -125,7 +126,7 @@ sft:
     lr_decay_style: constant
     lr_decay_iters: 10
   tokenizer:
-    tokenizer_model: /mnt/public/mjwei/download_models/openvla/openvla-7b/ #/mnt/public/tangyueran/Qwen/Qwen2.5-VL-3B-Instruct/
+    tokenizer_model: /mnt/mnt/public/mjwei/download_models/openvla/openvla-7b/ #/mnt/public/tangyueran/Qwen/Qwen2.5-VL-3B-Instruct/
     use_fast: False
     trust_remote_code: True
     padding_side: 'right'
@@ -154,13 +155,13 @@ sft:
     fsdp_size: -1               # Number of GPUs per FSDP group for hybrid sharding. -1 means use all available GPUs in a single FSDP group
 
     mixed_precision:            # mixed precision settings for fsdp/fsdp2
-      param_dtype: "bf16"
+      param_dtype: "fp32"
       reduce_dtype: "fp32"
       buffer_dtype: "fp32"
 
     amp:
       enabled: False                 # if True, automatic mixed precision (AMP) will be used in FSDP/FSDP2 training.
-      precision: "bf16"              # precision for AMP, options are ["fp16" , "bf16"]
+      precision: "fp32"              # precision for AMP, options are ["fp16" , "bf16"]
       use_grad_scaler: False         # if True, GradScaler will be used for AMP training to prevent underflow.
 
 critic:
