@@ -193,8 +193,13 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
     def forward(
         self,
         data: dict[str, torch.Tensor],
+        mode = None,
         **kwargs,
     ) -> dict[str, Any]:
+        if mode == "sft":
+            observation = data["observation"]
+            actions = data["actions"]
+            return super().forward(observation, actions)
         compute_values = kwargs.get("compute_values", False)
 
         chains = data["chains"]

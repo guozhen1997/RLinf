@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
 logging.getLogger().setLevel(logging.INFO)
 
+SUPPORTED_SFT_TASK_TYPE = ["sft"]
 SUPPORTED_MODEL_ARCHS = ["qwen2.5", "qwen2.5_vl", "openvla", "openvla_oft", "openpi"]
 SUPPORTED_ROLLOUT_BACKENDS = ["sglang", "vllm"]
 SUPPORTED_TASK_TYPE = ["embodied", "reasoning", "coding_online_rl"]
@@ -797,6 +798,13 @@ def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
         cfg.rollout = validate_rollout_cfg(cfg.rollout, cfg.algorithm)
     return cfg
 
+def validate_sft_cfg(cfg: DictConfig) -> DictConfig:
+    OmegaConf.set_struct(cfg, True)
+    assert cfg.runner.task_type in SUPPORTED_SFT_TASK_TYPE, (
+            f"task_type must be one of {SUPPORTED_SFT_TASK_TYPE}")
+    assert cfg.sft is not None, f"No sft in cfg"
+
+    return cfg
 
 def validate_cfg(cfg: DictConfig) -> DictConfig:
     OmegaConf.set_struct(cfg, True)
