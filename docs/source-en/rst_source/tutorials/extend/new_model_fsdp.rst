@@ -114,9 +114,9 @@ Modify `get_model` in `rlinf/models/__init__.py` to call `from_pretrained` for y
 
 .. code-block:: python
 
-  def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
+  def get_model(cfg: DictConfig, override_config_kwargs=None):
       torch_dtype = torch_dtype_from_precision(cfg.precision)
-
+      model_path = cfg.model_path
       if cfg.model_type == "your_model_type":
           from .embodiment.your_model_action_model import (
               YourModelForRLActionPrediction
@@ -138,59 +138,8 @@ Modify `get_model` in `rlinf/models/__init__.py` to call `from_pretrained` for y
 
       return model
 
-4. Environment Wrapper Functions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
-Add `wrap_observation_your_model` and `wrap_chunk_actions_your_model` in `rlinf/envs/your_env_wrapper.py`. 
-These convert simulator data to model inputs and model outputs back to simulator actions in the required shape and device.
-
-.. code-block:: python
-
-  def wrap_observation_your_model(raw_obs, input_processor, model, precision):
-      images = raw_obs["image"].permute(0,3,1,2).to(device="cuda:0", dtype=precision)
-      prompts = [
-          f"In: What action should the robot take to {t.lower()}?\nOut: "
-          for t in raw_obs["task_description"]
-      ]
-      inputs = input_processor(
-          prompts,
-          images,
-          padding="max_length",
-          max_length=model.max_prompt_length
-      ).to(device="cuda:0", dtype=precision)
-      return inputs
-
-  def wrap_chunk_actions_your_model(chunk_tokens, model, sim_precision):
-      tokens = chunk_tokens.cpu().numpy()
-      actions = []
-      for step in range(tokens.shape[1]):
-          decoded = wrap_single_step_actions(tokens[:, step], model)
-          formatted = format_actions_for_simulator(decoded, model)
-          actions.append(formatted)
-      return torch.stack(actions, dim=1).to(device="cuda").to(sim_precision)
-
-5. Worker Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-
-Update `get_observation_action_wrapper_func` in `rlinf/workers/generation/hf/multi_step_worker.py` 
-to return your wrappers when `cfg.env.train.wrapper` and `cfg.model_type` match. 
-
-.. code-block:: python
-
-  def get_observation_action_wrapper_func(cfg):
-      if cfg.env.train.wrapper == "your_env":
-          if cfg.actor.model.model_type == "your_model_type":
-              from rlinf.envs.your_env_wrapper import (
-                  wrap_observation_your_model,
-                  wrap_chunk_actions_your_model,
-              )
-              return wrap_observation_your_model, wrap_chunk_actions_your_model
-          raise NotImplementedError
-      raise NotImplementedError
-
-6. Configuration File
+4. Configuration File
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 

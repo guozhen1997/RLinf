@@ -32,6 +32,8 @@ runner:
   seq_length: 4096
   max_prompt_length: 30
 
+  resume_dir: null
+
 algorithm:
   auto_reset: True
   ignore_terminations: False
@@ -102,12 +104,14 @@ rollout:
     queue_size: 0
   mode: "colocate"
   backend: "huggingface"
-  model_dir: "/path/to/model/Openvla-oft-SFT-libero10-trajall/"
-  precision: ${actor.model.precision}
   gpu_memory_utilization: 0.5  # not used in Embodied
   enforce_eager: True  # not used in Embodied
   enable_offload: True
   pipeline_stage_num: 1
+
+  model:
+    model_path: "/path/to/model/Openvla-oft-SFT-libero10-trajall/"
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
@@ -130,8 +134,7 @@ actor:
     padding_side: "right"
 
   model:
-    model_dir: "/mnt/public/wph/models/robotwin-oft-sft-place_empty_cup_rand-without_action_head/Optional--10000_chkpt"
-    ckpt_path: null
+    model_path: "/mnt/public/wph/models/robotwin-oft-sft-place_empty_cup_rand-without_action_head/Optional--10000_chkpt"
     model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 7

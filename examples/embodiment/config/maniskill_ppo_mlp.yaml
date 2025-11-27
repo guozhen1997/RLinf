@@ -34,6 +34,8 @@ runner:
   seq_length: 4096
   max_prompt_length: 30
 
+  resume_dir: null
+
 algorithm:
   update_epoch: 8
   auto_reset: True
@@ -87,10 +89,12 @@ env:
 rollout:
   group_name: "RolloutGroup"
   backend: "huggingface"
-  model_dir: ""
   enable_offload: False
   pipeline_stage_num: 1
-  precision: ${actor.model.precision}
+
+  model:
+    model_path: ""
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
@@ -101,8 +105,7 @@ actor:
   enable_offload: False
 
   model:
-    model_dir: ""
-    ckpt_path: null
+    model_path: ""
     model_type: "mlp_policy"
     policy_setup: "panda-qpos"
     obs_dim: 42

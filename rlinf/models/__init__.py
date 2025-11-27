@@ -98,7 +98,7 @@ def get_vla_model_config_and_processor(cfg: DictConfig):
 
 
 def get_model(cfg: DictConfig, override_config_kwargs=None):
-    model_path = cfg.model_dir
+    model_path = cfg.model_path
     torch_dtype = torch_dtype_from_precision(cfg.precision)
     model_type = get_supported_model(cfg.model_type)
     if model_type == SupportedModel.OPENVLA:
@@ -364,9 +364,6 @@ def get_model(cfg: DictConfig, override_config_kwargs=None):
             for param in model.value_head.parameters():
                 param.requires_grad = True
 
-    if hasattr(cfg, "ckpt_path") and cfg.ckpt_path is not None:
-        model_dict = torch.load(cfg.ckpt_path)
-        model.load_state_dict(model_dict)
     return model
 
 

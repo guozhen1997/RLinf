@@ -189,8 +189,9 @@ rollout
 
     gpu_memory_utilization: 0.55
 
-    model_dir: ../../model/DeepSeek-R1-Distill-Qwen-1.5B/
-    model_type: qwen2.5
+    model:
+      model_path: ../../model/DeepSeek-R1-Distill-Qwen-1.5B/
+      model_type: qwen2.5
 
     recompute_logprobs: True
 
@@ -198,9 +199,9 @@ rollout
 
 ``rollout.group_name``：rollout / inference worker 的逻辑分组名。  
 
-``rollout.model_dir``：生成后端所用 HF 模型路径。  
+``rollout.model.model_path``：生成后端所用 HF 模型路径。  
 
-``rollout.model_type``：后端内部使用的模型架构标记（如 qwen2.5）。  
+``rollout.model.model_type``：后端内部使用的模型架构标记（如 qwen2.5）。  
 
 ``rollout.recompute_logprobs``：是否为采样序列重新计算对数概率。
 
@@ -212,7 +213,8 @@ actor
   actor:
     group_name: "ActorGroup"
 
-    checkpoint_load_path: null
+    model:
+      megatron_checkpoint: null
 
     seed: 1234
 
@@ -220,7 +222,7 @@ actor
 
 ``actor.group_name``：训练（actor）worker 的逻辑分组名。  
 
-``actor.checkpoint_load_path``：训练前加载的 checkpoint 路径。 
+``actor.model.megatron_checkpoint``：训练前加载的模型 Megatron checkpoint 路径。 
 
 ``actor.seed``：全局随机种子，便于复现。
 
@@ -491,8 +493,7 @@ actor
       
       ckpt: # checkpoint 转换器配置
         model: DeepSeek-R1-Distill-Qwen-1.5B
-        model_type: null # 若为 null，将由 HF 配置推断
-        hf_model_path: ${rollout.model_dir} # HF 模型所在路径
+        hf_model_path: ${rollout.model.model_path} # HF 模型所在路径
         save_path: ${runner.output_dir}/${runner.experiment_name}/actor/megatron_ckpt_from_hf
         use_gpu_num : 0
         use_gpu_index: null # 
@@ -641,8 +642,6 @@ actor
 **Megatron checkpoint 转换器：**
 
 ``actor.megatron.ckpt.model``：转换器元信息中的模型名称。
-
-``actor.megatron.ckpt.model_type``：模型类型；为 null 时会从 HF 配置中推断。
 
 ``actor.megatron.ckpt.hf_model_path``：源 HF 模型路径。
 
@@ -870,6 +869,7 @@ actor
     enable_offload: True
 
     model:
+      model_path: "/path/to/hf_model"
       model_type: "openvla_oft"
       action_dim: 7
       num_action_chunks: 8
@@ -890,7 +890,6 @@ actor
       is_lora: True
       lora_rank: 32
       lora_path: /storage/models/oft-sft/lora_004000
-      ckpt_path: null
       num_images_in_input: 1
       attn_implementation: "flash_attention_2"
       low_cpu_mem_usage: True
@@ -926,7 +925,7 @@ actor
 
 **模型配置：**
 
-``actor.model.model_type``：模型结构名（openvla_oft）。  
+``actor.model.model_type``：模型类型（openvla_oft）。  
 
 ``actor.model.action_dim``：动作空间维度。  
 
@@ -956,7 +955,7 @@ actor
 
 ``actor.model.is_lora / lora_rank / lora_path``：是否使用 LoRA、秩与权重路径。  
 
-``actor.model.ckpt_path``：模型 checkpoint 路径。  
+``actor.model.megatron_checkpoint``：模型 checkpoint 路径。  
 
 ``actor.model.num_images_in_input``：输入的图像数量。  
 

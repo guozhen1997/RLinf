@@ -68,7 +68,7 @@ RLinf 提供了 **即开即用的评估脚本**，用于在 *训练分布内* �
             runner.logger.log_path=${LOG_DIR} \
             env.eval.init_params.id=${env_id} \
             env.eval.init_params.obj_set=${obj_set} \
-            actor.model.ckpt_path=${CKPT_PATH}"
+            runner.eval_policy_path=${CKPT_PATH}"
        echo ${CMD}  > "${MEGA_LOG_FILE}"
        ${CMD} 2>&1 | tee -a "${MEGA_LOG_FILE}"
    done
@@ -117,12 +117,15 @@ RLinf 提供了 **即开即用的评估脚本**，用于在 *训练分布内* �
 
 .. code-block:: yaml
 
+   runner:
+     eval_policy_path: "/path/to/rl_ckpt.pt"
+
    rollout:
-     model_dir: "/path/to/sft_base_model/"
+     model:
+       model_path: "/path/to/sft_base_model/"
    actor:
      model:
-       model_dir: "/path/to/sft_base_model/"
-       ckpt_path: "/path/to/rl_ckpt.pt"
+       model_path: "/path/to/sft_base_model/"
      tokenizer:
        tokenizer_model: "/path/to/sft_base_model/"
 

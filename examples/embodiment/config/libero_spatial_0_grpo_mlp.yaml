@@ -33,6 +33,8 @@ runner:
   seq_length: 4096
   max_prompt_length: 128
 
+  resume_dir: null
+
 algorithm:
   auto_reset: False
   ignore_terminations: False
@@ -104,10 +106,12 @@ rollout:
     queue_size: 0
   mode: "colocate"
   generation_backend: "huggingface"
-  model_dir: null
-  precision: ${actor.model.precision}
   enable_offload: False
   pipeline_stage_num: 1
+
+  model:
+    model_path: null
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
@@ -116,14 +120,13 @@ actor:
     queue_name: "replay_buffer"
     queue_size: 0
   training_backend: "fsdp"
-  checkpoint_load_path: null
-  checkpoint_save_path: "../results"
   micro_batch_size: 1024
   global_batch_size: 1024
   seed: 1234
   enable_offload: False
 
   model:
+    model_path: null
     model_type: "mlp_policy"
     use_wrist_image: False
     obs_dim: 8
@@ -136,7 +139,6 @@ actor:
     
     is_lora: False
     lora_rank: 32
-    ckpt_path: null
     gradient_checkpointing: False
     sharding_strategy: no_shard
   

@@ -88,13 +88,15 @@ env:
 rollout:
   group_name: "RolloutGroup"
   backend: "huggingface"
-  model_dir: "/workspace/dataset/openvla-7b"
-  precision: ${actor.model.precision}
   recompute_logprobs: False
   gpu_memory_utilization: 0.5
   enforce_eager: True
   enable_offload: True
   pipeline_stage_num: 2
+
+  model:
+    model_path: "/workspace/dataset/openvla-7b"
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
@@ -106,7 +108,7 @@ actor:
   enable_offload: True
 
   model:
-    model_dir: "/workspace/dataset/openvla-7b"
+    model_path: "/workspace/dataset/openvla-7b"
     model_type: "openvla"
     action_dim: 7
     num_action_chunks: 1

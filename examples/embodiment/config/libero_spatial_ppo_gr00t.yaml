@@ -32,6 +32,8 @@ runner:
   seq_length: 4096
   max_prompt_length: 30
 
+  resume_dir: null
+
 algorithm:
   auto_reset: False
   ignore_terminations: False
@@ -95,10 +97,12 @@ env:
 rollout:
   group_name: "RolloutGroup"
   backend: "huggingface"
-  model_dir: "/path/to/RLinf-Gr00t-SFT-Spatial"
-  precision: ${actor.model.precision}
   enable_offload: True
   pipeline_stage_num: 1
+
+  model:
+    model_path: "/path/to/RLinf-Gr00t-SFT-Spatial"
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
@@ -109,8 +113,7 @@ actor:
   enable_offload: False
 
   model:
-    model_dir: "/path/to/RLinf-Gr00t-SFT-Spatial"
-    ckpt_path: null
+    model_path: "/path/to/RLinf-Gr00t-SFT-Spatial"
     precision: "bf16"
     trust_remote_code: True
     is_lora: false

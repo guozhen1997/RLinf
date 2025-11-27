@@ -84,16 +84,16 @@ env:
 rollout:
   group_name: "RolloutGroup"
   generation_backend: "huggingface"
-  model_dir: "/workspace/dataset/Openvla-oft-SFT-libero-goal-traj1/"
-  precision: ${actor.model.precision}
   enable_offload: True
   pipeline_stage_num: 1
+  model:
+    model_type: "openvla_oft"
+    model_path: "/workspace/dataset/Openvla-oft-SFT-libero-goal-traj1/"
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  checkpoint_load_path: "/workspace/dataset/Openvla-oft-SFT-libero-goal-traj1/"
-  checkpoint_save_path: "/workspace/results"
 
   micro_batch_size: 2
   global_batch_size: 8
@@ -102,7 +102,7 @@ actor:
 
   model:
     model_type: "openvla_oft"
-    ckpt_path: null
+    model_path: "/workspace/dataset/Openvla-oft-SFT-libero-goal-traj1/"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 7
     num_action_chunks: 8

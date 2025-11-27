@@ -178,7 +178,7 @@ def activation_to_func(
 
 
 def validate_rollout_cfg(cfg, algorithm_cfg):
-    assert get_supported_model(cfg.model_type)
+    assert get_supported_model(cfg.model.model_type)
 
     def validate_sglang_cfg(cfg):
         assert cfg is not None, (
@@ -204,7 +204,9 @@ def validate_rollout_cfg(cfg, algorithm_cfg):
 
     with open_dict(cfg):
         cfg.gpu_memory_utilization = cfg.get("gpu_memory_utilization", 0.65)
-        assert cfg.model_dir is not None, "model_dir must be specified for rollout."
+        assert cfg.model.model_path is not None, (
+            "rollout.model.model_path must be specified for rollout."
+        )
 
         cfg.disable_log_stats = cfg.get("disable_log_stats", False)
         cfg.detokenize = cfg.get("detokenize", False)
@@ -372,15 +374,15 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
         cfg.use_torch_fsdp2 = False
 
         # training args for megatron
-        cfg.megatron.load = cfg.get("checkpoint_load_path", None)
+        cfg.megatron.load = cfg.model.get("megatron_checkpoint", None)
         use_hf_ckpt = cfg.megatron.get("use_hf_ckpt", False)
         if cfg.megatron.load is None:
             assert use_hf_ckpt, (
-                "checkpoint_load_path is required if use_hf_ckpt is False"
+                "model.megatron_checkpoint is required if use_hf_ckpt is False"
             )
         else:
             assert not use_hf_ckpt, (
-                "checkpoint_load_path should be None if use_hf_ckpt is True"
+                "model.megatron_checkpoint should be None if use_hf_ckpt is True"
             )
         cfg.megatron.pretrained_checkpoint = cfg.get("pretrained_checkpoint", None)
         cfg.megatron.save = None
@@ -810,9 +812,9 @@ def validate_reasoning_cfg(cfg: DictConfig) -> DictConfig:
 
 
 def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
-    assert get_supported_model(cfg.rollout.model_type) == SupportedModel.QWEN2_5, (
-        f"Model type {cfg.rollout.model_type} is not supported"
-    )
+    assert (
+        get_supported_model(cfg.rollout.model.model_type) == SupportedModel.QWEN2_5
+    ), f"Model type {cfg.rollout.model.model_type} is not supported"
 
     assert cfg.algorithm.recompute_logprobs or cfg.rollout.return_logprobs, (
         "One of `algorithm.recompute_logprobs` or `rollout.return_logprobs` must be True to compute `prev_logprobs`."
@@ -887,7 +889,9 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
 
     if cfg.actor.training_backend == "megatron":
         cfg.actor = validate_megatron_cfg(cfg.actor)
-        cfg.actor = validate_model_cfg_by_hf_config(cfg.actor, cfg.rollout.model_dir)
+        cfg.actor = validate_model_cfg_by_hf_config(
+            cfg.actor, cfg.rollout.model.model_path
+        )
         # TODO. Need actually pad padded_vocab_size.
         assert (
             cfg.actor.model.padded_vocab_size
@@ -901,7 +905,9 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
 
     if cfg.critic.use_critic_model and cfg.critic.training_backend == "megatron":
         cfg.critic = validate_megatron_cfg(cfg.critic)
-        cfg.critic = validate_model_cfg_by_hf_config(cfg.critic, cfg.rollout.model_dir)
+        cfg.critic = validate_model_cfg_by_hf_config(
+            cfg.critic, cfg.rollout.model.model_path
+        )
     elif cfg.critic.use_critic_model and cfg.critic.training_backend == "fsdp":
         cfg.critic = validate_fsdp_cfg(cfg.critic)
 
