@@ -13,10 +13,10 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 2-2
-    env: 2-2
-    rollout: 2-2
-    reward: 2-2  # Placement for reward worker (only used when use_reward_model=True)
+    actor: 0-0
+    env: 0-0
+    rollout: 0-0
+    reward: 0-0  # Placement for reward worker (only used when use_reward_model=True)
 
 runner:
   task_type: embodied

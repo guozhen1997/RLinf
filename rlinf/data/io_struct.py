@@ -1098,6 +1098,13 @@ class EnvOutput:
                 )
         elif self.simulator_type == "maniskill":
             image_tensor = obs.get("images", None)
+            # Handle dict format images (e.g., {"base_camera": tensor})
+            if isinstance(image_tensor, dict):
+                if len(image_tensor) == 0:
+                    image_tensor = None
+                else:
+                    # Extract the first camera's image tensor
+                    image_tensor = next(iter(image_tensor.values()))
         elif self.simulator_type == "robotwin":
             image_tensor = obs["images"]
         elif self.simulator_type == "isaaclab":
