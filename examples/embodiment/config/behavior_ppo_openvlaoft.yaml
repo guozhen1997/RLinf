@@ -34,6 +34,8 @@ runner:
   seq_length: 4096
   max_prompt_length: 50
 
+  resume_dir: null
+
 algorithm:
   auto_reset: False
   ignore_terminations: False
@@ -97,10 +99,12 @@ rollout:
     queue_size: 0
   mode: "colocate"
   backend: "huggingface"
-  model_dir: "/path/to/model/RLinf-OpenVLAOFT-Behavior/"
-  precision: ${actor.model.precision}
   enable_offload: True
   pipeline_stage_num: 1
+
+  model:
+    model_path: "/path/to/model/RLinf-OpenVLAOFT-Behavior/"
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
@@ -115,8 +119,7 @@ actor:
   enable_offload: True
 
   model:
-    model_dir: "/path/to/model/RLinf-OpenVLAOFT-Behavior/"
-    ckpt_path: null
+    model_path: "/path/to/model/RLinf-OpenVLAOFT-Behavior/"
     model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 23

@@ -196,8 +196,9 @@ rollout
 
     gpu_memory_utilization: 0.55
 
-    model_dir: ../../model/DeepSeek-R1-Distill-Qwen-1.5B/
-    model_type: qwen2.5
+    model:
+      model_path: ../../model/DeepSeek-R1-Distill-Qwen-1.5B/
+      model_type: qwen2.5
 
     recompute_logprobs: True
 
@@ -205,9 +206,9 @@ rollout
 
 ``rollout.group_name``: Logical name for rollout/inference workers.
 
-``rollout.model_dir``: Path to the HF model used by the generation backend.
+``rollout.model.model_path``: Path to the HF model used by the generation backend.
 
-``rollout.model_type``: Internal architecture tag used by the backend (e.g., qwen2.5).
+``rollout.model.model_type``: Internal architecture tag used by the backend (e.g., qwen2.5).
 
 ``rollout.recompute_logprobs``: Recompute log-probs for sampled sequences.
 
@@ -222,7 +223,8 @@ actor
   actor:
     group_name: "ActorGroup"
 
-    checkpoint_load_path: null
+    model:
+      megatron_checkpoint: null
 
     seed: 1234
 
@@ -231,7 +233,7 @@ actor
 
 ``actor.group_name``: Logical name for the training (actor) workers.
 
-``actor.checkpoint_load_path``: Path to a checkpoint to load before training.
+``actor.model.megatron_checkpoint``: Path to a megatron model checkpoint to load before training.
 
 ``actor.seed``: Global seed for reproducibility.
 
@@ -513,8 +515,7 @@ actor
       
       ckpt: # config for ckpt convertor
         model: DeepSeek-R1-Distill-Qwen-1.5B
-        model_type: null # will be set by hf model's config if null
-        hf_model_path: ${rollout.model_dir} # path to the hf model
+        hf_model_path: ${rollout.model.model_path} # path to the hf model
         save_path: ${runner.output_dir}/${runner.experiment_name}/actor/megatron_ckpt_from_hf
         use_gpu_num : 0
         use_gpu_index: null # 
@@ -692,8 +693,6 @@ actor
 **Megatron checkpoint converter**
 
 ``actor.megatron.ckpt.model``: Model name for the converter metadata.
-
-``actor.megatron.ckpt.model_type``: Model type; inferred from HF config when null.
 
 ``actor.megatron.ckpt.hf_model_path``: Source HF model path.
 
@@ -927,6 +926,7 @@ actor
     enable_offload: True
 
     model:
+      model_path: "/path/to/huggingface_model"
       model_type: "openvla_oft"
       action_dim: 7
       num_action_chunks: 8
@@ -947,7 +947,6 @@ actor
       is_lora: True
       lora_rank: 32
       lora_path: /storage/models/oft-sft/lora_004000
-      ckpt_path: null
       num_images_in_input: 1
       attn_implementation: "flash_attention_2"
       low_cpu_mem_usage: True
@@ -986,6 +985,8 @@ actor
 
 ``actor.model.model_type``: Model architecture name (openvla_oft).
 
+``actor.model.model_path``: Path to huggingface model.
+
 ``actor.model.action_dim``: Action space dimensionality.
 
 ``actor.model.num_action_chunks``: Number of action chunks per sequence.
@@ -1021,8 +1022,6 @@ actor
 ``actor.model.lora_rank``: LoRA rank for low-rank adaptation.
 
 ``actor.model.lora_path``: Path to LoRA weights.
-
-``actor.model.ckpt_path``: Path to model checkpoint.
 
 ``actor.model.num_images_in_input``: Number of images in model input.
 

@@ -114,9 +114,9 @@
 
 .. code-block:: python
 
-  def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
+  def get_model(cfg: DictConfig, override_config_kwargs=None):
       torch_dtype = torch_dtype_from_precision(cfg.precision)
-
+      model_path = cfg.model_path
       if cfg.model_type == "your_model_type":
           from .embodiment.your_model_action_model import (
               YourModelForRLActionPrediction
@@ -138,57 +138,7 @@
 
       return model
 
-4. 环境封装函数
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-在 `rlinf/envs/your_env_wrapper.py` 中添加 `wrap_observation_your_model` 和 `wrap_chunk_actions_your_model`。  
-这些函数用于将模拟器数据转换为模型输入，并将模型输出转换为模拟器动作，保持所需的形状和设备。  
-
-.. code-block:: python
-
-  def wrap_observation_your_model(raw_obs, input_processor, model, precision):
-      images = raw_obs["image"].permute(0,3,1,2).to(device="cuda:0", dtype=precision)
-      prompts = [
-          f"In: What action should the robot take to {t.lower()}?\nOut: "
-          for t in raw_obs["task_description"]
-      ]
-      inputs = input_processor(
-          prompts,
-          images,
-          padding="max_length",
-          max_length=model.max_prompt_length
-      ).to(device="cuda:0", dtype=precision)
-      return inputs
-
-  def wrap_chunk_actions_your_model(chunk_tokens, model, sim_precision):
-      tokens = chunk_tokens.cpu().numpy()
-      actions = []
-      for step in range(tokens.shape[1]):
-          decoded = wrap_single_step_actions(tokens[:, step], model)
-          formatted = format_actions_for_simulator(decoded, model)
-          actions.append(formatted)
-      return torch.stack(actions, dim=1).to(device="cuda").to(sim_precision)
-
-5. Worker 集成
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-更新 `rlinf/workers/generation/hf/multi_step_worker.py` 中的 `get_observation_action_wrapper_func`，  
-当 `cfg.env.train.wrapper` 和 `cfg.model_type` 匹配时返回你的封装函数。  
-
-.. code-block:: python
-
-  def get_observation_action_wrapper_func(cfg):
-      if cfg.env.train.wrapper == "your_env":
-          if cfg.actor.model.model_type == "your_model_type":
-              from rlinf.envs.your_env_wrapper import (
-                  wrap_observation_your_model,
-                  wrap_chunk_actions_your_model,
-              )
-              return wrap_observation_your_model, wrap_chunk_actions_your_model
-          raise NotImplementedError
-      raise NotImplementedError
-
-6. 配置文件
+4. 配置文件
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 在 `examples/embodiment/config/your_config.yaml` 中创建配置文件，  
@@ -198,7 +148,7 @@
 .. code-block:: yaml
 
   model:
-    model_type: "your_model_name"
+    model_type: "your_model_type"
     action_token_len: 7
     action_chunks_len: 1
     unnorm_key: your_action_key

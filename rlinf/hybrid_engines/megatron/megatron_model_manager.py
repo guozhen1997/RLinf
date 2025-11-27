@@ -286,13 +286,11 @@ class MegatronModelManager:
             checkpointing_context = {}
         return checkpointing_context
 
-    def save_checkpoint(
-        self, checkpoint_save_path, step, num_floating_point_operations_so_far=0
-    ):
+    def save_checkpoint(self, save_path, step, num_floating_point_operations_so_far=0):
         if not self.is_running:
             return
         args = get_args()
-        args.save = checkpoint_save_path
+        args.save = save_path
         save_checkpoint(
             iteration=step,
             model=self.model,
@@ -303,9 +301,9 @@ class MegatronModelManager:
             preprocess_common_state_dict_fn=preprocess_common_state_dict,
         )
 
-    def load_checkpoint(self, checkpoint_load_path):
+    def load_checkpoint(self, load_path):
         args = get_args()
-        args.load = checkpoint_load_path
+        args.load = load_path
         load_checkpoint(
             self.model,
             self.optimizer,

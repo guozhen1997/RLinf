@@ -28,7 +28,7 @@ do
         runner.logger.log_path=${LOG_DIR} \
         env.eval.init_params.id=${env_id} \
         env.eval.init_params.obj_set=${obj_set} \
-        actor.model.ckpt_path=${CKPT_PATH}"
+        runner.eval_policy_path=${CKPT_PATH}"
 
     echo ${CMD} > ${MEGA_LOG_FILE}
     ${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
@@ -47,7 +47,7 @@ do
         runner.logger.log_path=${LOG_DIR} \
         env.eval.init_params.id=${env_id} \
         env.eval.init_params.obj_set=${obj_set} \
-        actor.model.ckpt_path=${CKPT_PATH}"
+        runner.eval_policy_path=${CKPT_PATH}"
     echo ${CMD}  > ${MEGA_LOG_FILE}
     ${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
 done

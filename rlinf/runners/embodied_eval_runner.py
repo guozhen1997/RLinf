@@ -38,6 +38,11 @@ class EmbodiedEvalRunner:
         self.timer = ScopedTimer(reduction="max", sync_cuda=False)
         self.metric_loger = MetricLogger(cfg)
 
+    def _load_eval_policy(self):
+        assert self.cfg.runner.eval_policy_path is not None
+
+        self.rollout.load_checkpoint(self.cfg.runner.eval_policy_path).wait()
+
     def evaluate(self):
         env_futures = self.env.evaluate()
         rollout_futures = self.rollout.evaluate()
@@ -48,6 +53,8 @@ class EmbodiedEvalRunner:
         return eval_metrics
 
     def run(self):
+        self._load_eval_policy()
+
         eval_metrics = self.evaluate()
         eval_metrics = {f"eval/{k}": v for k, v in eval_metrics.items()}
         self.metric_loger.log(step=0, data=eval_metrics)

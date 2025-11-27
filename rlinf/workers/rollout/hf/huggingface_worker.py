@@ -47,8 +47,8 @@ class MultiStepRolloutWorker(Worker):
     def init_worker(self):
         rollout_model_config = copy.deepcopy(self.cfg.actor.model)
         with open_dict(rollout_model_config):
-            rollout_model_config.precision = self.cfg.rollout.precision
-            rollout_model_config.model_dir = self.cfg.rollout.model_dir
+            rollout_model_config.precision = self.cfg.rollout.model.precision
+            rollout_model_config.path = self.cfg.rollout.model.model_path
 
         self.hf_model = get_model(rollout_model_config)
 
@@ -68,6 +68,10 @@ class MultiStepRolloutWorker(Worker):
         self.setup_sample_params()
         if self.cfg.rollout.get("enable_offload", False):
             self.offload_model()
+
+    def load_checkpoint(self, load_path):
+        model_dict = torch.load(load_path)
+        self.hf_model.load_state_dict(model_dict)
 
     def setup_sample_params(self):
         # length parameters for rollout

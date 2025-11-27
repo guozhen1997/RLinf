@@ -54,7 +54,7 @@ Quick Start — ManiSkill3
             runner.logger.log_path=${LOG_DIR} \
             env.eval.init_params.id=${env_id} \
             env.eval.init_params.obj_set=${obj_set} \
-            actor.model.ckpt_path=${CKPT_PATH}"
+            runner.eval_policy_path=${CKPT_PATH}"
        echo ${CMD}  > "${MEGA_LOG_FILE}"
        ${CMD} 2>&1 | tee -a "${MEGA_LOG_FILE}"
    done
@@ -72,7 +72,7 @@ Quick Start — ManiSkill3
             runner.logger.log_path=${LOG_DIR} \
             env.eval.init_params.id=${env_id} \
             env.eval.init_params.obj_set=${obj_set} \
-            actor.model.ckpt_path=${CKPT_PATH}"
+            runner.eval_policy_path=${CKPT_PATH}"
        echo ${CMD}  > "${MEGA_LOG_FILE}"
        ${CMD} 2>&1 | tee -a "${MEGA_LOG_FILE}"
    done
@@ -124,11 +124,11 @@ Quick Start — LIBERO
 .. code-block:: yaml
 
    rollout:
-     model_dir: "/path/to/sft_base_model/"
+     model:
+       model_path: "/path/to/sft_base_model/"
    actor:
      model:
-       model_dir: "/path/to/sft_base_model/"
-       ckpt_path: "/path/to/rl_ckpt.pt"
+       model_path: "/path/to/sft_base_model/"
      tokenizer:
        tokenizer_model: "/path/to/sft_base_model/"
 
