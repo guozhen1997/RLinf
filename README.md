@@ -102,6 +102,10 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
           <ul>
             <li>CNN ✅</li>
           </ul>
+          <li><b>World Models</b></li>
+          <ul>
+            <li><a href="https://github.com/RLinf/EnerVerse-AC">EVAC (Enverse-AC)</a> ✅</li>
+          </ul>
         </ul>
       </td>
       <td>
