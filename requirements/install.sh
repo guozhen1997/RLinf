@@ -2,12 +2,17 @@
 
 TARGET="${1:-"openvla"}"
 EMBODIED_TARGET=("openvla" "openvla-oft" "openpi")
+ENABLE_ROBOTWIN="false"
 
 # Get the remaining args
 while [ "$#" -gt 0 ]; do
     case "$2" in
         --enable-behavior)
             ENABLE_BEHAVIOR="true"
+            shift
+            ;;
+        --robotwin)
+            ENABLE_ROBOTWIN="true"
             shift
             ;;
         --test-build)
@@ -37,12 +42,22 @@ source .venv/bin/activate
 UV_TORCH_BACKEND=auto uv sync
 
 if [[ " ${EMBODIED_TARGET[*]} " == *" $TARGET "* ]]; then
-    uv sync --extra embodied
+    if [ "$ENABLE_ROBOTWIN" = "true" ]; then
+        uv sync --extra embodied --extra robotwin
+    else
+        uv sync --extra embodied
+    fi
     uv pip uninstall pynvml
     bash requirements/install_embodied_deps.sh # Must be run after the above command
     mkdir -p /opt && git clone https://github.com/RLinf/LIBERO.git /opt/libero
     mkdir -p /opt && git clone https://github.com/Tian-Nian/RLinf_RoboTwin.git /opt/RLinf_RoboTwin
     echo "export PYTHONPATH=/opt/RLinf_RoboTwin:/opt/libero:$PYTHONPATH" >> .venv/bin/activate
+    
+    # Apply RoboTwin patches if robotwin is enabled
+    if [ "$ENABLE_ROBOTWIN" = "true" ]; then
+        echo "Applying RoboTwin compatibility patches..."
+        bash requirements/patch_sapien_mplib_for_robotwin.sh
+    fi
 fi
 
 if [ "$TARGET" = "openvla" ]; then
