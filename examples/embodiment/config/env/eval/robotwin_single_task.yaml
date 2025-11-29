@@ -1,13 +1,13 @@
 simulator_type: robotwin
 auto_reset: ${algorithm.auto_reset}
 ignore_terminations: ${algorithm.ignore_terminations}
-use_rel_reward: True
+use_rel_reward: False
 use_custom_reward: True
 seed: 0
 num_group: ${algorithm.num_group_envs}
 group_size: ${algorithm.group_size}
 use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
-max_episode_steps: 250
+max_episode_steps: 200
 only_eval: True
 
 video_cfg:

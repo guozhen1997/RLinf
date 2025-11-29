@@ -600,7 +600,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
         # self.input_processor = input_processor
         self.processor = AutoProcessor.from_pretrained(
-            cfg.actor.checkpoint_load_path, trust_remote_code=True
+            cfg.actor.model.model_dir, trust_remote_code=True
         )
 
     def forward(

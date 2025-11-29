@@ -23,6 +23,7 @@ import torch.multiprocessing as mp
 from omegaconf import OmegaConf
 from PIL import Image
 
+from rlinf.envs.utils import list_of_dict_to_dict_of_list
 from rlinf.models.embodiment.model_utils import center_crop_image
 
 from .utils import put_info_on_image, save_rollout_video, tile_images
@@ -192,14 +193,10 @@ class RoboTwinEnv(gym.Env):
         }
         return extracted_obs
 
-    def _calc_step_reward(self, info):
+    def _calc_step_reward(self, terminations):
         reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
 
-        if "success" in info:
-            success_reward = torch.tensor(
-                [float(x) for x in info["success"]], device=self.device
-            )
-            reward += success_reward * 1.0
+        reward += terminations * 1.0
 
         reward_diff = reward - self.prev_step_reward
         self.prev_step_reward = reward
@@ -208,6 +205,22 @@ class RoboTwinEnv(gym.Env):
             return reward_diff
         else:
             return reward
+        
+    def _cal_chunk_rewards(self, step_reward, chunk_step, terminations, infos):
+        n_steps_to_run = torch.as_tensor(np.array(infos["n_steps_to_run"]).reshape(-1), device=self.device)
+        chunk_rewards = torch.zeros(self.num_envs, chunk_step, device=self.device)
+        for env_id in range(self.num_envs):
+            steps_left = n_steps_to_run[env_id]
+            reward = step_reward[env_id]
+            start_idx = chunk_step - steps_left - 1
+
+            if terminations[env_id] and start_idx > 0:
+                if self.use_rel_reward:
+                    chunk_rewards[env_id, start_idx] = reward
+                else:
+                    chunk_rewards[env_id, start_idx:] = reward
+
+        return chunk_rewards
 
     def reset(
         self,
@@ -235,17 +248,6 @@ class RoboTwinEnv(gym.Env):
         if actions is None:
             assert self._is_start, "Actions must be provided after the first reset."
 
-        if self.is_start:
-            extracted_obs, infos = self.reset()
-            self._is_start = False
-            terminations = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            truncations = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            return extracted_obs, None, terminations, truncations, infos
-
         if isinstance(actions, torch.Tensor):
             actions = actions.cpu().numpy()
         elif isinstance(actions, dict):
@@ -256,17 +258,9 @@ class RoboTwinEnv(gym.Env):
             # [n_envs, action_dim] -> [n_envs, 1, action_dim]
             actions = actions[:, None, :]
 
-        raw_obs, step_reward, terminations, truncations, infos = self.venv.step(actions)
+        raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(actions)
         extracted_obs = self._extract_obs_image(raw_obs)
-
-        if self.use_custom_reward:
-            step_reward = self._calc_step_reward(infos)
-        else:
-            if isinstance(step_reward, list):
-                step_reward = torch.as_tensor(
-                    np.array(step_reward, dtype=np.float32).reshape(-1),
-                    device=self.device,
-                )
+        infos = list_of_dict_to_dict_of_list(info_list)
 
         if isinstance(terminations, list):
             terminations = torch.as_tensor(
@@ -276,7 +270,20 @@ class RoboTwinEnv(gym.Env):
             truncations = torch.as_tensor(
                 np.array(truncations).reshape(-1), device=self.device
             )
-        self._elapsed_steps += 1
+
+        if self.use_custom_reward:
+            step_reward = self._calc_step_reward(terminations)
+        else:
+            if isinstance(step_reward, list):
+                step_reward = torch.as_tensor(
+                    np.array(step_reward, dtype=np.float32).reshape(-1),
+                    device=self.device,
+                )
+
+        self._elapsed_steps += actions.shape[1]
+        truncated = self._elapsed_steps >= self.cfg.max_episode_steps
+        if truncated.any():
+            truncations = torch.logical_or(truncated, truncations)
 
         if self.video_cfg.save_video:
             plot_infos = {
@@ -302,44 +309,66 @@ class RoboTwinEnv(gym.Env):
         return extracted_obs, step_reward, terminations, truncations, infos
 
     def chunk_step(self, chunk_actions):
-        # chunk_actions: [num_envs, chunk_step, action_dim]
-        chunk_size = chunk_actions.shape[1]
-        chunk_rewards = []
-        raw_chunk_terminations = []
-        raw_chunk_truncations = []
+        if isinstance(chunk_actions, torch.Tensor):
+            chunk_actions = chunk_actions.cpu().numpy()
 
-        for i in range(chunk_size):
-            actions = chunk_actions[:, i]
-            extracted_obs, step_reward, terminations, truncations, infos = self.step(
-                actions, auto_reset=False
+        # chunk_actions: [num_envs, chunk_step, action_dim]
+        num_envs = chunk_actions.shape[0]
+        chunk_step = chunk_actions.shape[1]
+
+        raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(chunk_actions)
+        extracted_obs = self._extract_obs_image(raw_obs)
+        infos = list_of_dict_to_dict_of_list(info_list)
+        if isinstance(terminations, list):
+            terminations = torch.as_tensor(
+                np.array(terminations).reshape(-1), device=self.device
+            )
+        if isinstance(truncations, list):
+            truncations = torch.as_tensor(
+                np.array(truncations).reshape(-1), device=self.device
             )
 
-            chunk_rewards.append(step_reward)
-            raw_chunk_terminations.append(terminations)
-            raw_chunk_truncations.append(truncations)
+        if self.use_custom_reward:
+            step_reward = self._calc_step_reward(terminations)
+        else:
+            if isinstance(step_reward, list):
+                step_reward = torch.as_tensor(
+                    np.array(step_reward, dtype=np.float32).reshape(-1),
+                    device=self.device,
+                )
 
-        chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
-        raw_chunk_terminations = torch.stack(
-            raw_chunk_terminations, dim=1
-        )  # [num_envs, chunk_steps]
-        raw_chunk_truncations = torch.stack(
-            raw_chunk_truncations, dim=1
-        )  # [num_envs, chunk_steps]
+        chunk_rewards = self._cal_chunk_rewards(step_reward, chunk_step, terminations, infos)
 
-        past_terminations = raw_chunk_terminations.any(dim=1)
-        past_truncations = raw_chunk_truncations.any(dim=1)
-        past_dones = torch.logical_or(past_terminations, past_truncations)
+        self._elapsed_steps += chunk_actions.shape[1]
+        truncated = self._elapsed_steps >= self.cfg.max_episode_steps
+        if truncated.any():
+            truncations = torch.logical_or(truncated, truncations)
 
+        if self.video_cfg.save_video:
+            plot_infos = {
+                "terminations": terminations,
+                "task": self.cfg.task_config.task_name,
+            }
+            self.add_new_frames(raw_obs, plot_infos)
+        infos = self._record_metrics(step_reward, infos)
+
+        if self.ignore_terminations:
+            terminations[:] = False
+            if self.record_metrics:
+                if "success" in infos:
+                    infos["episode"]["success_at_end"] = infos["success"].clone()
+
+        past_dones = torch.logical_or(terminations, truncations)
         if past_dones.any() and self.auto_reset:
             extracted_obs, infos = self._handle_auto_reset(
                 past_dones, extracted_obs, infos
             )
 
-        chunk_terminations = torch.zeros_like(raw_chunk_terminations)
-        chunk_terminations[:, -1] = past_terminations
+        chunk_terminations = torch.zeros((num_envs, chunk_step))
+        chunk_terminations[:, -1] = terminations
 
-        chunk_truncations = torch.zeros_like(raw_chunk_truncations)
-        chunk_truncations[:, -1] = past_truncations
+        chunk_truncations = torch.zeros((num_envs, chunk_step))
+        chunk_truncations[:, -1] = truncations
 
         return (
             extracted_obs,

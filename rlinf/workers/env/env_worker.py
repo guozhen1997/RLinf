@@ -70,6 +70,7 @@ class EnvWorker(Worker):
             self.channel = self.connect_channel(cfg.env.channel.name)
 
     def init_worker(self):
+        self._logger.info(f"Initializing EnvWorker with {self.cfg.env.train.simulator_type} env")
         enable_offload = self.cfg.env.enable_offload
         only_eval = getattr(self.cfg.runner, "only_eval", False)
         if self.cfg.env.train.simulator_type == "maniskill":
@@ -181,17 +182,21 @@ class EnvWorker(Worker):
 
         if not only_eval:
             self._init_simulator()
+        
+        self._logger.info(f"Successfully initialized {self.cfg.env.train.simulator_type} env")
 
     def _init_simulator(self):
         for i in range(self.stage_num):
-            extracted_obs, rewards, terminations, truncations, infos = (
-                self.simulator_list[i].step()
+            extracted_obs, _ = (
+                self.simulator_list[i].reset()
             )
             self.last_obs_list.append(extracted_obs)
-            dones = torch.logical_or(terminations, truncations)
-            self.last_dones_list.append(
-                dones.unsqueeze(1).repeat(1, self.cfg.actor.model.num_action_chunks)
+            dones = (
+                torch.zeros((self.cfg.env.train.num_envs,), dtype=bool)
+                .unsqueeze(1)
+                .repeat(1, self.cfg.actor.model.num_action_chunks)
             )
+            self.last_dones_list.append(dones)
 
             if self.cfg.env.enable_offload:
                 self.simulator_list[i].close()
@@ -422,7 +427,7 @@ class EnvWorker(Worker):
         for i in range(self.stage_num):
             # self.eval_simulator_list[i].start_simulator()
             self.eval_simulator_list[i].is_start = True
-            extracted_obs, _, _, _, infos = self.eval_simulator_list[i].step()
+            extracted_obs, infos = self.eval_simulator_list[i].reset()
             env_output = EnvOutput(
                 simulator_type=self.cfg.env.eval.simulator_type,
                 obs=extracted_obs,
