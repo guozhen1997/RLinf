@@ -17,7 +17,6 @@ video_cfg:
 
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 
-seeds_path: /mnt/public/guozhen/test_robotwin/RLinf/examples/embodiment/config/env/robotwin2_train_seeds.json
 assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
 
 task_config:

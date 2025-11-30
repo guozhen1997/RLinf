@@ -424,7 +424,7 @@ class RoboTwinEnv(gym.Env):
         self.render_images.append(full_image)
 
     def _init_reset_state_ids(self):
-        if self.cfg.seeds_path is not None and os.path.exists(self.cfg.seeds_path):
+        if self.cfg.get("seeds_path", None) is not None and os.path.exists(self.cfg.seeds_path):
             with open(self.cfg.seeds_path, "r") as f:
                 data = json.load(f)
             success_seeds = data[self.task_name].get("success_seeds", None)
