@@ -235,6 +235,7 @@ Thanks to this decoupled design, workers can be flexibly and dynamically schedul
    libero
    behavior
    metaworld
+   calvin
    pi0
    reasoning
    coding_online_rl

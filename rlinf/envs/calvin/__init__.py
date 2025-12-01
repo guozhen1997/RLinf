@@ -42,15 +42,14 @@ def _get_calvin_tasks_and_reward(num_sequences, use_random_seed=True):
 
 def make_env():
     dataset_paths = [
-        "/mnt/mnt/public/chenkang/rlinf_pi/calvin/dataset/calvin_debug_dataset",
-        "/mnt/mnt/public/chenkang/RLinf_fork_calvin/calvin_debug_dataset",  # Add your second path here
+        "calvin_debug_dataset/",
     ]
     for path in dataset_paths:
         try:
             return get_env(Path(path) / "validation", show_gui=False)
         except Exception:
             continue
-    raise RuntimeError(f"Failed to create environment from all paths: {dataset_paths}")
+    raise RuntimeError(f"Please download your calvin_debug_dataset from https://github.com/mees/calvin#computer--quick-start")
 
 
 class CalvinBenchmark:

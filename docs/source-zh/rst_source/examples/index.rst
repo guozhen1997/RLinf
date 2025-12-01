@@ -230,6 +230,7 @@ RLinf的整体设计简洁且模块化，以Worker为抽象封装强化学习训
    libero
    behavior
    metaworld
+   calvin
    pi0
    reasoning
    coding_online_rl

@@ -34,8 +34,6 @@ from rlinf.envs.utils import (
     to_tensor,
 )
 
-# TODO: now rollout is fixed on 1000 sequences
-
 
 class CalvinEnv(gym.Env):
     def __init__(self, cfg, seed_offset, total_num_processes):
