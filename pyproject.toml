@@ -110,6 +110,9 @@ override-dependencies = [
     "tensorflow-addons==0.23.0",
 ]
 
+[tool.uv.extra-build-dependencies]
+pytorch3d = ["torch"]
+
 [tool.ruff]
 line-length = 88
 indent-width = 4
