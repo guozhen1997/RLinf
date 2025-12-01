@@ -522,7 +522,8 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                 processed_logprob_tensor.shape[0], processed_logprob_tensor.shape[1]
             )  # [B, act]
         else:
-            idxs = logits_tensor.argmax(dim=-1)  # [B, act]
+            processed_logits_tensor = logits_tensor
+            idxs = processed_logits_tensor.argmax(dim=-1)  # [B, act]
 
         # assert torch.all(idxs >= 0) and torch.all(idxs < self.config.n_action_bins)
         # generated_ids = idxs + (self.vocab_size - self.config.n_action_bins)

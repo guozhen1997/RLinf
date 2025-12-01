@@ -41,7 +41,7 @@ algorithm:
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
   n_chunk_steps: 10 # 20
-  n_eval_chunk_steps: 16
+  n_eval_chunk_steps: 256
   num_group_envs: 4
   rollout_epoch: 1 # 16
   reward_type: chunk_level
