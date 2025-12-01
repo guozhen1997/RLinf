@@ -226,8 +226,8 @@ Thanks to this decoupled design, workers can be flexibly and dynamically schedul
    libero
    behavior
    metaworld
+   robotwin
    pi0
    reasoning
    coding_online_rl
    gr00t
-   robotwin
