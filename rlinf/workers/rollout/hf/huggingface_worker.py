@@ -180,7 +180,7 @@ class MultiStepRolloutWorker(Worker):
         for _ in range(self.cfg.algorithm.n_eval_chunk_steps):
             for _ in range(self.stage_num):
                 env_output = self.recv_env_output()
-                actions, _ = self.predict(env_output["obs"], mode="eval")
+                actions, _ = self.predict(env_output["obs"], do_sample=self._sampling_params.get("do_sample", True), mode="eval")
                 self.send_chunk_actions(actions)
 
         if self.cfg.rollout.get("enable_offload", False):

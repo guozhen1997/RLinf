@@ -1,7 +1,7 @@
 simulator_type: robotwin
 auto_reset: ${algorithm.auto_reset}
 ignore_terminations: ${algorithm.ignore_terminations}
-use_rel_reward: False
+use_rel_reward: True
 use_custom_reward: True
 seed: 0
 num_group: ${algorithm.num_group_envs}
