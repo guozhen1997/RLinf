@@ -27,9 +27,9 @@ data:
   dataset_name: robo2vlm
   max_prompt_length: 1024
   filter_prompt_by_length: True
-  rollout_batch_size: 1
+  rollout_batch_size: 2
   val_rollout_batch_size: null
-  num_workers: 1
+  num_workers: 2
   # XXX Missing max_length
   max_length: 1024
   prompt_key: "question"
@@ -61,11 +61,11 @@ sft:
 
   checkpoint_load_path: ${CKPT_PATH} # null
   checkpoint_save_path: "/mnt/mnt/public/tangyueran/result"
-  global_batch_size: 1
-  micro_batch_size: 1
+  global_batch_size: 2
+  micro_batch_size: 2
 
   # XXX Missing batch_size
-  batch_size: 1
+  batch_size: 2
   seed: 1234
   model:
     model_name: "openpi"

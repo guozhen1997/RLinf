@@ -94,6 +94,7 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         """Main training loop"""
         num_epochs = getattr(self.cfg, "num_epochs", 1)
         self.model.train()
+        print(self.model)
 
         self.gradient_accumulation = (
             self.cfg.global_batch_size
@@ -104,11 +105,8 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         for epoch in range(num_epochs):
             self.epoch = epoch
             self.distributed_sampler.set_epoch(epoch)
-            print("DEBUG: Epoch:", epoch)
             
             for step, global_batch in enumerate(self.dataloader):
-                # split global_batch into micro_batches
-                print("DEBUG: Step:", step)
                 micro_batches = get_iterator_k_split(
                     global_batch,
                     self.cfg.global_batch_size // self.cfg.micro_batch_size,
@@ -122,17 +120,17 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
                             is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
                         )
                         observation, actions = self._prepare_batch(m_batch)
-                        # TODO: m_batch is : {"observation.images.image": tensor, "observation.images.wrist_image": tensor, "image": Tensor, "wrist_image": Tensor, "state":Tensor, "actions":Tensor, "time_stamp":tensor, "frame_index": tensor,
-                        #                     "episode_index": tensor, "index": tensor, "task_index": tensor, "task": [str]} 
-                        # Find the right way to preprocess it
-                        # FIXME: USE JAX to map it.
                         m_data = dict(observation=observation, actions=actions)
-                        outputs = self.model(data=m_data, mode='sft')
-                        loss = (
-                            outputs.loss
-                            if hasattr(outputs, "loss")
-                            else self._compute_loss(outputs, m_batch["labels"])
-                        )
+                        sft_losses = self.model(data=m_data, mode="sft")
+                        # Ensure losses is a tensor and handle different return types
+                        if isinstance(sft_losses, list | tuple):
+                            sft_losses = torch.stack(sft_losses)
+                        elif not isinstance(sft_losses, torch.Tensor):
+                            sft_losses = torch.tensor(sft_losses, device=self.device, dtype=torch.float32)
+
+                        sft_loss = sft_losses.mean()
+                        total_loss = sft_loss * 0.1
+                        loss = total_loss
 
                         # scale loss for gradient accumulation and backprop
                         loss = loss / self.gradient_accumulation
@@ -187,20 +185,7 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
     def _prepare_batch(self, batch):
         """Prepare batch for training"""
         if self.cfg.data.type == 'openpi':
-            import openpi.models.model as _model
-            data = batch
-            actions = data['actions']
-            data = {'image':{'base_0_rgb':data['observation.images.image'].cuda(), #.permute(0,2,3,1), # 1 3 480 640 -> 1 640 3 480, to fit the openpi shape. Openpi get NCHW input and permute to NHWC, thus, 1 640 3 480 -> 1 3 480 640
-                             "left_wrist_0_rgb":data['observation.images.wrist_image'].cuda(),#.permute(0,2,3,1),
-                             'right_wrist_0_rgb':data['observation.images.wrist_image'].cuda(),#.permute(0,2,3,1),
-                             },
-                    'image_mask':{'base_0_rgb':torch.tensor([True]).cuda(),'left_wrist_0_rgb':torch.tensor([True]).cuda(), 'right_wrist_0_rgb':torch.tensor([True]).cuda()},
-                    'state':data['state']} # 'actions':data['actions']}
-            not_tensor_keys = ['task']
-            item = _model.Observation.from_dict({k:v for k,v in data.items() if k not in not_tensor_keys})
-            return item, actions
-            #return batch[0] # only return first tensor dict. skip the non-tensor items
-        # FIXME: Input is : "input_ids", "attention_mask",  "position_ids", "loss_mask"
+            return self.dataset.prepare_batch(batch)
         if isinstance(batch, list):
             # Handle batched data
             batch = {

@@ -40,22 +40,26 @@ class LeRobotDataset(Dataset):
     
     def __getitem__(self, idx):
         return self.data[idx]
-        data = self.data[idx]
-        data = {'image':{'image':data['observation.images.image']}, 'image_mask':{}, 'state':data['state'], 'actions':data['actions']}
-        print(data)
-        not_tensor_keys = ['task']
-        item = _model.Observation.from_dict({k:v for k,v in data.items() if k not in not_tensor_keys})
-        #item = jax.tree.map(lambda x: torch.as_tensor(x) if type(x) is not str else x, self.data[idx])
-        print(item)
-        return item, {k:v for k,v in data.items() if k in not_tensor_keys}
-        #item = self.data[idx]
-        #frames = []
-        #pts = []
-        #for frame in item['video']:
-        #    frames.append(frame['data'])
-        #    pts.append(torch.tensor(frame['pts']))
-        #label = item['label']
-        #return {"data":torch.stack(frames), "pts":torch.stack(pts), "label":label}
+    
+    def prepare_batch(self, batch):
+        if self.cfg.type == "openpi":
+            data = batch
+            actions = data['actions']
+            data = {'image':{'base_0_rgb':data['observation.images.image'].cuda().requires_grad_(True),
+                             "left_wrist_0_rgb":data['observation.images.wrist_image'].cuda().requires_grad_(True),
+                             'right_wrist_0_rgb':data['observation.images.wrist_image'].cuda().requires_grad_(True),
+                             },
+                    'image_mask':{
+                        'base_0_rgb':torch.tensor([True]*(data["observation.images.image"].shape[0])).cuda(),
+                        'left_wrist_0_rgb':torch.tensor([True]*(data["observation.images.image"].shape[0])).cuda(),
+                        'right_wrist_0_rgb':torch.tensor([True]*(data["observation.images.image"].shape[0])).cuda()
+                        },
+                    'state':data['state'].cuda().requires_grad_(True)} # 'actions':data['actions']}
+            not_tensor_keys = ['task']
+            item = _model.Observation.from_dict({k:v for k,v in data.items() if k not in not_tensor_keys})
+            return item, actions
+        else:
+            return batch
     
     def __len__(self):
         """Return the length of the dataset"""

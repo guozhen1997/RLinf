@@ -20,6 +20,7 @@ from typing import Any, Literal
 import jax
 import numpy as np
 import torch
+import torch.nn.functional as F
 from openpi import transforms as _transforms
 from openpi.models import model as _model
 from openpi.models.pi0_config import Pi0Config
@@ -190,6 +191,22 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         outputs["actions"] = outputs["actions"][:, : self.config.action_chunk]
         return outputs
 
+    def default_forward(self, observation, actions, noise=None, time=None) -> torch.Tensor:
+        """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
+        images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=True)
+
+        if noise is None:
+            noise = self.sample_noise(actions.shape, actions.device).requires_grad_(True)
+
+        if time is None:
+            time = self.sample_time(actions.shape[0], actions.device).requires_grad_(True)
+
+        time_expanded = time[:, None, None]
+        x_t = time_expanded * noise + (1 - time_expanded) * actions
+        u_t = noise - actions
+
+        return F.mse_loss(u_t, x_t, reduction="none")
+
     def forward(
         self,
         data: dict[str, torch.Tensor],
@@ -199,7 +216,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         if mode == "sft":
             observation = data["observation"]
             actions = data["actions"]
-            return super().forward(observation, actions)
+            return self.default_forward(observation, actions)
         compute_values = kwargs.get("compute_values", False)
 
         chains = data["chains"]
