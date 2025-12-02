@@ -429,14 +429,28 @@ class RoboTwinEnv(gym.Env):
                 data = json.load(f)
             success_seeds = data[self.task_name].get("success_seeds", None)
             if success_seeds is not None:
-                self.success_seeds = torch.as_tensor(success_seeds, dtype=torch.long)
+                success_seeds = torch.as_tensor(success_seeds, dtype=torch.long)
+                self._generator = torch.Generator()
+                self._generator.manual_seed(self.seed)
+                shuffled_indices = torch.randperm(
+                    success_seeds.numel(), generator=self._generator
+                )
+                shuffled_seeds = success_seeds[shuffled_indices]
+                # Drop last to make total divisible by num_group
+                total_seeds = shuffled_seeds.numel()
+                keep_count = (total_seeds // self.num_group) * self.num_group
+                self.success_seeds = shuffled_seeds[:keep_count]
+                self._current_seed_index = 0
             else:
                 self.success_seeds = None
+                self._current_seed_index = 0
         else:
             self.success_seeds = None
+            self._current_seed_index = 0
 
-        self._generator = torch.Generator()
-        self._generator.manual_seed(self.seed)
+        if not hasattr(self, "_generator"):
+            self._generator = torch.Generator()
+            self._generator.manual_seed(self.seed)
         self.update_reset_state_ids()
 
     def update_reset_state_ids(self, env_idx=None):
@@ -445,14 +459,13 @@ class RoboTwinEnv(gym.Env):
 
         if env_idx is not None and hasattr(self, "reset_state_ids"):
             if self.success_seeds is not None:
-                reset_state_ids = self.success_seeds[
-                    torch.randperm(
-                        self.success_seeds.numel(), generator=self._generator
-                    )[: self.num_group]
-                ]
+                total_seeds = self.success_seeds.numel()
+                indices = (torch.arange(self.num_group, device=self.success_seeds.device) + self._current_seed_index) % total_seeds
+                reset_state_ids = self.success_seeds[indices]
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
+                self._current_seed_index = (self._current_seed_index + self.num_group) % total_seeds
             else:
                 reset_state_ids = torch.randint(
                     low=10000,
@@ -467,14 +480,13 @@ class RoboTwinEnv(gym.Env):
                 self.reset_state_ids[idx] = reset_state_ids[idx]
         else:
             if self.success_seeds is not None:
-                reset_state_ids = self.success_seeds[
-                    torch.randperm(
-                        self.success_seeds.numel(), generator=self._generator
-                    )[: self.num_group]
-                ]
+                total_seeds = self.success_seeds.numel()
+                indices = (torch.arange(self.num_group, device=self.success_seeds.device) + self._current_seed_index) % total_seeds
+                reset_state_ids = self.success_seeds[indices]
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
+                self._current_seed_index = (self._current_seed_index + self.num_group) % total_seeds
             else:
                 reset_state_ids = torch.randint(
                     low=10000,
