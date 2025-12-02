@@ -49,7 +49,7 @@ def make_env():
             return get_env(Path(path) / "validation", show_gui=False)
         except Exception:
             continue
-    raise RuntimeError(f"Please download your calvin_debug_dataset from https://github.com/mees/calvin#computer--quick-start")
+    raise RuntimeError(f"Please download the calvin_debug_dataset from https://github.com/mees/calvin#computer--quick-start with `sh download_data.sh debug`.")
 
 
 class CalvinBenchmark:
