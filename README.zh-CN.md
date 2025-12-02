@@ -69,6 +69,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为利用强化学习进�
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/behavior.html">BEHAVIOR</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/metaworld.html">MetaWorld</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/isaaclab.html">IsaacLab</a> ✅</li>
+          <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/calvin.html">CALVIN</a> ✅</li>
           <li>RoboCasa</li>
           <li>More...</li>
         </ul>

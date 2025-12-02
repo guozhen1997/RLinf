@@ -69,6 +69,7 @@ RLinf is a flexible and scalable open-source infrastructure designed for post-tr
           <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/behavior.html">BEHAVIOR</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/metaworld.html">MetaWorld</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/isaaclab.html">IsaacLab</a> ✅</li>
+          <li><a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/calvin.html">CALVIN</a> ✅</li>
           <li>RoboCasa</li>
           <li>More...</li>
         </ul>
