@@ -95,10 +95,9 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
     def fit(self):
         """Main training loop"""
         num_epochs = getattr(self.cfg, "num_epochs", 1)
-        self.load_fsdp_param_and_grad(self.device)
-        self.load_fsdp_optimizer(self.device)
+        self.load_param_and_grad(self.device)
+        self.load_optimizer(self.device)
         self.model.train()
-        print(self.model)
 
         self.gradient_accumulation = (
             self.cfg.global_batch_size

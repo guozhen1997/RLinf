@@ -3,6 +3,7 @@ defaults:
 
 TASK_NAME: PandaPutOnPlateInScene25Simple-v1
 CKPT_PATH: "/mnt/mnt/public/shiliangzhi/work-space/sft-pretrained/sim-real/${TASK_NAME}"
+  #CKPT_PATH: "/mnt/mnt/public/xusi/models/openpi/" #"/mnt/mnt/public/shiliangzhi/work-space/sft-pretrained/sim-real/${TASK_NAME}"
 hydra:
   run:
     dir: .
@@ -11,7 +12,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    sft: all
+    sft: 0-3
 
 runner:
   task_type: sft #reasoning
@@ -27,9 +28,9 @@ data:
   dataset_name: robo2vlm
   max_prompt_length: 1024
   filter_prompt_by_length: True
-  rollout_batch_size: 2
+  rollout_batch_size: 1
   val_rollout_batch_size: null
-  num_workers: 2
+  num_workers: 1
   # XXX Missing max_length
   max_length: 1024
   prompt_key: "question"
@@ -61,11 +62,11 @@ sft:
 
   checkpoint_load_path: ${CKPT_PATH} # null
   checkpoint_save_path: "/mnt/mnt/public/tangyueran/result"
-  global_batch_size: 2
-  micro_batch_size: 2
+  global_batch_size: 1
+  micro_batch_size: 1
 
   # XXX Missing batch_size
-  batch_size: 2
+  batch_size: 1
   seed: 1234
   model:
     model_name: "openpi"
