@@ -120,17 +120,6 @@ class IsaaclabBaseEnv(gym.Env):
         return obs, infos
 
     def step(self, actions=None, auto_reset=True):
-        # There will be an empty step when running env worker.
-        if actions is None:
-            assert self._is_start, "Actions must be provided after the first reset."
-        if self.is_start:
-            obs, infos = self.reset()
-            self._is_start = False
-
-            terminations = torch.zeros(self.num_envs, dtype=torch.bool).to(self.device)
-            truncations = torch.zeros(self.num_envs, dtype=torch.bool).to(self.device)
-
-            return obs, None, terminations, truncations, infos
 
         obs, step_reward, terminations, truncations, infos = self.env.step(actions)
 

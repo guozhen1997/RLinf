@@ -311,14 +311,17 @@ class MetaWorldEnv(gym.Env):
         self,
         env_idx: Optional[Union[int, list[int], np.ndarray]] = None,
         reset_state_ids=None,
-        options: Optional[dict] = {},
     ):
         if env_idx is None:
             env_idx = np.arange(self.num_envs)
 
         if reset_state_ids is None:
-            num_reset_states = len(env_idx)
-            reset_state_ids = self._get_random_reset_state_ids(num_reset_states)
+            if self.is_start:
+                reset_state_ids = self.reset_state_ids if self.use_fixed_reset_state_ids else None
+                self._is_start = False
+            else:
+                num_reset_states = len(env_idx)
+                reset_state_ids = self._get_random_reset_state_ids(num_reset_states)
 
         self._reconfigure(reset_state_ids, env_idx)
 
@@ -343,19 +346,6 @@ class MetaWorldEnv(gym.Env):
         return obs, infos
 
     def step(self, actions=None, auto_reset=True):
-        if actions is None:
-            assert self._is_start, "Actions must be provided after the first reset."
-        if self.is_start:
-            obs, infos = self.reset(
-                reset_state_ids=self.reset_state_ids
-                if self.use_fixed_reset_state_ids
-                else None
-            )
-            self._is_start = False
-            terminations = np.zeros(self.num_envs, dtype=bool)
-            truncations = np.zeros(self.num_envs, dtype=bool)
-
-            return obs, None, to_tensor(terminations), to_tensor(truncations), infos
 
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().numpy()

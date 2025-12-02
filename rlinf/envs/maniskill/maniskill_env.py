@@ -220,8 +220,11 @@ class ManiskillEnv(gym.Env):
         self,
         *,
         seed: Optional[Union[int, list[int]]] = None,
-        options: Optional[dict] = {},
+        options: Optional[dict] = None,
     ):
+        if options is None:
+            seed = self.seed
+            options = {"episode_id": self.reset_state_ids} if self.use_fixed_reset_state_ids else {}
         raw_obs, infos = self.env.reset(seed=seed, options=options)
         extracted_obs = self._wrap_obs(raw_obs)
         if "env_idx" in options:
@@ -234,26 +237,6 @@ class ManiskillEnv(gym.Env):
     def step(
         self, actions: Union[Array, dict] = None, auto_reset=True
     ) -> tuple[Array, Array, Array, Array, dict]:
-        if actions is None:
-            assert self._is_start, "Actions must be provided after the first reset."
-        if self.is_start:
-            extracted_obs, infos = self.reset(
-                seed=self.seed,
-                options={"episode_id": self.reset_state_ids}
-                if self.use_fixed_reset_state_ids
-                else {},
-            )
-            self._is_start = False
-            terminations = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            truncations = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            if self.video_cfg.save_video:
-                self.add_new_frames(infos=infos)
-            return extracted_obs, None, terminations, truncations, infos
-
         raw_obs, _reward, terminations, truncations, infos = self.env.step(actions)
         extracted_obs = self._wrap_obs(raw_obs)
         step_reward = self._calc_step_reward(_reward, infos)

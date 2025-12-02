@@ -140,11 +140,13 @@ class EnvWorker(Worker):
         """Initialize the training environments and store the initial observations and done signals."""
         for i in range(self.num_pipeline_stages):
             self.train_env_list[i].start_env()
-            extracted_obs, rewards, terminations, truncations, infos = (
-                self.train_env_list[i].step()
+            extracted_obs, _ = self.train_env_list[i].reset()
+            dones = (
+                torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
+                .unsqueeze(1)
+                .repeat(1, self.cfg.actor.model.num_action_chunks)
             )
             self.last_obs_list.append(extracted_obs)
-            dones = torch.logical_or(terminations, truncations)
             self.last_dones_list.append(
                 dones.unsqueeze(1).repeat(1, self.cfg.actor.model.num_action_chunks)
             )
