@@ -1,0 +1,169 @@
+defaults:
+  - override hydra/job_logging: stdout
+
+TASK_NAME: PandaPutOnPlateInScene25Simple-v1
+CKPT_PATH: "/mnt/mnt/public/shiliangzhi/work-space/sft-pretrained/sim-real/${TASK_NAME}"
+  #CKPT_PATH: "/mnt/mnt/public/xusi/models/openpi/" #"/mnt/mnt/public/shiliangzhi/work-space/sft-pretrained/sim-real/${TASK_NAME}"
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    sft: 0-3
+
+runner:
+  task_type: sft #reasoning
+  logger:
+    log_path: ${runner.output_dir}/${runner.experiment_name}
+    project_name: rlinf
+  experiment_name: sft-openpi
+  output_dir: ../results
+
+data:
+  type: openpi
+  data_id: slzhta/pick_to_plate_real 
+  dataset_name: robo2vlm
+  max_prompt_length: 1024
+  filter_prompt_by_length: True
+  rollout_batch_size: 1
+  val_rollout_batch_size: null
+  num_workers: 1
+  # XXX Missing max_length
+  max_length: 1024
+  prompt_key: "question"
+  response_key: "question"
+  image_keys: ["image"] # some vlm datasets may have multiple image columns
+  choice_key: "choices"
+  answer_key: "correct_answer"
+  solution_key: "solution"
+  use_chat_template: True
+  lazy_loading: True
+  shuffle: True
+  validation_shuffle: True
+  seed: 1234
+    #data_path: "/mnt/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
+  data_path: "/mnt/mnt/public/shiliangzhi/.cache/huggingface/lerobot/slzhta/pick_to_plate_real" #"/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data"
+    #data_paths: ["/mnt/public/tangyueran/keplerccc/Robo2VLM-1/"]
+    #data_paths: ["/mnt/public/guozhen/data/boba_106k_0319_prompt_1024.jsonl"]
+    #data_paths: ["/mnt/public/guozhen/data/test.jsonl"]
+    # XXX 1:robo2vlm has no train/val datasests.
+    # XXX 2:sft cannot create rl dataset, train and val dataset not set
+  train_data_paths: ["/mnt/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data/train/"]
+  val_data_paths: ["/mnt/mnt/public/tangyueran/keplerccc/Robo2VLM-1/data/val/"]
+
+
+sft:
+  data: ${data}
+  group_name: "SFTGroup"
+  training_backend: fsdp
+
+  checkpoint_load_path: ${CKPT_PATH} # null
+  checkpoint_save_path: "/mnt/mnt/public/tangyueran/result"
+  global_batch_size: 1
+  micro_batch_size: 1
+
+  # XXX Missing batch_size
+  batch_size: 1
+  seed: 1234
+  model:
+    model_name: "openpi"
+    precision: "fp32"
+    num_action_chunks: 5 # interface for the env
+    action_dim: 7
+    is_lora: False
+    num_images_in_input: 1        # Tonghe changed from 2 in libero to 1 in maniskill, as only 3rd person top view rgb are used. 
+    use_proprio: True           
+    num_steps: 10
+    logprob_gather_mode: "raw"
+    # openpi specific parameters
+    openpi:
+      simulator: maniskill
+      noise_level: 0.5
+      action_chunk: 1 #${actor.model.num_action_chunks}
+      num_steps: 1 # ${actor.model.num_steps}
+      train_expert_only: True
+      action_env_dim: 1 #${actor.model.action_dim}
+      noise_method: "reinflow"    # Tonghe changed from flow_sde
+      noise_anneal: False         # Tonghe appended, but we turn it off currently. 
+      action_horizon: 16           # Tonghe: changed from sft 5 to 8. 
+      noise_params: [0.16, 0.12, 200] # Tonghe appended. noise_start, noise_end, anneal_steps
+      adv_method: ppo
+      detach_critic_input: True
+      value_after_vlm: False      # pi0: False. pi0.5: True
+      joint_logprob: True
+    # For maniskill
+    policy_setup: panda_wristcam
+
+
+  runner: ${runner}
+  optim:
+    optimizer: adam
+    bf16: False #False
+    fp16: False #True
+    lr: 2e-05
+    value_lr: 3.0e-3
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-05
+    min_lr: 2.0e-6
+    weight_decay: 0.05
+    use_distributed_optimizer: True
+    overlap_grad_reduce: False
+    overlap_param_gather: False
+    optimizer_enable_pin: false
+    overlap_param_gather_with_optimizer_step: False
+    clip_grad: 0.8
+    loss_scale: 65536
+
+  lr_sched:
+    lr_warmup_fraction: 0.01
+    lr_warmup_init: 0.0
+    lr_warmup_iters: 0
+    max_lr: 2.0e-5
+    min_lr: 0.0
+    lr_decay_style: constant
+    lr_decay_iters: 10
+  tokenizer:
+    tokenizer_model: /mnt/mnt/public/mjwei/download_models/openvla/openvla-7b/ #/mnt/public/tangyueran/Qwen/Qwen2.5-VL-3B-Instruct/
+    use_fast: False
+    trust_remote_code: True
+    padding_side: 'right'
+
+  fsdp_config:                  # below are fsdp configs, for more details, see https://pytorch.org/docs/stable/fsdp.html and https://huggingface.co/docs/accelerate/package_reference/fsdp
+
+    strategy: "fsdp"            # FSDP strategy: ["fsdp", "fsdp2"]
+
+    # Sharding strategy: "full_shard" (shard parameters, gradients, optimizer states),
+    # "shard_grad_op" (shard gradients and optimizer states only), 
+    # "hybrid_shard" (combines data parallelism and model parallelism - sharding within FSDP groups, replicate across DDP groups),
+    # "no_shard" (no sharding)
+    sharding_strategy: "full_shard" 
+
+    cpu_offload: False           # whether to offload parameters and gradients to CPU when not in use，if True, actor's enable_offload should be True too.
+    offload_pin_memory: False    # whether FSDP2's CPU offload policy should pin memory when cpu_offload is True
+    reshard_after_forward: True  # if True, FSDP2 will reshard parameters after forward pass to save memory
+
+    enable_gradient_accumulation: True  # if True, gradient accumulation will be enabled for FSDP/FSDP2 training, which will enhance training performance but increase memory usage.
+    forward_prefetch: False             # if True, FSDP will explicitly prefetches the next upcoming all-gather while executing in the forward pass. only use with static graphs. Overlaps communication with computation to improve performance.
+    limit_all_gathers: False            # if True, FSDP will synchronizes CPU threads to limit the number of concurrent all-gathers. Only affects strategies that schedule all-gathers
+    backward_prefetch: null             # options are null, 'pre', 'post'. if 'pre', FSDP will prefetch the next upcoming all-gather while computing gradients. if 'post', FSDP will prefetch the next all-gather until current gradient is computed.
+    use_orig_params: False              # if True, FSDP will use module's original parameters, it means it will expose nn.Module.named_parameters rather than FlatParameter
+    use_liger_kernel: False             # if True, liger_kernel will be used for FSDP, note that currently supported models in RLinf are [qwen2.5, qwen2.5-vl], for more details, see liger_kernel's doc
+
+    fsdp_size: -1               # Number of GPUs per FSDP group for hybrid sharding. -1 means use all available GPUs in a single FSDP group
+
+    mixed_precision:            # mixed precision settings for fsdp/fsdp2
+      param_dtype: "fp32"
+      reduce_dtype: "fp32"
+      buffer_dtype: "fp32"
+
+    amp:
+      enabled: False                 # if True, automatic mixed precision (AMP) will be used in FSDP/FSDP2 training.
+      precision: "fp32"              # precision for AMP, options are ["fp16" , "bf16"]
+      use_grad_scaler: False         # if True, GradScaler will be used for AMP training to prevent underflow.
+
+critic:
+  use_critic_model: False

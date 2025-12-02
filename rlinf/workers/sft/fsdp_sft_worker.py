@@ -11,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import os
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from torch.utils.data import DistributedSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from rlinf.data.datasets.sft import SFTDataset
+from rlinf.data.datasets.sft import SFTDataset, LeRobotDataset
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
 from rlinf.scheduler import Worker
@@ -30,17 +30,24 @@ from rlinf.utils.metric_utils import (
 )
 from rlinf.utils.placement import HybridComponentPlacement
 
-
 class FSDPSFTWorker(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig, placement: HybridComponentPlacement):
         Worker.__init__(self)
-        super().__init__(cfg.sft)
-
+        super().__init__(cfg.sft, world_size=self._world_size,rank=self._rank)
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+        self.device=torch.cuda.current_device()
         self.cfg = cfg.sft
         self.placement = placement
 
         # Initialize dataset
-        self.dataset = SFTDataset(self.cfg.data, self.tokenizer)
+        if self.cfg.data.type == 'openpi':
+            #import openpi.training.data_loader as openpi_data_loader
+            #import openpi.training.config as openpi_config
+            #dataloader_config = openpi_config.get_config("pi0_maniskill")
+            #self.dataloader = openpi_data_loader.create_data_loader(dataloader_config, framework='pytorch', shuffle=True)
+            self.dataset = LeRobotDataset(self.cfg.data)
+        else:
+            self.dataset = SFTDataset(self.cfg.data, self.tokenizer)
 
         # Create distributed sampler
         self.distributed_sampler = DistributedSampler(
@@ -52,18 +59,19 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
 
         # Initialize dataloader
         self.dataloader = StatefulDataLoader(
-            dataset=self.dataset,
-            batch_size=self.cfg.batch_size,
-            sampler=self.distributed_sampler,
-            num_workers=getattr(self.cfg.data, "num_workers", 0),
-            pin_memory=getattr(self.cfg.data, "pin_memory", False),
-            persistent_workers=getattr(self.cfg.data, "persistent_workers", False),
-            prefetch_factor=getattr(self.cfg.data, "prefetch_factor", 2),
-            num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
-        )
+                dataset=self.dataset,
+                batch_size=self.cfg.batch_size,
+                sampler=self.distributed_sampler,
+                num_workers=getattr(self.cfg.data, "num_workers", 0),
+                pin_memory=getattr(self.cfg.data, "pin_memory", False),
+                persistent_workers=getattr(self.cfg.data, "persistent_workers", False),
+                prefetch_factor=getattr(self.cfg.data, "prefetch_factor", 2),
+                #num_prefetch_batches=getattr(self.cfg.data, "num_prefetch_batches", 1),
+            )
 
         if self._rank == 0:
-            self.metric_logger = MetricLogger(self.cfg.log_dir)
+            # XXX MegticLogger use cfg instead of dir
+            self.metric_logger = MetricLogger(self.cfg)
         else:
             self.metric_logger = None
 
@@ -74,33 +82,37 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
         self.timer = ScopedTimer(reduction="max", sync_cuda=False)
 
     def model_provider_func(self):
-        model = get_model(self.cfg.sft.checkpoint_load_path, self.cfg.sft.model)
+        # XXX self.cfg = cfg.sft
+        model = get_model(self.cfg.checkpoint_load_path, self.cfg.model)
         if model is not None:
             return model
         return super().model_provider_func()
 
     def init_worker(self):
         self.setup_model_and_optimizer()
+        #self.load_checkpoint(os.path.join(self.cfg.checkpoint_load_path, "Null"))
 
     def fit(self):
         """Main training loop"""
         num_epochs = getattr(self.cfg, "num_epochs", 1)
+        self.load_param_and_grad(self.device)
+        self.load_optimizer(self.device)
+        self.model.train()
 
         self.gradient_accumulation = (
-            self.cfg.sft.global_batch_size
-            // self.cfg.sft.micro_batch_size
+            self.cfg.global_batch_size
+            // self.cfg.micro_batch_size
             // self._world_size
         )
 
         for epoch in range(num_epochs):
             self.epoch = epoch
             self.distributed_sampler.set_epoch(epoch)
-
+            
             for step, global_batch in enumerate(self.dataloader):
-                # split global_batch into micro_batches
                 micro_batches = get_iterator_k_split(
                     global_batch,
-                    self.cfg.sft.global_batch_size // self.cfg.actor.micro_batch_size,
+                    self.cfg.global_batch_size // self.cfg.micro_batch_size,
                 )
 
                 metrics = {}
@@ -110,14 +122,18 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
                             self.model,
                             is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
                         )
-                        m_batch = self._prepare_batch(m_batch)
+                        observation, actions = self._prepare_batch(m_batch)
+                        m_data = dict(observation=observation, actions=actions)
+                        sft_losses = self.model(data=m_data, mode="sft")
+                        # Ensure losses is a tensor and handle different return types
+                        if isinstance(sft_losses, list | tuple):
+                            sft_losses = torch.stack(sft_losses)
+                        elif not isinstance(sft_losses, torch.Tensor):
+                            sft_losses = torch.tensor(sft_losses, device=self.device, dtype=torch.float32)
 
-                        outputs = self.model(**m_batch)
-                        loss = (
-                            outputs.loss
-                            if hasattr(outputs, "loss")
-                            else self._compute_loss(outputs, m_batch["labels"])
-                        )
+                        sft_loss = sft_losses.mean()
+                        total_loss = sft_loss * 0.1
+                        loss = total_loss
 
                         # scale loss for gradient accumulation and backprop
                         loss = loss / self.gradient_accumulation
@@ -171,6 +187,8 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
 
     def _prepare_batch(self, batch):
         """Prepare batch for training"""
+        if self.cfg.data.type == 'openpi':
+            return self.dataset.prepare_batch(batch)
         if isinstance(batch, list):
             # Handle batched data
             batch = {
@@ -181,10 +199,13 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
                     [item["attention_mask"] for item in batch], dtype=torch.long
                 ),
                 "labels": torch.tensor(
-                    [item["labels"] for item in batch], dtype=torch.long
+                    [item["position_ids"] for item in batch], dtype=torch.long
+                    #[item["labels"] for item in batch], dtype=torch.long
                 ),
             }
-
+        else:
+            batch["labels"] = batch['position_ids']
+            batch = {"labels":batch["labels"], "input_ids":batch["input_ids"], "attention_mask":batch["attention_mask"]}
         # Move to device
         batch = {
             k: v.cuda() if isinstance(v, torch.Tensor) else v for k, v in batch.items()

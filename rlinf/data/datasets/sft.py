@@ -13,26 +13,119 @@
 # limitations under the License.
 
 import json
-
+import os
 import torch
+import jax
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
+from datasets import load_dataset, load_from_disk
+import lerobot.common.datasets.lerobot_dataset as lerobot_datasets
+import openpi.models.model as _model
 
+try:
+    from omnigibson.learning.datas.lerobot_dataset import BehaviorLeRobotDataset
+except ImportError as e:
+    print("[Warning]: cannot import omnigibson for Behavior env. Datasets from Behavior are not available")
 
 def compute_position_id_with_mask(mask):
     return torch.clip(torch.cumsum(mask, dim=-1) - 1, min=0, max=None)
+
+class LeRobotDataset(Dataset):
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
+        self.data = lerobot_datasets.LeRobotDataset(self.cfg.data_id, self.cfg.data_path)
+        #if jax_format:
+        #    self.data = jax.tree.map(lambda x: self.data[x], self.data)
+        print(self.data)
+    
+    def __getitem__(self, idx):
+        return self.data[idx]
+    
+    def prepare_batch(self, batch):
+        if self.cfg.type == "openpi":
+            data = batch
+            actions = data['actions']
+            data = {'image':{'base_0_rgb':data['observation.images.image'].cuda().requires_grad_(True),
+                             "left_wrist_0_rgb":data['observation.images.wrist_image'].cuda().requires_grad_(True),
+                             'right_wrist_0_rgb':data['observation.images.wrist_image'].cuda().requires_grad_(True),
+                             },
+                    'image_mask':{
+                        'base_0_rgb':torch.tensor([True]*(data["observation.images.image"].shape[0])).cuda(),
+                        'left_wrist_0_rgb':torch.tensor([True]*(data["observation.images.image"].shape[0])).cuda(),
+                        'right_wrist_0_rgb':torch.tensor([True]*(data["observation.images.image"].shape[0])).cuda()
+                        },
+                    'state':data['state'].cuda().requires_grad_(True)} # 'actions':data['actions']}
+            not_tensor_keys = ['task']
+            item = _model.Observation.from_dict({k:v for k,v in data.items() if k not in not_tensor_keys})
+            return item, actions
+        else:
+            return batch
+    
+    def __len__(self):
+        """Return the length of the dataset"""
+        return len(self.data)
 
 
 class SFTDataset(Dataset):
     def __init__(self, cfg: DictConfig, tokenizer):
         self.tokenizer = tokenizer
         self.cfg = cfg
+        #self._load_data()
         self.data = self._load_data()
 
         self.prompt_key = cfg.prompt_key
         self.response_key = cfg.response_key
 
         self.max_length = cfg.max_length
+
+
+    def _expand_data_paths(self, inputs: list[str]) -> list[str]:
+        exts = {".jsonl", ".json", ".parquet"}
+        files: list[str] = []
+        for p in inputs:
+            if os.path.isdir(p):
+                for root, _, fnames in os.walk(p):
+                    for fn in fnames:
+                        ext = os.path.splitext(fn)[1].lower()
+                        if ext in exts:
+                            files.append(os.path.join(root, fn))
+            else:
+                files.append(p)
+        files = sorted(set(files))
+        return files
+
+    # TODO(tyr): Add lazy load in future.
+    def _eager_load_all(self) -> None:
+        merged: list[dict[str, Any]] = []
+        for path in self.data_paths:
+            fmt = os.path.splitext(path)[1].lower()
+            if fmt == ".jsonl":
+                with open(path, "r", encoding="utf-8") as f:
+                    merged.extend(json.loads(l) for l in f)
+            elif fmt == ".json":
+                with open(path, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    if isinstance(content, list):
+                        merged.extend(content)
+                    else:
+                        merged.append(content)
+            elif fmt == ".parquet":
+                try:
+                    merged.extend(pd.read_parquet(path).to_dict(orient="records"))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load parquet eagerly: {path}: {e}")
+            else:
+                logging.warning(f"Unsupported format {fmt} for path {path}, skipping.")
+        self._records = merged
+        # Build indices for consistency
+        self._indices = [("", "eager", i) for i in range(len(self._records))]
+
+    # Eager load
+    def _load_data_in(self):
+        """Load data from dirs or paths"""
+        raw_paths = [self.cfg.data_paths] if isinstance(self.cfg.data_paths, str) else self.cfg.data_paths
+        self.data_paths = self._expand_data_paths(raw_paths)
+        self._eager_load_all()
 
     def _load_data(self):
         """Load data from specified paths"""

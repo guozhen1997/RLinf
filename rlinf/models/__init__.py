@@ -171,7 +171,6 @@ def get_model(model_path, cfg: DictConfig, override_config_kwargs=None):
         model.vision_backbone.set_num_images_in_input(cfg.get("num_images_in_input", 1))
 
         model.to(torch_dtype)
-
     elif cfg.model_name == "openpi":
         import openpi.shared.download as download
         import openpi.transforms as transforms

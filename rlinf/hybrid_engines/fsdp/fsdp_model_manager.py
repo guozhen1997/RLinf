@@ -35,7 +35,7 @@ from rlinf.hybrid_engines.fsdp.utils import (
     get_lr_scheduler,
 )
 from rlinf.utils.logging import get_logger
-
+from rlinf.utils.utils import clear_memory
 
 class FSDPModelManager:
     """
@@ -316,7 +316,7 @@ class FSDPModelManager:
         Offload optimizer states to CPU.
         """
         self._strategy.offload_optimizer(self.optimizer)
-
+    
     def load_optimizer(self, device_id: int) -> None:
         """
         Load optimizer states to the specified device.

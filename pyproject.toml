@@ -36,6 +36,7 @@ dependencies = [
     "word2number",
     "regex",
     "scipy",
+    "lerobot",
 
     # Utilities
     "hydra-core==1.4.0.dev1",
