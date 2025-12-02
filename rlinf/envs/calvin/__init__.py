@@ -41,7 +41,10 @@ def _get_calvin_tasks_and_reward(num_sequences, use_random_seed=True):
 
 
 def make_env():
+    # Get current file directory
+    current_dir = Path(__file__).parent
     dataset_paths = [
+        str(current_dir / "calvin_debug_dataset"),
         "calvin_debug_dataset/",
     ]
     for path in dataset_paths:
