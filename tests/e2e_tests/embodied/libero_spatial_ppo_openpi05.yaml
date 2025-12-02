@@ -26,6 +26,7 @@ runner:
   max_epochs: 1
   max_steps: -1
 
+  only_eval: False
   val_check_interval: -1
   save_interval: 40
   seq_length: 4096

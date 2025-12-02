@@ -222,7 +222,7 @@ class EnvManager:
             self.env = None
         else:
             self.env_cls = env_cls
-            self.env = self.env_cls(self.cfg, seed_offset, total_num_processes)
+            self.env = self.env_cls(cfg, num_envs, seed_offset, total_num_processes)
 
     @classmethod
     def register_env(cls, env_name: str):
@@ -360,6 +360,7 @@ class EnvManager:
         if name in [
             "cfg",
             "rank",
+            "num_envs",
             "seed_offset",
             "total_num_processes",
             "process",
@@ -405,6 +406,7 @@ class EnvManager:
 def _simulator_worker(
     cfg,
     rank,
+    num_envs,
     seed_offset,
     total_num_processes,
     env_cls,
@@ -425,7 +427,7 @@ def _simulator_worker(
     omegaconf_register()
 
     try:
-        simulator = env_cls(cfg, seed_offset, total_num_processes)
+        simulator = env_cls(cfg, num_envs, seed_offset, total_num_processes)
         assert isinstance(simulator, EnvOffloadMixin), (
             f"Environment class {env_cls.__name__} must inherit from EnvOffloadMixin"
         )
