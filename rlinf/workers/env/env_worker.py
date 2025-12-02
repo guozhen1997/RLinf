@@ -94,11 +94,12 @@ class EnvWorker(Worker):
         enable_offload = self.cfg.env.enable_offload
         total_num_processes = self._world_size * self.num_pipeline_stages
         only_eval = getattr(self.cfg.runner, "only_eval", False)
+        enable_eval = self.cfg.runner.val_check_interval > 0 or only_eval
         if not only_eval:
             self.train_num_envs_per_stage = (
                 self.cfg.env.train.total_num_envs // self._world_size // self.stage_num
             )
-        else:
+        if enable_eval:
             self.eval_num_envs_per_stage = (
                 self.cfg.env.eval.total_num_envs // self._world_size // self.stage_num
             )
@@ -118,7 +119,7 @@ class EnvWorker(Worker):
                         enable_offload=enable_offload,
                     )
                 )
-            if self.cfg.runner.val_check_interval > 0 or self.eval_only:
+            if enable_eval:
                 self.eval_env_list.append(
                     EnvManager(
                         self.cfg,
@@ -342,7 +343,7 @@ class EnvWorker(Worker):
                 self.put_batch(output_channel, env_output)
                 env_output_list.append(env_output)
 
-            for _ in range(self.cfg.algorithm.n_chunk_steps):
+            for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     # Retrieve actions from the RolloutWorker
                     self.device_lock.release()  # Release lock to allow RolloutWorker to run

@@ -147,7 +147,7 @@ class BehaviorEnv(gym.Env):
     def reset(self):
         raw_obs, infos = self.env.reset()
         obs = self._wrap_obs(raw_obs)
-        rewards = torch.zeros(self.cfg.num_envs, dtype=bool)
+        rewards = torch.zeros(self.num_envs, dtype=bool)
         infos = self._record_metrics(rewards, infos)
         self._reset_metrics()
         return obs, infos

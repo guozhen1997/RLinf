@@ -684,10 +684,12 @@ def validate_embodied_cfg(cfg):
     assert cfg.env.train.total_num_envs % env_world_size == 0, (
         "Total number of parallel environments for training must be divisible by the number of environment processes"
     )
-    if stage_num > 1:
-        assert cfg.env.train.total_num_envs % env_world_size % stage_num == 0, (
-            "Total number of parallel environments for training must be divisible by the number of environment processes and the number of pipeline stages"
-        )
+    assert cfg.env.train.total_num_envs % env_world_size % stage_num == 0, (
+        "Total number of parallel environments for training must be divisible by the number of environment processes and the number of pipeline stages"
+    )
+    assert cfg.env.train.total_num_envs // env_world_size // stage_num > 0, (
+        "env.train.total_num_envs // env_world_size // rollout.pipeline_stage_num must be greater than 0"
+    )
 
     if cfg.runner.val_check_interval > 0 or cfg.runner.only_eval:
         assert cfg.env.eval.total_num_envs > 0, (
@@ -696,10 +698,12 @@ def validate_embodied_cfg(cfg):
         assert cfg.env.eval.total_num_envs % env_world_size == 0, (
             "Total number of parallel environments for evaluation must be divisible by the number of environment processes"
         )
-        if stage_num > 1:
-            assert cfg.env.eval.total_num_envs % env_world_size % stage_num == 0, (
-                "Total number of parallel environments for evaluation must be divisible by the number of environment processes and the number of pipeline stages"
-            )
+        assert cfg.env.eval.total_num_envs % env_world_size % stage_num == 0, (
+            "Total number of parallel environments for evaluation must be divisible by the number of environment processes and the number of pipeline stages"
+        )
+        assert cfg.env.eval.total_num_envs // env_world_size // stage_num > 0, (
+            "env.eval.total_num_envs // env_world_size // rollout.pipeline_stage_num must be greater than 0"
+        )
 
     with open_dict(cfg):
         if cfg.env.train.simulator_type == "maniskill":
