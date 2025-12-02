@@ -34,18 +34,10 @@ runner:
   resume_dir: null
 
 algorithm:
-  auto_reset: False
-  ignore_terminations: False
-  use_fixed_reset_state_ids: True
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
-  max_episode_steps: 320
-  use_ordered_reset_state_ids: False
   reward_coef: 1.0
   group_size: 1
-  n_chunk_steps: 64
-  n_eval_chunk_steps: 64
-  num_group_envs: 64
   rollout_epoch: 8
   reward_type: chunk_level
   logprob_type: chunk_level
@@ -89,6 +81,11 @@ algorithm:
 env:
   group_name: "EnvGroup"
   enable_offload: False
+
+  # Override the default values in env/train or env/eval
+  train:
+    total_num_envs: 64
+    max_episode_steps: 320
 
 rollout:
   group_name: "RolloutGroup"

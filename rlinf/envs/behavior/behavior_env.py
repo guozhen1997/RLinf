@@ -45,8 +45,12 @@ __all__ = ["BehaviorEnv"]
 
 
 class BehaviorEnv(gym.Env):
-    def __init__(self, cfg, seed_offset, total_num_processes, record_metrics=True):
+    def __init__(
+        self, cfg, num_envs, seed_offset, total_num_processes, record_metrics=True
+    ):
         self.cfg = cfg
+
+        self.num_envs = num_envs
         self.ignore_terminations = cfg.ignore_terminations
         self.seed_offset = seed_offset
         self.total_num_processes = total_num_processes
@@ -96,7 +100,7 @@ class BehaviorEnv(gym.Env):
     def _init_env(self):
         self._load_tasks_cfg()
         self.env = VectorEnvironment(
-            self.cfg.num_envs,
+            self.num_envs,
             OmegaConf.to_container(self.cfg.omnigibson_cfg, resolve=True),
         )
 
@@ -136,9 +140,7 @@ class BehaviorEnv(gym.Env):
             "wrist_images": torch.stack(
                 [obs["wrist_images"] for obs in extracted_obs_list], axis=0
             ),  # [N_ENV, N_IMG, C, H, W]
-            "task_descriptions": [
-                self.task_description for i in range(self.cfg.num_envs)
-            ],
+            "task_descriptions": [self.task_description for i in range(self.num_envs)],
         }
         return obs
 
@@ -157,8 +159,8 @@ class BehaviorEnv(gym.Env):
             assert self._is_start, "Actions must be provided after the first reset."
             obs, infos = self.reset()
             terminations, truncations = (
-                torch.zeros(self.cfg.num_envs, dtype=bool),
-                torch.zeros(self.cfg.num_envs, dtype=bool),
+                torch.zeros(self.num_envs, dtype=bool),
+                torch.zeros(self.num_envs, dtype=bool),
             )
             return obs, None, terminations, truncations, infos
         raw_obs, rewards, terminations, truncations, infos = self.env.step(actions)
@@ -288,24 +290,24 @@ class BehaviorEnv(gym.Env):
 
     def _init_metrics(self):
         self.success_once = torch.zeros(
-            self.cfg.num_envs, device=self.device, dtype=torch.bool
+            self.num_envs, device=self.device, dtype=torch.bool
         )
         self.fail_once = torch.zeros(
-            self.cfg.num_envs, device=self.device, dtype=torch.bool
+            self.num_envs, device=self.device, dtype=torch.bool
         )
         self.returns = torch.zeros(
-            self.cfg.num_envs, device=self.device, dtype=torch.float32
+            self.num_envs, device=self.device, dtype=torch.float32
         )
         self.prev_step_reward = torch.zeros(
-            self.cfg.num_envs, device=self.device, dtype=torch.float32
+            self.num_envs, device=self.device, dtype=torch.float32
         )
 
     def _reset_metrics(self, env_idx=None):
         if env_idx is not None:
-            mask = torch.zeros(self.cfg.num_envs, dtype=bool, device=self.device)
+            mask = torch.zeros(self.num_envs, dtype=bool, device=self.device)
             mask[env_idx] = True
         else:
-            mask = torch.ones(self.cfg.num_envs, dtype=bool, device=self.device)
+            mask = torch.ones(self.num_envs, dtype=bool, device=self.device)
         self.prev_step_reward[mask] = 0.0
         if self.record_metrics:
             self.success_once[mask] = False

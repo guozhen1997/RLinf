@@ -685,16 +685,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         self.rollout_batch["logprob"] = self.rollout_batch["prev_logprobs"]
 
     def compute_advantages_and_returns(self):
-        stage_num = self.cfg.rollout.pipeline_stage_num
-        env_world_size = self._component_placement.get_world_size("env")
-        actor_world_size = self._component_placement.get_world_size("actor")
-        num_group_envs_for_train = (
-            self.cfg.algorithm.num_group_envs
-            * stage_num
-            * env_world_size
-            // actor_world_size
-        )
-
         kwargs = {
             "task_type": self.cfg.runner.task_type,
             "adv_type": self.cfg.algorithm.adv_type,
@@ -703,12 +693,10 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             "values": self.rollout_batch.get("prev_values", None),
             "gamma": self.cfg.algorithm.get("gamma", 1),
             "gae_lambda": self.cfg.algorithm.get("gae_lambda", 1),
-            "num_group_envs": num_group_envs_for_train,
             "group_size": self.cfg.algorithm.get("group_size", 8),
             "reward_type": self.cfg.algorithm.reward_type,
             "loss_mask": self.rollout_batch.get("loss_mask", None),
             "loss_mask_sum": self.rollout_batch.get("loss_mask_sum", None),
-            "rollout_epoch": self.cfg.algorithm.get("rollout_epoch", 1),
         }
 
         advantages_and_returns = calculate_adv_and_returns(**kwargs)

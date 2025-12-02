@@ -41,15 +41,15 @@ from rlinf.envs.utils import (
 
 
 class LiberoEnv(gym.Env):
-    def __init__(self, cfg, seed_offset, total_num_processes):
+    def __init__(self, cfg, num_envs, seed_offset, total_num_processes):
         self.seed_offset = seed_offset
         self.cfg = cfg
         self.total_num_processes = total_num_processes
         self.seed = self.cfg.seed + seed_offset
         self._is_start = True
-        self.num_envs = self.cfg.num_envs
+        self.num_envs = num_envs
         self.group_size = self.cfg.group_size
-        self.num_group = self.cfg.num_group
+        self.num_group = self.num_envs // self.group_size
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
         self.specific_reset_id = cfg.get("specific_reset_id", None)
 
@@ -103,8 +103,8 @@ class LiberoEnv(gym.Env):
 
         task_descriptions = []
         if env_idx is None:
-            env_idx = np.arange(self.cfg.num_envs)
-        for env_id in range(self.cfg.num_envs):
+            env_idx = np.arange(self.num_envs)
+        for env_id in range(self.num_envs):
             if env_id not in env_idx:
                 task_descriptions.append(self.task_descriptions[env_id])
                 continue

@@ -38,15 +38,10 @@ runner:
 
 algorithm:
   update_epoch: 8
-  auto_reset: True
-  ignore_terminations: False
-  use_fixed_reset_state_ids: False
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  n_chunk_steps: 50
-  n_eval_chunk_steps: 50
-  num_group_envs: 1024
+
   rollout_epoch: 1
   reward_type: action_level
   logprob_type: action_level
@@ -85,6 +80,12 @@ algorithm:
 env:
   group_name: "EnvGroup"
   enable_offload: False
+
+  # Override the default values in env/train or env/eval
+  train:
+    total_num_envs: 1024
+    auto_reset: True
+    use_fixed_reset_state_ids: False
 
 rollout:
   group_name: "RolloutGroup"

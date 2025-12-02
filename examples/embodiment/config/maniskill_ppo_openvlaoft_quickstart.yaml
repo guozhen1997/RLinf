@@ -35,27 +35,15 @@ runner:
   resume_dir: null
 
 algorithm:
-  auto_reset: True
-  ignore_terminations: False
-  use_fixed_reset_state_ids: False
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  n_chunk_steps: 20
-  n_eval_chunk_steps: 10
-  # training rollout mbs
-  rollout_micro_batch_size: 64
-  num_group_envs: 8
+
   rollout_epoch: 1
 
   reward_type: action_level
   logprob_type: token_level
   entropy_type: token_level
-
-  # mbs to do log prob inference, can be set to
-  # lower than rollout_micro_batch_size to reduce
-  # memory usage
-  logprob_forward_micro_batch_size: 8 # ${.rollout_micro_batch_size}
 
   adv_type: gae
   loss_type: actor_critic
@@ -95,6 +83,13 @@ env:
     queue_name: "obs_buffer"
     queue_size: 0
   enable_offload: False
+
+  # Override the default values in env/train or env/eval
+  train:
+    total_num_envs: 8
+    auto_reset: True
+    use_fixed_reset_state_ids: False
+
 
 rollout:
   group_name: "RolloutGroup"

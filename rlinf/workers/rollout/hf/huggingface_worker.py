@@ -270,13 +270,18 @@ class MultiStepRolloutWorker(Worker):
             EmbodiedRolloutResult() for _ in range(self.num_pipeline_stages)
         ]
 
+        n_chunk_steps = (
+            self.cfg.env.train.max_episode_steps
+            // self.cfg.actor.model.num_action_chunks
+        )
+
         self.device_lock.acquire()
         for _ in tqdm(
             range(self.cfg.algorithm.rollout_epoch),
             desc="Generating Rollout Epochs",
             disable=(self._rank != 0),
         ):
-            for _ in range(self.cfg.algorithm.n_chunk_steps):
+            for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     # Get env output
                     self.device_lock.release()  # Release lock to allow EnvWorker to run
@@ -327,7 +332,11 @@ class MultiStepRolloutWorker(Worker):
         if self.enable_offload:
             self._load_model()
 
-        for _ in range(self.cfg.algorithm.n_eval_chunk_steps):
+        n_chunk_steps = (
+            self.cfg.env.eval.max_episode_steps
+            // self.cfg.actor.model.num_action_chunks
+        )
+        for _ in range(n_chunk_steps):
             for _ in range(self.num_pipeline_stages):
                 env_batch, env_outputs = self.get_batch(
                     input_channel, self.eval_num_groups_per_stage

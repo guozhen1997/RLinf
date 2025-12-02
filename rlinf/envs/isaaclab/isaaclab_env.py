@@ -19,6 +19,7 @@ from typing import Optional
 import gymnasium as gym
 import imageio
 import torch
+from omegaconf import open_dict
 
 from rlinf.envs.isaaclab.venv import SubProcIsaacLabEnv
 
@@ -32,12 +33,16 @@ class IsaaclabBaseEnv(gym.Env):
     def __init__(
         self,
         cfg,
+        num_envs,
         seed_offset,
         total_num_processes,
     ):
         self.cfg = cfg
         self.isaaclab_env_id = self.cfg.init_params.id
-        self.num_envs = cfg.init_params.num_envs
+        self.num_envs = num_envs
+
+        with open_dict(cfg):
+            cfg.init_params.num_envs = num_envs
         self.seed = self.cfg.seed + seed_offset
         self.total_num_processes = total_num_processes
         self.video_cfg = cfg.video_cfg

@@ -72,25 +72,36 @@ class EnvWorker(Worker):
 
         # Sanity checks
         assert (
-            self.train_batch_size_per_stage
-            == self.train_num_groups_per_stage * self.train_group_size
-        ), (
-            f"The train num_envs {self.train_batch_size_per_stage} does not match num_groups ({self.train_num_groups_per_stage}) * group_size ({self.train_group_size})."
+            self._component_placement.get_world_size("rollout")
+            % self._component_placement.get_world_size("env")
+            == 0
         )
-        assert (
-            self.eval_batch_size_per_stage
-            == self.eval_num_groups_per_stage * self.eval_group_size
-        ), (
-            f"The eval num_envs {self.eval_batch_size_per_stage} does not match num_groups ({self.eval_num_groups_per_stage}) * group_size ({self.eval_group_size})."
-        )
+        # gather_num: number of rollout for each env process
+        self.gather_num = self._component_placement.get_world_size(
+            "rollout"
+        ) // self._component_placement.get_world_size("env")
+        # stage_num: default to 2, use for pipeline rollout process
+        self.stage_num = self.cfg.rollout.pipeline_stage_num
 
-        # Used for pipelined rollout interactions
-        self.num_pipeline_stages = self.cfg.rollout.pipeline_stage_num
+        # only need rank0 to create channel
+        if self._rank == 0:
+            self.channel = self.create_channel(cfg.env.channel.name)
+        else:
+            self.channel = self.connect_channel(cfg.env.channel.name)
 
     def init_worker(self):
         """Create the environment instances for the EnvWorker and start the environments."""
         enable_offload = self.cfg.env.enable_offload
         total_num_processes = self._world_size * self.num_pipeline_stages
+        only_eval = getattr(self.cfg.runner, "only_eval", False)
+        if not only_eval:
+            self.train_num_envs_per_stage = (
+                self.cfg.env.train.total_num_envs // self._world_size // self.stage_num
+            )
+        else:
+            self.eval_num_envs_per_stage = (
+                self.cfg.env.eval.total_num_envs // self._world_size // self.stage_num
+            )
 
         for stage_id in range(self.num_pipeline_stages):
             seed_offset = self._rank * self.num_pipeline_stages + stage_id
@@ -99,6 +110,7 @@ class EnvWorker(Worker):
                     EnvManager(
                         self.cfg,
                         rank=self._rank,
+                        num_envs=self.train_num_envs_per_stage,
                         seed_offset=seed_offset,
                         total_num_processes=total_num_processes,
                         env_type=self.env_type,
@@ -111,6 +123,7 @@ class EnvWorker(Worker):
                     EnvManager(
                         self.cfg,
                         rank=self._rank,
+                        num_envs=self.eval_num_envs_per_stage,
                         seed_offset=seed_offset,
                         total_num_processes=total_num_processes,
                         env_type=self.env_type,
@@ -312,6 +325,11 @@ class EnvWorker(Worker):
         for env in self.train_env_list:
             env.start_env()
 
+        n_chunk_steps = (
+            self.cfg.env.train.max_episode_steps
+            // self.cfg.actor.model.num_action_chunks
+        )
+
         env_metrics = defaultdict(list)
         self.device_lock.acquire()
         for epoch in range(self.cfg.algorithm.rollout_epoch):
@@ -394,7 +412,11 @@ class EnvWorker(Worker):
 
         eval_metrics = defaultdict(list)
 
-        for eval_step in range(self.cfg.algorithm.n_eval_chunk_steps):
+        n_chunk_steps = (
+            self.cfg.env.eval.max_episode_steps
+            // self.cfg.actor.model.num_action_chunks
+        )
+        for eval_step in range(n_chunk_steps):
             for stage_id in range(self.num_pipeline_stages):
                 raw_chunk_actions = self.get_actions(
                     input_channel, stage_id, self.eval_num_groups_per_stage
@@ -405,7 +427,7 @@ class EnvWorker(Worker):
 
                 for key, value in env_info.items():
                     eval_metrics[key].append(value)
-                if eval_step == self.cfg.algorithm.n_eval_chunk_steps - 1:
+                if eval_step == n_chunk_steps - 1:
                     continue
                 self.put_batch(output_channel, env_output)
 

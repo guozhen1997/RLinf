@@ -807,15 +807,8 @@ algorithm
 .. code:: yaml
 
   algorithm:
-    auto_reset: True
-    ignore_terminations: True
-    use_fixed_reset_state_ids: False
     normalize_advantages: True
     kl_penalty: kl
-
-    n_chunk_steps: 10
-    n_eval_chunk_steps: 10
-    num_group_envs: 32
     rollout_epoch: 1
 
     reward_type: chunk_level
@@ -828,19 +821,7 @@ algorithm
       max_length: 1024
       min_length: 1
 
-``algorithm.auto_reset``: Automatically reset environments when episodes terminate.
-
-``algorithm.ignore_terminations``: Ignore episode terminations during training (if enabled, episode only ends when it reaches the ``max_episode_steps``).
-
-``algorithm.use_fixed_reset_state_ids``: Use fixed reset state IDs (false for randomization). Always True for GRPO, default be False for PPO.
-
 ``algorithm.normalize_advantages``: Normalize advantages across the batch.
-
-``algorithm.n_chunk_steps``: Number of chunks (i.e., times the model is called to predict action chunks) within one rollout epoch.
-
-``algorithm.n_eval_chunk_steps``: Number of chunks in evaluation.
-
-``algorithm.num_group_envs``: Number of environment groups.
 
 ``algorithm.rollout_epoch``: Number of rollout epochs per training step.
 
@@ -871,6 +852,20 @@ env
       queue_size: 0
     enable_offload: True
 
+    train:
+      total_num_envs: null
+      auto_reset: False
+      ignore_terminations: False
+      use_fixed_reset_state_ids: True
+      max_episode_steps: 10
+
+    eval:
+      total_num_envs: null
+      auto_reset: False
+      ignore_terminations: False
+      use_fixed_reset_state_ids: True
+      max_episode_steps: 10
+
 ``env.group_name``: Logical name for environment worker group.
 
 ``env.channel.name``: Shared memory channel name for inter-process communication.
@@ -880,6 +875,26 @@ env
 ``env.channel.queue_size``: Queue size (0 for unlimited).
 
 ``env.enable_offload``: Enable environment offloading to reduce memory usage.
+
+``env.train.total_num_envs``: Total number of parallel environments for training.
+
+``env.train.auto_reset``: Automatically reset environments when episodes terminate.
+
+``env.train.ignore_terminations``: Ignore episode terminations during training (if enabled, episode only ends when it reaches the ``max_episode_steps``).
+
+``env.train.use_fixed_reset_state_ids``: Use fixed reset state IDs (false for randomization). Always True for GRPO, default be False for PPO.
+
+``env.train.max_episode_steps``: Maximum number of steps per episode for training.
+
+``env.eval.total_num_envs``: Total number of parallel environments for evaluation.
+
+``env.eval.auto_reset``: Automatically reset environments when episodes terminate for evaluation.
+
+``env.eval.ignore_terminations``: Ignore episode terminations during evaluation (if enabled, episode only ends when it reaches the ``max_episode_steps`` for evaluation).
+
+``env.eval.use_fixed_reset_state_ids``: Use fixed reset state IDs (false for randomization). Always True for GRPO, default be False for PPO.
+
+``env.eval.max_episode_steps``: Maximum number of steps per episode for evaluation.
 
 rollout
 ~~~~~~~~~~~~~~~
@@ -1107,16 +1122,10 @@ The path is
 .. code:: yaml
 
   seed: 0
-  num_task: ${algorithm.num_group_envs}
-  num_group: ${algorithm.num_group_envs}
-  group_size: ${algorithm.group_size}
-  use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
+  group_size: 1
+  use_fixed_reset_state_ids: True
 
 ``seed``: Random seed for environment initialization (0 for reproducibility).
-
-``num_task``: Number of tasks to use (inherits from algorithm.num_group_envs).
-
-``num_group``: Number of environment groups (inherits from algorithm.num_group_envs).
 
 ``group_size``: Number of environments per group (inherits from algorithm.group_size).
 
@@ -1126,9 +1135,9 @@ The path is
 
 .. code:: yaml
 
-  num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
+  total_num_envs: null
 
-``num_envs``: Total number of environments (calculated as group_size × num_group_envs).
+``total_num_envs``: Total number of parallel environments for trainin or evaluation.
 
 **Video Recording**
 

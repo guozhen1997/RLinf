@@ -37,15 +37,9 @@ runner:
   resume_dir: null
 
 algorithm:
-  auto_reset: False
-  ignore_terminations: False
-  use_fixed_reset_state_ids: True
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 8
-  n_chunk_steps: ${int_div:${env.train.max_episode_steps}, ${actor.model.num_action_chunks}}
-  n_eval_chunk_steps: ${int_div:${env.train.max_episode_steps}, ${actor.model.num_action_chunks}}
-  num_group_envs: 8
   rollout_epoch: 8
   reward_type: action_level  # action_level or chunk_level
   logprob_type: token_level
@@ -66,8 +60,6 @@ algorithm:
   gae_lambda: 0.95
 
   reward_coef: 5.0
-  max_episode_steps: 512
-  use_ordered_reset_state_ids: True
 
   sampling_params:
     use_greedy: False
@@ -91,6 +83,11 @@ algorithm:
 env:
   group_name: "EnvGroup"
   enable_offload: False
+
+  eval:
+    total_num_envs: 8
+    group_size: 1
+    max_episode_steps: 512
 
 rollout:
   group_name: "RolloutGroup"

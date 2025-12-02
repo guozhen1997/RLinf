@@ -37,19 +37,10 @@ runner:
   resume_dir: null
 
 algorithm:
-  auto_reset: False
-  ignore_terminations: False
-  use_fixed_reset_state_ids: True
-
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 8
-
-  num_group_envs: 32
   rollout_epoch: 1
-
-  n_chunk_steps: 80
-  n_eval_chunk_steps: 80
 
   reward_type: action_level
   logprob_type: token_level
@@ -88,6 +79,11 @@ algorithm:
 env:
   group_name: "EnvGroup"
   enable_offload: False
+
+  # Override the default values in env/train or env/eval
+  train:
+    total_num_envs: 256
+    group_size: ${algorithm.group_size}
 
 rollout:
   group_name: "RolloutGroup"

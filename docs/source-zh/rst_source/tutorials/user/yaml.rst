@@ -752,15 +752,9 @@ algorithm
 .. code:: yaml
 
   algorithm:
-    auto_reset: True
-    ignore_terminations: True
-    use_fixed_reset_state_ids: False
     normalize_advantages: True
     kl_penalty: kl
 
-    n_chunk_steps: 10
-    n_eval_chunk_steps: 10
-    num_group_envs: 32
     rollout_epoch: 1
 
     reward_type: chunk_level
@@ -772,19 +766,7 @@ algorithm
       max_length: 1024
       min_length: 1
 
-``algorithm.auto_reset``：是否在 episode 结束时自动重置环境。
-
-``algorithm.ignore_terminations``：训练时是否忽略 episode 的终止信号（若开启，episode 仅在达到最大步数时结束）。
-
-``algorithm.use_fixed_reset_state_ids``：是否使用固定 reset 状态 ID（GRPO 推荐 True，PPO 默认为 False，旨在随机化）。
-
 ``algorithm.normalize_advantages``：是否对优势值归一化处理。
-
-``algorithm.n_chunk_steps``：每个 rollout epoch 中的 chunk 数量（调用模型 predict 的次数）。
-
-``algorithm.n_eval_chunk_steps``：评估模式下的 chunk 数量。
-
-``algorithm.num_group_envs``：环境组数量（用于并行）。
 
 ``algorithm.rollout_epoch``：每个训练步骤前的 rollout 轮数。
 
@@ -815,6 +797,20 @@ env
       queue_size: 0
     enable_offload: True
 
+    train:
+      total_num_envs: null
+      auto_reset: False
+      ignore_terminations: False
+      use_fixed_reset_state_ids: True
+      max_episode_steps: 10
+
+    eval:
+      total_num_envs: null
+      auto_reset: False
+      ignore_terminations: False
+      use_fixed_reset_state_ids: True
+      max_episode_steps: 10
+
 ``env.group_name``：环境 worker 组的逻辑名称。  
 
 ``env.channel.name``：进程间通信的共享内存通道名。  
@@ -824,6 +820,26 @@ env
 ``env.channel.queue_size``：队列大小（0 表示不限制）。  
 
 ``env.enable_offload``：启用环境侧的下放以降低内存占用。
+
+``env.train.total_num_envs``: Total number of parallel environments for training.
+
+``env.train.auto_reset``: Automatically reset environments when episodes terminate for training.
+
+``env.train.ignore_terminations``: Ignore episode terminations during training (if enabled, episode only ends when it reaches the ``max_episode_steps`` for training).
+
+``env.train.use_fixed_reset_state_ids``: Use fixed reset state IDs (false for randomization). Always True for GRPO, default be False for PPO.
+
+``env.train.max_episode_steps``: Maximum number of steps per episode for training.
+
+``env.eval.total_num_envs``: Total number of parallel environments for evaluation.
+
+``env.eval.auto_reset``: Automatically reset environments when episodes terminate for evaluation.
+
+``env.eval.ignore_terminations``: Ignore episode terminations during evaluation (if enabled, episode only ends when it reaches the ``max_episode_steps`` for evaluation).
+
+``env.eval.use_fixed_reset_state_ids``: Use fixed reset state IDs (false for randomization). Always True for GRPO, default be False for PPO.
+
+``env.eval.max_episode_steps``: Maximum number of steps per episode for evaluation.
 
 rollout
 ~~~~~~~~~~~~~~~
@@ -1037,16 +1053,10 @@ actor
 .. code:: yaml
 
   seed: 0
-  num_task: ${algorithm.num_group_envs}
-  num_group: ${algorithm.num_group_envs}
-  group_size: ${algorithm.group_size}
-  use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
+  group_size: 1
+  use_fixed_reset_state_ids: True
 
 ``seed``：环境初始化随机种子（0 便于复现）。  
-
-``num_task``：任务数量（继承自 algorithm.num_group_envs）。  
-
-``num_group``：环境分组数量（继承自 algorithm.num_group_envs）。  
 
 ``group_size``：每个分组的环境数（继承自 algorithm.group_size）。  
 
@@ -1056,9 +1066,9 @@ actor
 
 .. code:: yaml
 
-  num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
+  total_num_envs: null
 
-``num_envs``：总环境数（= group_size × num_group_envs）。
+``total_num_envs``：总并行环境数用于训练或评估。
 
 **视频记录**
 

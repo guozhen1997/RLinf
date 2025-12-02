@@ -34,21 +34,10 @@ runner:
   resume_dir: null
 
 algorithm:
-  auto_reset: False
-  ignore_terminations: False
-  use_fixed_reset_state_ids: True
-  specific_reset_id: null # can be a number or null. Indicate the reset state id (related to the task_id and trial_id) 
-  # wanted to be specify. (e.g. if set 0, the env always use the task 0 and trial 0 in the libero-spatial suite; 
-  # if set null, the initial states will be sampled from the whole libero-spatial suite. )
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 8
-  max_episode_steps: 240
-  use_ordered_reset_state_ids: False
   reward_coef: 1.0
-  n_chunk_steps: 48
-  n_eval_chunk_steps: 48
-  num_group_envs: 8
   rollout_epoch: 8
   reward_type: chunk_level
   logprob_type: chunk_level
@@ -92,6 +81,11 @@ algorithm:
 env:
   group_name: "EnvGroup"
   enable_offload: False
+
+  # Override the default values in env/train or env/eval
+  train:
+    total_num_envs: 64
+    group_size: ${algorithm.group_size}
 
 rollout:
   group_name: "RolloutGroup"

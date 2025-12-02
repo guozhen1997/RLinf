@@ -677,18 +677,29 @@ def validate_embodied_cfg(cfg):
     )
     stage_num = cfg.rollout.pipeline_stage_num
     env_world_size = component_placement.get_world_size("env")
-    assert cfg.algorithm.num_group_envs % (stage_num * env_world_size) == 0, (
-        f"num_group_envs ({cfg.algorithm.num_group_envs}) must be divisible by "
-        f"pipeline_stage_num ({stage_num}) * env_world_size ({env_world_size})"
+
+    assert cfg.env.train.total_num_envs > 0, (
+        "Total number of parallel environments for training must be greater than 0"
     )
-    assert cfg.env.eval.num_envs % (stage_num * env_world_size) == 0, (
-        f"eval.num_envs ({cfg.env.eval.num_envs}) must be divisible by "
-        f"pipeline_stage_num ({stage_num}) * env_world_size ({env_world_size})"
+    assert cfg.env.train.total_num_envs % env_world_size == 0, (
+        "Total number of parallel environments for training must be divisible by the number of environment processes"
     )
-    cfg.algorithm.num_group_envs = (
-        cfg.algorithm.num_group_envs // stage_num // env_world_size
-    )
-    cfg.env.eval.num_envs = cfg.env.eval.num_envs // stage_num // env_world_size
+    if stage_num > 1:
+        assert cfg.env.train.total_num_envs % env_world_size % stage_num == 0, (
+            "Total number of parallel environments for training must be divisible by the number of environment processes and the number of pipeline stages"
+        )
+
+    if cfg.runner.val_check_interval > 0 or cfg.runner.only_eval:
+        assert cfg.env.eval.total_num_envs > 0, (
+            "Total number of parallel environments for evaluation must be greater than 0"
+        )
+        assert cfg.env.eval.total_num_envs % env_world_size == 0, (
+            "Total number of parallel environments for evaluation must be divisible by the number of environment processes"
+        )
+        if stage_num > 1:
+            assert cfg.env.eval.total_num_envs % env_world_size % stage_num == 0, (
+                "Total number of parallel environments for evaluation must be divisible by the number of environment processes and the number of pipeline stages"
+            )
 
     with open_dict(cfg):
         if cfg.env.train.simulator_type == "maniskill":

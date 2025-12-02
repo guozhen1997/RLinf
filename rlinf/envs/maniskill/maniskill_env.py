@@ -30,6 +30,7 @@ from mani_skill.utils.visualization.misc import (
     put_info_on_image,
     tile_images,
 )
+from omegaconf import open_dict
 from omegaconf.omegaconf import OmegaConf
 
 __all__ = ["ManiskillEnv"]
@@ -61,14 +62,16 @@ def extract_termination_from_info(info, num_envs, device):
 
 
 class ManiskillEnv(gym.Env):
-    def __init__(self, cfg, seed_offset, total_num_processes, record_metrics=True):
+    def __init__(
+        self, cfg, num_envs, seed_offset, total_num_processes, record_metrics=True
+    ):
         env_seed = cfg.seed
         self.seed = env_seed + seed_offset
         self.total_num_processes = total_num_processes
         self.auto_reset = cfg.auto_reset
         self.use_rel_reward = cfg.use_rel_reward
         self.ignore_terminations = cfg.ignore_terminations
-        self.num_group = cfg.num_group
+        self.num_group = num_envs // cfg.group_size
         self.group_size = cfg.group_size
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
 
@@ -78,6 +81,8 @@ class ManiskillEnv(gym.Env):
 
         self.cfg = cfg
 
+        with open_dict(cfg):
+            cfg.init_params.num_envs = num_envs
         env_args = OmegaConf.to_container(cfg.init_params, resolve=True)
         self.env: BaseEnv = gym.make(**env_args)
         self.prev_step_reward = torch.zeros(self.num_envs, dtype=torch.float32).to(

@@ -167,6 +167,7 @@ class EnvManager:
         self,
         cfg: DictConfig,
         rank: int,
+        num_envs: int,
         seed_offset: int,
         total_num_processes: int,
         env_type: str,
@@ -186,6 +187,7 @@ class EnvManager:
         """
         self.cfg = cfg.env.train if not is_eval else cfg.env.eval
         self.rank = rank
+        self.num_envs = num_envs
         self.seed_offset = seed_offset
         self.total_num_processes = total_num_processes
         self.process: Optional[mp.Process] = None
@@ -281,6 +283,7 @@ class EnvManager:
             args=(
                 self.cfg,
                 self.rank,
+                self.num_envs,
                 self.seed_offset,
                 self.total_num_processes,
                 self.env_cls,

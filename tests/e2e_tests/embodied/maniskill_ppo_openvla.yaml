@@ -33,16 +33,10 @@ runner:
   max_prompt_length: 30
 
 algorithm:
-  auto_reset: True
-  ignore_terminations: True
-  use_fixed_reset_state_ids: false
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
 
-  n_chunk_steps: 2
-  n_eval_chunk_steps: 2
-  num_group_envs: 8
   rollout_epoch: 1
 
   adv_type: gae
@@ -85,6 +79,14 @@ env:
   group_name: "EnvGroup"
   enable_offload: True
 
+  # Override the default values in env/train or env/eval
+  train:
+    total_num_envs: 8
+    max_episode_steps: 16
+    auto_reset: True
+    ignore_terminations: True
+    use_fixed_reset_state_ids: False
+
 rollout:
   group_name: "RolloutGroup"
   backend: "huggingface"
@@ -102,8 +104,8 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
 
-  micro_batch_size: 2
-  global_batch_size: 8
+  micro_batch_size: 16
+  global_batch_size: 64
   seed: 1234
   enable_offload: True
 
@@ -114,8 +116,6 @@ actor:
     num_action_chunks: 1
     use_proprio: False
     unnorm_key: bridge_orig
-    micro_batch_size: 1
-    val_micro_batch_size: 8
     center_crop: True
     name: vllm
     temperature: 1.6

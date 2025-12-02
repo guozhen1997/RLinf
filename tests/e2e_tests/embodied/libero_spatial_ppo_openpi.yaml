@@ -32,19 +32,10 @@ runner:
   max_prompt_length: 50
 
 algorithm:
-  auto_reset: False
-  ignore_terminations: False
-  use_fixed_reset_state_ids: True
-  specific_reset_id: null
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  max_episode_steps: 16
-  use_ordered_reset_state_ids: False
   reward_coef: 1.0
-  n_chunk_steps: 2
-  n_eval_chunk_steps: 2
-  num_group_envs: 64
   rollout_epoch: 1
   reward_type: chunk_level
   logprob_type: chunk_level
@@ -89,6 +80,11 @@ env:
   group_name: "EnvGroup"
   enable_offload: False
 
+  # Override the default values in env/train or env/eval
+  train:
+    total_num_envs: 64
+    max_episode_steps: 10
+
 rollout:
   group_name: "RolloutGroup"
   generation_backend: "huggingface"
@@ -105,7 +101,7 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 16
-  global_batch_size: 256 # maximum : global batch size = micro batch size * actor num_processes.
+  global_batch_size: 128 # maximum : global batch size = micro batch size * actor num_processes.
   seed: 42
   enable_offload: False
 
