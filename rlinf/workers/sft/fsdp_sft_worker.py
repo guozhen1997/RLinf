@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import os
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
@@ -34,7 +34,8 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
     def __init__(self, cfg: DictConfig, placement: HybridComponentPlacement):
         Worker.__init__(self)
         super().__init__(cfg.sft, world_size=self._world_size,rank=self._rank)
-
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+        self.device=torch.cuda.current_device()
         self.cfg = cfg.sft
         self.placement = placement
 
@@ -89,10 +90,13 @@ class FSDPSFTWorker(FSDPModelManager, Worker):
 
     def init_worker(self):
         self.setup_model_and_optimizer()
+        #self.load_checkpoint(os.path.join(self.cfg.checkpoint_load_path, "Null"))
 
     def fit(self):
         """Main training loop"""
         num_epochs = getattr(self.cfg, "num_epochs", 1)
+        self.load_fsdp_param_and_grad(self.device)
+        self.load_fsdp_optimizer(self.device)
         self.model.train()
         print(self.model)
 

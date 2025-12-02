@@ -35,7 +35,7 @@ from rlinf.hybrid_engines.fsdp.utils import (
     get_lr_scheduler,
 )
 from rlinf.utils.logging import get_logger
-
+from rlinf.utils.utils import clear_memory
 
 class FSDPModelManager:
     """
@@ -292,6 +292,40 @@ class FSDPModelManager:
             self.model, self.optimizer, self.lr_scheduler, save_path
         )
 
+    def load_fsdp_optimizer(self, device_id):
+        if not self.optimizer.state:
+            return
+        for param_group in self.optimizer.param_groups:
+            for param in param_group["params"]:
+                state = self.optimizer.state[param]
+                for key, value in state.items():
+                    if isinstance(value, torch.Tensor):
+                        state[key] = value.to(device_id, non_blocking=True)
+        clear_memory()
+    def load_fsdp_param_and_grad(self, device_id, load_grad=False):
+        for _, param in self.model.named_parameters():
+            if hasattr(param, "_handle") and param._handle is not None:
+                flat_param = param._handle.flat_param
+                if (
+                    hasattr(flat_param, "_local_shard")
+                    and flat_param._local_shard is not None
+                ):
+                    flat_param._local_shard = flat_param._local_shard.to(
+                        device_id, non_blocking=True
+                    )
+                if flat_param.data is not None:
+                    flat_param.data = flat_param.data.to(device_id, non_blocking=True)
+                    flat_param._local_shard = flat_param.data
+            elif hasattr(param, "_local_shard") and param._local_shard is not None:
+                param._local_shard = param._local_shard.to(device_id, non_blocking=True)
+
+            if param.data is not None:
+                param.data = param.data.to(device_id, non_blocking=True)
+
+            if load_grad and param.grad is not None:
+                param.grad = param.grad.to(device_id, non_blocking=True)
+        clear_memory()
+
     def offload_param_and_grad(self, offload_grad: bool = False) -> None:
         """
         Offload FSDP parameters and gradients(options) to CPU.
@@ -316,7 +350,7 @@ class FSDPModelManager:
         Offload optimizer states to CPU.
         """
         self._strategy.offload_optimizer(self.optimizer)
-
+    
     def load_optimizer(self, device_id: int) -> None:
         """
         Load optimizer states to the specified device.

@@ -73,6 +73,7 @@ class Accelerator:
                             break
                 elif supported == "NPU":
                     accelerator_type = AcceleratorType.NPU
+                print("ACCER:", accelerator_type, node_resources)
                 return accelerator_type, int(node_resources[supported])
         return AcceleratorType.NO_ACCEL, 0
 

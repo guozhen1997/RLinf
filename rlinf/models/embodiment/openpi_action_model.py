@@ -80,7 +80,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         # Override `sample_actions` to prevent parent class polymorphic call
         sample_actions_func = self.sample_actions
         super().__init__(config)
-        self.sample_actions = sample_actions_func
+        #self.sample_actions = sample_actions_func
 
         # rl model init
         if self.config.value_after_vlm:
@@ -216,7 +216,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         if mode == "sft":
             observation = data["observation"]
             actions = data["actions"]
-            return self.default_forward(observation, actions)
+            return super().forward(observation, actions)
+            #return self.default_forward(observation, actions)
         compute_values = kwargs.get("compute_values", False)
 
         chains = data["chains"]
