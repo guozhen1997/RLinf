@@ -96,7 +96,6 @@ Before starting training, you need to download the corresponding pretrained mode
    hf download RLinf/RLinf-Pi0-CALVIN-ABC-D
    hf download RLinf/RLinf-Pi05-CALVIN-ABC-D
 
-
 After downloading, make sure to correctly specify the model path in the configuration yaml file.
 
 Running the Script
