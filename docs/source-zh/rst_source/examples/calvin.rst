@@ -66,6 +66,19 @@
 
 具体的环境安装参考CALVIN官方的安装文档 `CALVIN Quick Start <https://github.com/mees/calvin#computer--quick-start>`__。
 
+.. code:: bash
+
+   git clone --recurse-submodules https://github.com/mees/calvin.git
+   export CALVIN_ROOT=$(pwd)/calvin
+   cd $CALVIN_ROOT
+   pip install wheel cmake==3.18.4
+   cd calvin_env/tacto
+   pip install -e .
+   cd ..
+   pip install -e .
+   cd ../calvin_models
+   pip install -e .
+
 模型下载
 -----------
 

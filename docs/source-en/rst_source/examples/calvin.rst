@@ -1,4 +1,4 @@
-RL Training with CALVIN Benchmark
+RL with CALVIN Benchmark
 ==================================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
@@ -64,6 +64,19 @@ Dependencies Installation
 If you are using a Docker image, pull the latest image via `docker pull` to get the required dependencies.
 
 For detailed environment installation, please refer to the official CALVIN installation documentation `CALVIN Quick Start <https://github.com/mees/calvin#computer--quick-start>`__.
+
+.. code:: bash
+
+   git clone --recurse-submodules https://github.com/mees/calvin.git
+   export CALVIN_ROOT=$(pwd)/calvin
+   cd $CALVIN_ROOT
+   pip install wheel cmake==3.18.4
+   cd calvin_env/tacto
+   pip install -e .
+   cd ..
+   pip install -e .
+   cd ../calvin_models
+   pip install -e .
 
 Model Download
 --------------
