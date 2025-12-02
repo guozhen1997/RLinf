@@ -269,24 +269,23 @@ class MetaWorldEnv(gym.Env):
             ),
             "task_descriptions": self.task_descriptions,
         }
+        return obs
 
-        images_and_states = to_tensor(
-            list_of_dict_to_dict_of_list(images_and_states_list)
-        )
+    def _post_process_obs(self, obs):
         image_tensor = torch.stack(
             [
                 value.clone().permute(2, 0, 1)
-                for value in images_and_states["full_image"]
+                for value in obs["images_and_states"]["full_image"]
             ]
         )
-        states = images_and_states["state"]
+        states = obs["images_and_states"]["state"]
 
         obs = {
             "images": image_tensor,
             "states": states,
-            "task_descriptions": self.task_descriptions,
+            "task_descriptions": obs["task_descriptions"],
         }
-        return obs
+        return
 
     def _reconfigure(self, reset_state_ids, env_idx):
         reconfig_env_idx = []
@@ -335,6 +334,7 @@ class MetaWorldEnv(gym.Env):
             raw_obs, _reward, _, _, _ = self.env.step(all_actions)
 
         obs = self._wrap_obs(raw_obs)
+        obs = self._post_process_obs(obs)
         if env_idx is not None:
             self._reset_metrics(env_idx)
         else:
@@ -380,6 +380,8 @@ class MetaWorldEnv(gym.Env):
                 "task": self.task_descriptions,
             }
             self.add_new_frames(obs, plot_infos)
+
+        obs = self._post_process_obs(obs)
 
         infos = self._record_metrics(step_reward, terminations, infos)
         if self.ignore_terminations:
