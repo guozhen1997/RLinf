@@ -113,7 +113,7 @@ _CONFIGS = [
         data=LeRobotCalvinDataConfig(
             repo_id="InternRobotics/InternData-Calvin_ABC",
             base_config=DataConfig(
-                prompt_from_task=True, root="data/InternData-Calvin_ABC/"
+                prompt_from_task=True, 
             ),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_calvin/assets"),
             extra_delta_transform=False,
@@ -132,7 +132,7 @@ _CONFIGS = [
         data=LeRobotCalvinDataConfig(
             repo_id="InternRobotics/InternData-Calvin_ABC",
             base_config=DataConfig(
-                prompt_from_task=True, root="data/InternData-Calvin_ABC/"
+                prompt_from_task=True, 
             ),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_calvin/assets"),
             extra_delta_transform=False,

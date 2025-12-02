@@ -43,16 +43,8 @@ def _get_calvin_tasks_and_reward(num_sequences, use_random_seed=True):
 def make_env():
     # Get current file directory
     current_dir = Path(__file__).parent
-    dataset_paths = [
-        str(current_dir / "calvin_debug_dataset"),
-        "calvin_debug_dataset/",
-    ]
-    for path in dataset_paths:
-        try:
-            return get_env(Path(path) / "validation", show_gui=False)
-        except Exception:
-            continue
-    raise RuntimeError(f"Please download the calvin_debug_dataset from https://github.com/mees/calvin#computer--quick-start with `sh download_data.sh debug`.")
+    dataset_path = str(current_dir / "calvin_debug_dataset")
+    return get_env(Path(dataset_path) / "validation", show_gui=False)
 
 
 class CalvinBenchmark:

@@ -266,9 +266,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
         # store used keys
         return processed_obs
-
-    def input_processor(self, to_process_obs):
-        processed_obs = self.input_transform(to_process_obs)
+    
+    def precision_processor(self, processed_obs):
         device = next(self.parameters()).device
         for key, value in processed_obs.items():
             if isinstance(value, list):
@@ -290,8 +289,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
     def predict_action_batch(
         self, env_obs, mode: Literal["train", "eval"] = "train", compute_values=True
     ) -> tuple[np.ndarray, dict[str, Any]]:
-        to_process_obs = self.obs_processor(env_obs)
-        processed_obs = self.input_processor(to_process_obs)
+        to_process_obs = self.obs_processor(env_obs) # env obs -> policy input obs
+        processed_obs = self.input_transform(to_process_obs) # policy input obs -> model input obs
+        processed_obs = self.precision_processor(processed_obs) # obs precision processor
         observation = _model.Observation.from_dict(processed_obs)
         outputs = self.sample_actions(
             observation, mode=mode, compute_values=compute_values

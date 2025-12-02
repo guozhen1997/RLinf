@@ -1,4 +1,4 @@
-RL Training with CALVIN Simulator
+RL Training with CALVIN Benchmark
 ==================================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
@@ -37,7 +37,7 @@ Environment
 - **Rewards**: 0/1 rewards based on subtask completion
 
 Algorithm
------------
+---------
 
 **Core Algorithm Components**
 
@@ -59,14 +59,14 @@ Algorithm
 
 
 Dependencies Installation
------------
+-------------------------
 
 If you are using a Docker image, pull the latest image via `docker pull` to get the required dependencies.
 
 For detailed environment installation, please refer to the official CALVIN installation documentation `CALVIN Quick Start <https://github.com/mees/calvin#computer--quick-start>`__.
 
 Model Download
------------
+--------------
 
 Before starting training, you need to download the corresponding pretrained models:
 
@@ -87,7 +87,7 @@ Before starting training, you need to download the corresponding pretrained mode
 After downloading, make sure to correctly specify the model path in the configuration yaml file.
 
 Running the Script
------------
+------------------
 
 **1. Key Cluster Configuration**
 
@@ -210,7 +210,7 @@ Visualization and Results
 
 
 CALVIN Results
--------------------------
+--------------
 The table below shows the performance comparison of different methods and configurations on the CALVIN D task. avg_num_subtasks represents the average number of completed subtasks, and success_len_1 to success_len_5 represent the success rates for subtask sequences of length 1 to 5, respectively.
 
 .. list-table:: **CALVIN D Task Performance Comparison**
