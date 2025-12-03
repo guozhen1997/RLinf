@@ -224,7 +224,11 @@ class ManiskillEnv(gym.Env):
     ):
         if options is None:
             seed = self.seed
-            options = {"episode_id": self.reset_state_ids} if self.use_fixed_reset_state_ids else {}
+            options = (
+                {"episode_id": self.reset_state_ids}
+                if self.use_fixed_reset_state_ids
+                else {}
+            )
         raw_obs, infos = self.env.reset(seed=seed, options=options)
         extracted_obs = self._wrap_obs(raw_obs)
         if "env_idx" in options:

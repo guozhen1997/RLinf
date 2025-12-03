@@ -58,51 +58,31 @@ class EnvWorker(Worker):
         self.last_obs_list = []
         self.last_dones_list = []
 
+        # Used for pipelined rollout interactions
+        self.num_pipeline_stages = self.cfg.rollout.pipeline_stage_num
+
         # Env configurations
-        self.env_type = cfg.env.train.simulator_type
         self.eval_only = getattr(self.cfg.runner, "only_eval", False)
+        self.enable_eval = self.cfg.runner.val_check_interval > 0 or self.eval_only
+        if not self.eval_only:
+            self.train_num_envs_per_stage = (
+                self.cfg.env.train.total_num_envs
+                // self._world_size
+                // self.num_pipeline_stages
+            )
+        if self.enable_eval:
+            self.eval_num_envs_per_stage = (
+                self.cfg.env.eval.total_num_envs
+                // self._world_size
+                // self.num_pipeline_stages
+            )
 
-        self.train_batch_size_per_stage = self.cfg.env.train.num_envs
-        self.train_num_groups_per_stage = self.cfg.env.train.num_group
-        self.train_group_size = self.cfg.env.train.group_size
-
-        self.eval_batch_size_per_stage = self.cfg.env.eval.num_envs
-        self.eval_num_groups_per_stage = self.cfg.env.eval.num_group
-        self.eval_group_size = self.cfg.env.eval.group_size
-
-        # Sanity checks
-        assert (
-            self._component_placement.get_world_size("rollout")
-            % self._component_placement.get_world_size("env")
-            == 0
-        )
-        # gather_num: number of rollout for each env process
-        self.gather_num = self._component_placement.get_world_size(
-            "rollout"
-        ) // self._component_placement.get_world_size("env")
-        # stage_num: default to 2, use for pipeline rollout process
-        self.stage_num = self.cfg.rollout.pipeline_stage_num
-
-        # only need rank0 to create channel
-        if self._rank == 0:
-            self.channel = self.create_channel(cfg.env.channel.name)
-        else:
-            self.channel = self.connect_channel(cfg.env.channel.name)
+        self.env_type = cfg.env.train.simulator_type
 
     def init_worker(self):
         """Create the environment instances for the EnvWorker and start the environments."""
         enable_offload = self.cfg.env.enable_offload
         total_num_processes = self._world_size * self.num_pipeline_stages
-        only_eval = getattr(self.cfg.runner, "only_eval", False)
-        enable_eval = self.cfg.runner.val_check_interval > 0 or only_eval
-        if not only_eval:
-            self.train_num_envs_per_stage = (
-                self.cfg.env.train.total_num_envs // self._world_size // self.stage_num
-            )
-        if enable_eval:
-            self.eval_num_envs_per_stage = (
-                self.cfg.env.eval.total_num_envs // self._world_size // self.stage_num
-            )
 
         for stage_id in range(self.num_pipeline_stages):
             seed_offset = self._rank * self.num_pipeline_stages + stage_id
@@ -119,7 +99,7 @@ class EnvWorker(Worker):
                         enable_offload=enable_offload,
                     )
                 )
-            if enable_eval:
+            if self.enable_eval:
                 self.eval_env_list.append(
                     EnvManager(
                         self.cfg,
@@ -188,7 +168,6 @@ class EnvWorker(Worker):
                     env_info[key] = final_info["episode"][key][chunk_dones[:, -1]].cpu()
 
         env_output = EnvOutput(
-            env_type=self.env_type,
             obs=extracted_obs,
             final_obs=infos["final_observation"]
             if "final_observation" in infos
@@ -197,8 +176,7 @@ class EnvWorker(Worker):
             dones=chunk_dones,
             worker_rank=self._rank,
             stage_id=stage_id,
-            num_groups=self.train_num_groups_per_stage,
-            group_size=self.train_group_size,
+            num_envs=self.train_num_envs_per_stage,
         )
         return env_output, env_info
 
@@ -231,15 +209,13 @@ class EnvWorker(Worker):
                     env_info[key] = final_info["episode"][key][chunk_dones[:, -1]].cpu()
 
         env_output = EnvOutput(
-            env_type=self.env_type,
             obs=extracted_obs,
             final_obs=infos["final_observation"]
             if "final_observation" in infos
             else None,
             worker_rank=self._rank,
             stage_id=stage_id,
-            num_groups=self.eval_num_groups_per_stage,
-            group_size=self.eval_group_size,
+            num_envs=self.eval_num_envs_per_stage,
         )
         return env_output, env_info
 
@@ -248,7 +224,7 @@ class EnvWorker(Worker):
             obs, infos = self.train_env_list[stage_id].reset()
             self.last_obs_list.append(obs)
             dones = (
-                torch.zeros((self.train_batch_size_per_stage,), dtype=torch.bool)
+                torch.zeros((self.train_num_envs_per_stage,), dtype=torch.bool)
                 .unsqueeze(1)
                 .repeat(1, self.cfg.actor.model.num_action_chunks)
             )
@@ -260,14 +236,12 @@ class EnvWorker(Worker):
             final_obs = None
 
         return EnvOutput(
-            env_type=self.env_type,
             obs=obs,
             dones=dones,
             final_obs=final_obs,
             worker_rank=self._rank,
             stage_id=stage_id,
-            num_groups=self.train_num_groups_per_stage,
-            group_size=self.train_group_size,
+            num_envs=self.train_num_envs_per_stage,
         )
 
     def _finish_rollout(self, mode="train"):
@@ -284,18 +258,18 @@ class EnvWorker(Worker):
                     self.eval_env_list[i].flush_video()
 
     def get_actions(
-        self, input_channel: Channel, stage_id: int, num_groups: int
+        self, input_channel: Channel, stage_id: int, num_envs: int
     ) -> np.ndarray:
         """This function is used to get the actions from the input channel.
 
         It retrieves a list of chunk actions from the input channel with the key (worker_rank, stage_id).
-        The retrieved chunk actions are also accompanied with the group id, which indicates the env group index of the chunk action in the current stage.
-        After retrieving all the chunk actions for the current stage, they are first sorted according to the group id to ensure the correct order, and then concatenated into a single numpy array before being returned.
+        The retrieved chunk actions are also accompanied with the env id, which indicates the env index of the chunk action in the current stage.
+        After retrieving all the chunk actions for the current stage, they are first sorted according to the env id to ensure the correct order, and then concatenated into a single numpy array before being returned.
         """
         chunk_action = []
-        for _ in range(num_groups):
-            group_id, action = input_channel.get(key=(self._rank, stage_id))
-            chunk_action.append((group_id, action))
+        for _ in range(num_envs):
+            env_id, action = input_channel.get(key=(self._rank, stage_id))
+            chunk_action.append((env_id, action))
         chunk_action.sort(key=lambda x: x[0])
         chunk_action = np.concatenate([action for _, action in chunk_action], axis=0)
         return chunk_action
@@ -307,7 +281,7 @@ class EnvWorker(Worker):
     ):
         """This function is used to put the environment output into the output channel.
 
-        It accepts an env_output and split it into a list of env_outputs containing num_groups env_outputs and put them into the output channel along with three identifiers: the group id, the pipeline stage id, and the worker rank, which are used by the RolloutWorker to put the corresponding actions back to the correct environment instances.
+        It accepts an env_output and split it into a list of env_outputs containing num_envs env_outputs and put them into the output channel along with three identifiers: the env id, the pipeline stage id, and the worker rank, which are used by the RolloutWorker to put the corresponding actions back to the correct environment instances.
 
         Args:
             output_channel (Channel): The output channel to put the environment output.
@@ -350,7 +324,7 @@ class EnvWorker(Worker):
                     # Retrieve actions from the RolloutWorker
                     self.device_lock.release()  # Release lock to allow RolloutWorker to run
                     raw_chunk_actions = self.get_actions(
-                        input_channel, stage_id, self.train_num_groups_per_stage
+                        input_channel, stage_id, self.train_num_envs_per_stage
                     )
                     self.device_lock.acquire()  # Re-acquire lock for environment interaction
 
@@ -401,15 +375,13 @@ class EnvWorker(Worker):
         for stage_id in range(self.num_pipeline_stages):
             self.eval_env_list[stage_id].start_env()
             self.eval_env_list[stage_id].is_start = True
-            extracted_obs, _, _, _, infos = self.eval_env_list[stage_id].step()
+            extracted_obs, infos = self.eval_env_list[stage_id].reset()
             env_output = EnvOutput(
-                env_type=self.env_type,
                 obs=extracted_obs,
                 final_obs=infos.get("final_observation", None),
                 worker_rank=self._rank,
                 stage_id=stage_id,
-                num_groups=self.eval_num_groups_per_stage,
-                group_size=self.eval_group_size,
+                num_envs=self.eval_num_envs_per_stage,
             )
             self.put_batch(output_channel, env_output)
 
@@ -422,7 +394,7 @@ class EnvWorker(Worker):
         for eval_step in range(n_chunk_steps):
             for stage_id in range(self.num_pipeline_stages):
                 raw_chunk_actions = self.get_actions(
-                    input_channel, stage_id, self.eval_num_groups_per_stage
+                    input_channel, stage_id, self.eval_num_envs_per_stage
                 )
                 env_output, env_info = self._env_evaluate_step(
                     raw_chunk_actions, stage_id

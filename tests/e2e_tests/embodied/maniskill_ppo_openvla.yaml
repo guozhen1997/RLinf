@@ -82,8 +82,8 @@ env:
 
   # Override the default values in env/train or env/eval
   train:
-    total_num_envs: 8
-    max_episode_steps: 16
+    total_num_envs: 4
+    max_episode_steps: 8
     auto_reset: True
     ignore_terminations: True
     use_fixed_reset_state_ids: False
@@ -105,8 +105,8 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
 
-  micro_batch_size: 16
-  global_batch_size: 64
+  micro_batch_size: 8
+  global_batch_size: 32
   seed: 1234
   enable_offload: True
 

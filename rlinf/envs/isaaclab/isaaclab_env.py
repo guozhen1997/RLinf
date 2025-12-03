@@ -120,7 +120,6 @@ class IsaaclabBaseEnv(gym.Env):
         return obs, infos
 
     def step(self, actions=None, auto_reset=True):
-
         obs, step_reward, terminations, truncations, infos = self.env.step(actions)
 
         if self.video_cfg.save_video:

@@ -34,7 +34,7 @@ The RLinf environment system consists of the following components:
            # Initialize environment-related parameters
            self.num_envs = num_envs
            self.group_size = self.cfg.group_size
-           self.num_group = self.cfg.num_group
+           self.num_group = self.num_envs // self.group_size
 
            # Initialize environment internals
            self._init_environment()
@@ -232,13 +232,12 @@ Add your environment configuration:
 
    your_env:
      env_type: "your_env"
-     num_envs: 8
+     total_num_envs: 8
      group_size: 4
-     num_group: 2
      seed: 42
      # Other environment-specific settings
 
-7. Register Environment
+1. Register Environment
 -----------------------------------
 
 Expose the new environment in the package:

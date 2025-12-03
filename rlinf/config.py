@@ -690,6 +690,15 @@ def validate_embodied_cfg(cfg):
     assert cfg.env.train.total_num_envs // env_world_size // stage_num > 0, (
         "env.train.total_num_envs // env_world_size // rollout.pipeline_stage_num must be greater than 0"
     )
+    assert (
+        cfg.env.train.total_num_envs
+        // env_world_size
+        // stage_num
+        % cfg.env.train.group_size
+        == 0
+    ), (
+        "env.train.total_num_envs // env_world_size // rollout.pipeline_stage_num must be divisible by the group size"
+    )
 
     if cfg.runner.val_check_interval > 0 or cfg.runner.only_eval:
         assert cfg.env.eval.total_num_envs > 0, (
@@ -703,6 +712,15 @@ def validate_embodied_cfg(cfg):
         )
         assert cfg.env.eval.total_num_envs // env_world_size // stage_num > 0, (
             "env.eval.total_num_envs // env_world_size // rollout.pipeline_stage_num must be greater than 0"
+        )
+        assert (
+            cfg.env.eval.total_num_envs
+            // env_world_size
+            // stage_num
+            % cfg.env.eval.group_size
+            == 0
+        ), (
+            "env.eval.total_num_envs // env_world_size // rollout.pipeline_stage_num must be divisible by the group size"
         )
 
     with open_dict(cfg):

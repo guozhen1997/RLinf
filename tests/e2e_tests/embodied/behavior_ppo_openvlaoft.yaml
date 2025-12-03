@@ -81,7 +81,7 @@ env:
   
   # Override the default values in env/train or env/eval
   train:
-    total_num_envs: 8
+    total_num_envs: 4
     max_episode_steps: 8
 
 rollout:
@@ -100,7 +100,7 @@ actor:
   training_backend: "fsdp"
 
   micro_batch_size: 1
-  global_batch_size: 8
+  global_batch_size: 4
   seed: 1234
   enable_offload: True
 

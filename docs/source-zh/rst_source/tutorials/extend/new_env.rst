@@ -33,7 +33,7 @@ RLinf 的环境系统由以下组件构成：
            # 初始化环境相关参数
            self.num_envs = num_envs
            self.group_size = self.cfg.group_size
-           self.num_group = self.cfg.num_group
+           self.num_group = self.num_envs // self.group_size
 
            # 初始化环境内部
            self._init_environment()
@@ -231,13 +231,12 @@ RLinf 的环境系统由以下组件构成：
 
    your_env:
      env_type: "your_env"
-     num_envs: 8
+     total_num_envs: 8
      group_size: 4
-     num_group: 2
      seed: 42
      # 其他环境特定设置
 
-7. 注册环境
+1. 注册环境
 -----------------------------------
 
 在包中暴露新环境：

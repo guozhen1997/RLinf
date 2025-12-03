@@ -317,7 +317,9 @@ class MetaWorldEnv(gym.Env):
 
         if reset_state_ids is None:
             if self.is_start:
-                reset_state_ids = self.reset_state_ids if self.use_fixed_reset_state_ids else None
+                reset_state_ids = (
+                    self.reset_state_ids if self.use_fixed_reset_state_ids else None
+                )
                 self._is_start = False
             else:
                 num_reset_states = len(env_idx)
@@ -346,7 +348,6 @@ class MetaWorldEnv(gym.Env):
         return obs, infos
 
     def step(self, actions=None, auto_reset=True):
-
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().numpy()
 

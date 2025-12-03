@@ -1045,7 +1045,6 @@ def put_tensor_cpu(data_dict):
 
 @dataclass(kw_only=True)
 class EnvOutput:
-    env_type: str
     obs: dict[str, Any]
     final_obs: Optional[dict[str, Any]] = None
     dones: Optional[torch.Tensor] = None  # [B]
@@ -1055,12 +1054,12 @@ class EnvOutput:
     # They are eventually used by the RolloutWorker to return the predicted values to the correct envs
     worker_rank: Optional[int] = None
     stage_id: Optional[int] = None
-    num_groups: Optional[int] = None
+    num_group_envs: Optional[int] = None
     group_size: Optional[int] = None
 
-    # The group ids of the envs in this EnvOutput. Not required if num_groups and group_size are provided.
-    # Must be the size of num_groups
-    group_ids: Optional[list[int]] = None
+    # The group env ids of the group envs in this EnvOutput. Not required if num_group_envs and group_size are provided.
+    # Must be the size of num_group_envs
+    group_env_ids: Optional[list[int]] = None
 
     def __post_init__(self):
         self.obs = put_tensor_cpu(self.obs)
@@ -1074,26 +1073,26 @@ class EnvOutput:
 
         # Sanity check
         if self.dones is not None:
-            assert self.dones.shape[0] == self.num_groups * self.group_size, (
-                f"Dones first dimension {self.dones.shape[0]} does not match num_groups {self.num_groups} * group_size {self.group_size}."
+            assert self.dones.shape[0] == self.num_group_envs * self.group_size, (
+                f"Dones first dimension {self.dones.shape[0]} does not match num_group_envs {self.num_group_envs} * group_size {self.group_size}."
             )
         if self.rewards is not None:
-            assert self.rewards.shape[0] == self.num_groups * self.group_size, (
-                f"Rewards first dimension {self.rewards.shape[0]} does not match num_groups {self.num_groups} * group_size {self.group_size}."
+            assert self.rewards.shape[0] == self.num_group_envs * self.group_size, (
+                f"Rewards first dimension {self.rewards.shape[0]} does not match num_group_envs {self.num_group_envs} * group_size {self.group_size}."
             )
 
-        if self.group_ids is not None:
-            assert self.num_groups is not None, (
-                "num_groups must be provided if group_ids is provided."
+        if self.group_env_ids is not None:
+            assert self.num_group_envs is not None, (
+                "num_group_envs must be provided if group_env_ids is provided."
             )
-            assert len(self.group_ids) == self.num_groups, (
-                f"Length of group_ids {len(self.group_ids)} does not match num_groups {self.num_groups}."
+            assert len(self.group_env_ids) == self.num_group_envs, (
+                f"Length of group_env_ids {len(self.group_env_ids)} does not match num_group_envs {self.num_group_envs}."
             )
         else:
-            assert self.num_groups is not None and self.group_size is not None, (
-                "num_groups and group_size must be provided if group_ids is not provided."
+            assert self.num_group_envs is not None, (
+                "num_group_envs must be provided if group_env_ids is not provided."
             )
-            self.group_ids = list(range(self.num_groups))
+            self.group_env_ids = list(range(self.num_group_envs))
 
     def prepare_observations(self, obs: dict[str, Any]) -> dict[str, Any]:
         image_tensor = obs["images"] if "images" in obs else None
@@ -1112,73 +1111,73 @@ class EnvOutput:
 
     @staticmethod
     def split_value(
-        value: torch.Tensor | list | np.ndarray | dict | Any, num_groups: int
+        value: torch.Tensor | list | np.ndarray | dict | Any, split_size: int
     ):
-        """Split a value into a list of values, each contains group_size envs' data."""
+        """Split a value into a list of values, each contains single env's data."""
         if torch.is_tensor(value):
-            assert value.shape[0] % num_groups == 0, (
-                f"Value first dimension {value.shape[0]} is not divisible by num_groups {num_groups}"
+            assert value.shape[0] % split_size == 0, (
+                f"Value first dimension {value.shape[0]} is not divisible by num_groups {split_size}"
             )
-            split_values = torch.chunk(value, num_groups, dim=0)
+            split_values = torch.chunk(value, split_size, dim=0)
             return [v.contiguous() for v in split_values]
         elif isinstance(value, list) or isinstance(value, np.ndarray):
-            assert len(value) % num_groups == 0, (
-                f"Value length {len(value)} is not divisible by num_groups {num_groups}"
+            assert len(value) % split_size == 0, (
+                f"Value length {len(value)} is not divisible by split_size {split_size}"
             )
-            length_per_group = len(value) // num_groups
+            length_per_group = len(value) // split_size
             return [
                 value[i * length_per_group : (i + 1) * length_per_group]
-                for i in range(num_groups)
+                for i in range(split_size)
             ]
         elif isinstance(value, dict):
             split_dicts = []
-            for i in range(num_groups):
+            for i in range(split_size):
                 split_dict = {}
                 for k, v in value.items():
-                    split_dict[k] = EnvOutput.split_value(v, num_groups)[i]
+                    split_dict[k] = EnvOutput.split_value(v, split_size)[i]
                 split_dicts.append(split_dict)
             return split_dicts
         else:
             raise ValueError(f"Unsupported type: {type(value)}")
 
     def split_by_group(self) -> list["EnvOutput"]:
-        """Split the EnvOutput into a list of EnvOutputs, each contains group_size envs' outputs."""
-        obs_split = self.split_value(self.obs, self.num_groups)
+        """Split the EnvOutput into a list of EnvOutputs, each contains single group_env's outputs."""
+        obs_split = self.split_value(self.obs, self.num_group_envs)
         final_obs_split = (
-            self.split_value(self.final_obs, self.num_groups)
+            self.split_value(self.final_obs, self.num_group_envs)
             if self.final_obs is not None
             else None
         )
         dones_split = (
-            self.split_value(self.dones, self.num_groups)
+            self.split_value(self.dones, self.num_group_envs)
             if self.dones is not None
             else None
         )
         rewards_split = (
-            self.split_value(self.rewards, self.num_groups)
+            self.split_value(self.rewards, self.num_group_envs)
             if self.rewards is not None
             else None
         )
 
-        group_ids_split = (
-            self.split_value(self.group_ids, self.num_groups)
-            if self.group_ids is not None
+        group_env_ids_split = (
+            self.split_value(self.group_env_ids, self.num_group_envs)
+            if self.group_env_ids is not None
             else None
         )
 
         env_outputs = []
-        for i in range(self.num_groups):
+        for i in range(self.num_group_envs):
             env_output = EnvOutput(
-                env_type=self.env_type,
                 obs=obs_split[i],
                 final_obs=final_obs_split[i] if final_obs_split is not None else None,
                 dones=dones_split[i] if dones_split is not None else None,
                 rewards=rewards_split[i] if rewards_split is not None else None,
                 worker_rank=self.worker_rank,
                 stage_id=self.stage_id,
-                num_groups=1 if self.num_groups is not None else None,
-                group_size=self.group_size,
-                group_ids=group_ids_split[i] if group_ids_split is not None else None,
+                num_group_envs=1 if self.num_group_envs is not None else None,
+                group_env_ids=group_env_ids_split[i]
+                if group_env_ids_split is not None
+                else None,
             )
             env_outputs.append(env_output)
 
@@ -1245,56 +1244,57 @@ class EnvOutput:
 
 
 @dataclass(kw_only=True)
-class EmbodiedRolloutResult:
+class ChunkStepResult:
     # required
-    prev_logprobs: list[torch.Tensor] = field(default_factory=list)
-    prev_values: list[torch.Tensor] = field(default_factory=list)
-    dones: list[torch.Tensor] = field(default_factory=list)
-    rewards: list[torch.Tensor] = field(default_factory=list)
-
-    forward_inputs: list[dict[str, list[torch.Tensor]]] = field(default_factory=list)
+    prev_logprobs: torch.Tensor = None  # [B, action_dim]
+    prev_values: torch.Tensor = None  # [B, 1]
+    dones: torch.Tensor = None  # [B, 1]
+    rewards: torch.Tensor = None  # [B, 1]
+    forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.prev_logprobs = (
-            [prev_logprob.cpu().contiguous() for prev_logprob in self.prev_logprobs]
-            if self.prev_logprobs is not None
-            else []
-        )
-        self.prev_values = (
-            [prev_value.cpu().contiguous() for prev_value in self.prev_values]
-            if self.prev_values is not None
-            else []
-        )
-        self.dones = (
-            [done.cpu().contiguous() for done in self.dones]
-            if self.dones is not None
-            else []
-        )
-        self.rewards = (
-            [reward.cpu().contiguous() for reward in self.rewards]
-            if self.rewards is not None
-            else []
-        )
+        if self.prev_logprobs is not None:
+            self.prev_logprobs = self.prev_logprobs.cpu().contiguous()
+        if self.prev_values is not None:
+            self.prev_values = self.prev_values.cpu().contiguous()
+        if self.dones is not None:
+            self.dones = self.dones.cpu().contiguous()
+        if self.rewards is not None:
+            self.rewards = self.rewards.cpu().contiguous()
+        if self.forward_inputs:
+            self.forward_inputs = put_tensor_cpu(self.forward_inputs)
 
-        self.forward_inputs = [
-            put_tensor_cpu(forward_inputs) for forward_inputs in self.forward_inputs
-        ]
 
-    def append_result(self, result: dict[str, torch.Tensor]):
-        self.prev_logprobs.append(
-            result["prev_logprobs"].cpu().contiguous()
-        ) if "prev_logprobs" in result else []
-        self.prev_values.append(
-            result["prev_values"].cpu().contiguous()
-        ) if "prev_values" in result else []
-        self.dones.append(
-            result["dones"].cpu().contiguous()
-        ) if "dones" in result else []
-        self.rewards.append(
-            result["rewards"].cpu().contiguous()
-        ) if "rewards" in result else []
+@dataclass(kw_only=True)
+class EmbodiedRolloutResult:
+    # required
+    prev_logprobs: list[torch.Tensor] = field(
+        default_factory=list
+    )  # lens of results is rollout_epoch * n_chunk_steps
+    prev_values: list[torch.Tensor] = field(
+        default_factory=list
+    )  # lens is rollout_epoch * n_chunk_steps + 1 because of the bootstrap value
+    dones: list[torch.Tensor] = field(
+        default_factory=list
+    )  # lens of results is rollout_epoch * n_chunk_steps + 1 because of the bootstrap value
+    rewards: list[torch.Tensor] = field(
+        default_factory=list
+    )  # lens of results is rollout_epoch * n_chunk_steps
+    forward_inputs: list[dict[str, list[torch.Tensor]]] = field(
+        default_factory=list
+    )  # lens of results is rollout_epoch * n_chunk_steps
 
-        self.forward_inputs.append(put_tensor_cpu(result["forward_inputs"]))
+    def append_result(self, result: ChunkStepResult):
+        if result.prev_logprobs is not None:
+            self.prev_logprobs.append(result.prev_logprobs)
+        if result.prev_values is not None:
+            self.prev_values.append(result.prev_values)
+        if result.dones is not None:
+            self.dones.append(result.dones)
+        if result.rewards is not None:
+            self.rewards.append(result.rewards)
+        if result.forward_inputs:
+            self.forward_inputs.append(result.forward_inputs)
 
     def to_dict(self):
         rollout_result_dict = {}
@@ -1331,19 +1331,46 @@ class EmbodiedRolloutResult:
                 torch.stack(merged_forward_inputs[k], dim=0).cpu().contiguous()
             )
 
+        assert len(rollout_result_dict["dones"]) == len(
+            rollout_result_dict["prev_values"]
+        ), "dones and prev_values must have the same length"
+        assert (
+            len(rollout_result_dict["dones"]) == len(rollout_result_dict["rewards"]) + 1
+        ), "dones length must be the length of rewards plus one"
+
         return rollout_result_dict
 
-    def to_splitted_dict(self, split_size) -> list[dict[str, torch.Tensor]]:
-        rollout_result_list = []
-        for i in range(split_size):
-            rollout_result_list.append(self.to_dict())
+    def to_splitted_dict(self, split_size: int) -> list[dict[str, torch.Tensor]]:
+        """Split the rollout result along the batch dimension.
 
-            for key, value in rollout_result_list[i].items():
+        1. Build a full dict via :meth:`to_dict` with tensors of shape ``[T/T+1, B, ...]``, where T is the number of chunk steps.
+        2. For each split, chunk along the batch dimension (dim=1) into ``split_size`` parts, keeping the time dimension as-is.
+        3. Return a list of ``split_size`` dictionaries, each containing tensors of shape ``[T/T+1, B / split_size, ...]``.
+
+        The time dimension ``T / T+1`` is preserved as-is and **no assumption is made**
+        about its relationship to ``rollout_epoch`` or ``n_chunk_steps``. Only the
+        batch dimension is partitioned, which keeps all keys aligned regardless of
+        their time length.
+
+        Args:
+            split_size: Number of splits to divide the batch dimension into.
+
+        Returns:
+            List of dictionaries, each containing a slice of the original batch.
+        """
+        full_dict = self.to_dict()
+        rollout_result_list: list[dict[str, torch.Tensor]] = []
+
+        for i in range(split_size):
+            split_dict: dict[str, torch.Tensor] = {}
+            for key, value in full_dict.items():
                 if isinstance(value, torch.Tensor):
-                    rollout_result_list[i][key] = torch.chunk(value, split_size, dim=1)[
-                        i
-                    ].contiguous()
+                    # Chunk along batch dimension (dim=1), keep time dimension T as is.
+                    chunks = torch.chunk(value, split_size, dim=1)
+                    split_dict[key] = chunks[i].contiguous()
                 else:
-                    raise ValueError(f"Unsupported type: {type(value)}")
+                    # Non-tensor values are shared across splits.
+                    split_dict[key] = value
+            rollout_result_list.append(split_dict)
 
         return rollout_result_list
