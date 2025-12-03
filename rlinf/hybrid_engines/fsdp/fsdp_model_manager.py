@@ -229,7 +229,7 @@ class FSDPModelManager:
         module = self.model_provider_func()
 
         # Enable gradient checkpointing if configured
-        if self._cfg.model.get("gradient_checkpointing", False):
+        if self._cfg.fsdp_config.get("gradient_checkpointing", False):
             self._logger.info("[FSDP] Enabling gradient checkpointing")
             module.gradient_checkpointing_enable()
         else:

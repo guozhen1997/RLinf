@@ -1,6 +1,7 @@
 defaults:
   - env/train: behavior_r1pro
   - env/eval: behavior_r1pro
+  - model/openvla_oft@actor.model
   - override hydra/job_logging: stdout
 
 hydra:
@@ -102,32 +103,15 @@ actor:
   seed: 1234
   enable_offload: True
 
+  # Override the default values in model/openvla_oft
   model:
     model_path: "/path/to/model/RLinf-OpenVLAOFT-Behavior/"
     model_type: "openvla_oft"
-    value_type: ${algorithm.reward_type}  # 'action' or 'token'
+    value_type: ${algorithm.reward_type}
     action_dim: 23
-    num_action_chunks: 8
-    use_proprio: False
     unnorm_key: behavior_turn_on_radio
-    center_crop: True
-
-    precision: "bf16"
-    add_bias_linear: False
-    add_qkv_bias: True
-    vocab_size: 32000
-    hidden_size: 4096
-    add_value_head: True
-    image_size: [224, 224]
-    is_lora: False
-    lora_rank: 32
-
     num_images_in_input: 3
-    attn_implementation: "flash_attention_2"
-    low_cpu_mem_usage: True
-    trust_remote_code: True
-    gradient_checkpointing: True
-
+  
   optim:
     lr: 1.0e-4
     value_lr: 3.0e-3
