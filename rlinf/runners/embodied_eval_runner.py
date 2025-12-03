@@ -46,9 +46,15 @@ class EmbodiedEvalRunner:
         self.metric_logger = MetricLogger(cfg)
 
     def _load_eval_policy(self):
-        assert self.cfg.runner.eval_policy_path is not None
-
+        assert self.cfg.runner.eval_policy_path is not None, (
+            "eval_policy_path must be provided when only_eval is True"
+        )
         self.rollout.load_checkpoint(self.cfg.runner.eval_policy_path).wait()
+
+    def init_workers(self):
+        self.rollout.init_worker().wait()
+        self.env.init_worker().wait()
+        self._load_eval_policy()
 
     def evaluate(self):
         env_handle: Handle = self.env.evaluate(
@@ -64,8 +70,6 @@ class EmbodiedEvalRunner:
         return eval_metrics
 
     def run(self):
-        self._load_eval_policy()
-
         eval_metrics = self.evaluate()
         eval_metrics = {f"eval/{k}": v for k, v in eval_metrics.items()}
         self.metric_logger.log(step=0, data=eval_metrics)
