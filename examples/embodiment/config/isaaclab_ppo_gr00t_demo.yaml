@@ -106,8 +106,8 @@ rollout:
   pipeline_stage_num: 1
 
   model:
-      model_path: "/path/to/RLinf-Gr00t-SFT-Spatial"
-      precision: ${actor.model.precision}
+    model_path: "/path/to/RLinf-Gr00t-SFT-Spatial"
+    precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"

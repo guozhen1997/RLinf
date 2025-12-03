@@ -161,10 +161,10 @@ class MultiStepRolloutWorker(Worker):
         """
         # First step: no rewards yet, only dones
         if env_batch["rewards"] is None:
-            return env_batch["dones"].bool().contiguous(), None
+            return env_batch["dones"].bool().cpu().contiguous(), None
 
-        dones = env_batch["dones"].bool().contiguous()
-        rewards = env_batch["rewards"].contiguous()
+        dones = env_batch["dones"].bool().cpu().contiguous()
+        rewards = env_batch["rewards"].cpu().contiguous()
 
         # Handle auto_reset: add bootstrap value to rewards for done episodes
         # Note: currently this is not correct for chunk-size>1 with partial reset
@@ -183,7 +183,7 @@ class MultiStepRolloutWorker(Worker):
                 final_values[last_step_dones] = _final_values[:, 0][last_step_dones]
 
                 # Add bootstrap value to the last step of done episodes
-                rewards[:, -1] += self.cfg.algorithm.gamma * final_values
+                rewards[:, -1] += self.cfg.algorithm.gamma * final_values.cpu()
 
         return dones, rewards
 

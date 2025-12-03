@@ -97,7 +97,7 @@ actor:
   training_backend: "fsdp"
 
   micro_batch_size: 2
-  global_batch_size: 32
+  global_batch_size: 8
   seed: 1234
   enable_offload: True
 

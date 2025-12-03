@@ -1142,6 +1142,7 @@ class EnvOutput:
 
     def split_by_group(self) -> list["EnvOutput"]:
         """Split the EnvOutput into a list of EnvOutputs, each contains single group_env's outputs."""
+        assert self.obs is not None, "obs cannot be None"
         obs_split = self.split_value(self.obs, self.num_group_envs)
         final_obs_split = (
             self.split_value(self.final_obs, self.num_group_envs)

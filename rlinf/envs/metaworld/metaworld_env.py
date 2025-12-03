@@ -285,7 +285,7 @@ class MetaWorldEnv(gym.Env):
             "states": states,
             "task_descriptions": obs["task_descriptions"],
         }
-        return
+        return obs
 
     def _reconfigure(self, reset_state_ids, env_idx):
         reconfig_env_idx = []
@@ -316,14 +316,8 @@ class MetaWorldEnv(gym.Env):
             env_idx = np.arange(self.num_envs)
 
         if reset_state_ids is None:
-            if self.is_start:
-                reset_state_ids = (
-                    self.reset_state_ids if self.use_fixed_reset_state_ids else None
-                )
-                self._is_start = False
-            else:
-                num_reset_states = len(env_idx)
-                reset_state_ids = self._get_random_reset_state_ids(num_reset_states)
+            num_reset_states = len(env_idx)
+            reset_state_ids = self._get_random_reset_state_ids(num_reset_states)
 
         self._reconfigure(reset_state_ids, env_idx)
 

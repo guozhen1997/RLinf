@@ -80,7 +80,7 @@ algorithm:
     min_new_tokens: 1
 
 inference:
-  model_type: ${rollout.model_type}
+  model_type: ${rollout.model.model_type}
   group_name: "InferenceGroup"
   load_from_actor: True
   model:
