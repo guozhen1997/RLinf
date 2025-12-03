@@ -35,7 +35,7 @@ runner:
 algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
-  group_size: 8
+  group_size: 4
   rollout_epoch: 1
   reward_type: action_level  # action_level or chunk_level
   logprob_type: token_level
@@ -82,7 +82,7 @@ env:
 
   # Override the default values in env/train or env/eval
   train:
-    total_num_envs: 8
+    total_num_envs: 32
     max_episode_steps: 8
     reward_coef: ${algorithm.reward_coef}
     group_size: ${algorithm.group_size}
@@ -100,8 +100,8 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  micro_batch_size: 1
-  global_batch_size: 8
+  micro_batch_size: 4
+  global_batch_size: 32
   seed: 1234
   enable_offload: False
 

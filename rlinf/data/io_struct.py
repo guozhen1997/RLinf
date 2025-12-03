@@ -1175,6 +1175,7 @@ class EnvOutput:
                 worker_rank=self.worker_rank,
                 stage_id=self.stage_id,
                 num_group_envs=1 if self.num_group_envs is not None else None,
+                group_size=self.group_size,
                 group_env_ids=group_env_ids_split[i]
                 if group_env_ids_split is not None
                 else None,

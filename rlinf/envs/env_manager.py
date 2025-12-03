@@ -222,7 +222,9 @@ class EnvManager:
             self.env = None
         else:
             self.env_cls = env_cls
-            self.env = self.env_cls(cfg, num_envs, seed_offset, total_num_processes)
+            self.env = self.env_cls(
+                self.cfg, num_envs, seed_offset, total_num_processes
+            )
 
     @classmethod
     def register_env(cls, env_name: str):
