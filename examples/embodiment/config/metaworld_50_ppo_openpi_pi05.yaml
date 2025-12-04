@@ -28,6 +28,7 @@ runner:
   max_epochs: 1000
   max_steps: -1
 
+  only_eval: False
   val_check_interval: -1
   save_interval: 50
   seq_length: 4096
@@ -98,7 +99,7 @@ rollout:
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/model/openpi"
+    model_path: "/path/to/model/RLinf-Pi05-SFT"
     precision: ${actor.model.precision}
 
 actor:
@@ -111,7 +112,7 @@ actor:
 
   # Override the default values in model/pi0_5
   model:
-    model_path: "/path/to/model/RLinf-OpenPI-Pi05-MetaWorld50"
+    model_path: "/path/to/model/RLinf-Pi05-SFT"
     num_action_chunks: 5 # interface for the env
     action_dim: 4
     add_value_head: True

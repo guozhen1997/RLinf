@@ -273,7 +273,8 @@ class MultiStepRolloutWorker(Worker):
         if self.enable_offload:
             self._load_model()
         self.buffer_list = [
-            EmbodiedRolloutResult() for _ in range(self.num_pipeline_stages)
+            EmbodiedRolloutResult(rollout_epoch=self.cfg.algorithm.rollout_epoch)
+            for _ in range(self.num_pipeline_stages)
         ]
 
         n_chunk_steps = (

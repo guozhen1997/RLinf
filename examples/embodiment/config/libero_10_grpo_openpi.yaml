@@ -28,6 +28,7 @@ runner:
   max_epochs: 1000
   max_steps: -1
 
+  only_eval: False
   val_check_interval: -1
   save_interval: 40
   seq_length: 4096
@@ -102,7 +103,7 @@ rollout:
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/model/openpi"
+    model_path: "/path/to/model/RLinf-Pi0-SFT-Long"
     precision: ${actor.model.precision}
 
 actor:
@@ -115,7 +116,7 @@ actor:
 
   # Override the default values in model/pi0
   model:
-    model_path: "/path/to/model/openpi"
+    model_path: "/path/to/model/RLinf-Pi0-SFT-Long"
 
   optim:
     lr: 5.0e-6

@@ -1270,15 +1270,16 @@ class ChunkStepResult:
 @dataclass(kw_only=True)
 class EmbodiedRolloutResult:
     # required
+    rollout_epoch: int = None
     prev_logprobs: list[torch.Tensor] = field(
         default_factory=list
     )  # lens of results is rollout_epoch * n_chunk_steps
     prev_values: list[torch.Tensor] = field(
         default_factory=list
-    )  # lens is rollout_epoch * n_chunk_steps + 1 because of the bootstrap value
+    )  # lens is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
     dones: list[torch.Tensor] = field(
         default_factory=list
-    )  # lens of results is rollout_epoch * n_chunk_steps + 1 because of the bootstrap value
+    )  # lens of results is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
     rewards: list[torch.Tensor] = field(
         default_factory=list
     )  # lens of results is rollout_epoch * n_chunk_steps
@@ -1337,8 +1338,9 @@ class EmbodiedRolloutResult:
             rollout_result_dict["prev_values"]
         ), "dones and prev_values must have the same length"
         assert (
-            len(rollout_result_dict["dones"]) == len(rollout_result_dict["rewards"]) + 1
-        ), "dones length must be the length of rewards plus one"
+            len(rollout_result_dict["dones"])
+            == len(rollout_result_dict["rewards"]) + self.rollout_epoch
+        ), "dones length must be the length of rewards plus rollout_epoch"
 
         return rollout_result_dict
 
