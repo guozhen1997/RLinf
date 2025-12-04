@@ -359,15 +359,23 @@ class MultiStepRolloutWorker(Worker):
             self.cfg.env.eval.max_episode_steps
             // self.cfg.actor.model.num_action_chunks
         )
-        for _ in range(n_chunk_steps):
-            for _ in range(self.num_pipeline_stages):
-                env_batch, env_outputs = self.get_batch(
-                    input_channel, self.eval_num_envs_per_stage
-                )
-                actions, _ = self.predict(env_batch["obs"], mode="eval")
-                self.put_actions(
-                    output_channel, actions, env_outputs, self.eval_num_envs_per_stage
-                )
+        for _ in tqdm(
+            range(self.cfg.algorithm.eval_rollout_epoch),
+            desc="Evaluating Rollout Epochs",
+            disable=(self._rank != 0),
+        ):
+            for _ in range(n_chunk_steps):
+                for _ in range(self.num_pipeline_stages):
+                    env_batch, env_outputs = self.get_batch(
+                        input_channel, self.eval_num_envs_per_stage
+                    )
+                    actions, _ = self.predict(env_batch["obs"], mode="eval")
+                    self.put_actions(
+                        output_channel,
+                        actions,
+                        env_outputs,
+                        self.eval_num_envs_per_stage,
+                    )
 
         if self.enable_offload:
             self._offload_model()

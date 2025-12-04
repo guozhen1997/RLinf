@@ -1347,11 +1347,11 @@ class EmbodiedRolloutResult:
     def to_splitted_dict(self, split_size: int) -> list[dict[str, torch.Tensor]]:
         """Split the rollout result along the batch dimension.
 
-        1. Build a full dict via :meth:`to_dict` with tensors of shape ``[T/T+1, B, ...]``, where T is the number of chunk steps.
+        1. Build a full dict via :meth:`to_dict` with tensors of shape ``[T/T+rollout_epoch, B, ...]``, where T is the number of chunk steps.
         2. For each split, chunk along the batch dimension (dim=1) into ``split_size`` parts, keeping the time dimension as-is.
-        3. Return a list of ``split_size`` dictionaries, each containing tensors of shape ``[T/T+1, B / split_size, ...]``.
+        3. Return a list of ``split_size`` dictionaries, each containing tensors of shape ``[T/T+rollout_epoch, B / split_size, ...]``.
 
-        The time dimension ``T / T+1`` is preserved as-is and **no assumption is made**
+        The time dimension ``T / T+rollout_epoch`` is preserved as-is and **no assumption is made**
         about its relationship to ``rollout_epoch`` or ``n_chunk_steps``. Only the
         batch dimension is partitioned, which keeps all keys aligned regardless of
         their time length.

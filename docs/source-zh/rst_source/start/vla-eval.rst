@@ -32,7 +32,8 @@ RLinf 提供了 **即开即用的评估脚本**，用于在 *训练分布内* �
    EVAL_NAME=grpo-openvlaoft
    CKPT_PATH=YOUR_CKPT_PATH
    CONFIG_NAME=YOUR_CFG_NAME      # 其中 env.eval 必须为 maniskill_ood_template
-
+   TOTAL_NUM_ENVS=YOUR_TOTAL_NUM_ENVS # total number of evaluation environments
+   EVAL_ROLLOUT_EPOCH=YOUR_EVAL_ROLLOUT_EPOCH # eval rollout epoch, total_trajectory_num = eval_rollout_epoch * total_num_envs
    for env_id in \
        "PutOnPlateInScene25VisionImage-v1" "PutOnPlateInScene25VisionTexture03-v1" \
        "PutOnPlateInScene25VisionTexture05-v1" "PutOnPlateInScene25VisionWhole03-v1"  \
@@ -48,6 +49,8 @@ RLinf 提供了 **即开即用的评估脚本**，用于在 *训练分布内* �
        CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ \
             --config-name ${CONFIG_NAME} \
             runner.logger.log_path=${LOG_DIR} \
+            algorithm.eval_rollout_epoch=${EVAL_ROLLOUT_EPOCH} \
+            env.eval.total_num_envs=${TOTAL_NUM_ENVS} \
             env.eval.init_params.id=${env_id} \
             env.eval.init_params.obj_set=${obj_set} \
             actor.model.ckpt_path=${CKPT_PATH}"
@@ -66,6 +69,8 @@ RLinf 提供了 **即开即用的评估脚本**，用于在 *训练分布内* �
        CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ \
             --config-name ${CONFIG_NAME} \
             runner.logger.log_path=${LOG_DIR} \
+            algorithm.eval_rollout_epoch=${EVAL_ROLLOUT_EPOCH} \
+            env.eval.total_num_envs=${TOTAL_NUM_ENVS} \
             env.eval.init_params.id=${env_id} \
             env.eval.init_params.obj_set=${obj_set} \
             runner.eval_policy_path=${CKPT_PATH}"
@@ -119,7 +124,8 @@ RLinf 提供了 **即开即用的评估脚本**，用于在 *训练分布内* �
 
    runner:
      eval_policy_path: "/path/to/rl_ckpt.pt"
-
+   algorithm:
+     eval_rollout_epoch: 1
    rollout:
      model:
        model_path: "/path/to/sft_base_model/"
