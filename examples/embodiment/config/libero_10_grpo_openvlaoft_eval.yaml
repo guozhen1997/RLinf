@@ -44,6 +44,7 @@ algorithm:
   group_size: 8
   rollout_epoch: 8
   eval_rollout_epoch: 2 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
+  
   reward_type: action_level  # action_level or chunk_level
   logprob_type: token_level
   entropy_type: token_level

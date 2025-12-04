@@ -29,6 +29,7 @@ runner:
   max_steps: -1
 
   only_eval: False
+  eval_policy_path: null
   val_check_interval: -1
   save_interval: 25
   seq_length: 4096
@@ -41,6 +42,8 @@ algorithm:
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 8
   rollout_epoch: 16
+  eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
+
   reward_type: action_level  # action_level or chunk_level
   logprob_type: token_level
   entropy_type: token_level

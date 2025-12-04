@@ -41,6 +41,7 @@ algorithm:
   group_size: 1
 
   rollout_epoch: 1
+  eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
 
   adv_type: gae
   loss_type: actor_critic

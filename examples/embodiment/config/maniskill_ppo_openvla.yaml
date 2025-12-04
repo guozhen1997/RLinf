@@ -31,6 +31,7 @@ runner:
   max_steps: -1
 
   only_eval: False
+  eval_policy_path: null
   val_check_interval: -1
   save_interval: 40
   seq_length: 4096
@@ -44,6 +45,8 @@ algorithm:
   group_size: 1
 
   rollout_epoch: 1
+  eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
+
   reward_type: action_level
   logprob_type: action_level
   entropy_type: action_level
