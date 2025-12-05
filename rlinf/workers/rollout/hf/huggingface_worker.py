@@ -249,26 +249,10 @@ class MultiStepRolloutWorker(Worker):
     def get_batch(self, input_channel: Channel, num_group_envs: int):
         """Get a batch of group environment outputs from the input channel."""
         env_outputs: list[EnvOutput] = []
-        env_batches: list[dict[str, torch.Tensor]] = []
-        batch_env_sizes = []  # Store the number of environments in each batch
         for _ in range(num_group_envs):
             env_output: EnvOutput = input_channel.get(key=self.get_batch_cnt)
             env_outputs.append(env_output)
-            env_batch_dict = env_output.to_batch()
-            env_batches.append(env_batch_dict)
-            # Store the number of environments in this batch
-            if env_output.dones is not None:
-                batch_env_sizes.append(env_output.dones.shape[0])
-            else:
-                # Fallback: calculate from num_group_envs * group_size
-                num_envs = (env_output.num_group_envs or 1) * (
-                    env_output.group_size or 1
-                )
-                batch_env_sizes.append(num_envs)
-        env_batch = EnvOutput.merge_batches(env_batches)
-        env_batch["_batch_env_sizes"] = (
-            batch_env_sizes  # Store batch sizes for final_obs processing
-        )
+        env_batch = EnvOutput.merge_to_batch(env_outputs)
         self.get_batch_cnt += 1
         return env_batch, env_outputs
 

@@ -1210,65 +1210,65 @@ class EnvOutput:
             )
 
     @staticmethod
-    def merge_batches(
-        env_batches: list[dict[str, torch.Tensor | int | dict]],
+    def merge_to_batch(
+        env_outputs: list["EnvOutput"],
     ) -> dict[str, torch.Tensor | int | dict]:
-        """Merge two env batches into one.
+        """Merge env outputs into one batch.
 
         Special handling for final_obs: keep it as a list instead of merging,
         so that we can process each env_output's final_obs separately.
+        Also computes and stores batch_env_sizes for final_obs processing.
         """
+        if len(env_outputs) == 0:
+            return {}
+
         merged_batch = {}
-        if len(env_batches) == 0:
-            return merged_batch
-        if len(env_batches) == 1:
-            # Even for single batch, wrap final_obs in a list for consistency
-            single_batch = env_batches[0].copy()
-            if "final_obs" in single_batch:
-                single_batch["final_obs"] = (
-                    [single_batch["final_obs"]]
-                    if single_batch["final_obs"] is not None
-                    else None
-                )
-            return single_batch
-
-        # Special handling: keep final_obs as a list
         final_obs_list = []
-        for batch in env_batches:
-            if "final_obs" in batch:
-                final_obs_list.append(batch["final_obs"])
-            else:
-                final_obs_list.append(None)
+        batch_env_sizes = []
 
-        for key in env_batches[0].keys():
-            if key == "final_obs":
-                continue
-            for i in range(1, len(env_batches)):
-                if key not in merged_batch:
-                    merged_batch[key] = env_batches[0][key]
-                merged_batch[key] = EnvOutput.merge_values(
-                    merged_batch[key], env_batches[i][key]
+        for env_output in env_outputs:
+            # Convert env_output to batch dict
+            obs = env_output.prepare_observations(env_output.obs)
+            final_obs = (
+                env_output.prepare_observations(env_output.final_obs)
+                if env_output.final_obs is not None
+                else None
+            )
+
+            # Collect final_obs for list handling
+            final_obs_list.append(final_obs)
+
+            # Merge non-final_obs keys
+            if not merged_batch:
+                # First batch: initialize merged_batch
+                merged_batch["obs"] = obs
+                merged_batch["dones"] = env_output.dones
+                merged_batch["rewards"] = env_output.rewards
+            else:
+                # Merge with existing batch
+                merged_batch["obs"] = EnvOutput.merge_values(merged_batch["obs"], obs)
+                merged_batch["dones"] = EnvOutput.merge_values(
+                    merged_batch["dones"], env_output.dones
+                )
+                merged_batch["rewards"] = EnvOutput.merge_values(
+                    merged_batch["rewards"], env_output.rewards
                 )
 
+            # Compute batch size
+            if env_output.dones is not None:
+                batch_env_sizes.append(env_output.dones.shape[0])
+            else:
+                batch_env_sizes.append(
+                    (env_output.num_group_envs or 1) * (env_output.group_size or 1)
+                )
+
+        # Set final_obs as list (keep as list for separate processing)
         merged_batch["final_obs"] = (
             final_obs_list if any(fo is not None for fo in final_obs_list) else None
         )
+        merged_batch["_batch_env_sizes"] = batch_env_sizes
 
         return merged_batch
-
-    def to_batch(self) -> dict[str, torch.Tensor | int | dict]:
-        env_batch = {}
-
-        env_batch["obs"] = self.prepare_observations(self.obs)
-        env_batch["final_obs"] = (
-            self.prepare_observations(self.final_obs)
-            if self.final_obs is not None
-            else None
-        )
-        env_batch["dones"] = self.dones
-        env_batch["rewards"] = self.rewards
-
-        return env_batch
 
 
 @dataclass(kw_only=True)
