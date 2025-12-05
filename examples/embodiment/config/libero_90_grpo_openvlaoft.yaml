@@ -116,6 +116,7 @@ actor:
   model:
     model_path: "/path/to/model/RLinf-OpenVLAOFT-LIBERO-90-Base-Lora/"
     model_type: "openvla_oft"
+    unnorm_key: libero_90_no_noops_trajall
     
   optim:
     lr: 2.0e-5
