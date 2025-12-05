@@ -1213,20 +1213,46 @@ class EnvOutput:
     def merge_batches(
         env_batches: list[dict[str, torch.Tensor | int | dict]],
     ) -> dict[str, torch.Tensor | int | dict]:
-        """Merge two env batches into one."""
+        """Merge two env batches into one.
+
+        Special handling for final_obs: keep it as a list instead of merging,
+        so that we can process each env_output's final_obs separately.
+        """
         merged_batch = {}
         if len(env_batches) == 0:
             return merged_batch
         if len(env_batches) == 1:
-            return env_batches[0]
+            # Even for single batch, wrap final_obs in a list for consistency
+            single_batch = env_batches[0].copy()
+            if "final_obs" in single_batch:
+                single_batch["final_obs"] = (
+                    [single_batch["final_obs"]]
+                    if single_batch["final_obs"] is not None
+                    else None
+                )
+            return single_batch
+
+        # Special handling: keep final_obs as a list
+        final_obs_list = []
+        for batch in env_batches:
+            if "final_obs" in batch:
+                final_obs_list.append(batch["final_obs"])
+            else:
+                final_obs_list.append(None)
 
         for key in env_batches[0].keys():
+            if key == "final_obs":
+                continue
             for i in range(1, len(env_batches)):
                 if key not in merged_batch:
                     merged_batch[key] = env_batches[0][key]
                 merged_batch[key] = EnvOutput.merge_values(
                     merged_batch[key], env_batches[i][key]
                 )
+
+        merged_batch["final_obs"] = (
+            final_obs_list if any(fo is not None for fo in final_obs_list) else None
+        )
 
         return merged_batch
 

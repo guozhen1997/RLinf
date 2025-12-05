@@ -136,7 +136,6 @@ actor:
     total_training_steps: ${runner.max_epochs}
     lr_warmup_steps: -1
     warmup_style: cosine
-    min_lr_ratio: 0.1
     num_cycles: 0.5
 
   # Override the default values in training_backend/fsdp
