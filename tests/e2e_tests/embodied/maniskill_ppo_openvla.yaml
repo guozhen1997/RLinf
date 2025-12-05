@@ -117,6 +117,7 @@ actor:
   model:
     model_path: "/workspace/dataset/openvla-7b"
     model_type: "openvla"
+    add_value_head: True
     is_lora: True
 
   tokenizer:

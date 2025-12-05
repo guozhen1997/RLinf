@@ -113,6 +113,7 @@ actor:
     action_dim: 23
     unnorm_key: behavior_turn_on_radio
     num_images_in_input: 3
+    add_value_head: True
   
   optim:
     lr: 1.0e-4

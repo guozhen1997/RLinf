@@ -129,6 +129,7 @@ actor:
   # Override the default values in model/gr00t
   model:
     model_path: "/path/to/gr00t_libero_spatial_fewshot_sft"
+    add_value_head: True
 
   optim:
     lr: 2.0e-5

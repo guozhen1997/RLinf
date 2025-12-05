@@ -114,6 +114,7 @@ actor:
   model:
     model_path: "/path/to/RLinf-Gr00t-SFT-Spatial"
     model_type: "gr00t"
+    add_value_head: True
 
   optim:
     lr: 2.0e-5

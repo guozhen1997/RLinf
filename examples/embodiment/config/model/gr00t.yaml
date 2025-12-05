@@ -17,7 +17,7 @@ policy_setup: "widowx_bridge"
 # Observation and embodiment settings
 obs_converter_type: "libero"
 embodiment_tag: "libero_franka"
-use_wrist_image: True
+add_value_head: True
 
 # RL head configuration
 rl_head_config:
@@ -28,7 +28,7 @@ rl_head_config:
   noise_anneal: False
   noise_params: [0.7, 0.3, 400]
   noise_level: 0.5
-  add_value_head: True
+  add_value_head: ${actor.model.add_value_head}
   chunk_critic_input: False
   detach_critic_input: True
   valid_action_dim: 7
