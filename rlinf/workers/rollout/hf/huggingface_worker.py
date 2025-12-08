@@ -173,7 +173,7 @@ class MultiStepRolloutWorker(Worker):
 
     def generate(self):
         if self.enable_offload:
-            self._load_model()
+            self.reload_model()
 
         self.buffer_list = [
             EmbodiedRolloutResult(rollout_epoch=self.cfg.algorithm.rollout_epoch)
@@ -232,7 +232,7 @@ class MultiStepRolloutWorker(Worker):
 
     def evaluate(self):
         if self.enable_offload:
-            self._load_model()
+            self.reload_model()
 
         n_chunk_steps = (
             self.cfg.env.eval.max_steps_per_rollout_epoch

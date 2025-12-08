@@ -18,5 +18,4 @@ video_cfg:
 
 base_config_name: r1pro_behavior
 
-tasks:
-  activity_task_indices: "0" # eg. "0-49" or "0-20,49"
+task_idx: 0 # 0-49, for now, we only support single task training

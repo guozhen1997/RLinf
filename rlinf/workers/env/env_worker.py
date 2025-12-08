@@ -293,7 +293,7 @@ class EnvWorker(Worker):
                     extracted_obs, infos = self.simulator_list[i].reset()
                     self.last_obs_list.append(extracted_obs)
                     dones = (
-                        torch.zeros((self.cfg.env.train.num_envs,), dtype=bool)
+                        torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
                         .unsqueeze(1)
                         .repeat(1, self.cfg.actor.model.num_action_chunks)
                     )

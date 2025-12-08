@@ -90,7 +90,7 @@ env:
     group_size: ${algorithm.group_size}
     max_episode_steps: 16
   eval:
-    total_num_envs: 4
+    total_num_envs: 8
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 16

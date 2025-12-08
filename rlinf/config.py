@@ -784,50 +784,6 @@ def validate_embodied_cfg(cfg):
             cfg.env.train.omnigibson_cfg = omnigibson_cfg
             cfg.env.eval.omnigibson_cfg = omnigibson_cfg
 
-            # Also accepts int or list/tuple of tokens (ints or range strings)
-            def parse_activity_ids(activity_ids) -> list[int]:
-                if activity_ids is None:
-                    return []
-                out: list[int] = []
-
-                def _add_token(tok: str):
-                    tok = tok.strip()
-                    if not tok:
-                        return
-                    if "-" in tok:
-                        start, end = tok.split("-", 1)
-                        start_i, end_i = int(start.strip()), int(end.strip())
-                        if end_i < start_i:
-                            start_i, end_i = end_i, start_i
-                        out.extend(range(start_i, end_i + 1))
-                    else:
-                        out.append(int(tok))
-
-                if isinstance(activity_ids, int):
-                    out.append(int(activity_ids))
-                elif isinstance(activity_ids, (list, tuple)):
-                    for item in activity_ids:
-                        if isinstance(item, int):
-                            out.append(int(item))
-                        else:
-                            for tok in str(item).split(","):
-                                _add_token(tok)
-                else:
-                    for tok in str(activity_ids).split(","):
-                        _add_token(tok)
-                return out
-
-            cfg.env.train.tasks.activity_task_indices = parse_activity_ids(
-                cfg.env.train.tasks.activity_task_indices
-            )
-            cfg.env.eval.tasks.activity_task_indices = parse_activity_ids(
-                cfg.env.eval.tasks.activity_task_indices
-            )
-            assert (
-                len(cfg.env.train.tasks.activity_task_indices) > 0
-                and len(cfg.env.eval.tasks.activity_task_indices) > 0
-            ), "No activity IDs provided"
-
     return cfg
 
 

@@ -83,7 +83,7 @@ class BehaviorEnv(gym.Env):
     def _load_tasks_cfg(self):
         with open_dict(self.cfg):
             self.cfg.omnigibson_cfg["task"]["activity_name"] = TASK_INDICES_TO_NAMES[
-                self.cfg.tasks.task_idx
+                self.cfg.task_idx
             ]
 
         # Read task description
