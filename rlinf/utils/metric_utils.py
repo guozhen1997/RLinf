@@ -149,18 +149,49 @@ def append_to_dict(data, new_data):
 
 
 def compute_loss_mask(dones):
+    '''
+    batch中的每一条数据代表一条trajectory，计算每个trajectory的有效掩码；
+    标记「有效动作步骤」（未终止的回合），屏蔽「已终止回合的后续无效步骤」
+    '''
+    '''
+    dones: 终止标志张量，形状 [n_chunk_step + 1, actual_bsz, num_action_chunks]
+        - n_chunk_step: 分块动作的步数（轨迹长度）
+        - actual_bsz: 实际批次大小（rollout_epoch × batch_size）
+        - num_action_chunks: 每个时间步的动作分块数（如机械臂多维度动作分块）
+    '''
+    # 21 * 1 * 25
     _, actual_bsz, num_action_chunks = dones.shape
+    # 实际动作步数 = dones总步数 - 1（dones多1个终止标志位）
     n_chunk_step = dones.shape[0] - 1
+
+    # print(f"debug wph: dones_shape: {dones.shape}", flush=True)
+    # print(f"debug wph: dones: {dones}", flush=True)
+    # 525 * 1
+    # 展平dones，适配分块动作的维度合并, # [n_chunk_step + 1 * rollout_epoch , bsz]
     flattened_dones = dones.transpose(1, 2).reshape(
         -1, actual_bsz
     )  # [n_chunk_step + 1, rollout_epoch x bsz]
+    
+    # print(f"debug wph: 1_flattened_dones_shape: {flattened_dones.shape}", flush=True)
+    # print(f"debug wph: 1_flattened_dones: {flattened_dones}", flush=True)
+    # 501 * 25，去掉最开头的历史步骤，只保留当前轨迹的步骤
     flattened_dones = flattened_dones[
         -(n_chunk_step * num_action_chunks + 1) :
     ]  # [n_steps+1, actual-bsz]
+    
+    # print(f"debug wph: 2_flattened_dones_shape: {flattened_dones.shape}", flush=True)
+    # print(f"debug wph: 2_flattened_dones: {flattened_dones}", flush=True)
+    
+    # 去掉最后一个，变为 500 * 25
+    # 如果出现1，后续的step均为1，置为无效
     flattened_loss_mask = (flattened_dones.cumsum(dim=0) == 0)[
         :-1
     ]  # [n_steps, actual-bsz]
 
+    # print(f"debug wph: flattened_loss_mask_shape: {flattened_loss_mask.shape}", flush=True)
+    # print(f"debug wph: flattened_loss_mask: {flattened_loss_mask}", flush=True)
+    
+    # reshape: 500 * 25 -> 20 * 1 * 25
     loss_mask = flattened_loss_mask.reshape(n_chunk_step, num_action_chunks, actual_bsz)
     loss_mask = loss_mask.transpose(
         1, 2
@@ -169,4 +200,8 @@ def compute_loss_mask(dones):
     loss_mask_sum = loss_mask.sum(dim=(0, 2), keepdim=True)  # [1, bsz, 1]
     loss_mask_sum = loss_mask_sum.expand_as(loss_mask)
 
+    # print(f"debug wph: loss_mask.shape: {loss_mask.shape}", flush=True)
+    # print(f"debug wph: loss_mask: {loss_mask}", flush=True)
+    # print(f"debug wph: loss_mask_sum: {loss_mask_sum}", flush=True)
+    
     return loss_mask, loss_mask_sum

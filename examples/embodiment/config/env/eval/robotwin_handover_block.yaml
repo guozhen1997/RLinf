@@ -7,7 +7,7 @@ seed: 0
 num_group: ${algorithm.num_group_envs}
 group_size: ${algorithm.group_size}
 use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
-max_episode_steps: 200
+max_episode_steps: 400
 only_eval: True
 
 video_cfg:
@@ -19,16 +19,15 @@ num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 
 assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
 
-# seeds_path: "/mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_eval_seeds.json"
-seeds_path: "/mnt/public/wph/codes/RLinf/examples/embodiment/seeds/robotwin2_eval_seeds.json"
+seeds_path: "/mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_eval_seeds.json"
 
 task_config:
-  task_name: place_empty_cup
-  step_lim: 200
+  task_name: handover_block
+  step_lim: 400
   # if you want to modify the config, please check the following tutorial first:
   # https://robotwin-platform.github.io/doc/usage/configurations.html
   render_freq: 0
-  episode_num: 100    # 没用到
+  episode_num: 100
   use_seed: false
   save_freq: 15
   embodiment: [piper, piper, 0.6]

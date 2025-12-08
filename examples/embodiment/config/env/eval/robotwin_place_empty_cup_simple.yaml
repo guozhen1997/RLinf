@@ -4,7 +4,7 @@ ignore_terminations: ${algorithm.ignore_terminations}
 use_rel_reward: True
 use_custom_reward: True
 seed: 0
-num_group: ${algorithm.num_group_envs}
+num_group: 128
 group_size: ${algorithm.group_size}
 use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
 max_episode_steps: 200
@@ -15,12 +15,21 @@ video_cfg:
   info_on_video: True
   video_base_dir: ${runner.logger.log_path}/video/eval
 
-num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
+num_envs: ${multiply:${algorithm.group_size}, ${env.eval.num_group}}
 
+# seeds_path: /mnt/public/wph/codes/RLinf/examples/embodiment/config/env/robotwin2_eval_seeds.json #${oc.env:EMBODIED_PATH}/config/env/robotwin2_eval_seeds.json
+seeds_path: /mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_eval_seeds.json
+# assets_path: "/mnt/public/wph/codes/RLinf_RoboTwin_gz"
 assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
 
-# seeds_path: "/mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_eval_seeds.json"
-seeds_path: "/mnt/public/wph/codes/RLinf/examples/embodiment/seeds/robotwin2_eval_seeds.json"
+# reward_coef: 5.0
+# filter_rewards: True
+# rewards_lower_bound: 0.5
+# rewards_upper_bound: 4.5
+reward_coef: 1.0
+filter_rewards: True
+rewards_lower_bound: 0.1
+rewards_upper_bound: 0.9
 
 task_config:
   task_name: place_empty_cup
@@ -28,16 +37,18 @@ task_config:
   # if you want to modify the config, please check the following tutorial first:
   # https://robotwin-platform.github.io/doc/usage/configurations.html
   render_freq: 0
-  episode_num: 100    # 没用到
+  episode_num: 100
   use_seed: false
   save_freq: 15
   embodiment: [piper, piper, 0.6]
+  # embodiment: ['aloha-agilex']
+
   language_num: 100
   domain_randomization:
     random_background: true
     cluttered_table: true
     clean_background_rate: 0.02
-    random_head_camera_dis: 0
+    random_head_camera_dis: 0.0
     random_table_height: 0.03
     random_light: true
     crazy_random_light_rate: 0.02
@@ -46,6 +57,8 @@ task_config:
     wrist_camera_type: D435
     collect_head_camera: true
     collect_wrist_camera: false
+    # collect_wrist_camera: true
+
   data_type:
     rgb: true
     third_view: false
@@ -53,6 +66,7 @@ task_config:
     pointcloud: false
     observer: false
     endpose: false
+    # endpose: true
     qpos: true
     mesh_segmentation: false
     actor_segmentation: false

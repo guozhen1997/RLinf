@@ -75,8 +75,11 @@ class RoboTwinEnv(gym.Env):
 
         from robotwin.envs.vector_env import VectorEnv
 
+        # 实际上就是环境的seed
         env_seeds = self.reset_state_ids.tolist()
-
+        print(f"debug wph: env_seeds={env_seeds}", flush=True)
+        print(f"debug wph: num_envs={self.num_envs}", flush=True)
+        
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
@@ -194,9 +197,10 @@ class RoboTwinEnv(gym.Env):
         return extracted_obs
 
     def _calc_step_reward(self, terminations):
-        reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        # reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
 
-        reward += terminations * 1.0
+        # reward += terminations * 1.0
+        reward = self.cfg.reward_coef * terminations
 
         reward_diff = reward - self.prev_step_reward
         self.prev_step_reward = reward
@@ -210,8 +214,10 @@ class RoboTwinEnv(gym.Env):
         n_steps_to_run = torch.as_tensor(np.array(infos["n_steps_to_run"]).reshape(-1), device=self.device)
         chunk_rewards = torch.zeros(self.num_envs, chunk_step, device=self.device)
         for env_id in range(self.num_envs):
+            # 每个chunk 在env中剩余没跑的action个数
             steps_left = n_steps_to_run[env_id]
             reward = step_reward[env_id]
+            # 计算最后一次真正执行的 action 在 chunk 里的索引
             start_idx = chunk_step - steps_left - 1
 
             if terminations[env_id] and start_idx > 0:
@@ -237,6 +243,7 @@ class RoboTwinEnv(gym.Env):
         infos = {}
 
         self._reset_metrics(env_idx)
+        # 更新 reset_state_ids: 更新环境的seed为下一次reset做准备
         self.update_reset_state_ids(env_idx=env_idx)
         extracted_obs = self._extract_obs_image(raw_obs)
 
@@ -271,6 +278,7 @@ class RoboTwinEnv(gym.Env):
                 np.array(truncations).reshape(-1), device=self.device
             )
 
+        # 计算reward
         if self.use_custom_reward:
             step_reward = self._calc_step_reward(terminations)
         else:
@@ -279,9 +287,11 @@ class RoboTwinEnv(gym.Env):
                     np.array(step_reward, dtype=np.float32).reshape(-1),
                     device=self.device,
                 )
-
+        # 计算对局步数
         self._elapsed_steps += actions.shape[1]
+        
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
+        # 合并到大的truncations
         if truncated.any():
             truncations = torch.logical_or(truncated, truncations)
 
@@ -294,15 +304,18 @@ class RoboTwinEnv(gym.Env):
             self.add_new_frames(raw_obs, plot_infos)
         infos = self._record_metrics(step_reward, infos)
 
+        # 如果ignore_terminations为True, terminations设置为False，直接忽略
         if self.ignore_terminations:
             terminations[:] = False
             if self.record_metrics:
                 if "success" in infos:
                     infos["episode"]["success_at_end"] = infos["success"].clone()
-
+        # 计算dones：通过逻辑或操作将terminations和truncations合并
         dones = torch.logical_or(terminations, truncations)
 
+        # 同时设置了auto_reset和self.auto_reset时，才会进行自动重置
         _auto_reset = auto_reset and self.auto_reset
+        # 如果dones中有True且_auto_reset为True，则进行自动重置
         if dones.any() and _auto_reset:
             extracted_obs, infos = self._handle_auto_reset(dones, extracted_obs, infos)
 
@@ -328,6 +341,7 @@ class RoboTwinEnv(gym.Env):
                 np.array(truncations).reshape(-1), device=self.device
             )
 
+        # 一般用于GRPO，返回0/1奖励
         if self.use_custom_reward:
             step_reward = self._calc_step_reward(terminations)
         else:
@@ -340,6 +354,9 @@ class RoboTwinEnv(gym.Env):
         chunk_rewards = self._cal_chunk_rewards(step_reward, chunk_step, terminations, infos)
 
         self._elapsed_steps += chunk_actions.shape[1]
+        # print(f"debug wph: chunk_actions_shape={chunk_actions.shape}", flush=True)
+        
+        # 是否truncated
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
         if truncated.any():
             truncations = torch.logical_or(truncated, truncations)
@@ -380,9 +397,10 @@ class RoboTwinEnv(gym.Env):
 
     def _handle_auto_reset(self, dones, extracted_obs, infos):
         final_obs = extracted_obs.copy()
+        # env_idx：选择出需要重置的环境索引
         env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]
         final_info = infos.copy()
-
+        # 对相应终止的环境进行reset
         extracted_obs, infos = self.reset(env_idx=env_idx.tolist())
         # gymnasium calls it final observation but it really is just o_{t+1} or the true next observation
         infos["final_observation"] = final_obs
@@ -424,36 +442,68 @@ class RoboTwinEnv(gym.Env):
         self.render_images.append(full_image)
 
     def _init_reset_state_ids(self):
+        '''
+        读取seeds_path中的所有成功种子，并打乱顺序;
+        如果没有指定seeds_path或文件不存在或文件中没有成功种子，则生成随机种子;
+        '''
         if self.cfg.get("seeds_path", None) is not None and os.path.exists(self.cfg.seeds_path):
             with open(self.cfg.seeds_path, "r") as f:
                 data = json.load(f)
             success_seeds = data[self.task_name].get("success_seeds", None)
             if success_seeds is not None:
-                self.success_seeds = torch.as_tensor(success_seeds, dtype=torch.long)
+                success_seeds = torch.as_tensor(success_seeds, dtype=torch.long)
+                self._generator = torch.Generator()
+                self._generator.manual_seed(self.seed)
+                shuffled_indices = torch.randperm(
+                    success_seeds.numel(), generator=self._generator
+                )
+                self.success_seeds = success_seeds[shuffled_indices]
+                self._current_seed_index = 0
             else:
+                # 如果没有成功种子，则生成随机种子
                 self.success_seeds = None
+                self._current_seed_index = 0
         else:
             self.success_seeds = None
+            self._current_seed_index = 0
 
-        self._generator = torch.Generator()
-        self._generator.manual_seed(self.seed)
+        if not hasattr(self, "_generator"):
+            self._generator = torch.Generator()
+            self._generator.manual_seed(self.seed)
         self.update_reset_state_ids()
 
     def update_reset_state_ids(self, env_idx=None):
+        # 如果启用了 use_fixed_reset_state_ids，且已经有 reset_state_ids
+        # -> 表示我们想固定 seed ，不再更新，直接返回
         if self.use_fixed_reset_state_ids and hasattr(self, "reset_state_ids"):
+            print(f"debug wph: use_fixed_reset_state_ids is True, not updating reset_state_ids", flush=True)
             return
 
+        # 有传env_idx时，表示只更新指定环境的reset_state_ids
         if env_idx is not None and hasattr(self, "reset_state_ids"):
             if self.success_seeds is not None:
-                reset_state_ids = self.success_seeds[
-                    torch.randperm(
-                        self.success_seeds.numel(), generator=self._generator
-                    )[: self.num_group]
-                ]
+                total_seeds = self.success_seeds.numel()
+                end_index = self._current_seed_index + self.num_group
+                if end_index <= total_seeds:
+                    reset_state_ids = self.success_seeds[self._current_seed_index:end_index]
+                else:
+                    # If exceeds, take from beginning (wrap around)
+                    # 如果越界了，就从尾部取到末尾 + 从头部取剩余的（环绕使用）
+                    remaining = self.num_group - (total_seeds - self._current_seed_index)
+                    reset_state_ids = torch.cat([
+                        self.success_seeds[self._current_seed_index:],
+                        self.success_seeds[:remaining]
+                    ])
+                # # repeat_interleave 按 group_size 重复，适用于GRPO算法
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
+                # Update index for next time
+                self._current_seed_index = (end_index) % total_seeds
+                print(f"debug wph: using parse 1", flush=True)
+                
             else:
+                # 没有 success_seeds，直接随机生成 reset_state_ids
                 reset_state_ids = torch.randint(
                     low=10000,
                     high=200000,
@@ -463,18 +513,32 @@ class RoboTwinEnv(gym.Env):
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
+            # 如果指定了 env_idx，则只更新对应环境的 reset_state_ids
             for idx in env_idx:
                 self.reset_state_ids[idx] = reset_state_ids[idx]
+        
+        # 如果没有传env_idx，则更新所有环境的reset_state_ids
         else:
+            # 
             if self.success_seeds is not None:
-                reset_state_ids = self.success_seeds[
-                    torch.randperm(
-                        self.success_seeds.numel(), generator=self._generator
-                    )[: self.num_group]
-                ]
+                total_seeds = self.success_seeds.numel()
+                end_index = self._current_seed_index + self.num_group
+                if end_index <= total_seeds:
+                    reset_state_ids = self.success_seeds[self._current_seed_index:end_index]
+                else:
+                    # If exceeds, take from beginning (wrap around)
+                    remaining = self.num_group - (total_seeds - self._current_seed_index)
+                    reset_state_ids = torch.cat([
+                        self.success_seeds[self._current_seed_index:],
+                        self.success_seeds[:remaining]
+                    ])
+                # 重复group_size次
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
+                # Update index for next time
+                self._current_seed_index = (end_index) % total_seeds
+                print(f"debug wph: using parse 2", flush=True)
             else:
                 reset_state_ids = torch.randint(
                     low=10000,

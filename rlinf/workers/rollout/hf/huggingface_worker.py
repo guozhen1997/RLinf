@@ -58,7 +58,7 @@ class MultiStepRolloutWorker(Worker):
             self.hf_model.setup_config_and_processor(
                 model_config, self.cfg, input_processor
             )
-
+        # rollout model in eval mode
         self.hf_model.eval()
 
         self.setup_sample_params()

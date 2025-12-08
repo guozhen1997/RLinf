@@ -619,6 +619,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             new_value = new_value.reshape(new_value.shape[0], -1, *new_value.shape[3:])
             rollout_batch[key] = new_value
 
+        # print(f"debug wph: dones.shape={rollout_batch['dones'].shape}", flush=True)
+        # print(f"debug wph: dones={rollout_batch['dones']}", flush=True)
+        
         if (
             not self.cfg.env.train.auto_reset
             and not self.cfg.env.train.ignore_terminations
@@ -626,6 +629,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             dones = rollout_batch[
                 "dones"
             ]  # [n_chunk_step, rollout_epoch x bsz, num_action_chunks]
+            #### debug wph: 计算loss_mask
             loss_mask, loss_mask_sum = compute_loss_mask(dones)
 
             if self.cfg.algorithm.reward_type == "chunk_level":
@@ -717,6 +721,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             "rollout_epoch": self.cfg.algorithm.get("rollout_epoch", 1),
         }
 
+        # 计算优势函数和回报
         advantages_and_returns = calculate_adv_and_returns(**kwargs)
 
         self.rollout_batch.update(advantages_and_returns)
@@ -726,6 +731,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 "loss_mask_sum": kwargs["loss_mask_sum"],
             }
         )
+        # 计算rollout的指标
         rollout_metrics = compute_rollout_metrics(self.rollout_batch)
         return rollout_metrics
 

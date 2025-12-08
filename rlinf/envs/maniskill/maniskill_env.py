@@ -233,7 +233,10 @@ class ManiskillEnv(gym.Env):
             )
             if self.video_cfg.save_video:
                 self.add_new_frames(infos=infos)
-            return extracted_obs, None, terminations, truncations, infos
+            # reset时直接返回0的reward
+            reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+            
+            return extracted_obs, reward, terminations, truncations, infos
 
         raw_obs, _reward, terminations, truncations, infos = self.env.step(actions)
         extracted_obs = self._wrap_obs(raw_obs)
@@ -271,10 +274,11 @@ class ManiskillEnv(gym.Env):
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
                 actions, auto_reset=False
             )
-
             chunk_rewards.append(step_reward)
             raw_chunk_terminations.append(terminations)
             raw_chunk_truncations.append(truncations)
+        
+        print(f"debug wph: reward type: {type(chunk_rewards)}, value: {chunk_rewards}, size:{len(chunk_rewards)}, each shape:{chunk_rewards[-1].shape}", flush=True)
 
         chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
         raw_chunk_terminations = torch.stack(

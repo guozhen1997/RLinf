@@ -223,6 +223,7 @@ class EnvWorker(Worker):
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         if not self.cfg.env.train.auto_reset:
             if self.cfg.env.train.ignore_terminations:
+                # 如果最后一个trunk任意位置被截断
                 if chunk_truncations[:, -1].any():
                     assert chunk_truncations[:, -1].all()
                     if "episode" in infos:
@@ -264,7 +265,7 @@ class EnvWorker(Worker):
             policy=self.cfg.actor.model.get("policy_setup", None),
         )
         env_info = {}
-
+                    
         extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = (
             self.eval_simulator_list[stage_id].chunk_step(chunk_actions)
         )
@@ -357,6 +358,7 @@ class EnvWorker(Worker):
         for epoch in range(self.cfg.algorithm.rollout_epoch):
             env_output_list = []
             if not self.cfg.env.train.auto_reset:
+                # 手动去reset
                 for i in range(self.stage_num):
                     extracted_obs, infos = self.simulator_list[i].reset()
                     self.last_obs_list.append(extracted_obs)
@@ -410,9 +412,10 @@ class EnvWorker(Worker):
                                 env_metrics[key].append(value)
                         else:
                             env_metrics[key].append(value)
-
+            # auto reset时更新参数
             self.last_obs_list = [env_output.obs for env_output in env_output_list]
             self.last_dones_list = [env_output.dones for env_output in env_output_list]
+            # 保存rollout的视频
             self.finish_rollout()
 
         # for simulator in self.simulator_list:

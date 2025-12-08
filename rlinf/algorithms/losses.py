@@ -75,7 +75,10 @@ def compute_ppo_actor_loss(
     ratio = torch.where(loss_mask, torch.exp(logprobs - old_logprobs), 0)
     approx_kl = torch.where(loss_mask, (logprobs - old_logprobs).detach(), 0.0)
 
+    print(f"debug wph: 裁剪前:{ratio.mean().item()}", flush=True)
     clipped_ratio = torch.clamp(ratio, 1.0 - clip_ratio_low, 1.0 + clip_ratio_high)
+    print(f"debug wph: 裁剪后:{clipped_ratio.mean().item()}", flush=True)
+    
     policy_loss1 = -advantages * ratio
     policy_loss2 = -advantages * clipped_ratio
 
@@ -105,6 +108,9 @@ def compute_ppo_actor_loss(
     if critic_warmup:
         policy_loss = torch.tensor(0.0, device=policy_loss.device)
 
+    print(f"debug wph: 与loss_mask裁剪后：{masked_mean(clipped_ratio.detach(), loss_mask)}", flush=True)
+    print(f"debug wph: loss_mask shape: {loss_mask.shape}", flush=True)
+    print(f"debug wph: loss_mask: {loss_mask}", flush=True)
     # Compile metrics for logging
     metrics_data = {
         "actor/policy_loss": policy_loss.detach(),

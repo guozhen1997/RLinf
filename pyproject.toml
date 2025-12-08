@@ -90,7 +90,7 @@ embodied = [
 robotwin = [
     "mplib==0.2.1",  # Required for RoboTwin, conflicts with ManiSkill
     "pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git",
-    "curobo @ git+https://github.com/NVlabs/curobo.git",
+    "nvidia-curobo @ git+https://github.com/NVlabs/curobo.git",
 ]
 
 [tool.uv]
@@ -109,6 +109,9 @@ override-dependencies = [
     "uvloop==0.21.0",
     "tensorflow-addons==0.23.0",
 ]
+
+[tool.uv.extra-build-dependencies]
+pytorch3d = ["torch"]
 
 [tool.ruff]
 line-length = 88

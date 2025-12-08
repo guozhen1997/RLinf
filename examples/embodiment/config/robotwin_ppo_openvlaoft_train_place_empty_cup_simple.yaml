@@ -1,24 +1,21 @@
 defaults:
-  - env/train: robotwin_single_task
-  - env/eval: robotwin_single_task
+  - env/train: robotwin_place_empty_cup_simple
+  - env/eval: robotwin_place_empty_cup_simple
   - override hydra/job_logging: stdout
-
-### for eval
 
 hydra:
   run:
     dir: .
-  output_subdir: null 
+  output_subdir: null
   searchpath:
     - file://${oc.env:EMBODIED_PATH}/config/
     
 cluster:
   num_nodes: 1
   component_placement:
-    env, rollout, actor: all
-    # env: 0-1
-    # rollout: 0-1
-    # actor: 0-1
+    actor: 0-3
+    rollout: 0-3
+    env: 0-3
 
 runner:
   task_type: embodied
@@ -31,29 +28,27 @@ runner:
   max_epochs: 1000
   max_steps: -1
 
-  only_eval: True
+  only_eval: False
   val_check_interval: -1
   save_interval: 10
   seq_length: 4096
-  # max_prompt_length: 128
-  max_prompt_length: 512
-
+  max_prompt_length: 128
 
 algorithm:
+  # 在rollout时候生效
   auto_reset: False
   ignore_terminations: True
+  
   use_fixed_reset_state_ids: False
-  # 
+
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
-  #### 应该等于环境的max_step // num_action_chunks 才和 simple等价
-  n_chunk_steps: 1 # 20
-  n_eval_chunk_steps: 8   # 128 / 4 = 32, 32 * 8 = 256 traj length for eval
-  num_group_envs: 128
+  n_chunk_steps: 8 # 20
+  n_eval_chunk_steps: 8
+  num_group_envs: 4
   rollout_epoch: 1 # 16
-
-  reward_type: chunk_level
+  reward_type: action_level
   logprob_type: token_level
   entropy_type: token_level
 
@@ -74,11 +69,11 @@ algorithm:
 
   # params for rollout
   sampling_params:
-    do_sample: False
+    do_sample: True
     use_greedy: False
-    temperature_train: 1.6
-    temperature_eval: 1.6
-    top_k: -1
+    temperature_train: 1.0
+    temperature_eval: 0.6
+    top_k: 0
     top_p: 1.0
     repetition_penalty: 1.0
 
@@ -117,13 +112,14 @@ actor:
     queue_name: "replay_buffer"
     queue_size: 0
   training_backend: "fsdp"
-  micro_batch_size: 8 # 1
-  global_batch_size: 128 # 640
+  micro_batch_size: 40 # 1
+  global_batch_size: 320 # 640
   seed: 1234
   enable_offload: True
 
   model:
     model_dir: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+
     model_name: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14
@@ -140,10 +136,9 @@ actor:
     add_qkv_bias: True
     vocab_size: 32000
     hidden_size: 4096
-    policy_setup: "widowx_bridge"
     add_value_head: True
     image_size: [224, 224]
-    is_lora: False
+    is_lora: True
     lora_rank: 32
     lora_path: null
     ckpt_path: null
@@ -160,6 +155,15 @@ actor:
     adam_beta2: 0.999
     adam_eps: 1.0e-05
     clip_grad: 10.0
+    critic_warmup_steps: 0
+    
+  # optim:
+  #   lr: 5.0e-6
+  #   value_lr: 5.0e-5
+  #   adam_beta1: 0.9
+  #   adam_beta2: 0.999
+  #   adam_eps: 1.0e-05
+  #   clip_grad: 1.0
 
   tokenizer:
     tokenizer_type: "HuggingFaceTokenizer"

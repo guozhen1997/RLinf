@@ -149,6 +149,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
         # llm label & mask & embedding
         all_actions_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+        # 和原来处理最后一个token的逻辑一致
         all_actions_mask[:, -self.action_dim * self.num_action_chunks - 1 : -1] = (
             True  # [B, L + act + 1], [many x 0; act x 1; 0]
         )
@@ -296,10 +297,25 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                 "pixel_values": [],
                 "proprio": [],
             }
+            
+            # print(f"debug wph: all_obs_image_shape: {env_obs['images'].shape}", flush=True)
+            
             for i in range(len(env_obs["task_descriptions"])):
                 task_description = env_obs["task_descriptions"][i]
                 image = np.array(env_obs["images"][i])
+                
+                # print(f"debug wph: image shape: {image.shape}", flush=True)
+                # print("debug wph: [predict_action_batch] image shape before PIL:", image.shape, image.dtype, flush=True)
+                # print("debug wph: [predict_action_batch] image ndim:", getattr(image, "ndim", "NA"), flush=True)
 
+                # 有待考虑，不完全对，如果是 (C, H, W)，就转成 (H, W, C)
+                if image.ndim == 3 and image.shape[0] in (1, 3):
+                    image = np.transpose(image, (1, 2, 0))  # CHW -> HWC
+                    # print(f"debug wph: transposed image shape: {image.shape}", flush=True)
+
+                if image.dtype != np.uint8:
+                    image = image.astype(np.uint8)
+    
                 image = Image.fromarray(image).convert("RGB")
 
                 prompt = f"In: What action should the robot take to {task_description.lower()}?\nOut:"
