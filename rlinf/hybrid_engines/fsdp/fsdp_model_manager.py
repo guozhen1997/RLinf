@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import warnings
 from typing import ContextManager, Union
 
 import torch
@@ -36,6 +37,12 @@ from rlinf.hybrid_engines.fsdp.utils import (
 )
 from rlinf.utils.logging import get_logger
 from rlinf.utils.utils import warmup_optimizer_state
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*NO_SHARD.*full_state_dict.*",
+    category=UserWarning,
+)
 
 
 class FSDPModelManager:

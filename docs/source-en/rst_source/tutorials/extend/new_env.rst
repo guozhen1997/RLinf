@@ -114,7 +114,7 @@ The RLinf environment system consists of the following components:
        """Active device."""
        return self.env.unwrapped.device
 
-1. Implement Environment Offload Support (Optional)
+2. Implement Environment Offload Support (Optional)
 ----------------------------------------------------------------------
 
 If you need to support saving/restoring environment state, inherit from ``EnvOffloadMixin``:
@@ -237,7 +237,7 @@ Add your environment configuration:
      seed: 42
      # Other environment-specific settings
 
-1. Register Environment
+7. Register Environment
 -----------------------------------
 
 Expose the new environment in the package:

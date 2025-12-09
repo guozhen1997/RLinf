@@ -97,7 +97,7 @@ class MetricLogger:
             os.makedirs(tensorboard_log_path, exist_ok=True)
 
             config_yaml_path = os.path.join(tensorboard_log_path, "config.yaml")
-            OmegaConf.save(cfg, config_yaml_path)
+            OmegaConf.save(cfg, config_yaml_path, resolve=True)
 
             self.logger["tensorboard"] = _TensorboardLogger(tensorboard_log_path)
 

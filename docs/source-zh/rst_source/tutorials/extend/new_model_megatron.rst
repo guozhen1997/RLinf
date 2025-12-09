@@ -154,7 +154,7 @@ RLinf 使用 hf_to_middle_file 方法将 huggingface 格式的 checkpoint 转换
 
 如果您已经适配了新的模型，我们特别欢迎您可以将 code 提交 pull request 贡献到我们的 `RLinf <https://github.com/RLinf/RLinf/pulls>`__ 仓库中，让更多的用户受益！
 
-1. SGLang 模型配置
+3. SGLang 模型配置
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 RLinf 仅支持已经被 SGLang 适配过的模型。  
