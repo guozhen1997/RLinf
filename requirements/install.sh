@@ -15,7 +15,9 @@ SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 
 SUPPORTED_TARGETS=("embodied" "reason")
 SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi")
-SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld")
+SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin")
+
+#=======================Utility Functions=======================
 
 print_help() {
         cat <<EOF
@@ -251,6 +253,13 @@ install_openpi_model() {
             install_prebuilt_flash_attn
             install_metaworld_env
             ;;
+        calvin)
+            create_and_sync_venv
+            install_common_embodied_deps
+            UV_TORCH_BACKEND=auto GIT_LFS_SKIP_SMUDGE=1 uv pip install -r $SCRIPT_DIR/embodied/models/openpi.txt
+            install_prebuilt_flash_attn
+            install_calvin_env
+            ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for OpenPI model." >&2
             exit 1
@@ -327,6 +336,29 @@ install_behavior_env() {
 
 install_metaworld_env() {
     uv pip install -r $SCRIPT_DIR/embodied/envs/metaworld.txt
+}
+
+install_calvin_env() {
+    local calvin_dir
+    if [ -n "${CALVIN_PATH:-}" ]; then
+        if [ ! -d "$CALVIN_PATH" ]; then
+            echo "CALVIN_PATH is set to '$CALVIN_PATH' but the directory does not exist." >&2
+            exit 1
+        fi
+        calvin_dir="$CALVIN_PATH"
+    else
+        calvin_dir="$VENV_DIR/calvin"
+        if [ ! -d "$calvin_dir" ]; then
+            git clone --recurse-submodules https://github.com/mees/calvin.git "$calvin_dir"
+        fi
+    fi
+
+    uv pip install wheel cmake==3.18.4 setuptools==57.5.0
+    # NOTE: Use a forker version of pyfasthash that fixes install on Python 3.11
+    uv pip install git+https://github.com/RLinf/pyfasthash.git --no-build-isolation
+    uv pip install -e $calvin_dir/calvin_env/tacto
+    uv pip install -e $calvin_dir/calvin_env
+    uv pip install -e $calvin_dir/calvin_models
 }
 
 #=======================REASONING INSTALLER=======================

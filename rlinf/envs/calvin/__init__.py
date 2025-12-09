@@ -22,29 +22,48 @@ from omegaconf import OmegaConf
 
 from rlinf.envs.calvin.utils import get_sequences
 
+ENV_CFG_DIR = Path(__file__).parent / "calvin_cfg/validation"
+
 
 def _get_calvin_tasks_and_reward(num_sequences, use_random_seed=True):
     conf_dir = (
-        pathlib.Path(calvin_env.__file__).absolute().parents[1]
-        / "calvin_agent"
+        pathlib.Path(calvin_env.__file__).absolute().parents[2]
+        / "calvin_models"
         / "conf"
     )
-    task_cfg = OmegaConf.load(
-        conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml"
-    )
+    task_cfg_path = conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml"
+    val_annotations_path = conf_dir / "annotations/new_playtable_validation.yaml"
+    if not conf_dir.exists():
+        raise FileNotFoundError(
+            f"Configuration directory {conf_dir} does not exist. "
+            "Please ensure that the calvin_models package is installed correctly."
+        )
+    if not task_cfg_path.exists():
+        raise FileNotFoundError(
+            f"Task configuration file {task_cfg_path} does not exist. "
+            "Please ensure that the calvin_models package is installed correctly."
+        )
+    if not val_annotations_path.exists():
+        raise FileNotFoundError(
+            f"Validation annotations file {val_annotations_path} does not exist. "
+            "Please ensure that the calvin_models package is installed correctly."
+        )
+
+    task_cfg = OmegaConf.load(task_cfg_path)
     task_oracle = hydra.utils.instantiate(task_cfg)
-    val_annotations = OmegaConf.load(
-        conf_dir / "annotations/new_playtable_validation.yaml"
-    )
+    val_annotations = OmegaConf.load(val_annotations_path)
     eval_sequences = get_sequences(num_sequences, use_random_seed=use_random_seed)
     return eval_sequences, val_annotations, task_oracle
 
 
 def make_env():
     # Get current file directory
-    current_dir = Path(__file__).parent
-    dataset_path = str(current_dir / "calvin_debug_dataset")
-    return get_env(Path(dataset_path) / "validation", show_gui=False)
+    if not ENV_CFG_DIR.exists():
+        raise FileNotFoundError(
+            f"Environment configuration directory {ENV_CFG_DIR} does not exist. "
+            "Please ensure that the calvin_env package is installed correctly."
+        )
+    return get_env(ENV_CFG_DIR, show_gui=False)
 
 
 class CalvinBenchmark:
