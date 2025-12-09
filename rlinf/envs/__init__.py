@@ -59,5 +59,9 @@ def get_env_cls(simulator_type, env_cfg=None):
         from rlinf.envs.behavior.behavior_env import BehaviorEnv
 
         return BehaviorEnv
+    elif simulator_type == "calvin":
+        from rlinf.envs.calvin.calvin_gym_env import CalvinEnv
+
+        return CalvinEnv
     else:
         raise NotImplementedError(f"Simulator type {simulator_type} not implemented")

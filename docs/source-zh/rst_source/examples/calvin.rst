@@ -1,12 +1,12 @@
-基于MetaWorld模拟器的强化学习训练
-==================================
+基于CALVIN模拟器的强化学习训练
+==============================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
    :width: 16px
    :height: 16px
    :class: inline-icon
 
-本示例提供了在 `MetaWorld <https://metaworld.farama.org/>`_ 环境中使用 **RLinf** 框架
+本示例提供了在 `CALVIN <https://github.com/mees/calvin/>`_ 环境中使用 **RLinf** 框架
 通过强化学习微调 π\ :sub:`0`\和π\ :sub:`0.5` 算法的完整指南。它涵盖了整个过程——从环境设置和核心算法设计到训练配置、评估和可视化——以及可重现的命令和配置片段。
 
 主要目标是开发一个能够执行机器人操作能力的模型：
@@ -20,21 +20,22 @@
 环境
 -----------
 
-**MetaWorld 环境**
+**CALVIN 环境**
 
-- **Environment**：基于 *MuJoCo* 的多任务仿真环境  
-- **Task**：指挥一台 7 自由度机械臂完成多种操作
-- **Observation**：工作区周围离屏相机采集的 RGB 图像
-- **Action Space**：4 维连续动作  
+- **Environment**：基于 *PyBullet* 的多任务仿真环境  
+- **Task**：指挥一台 7 自由度机械臂完成包含5个子任务的长序列任务
+- **Observation**：第三人称视角和腕部相机视角
+- **Action Space**：7 维连续动作  
   - 末端执行器三维位置控制（x, y, z）  
+  - 三维旋转控制（roll, pitch, yaw）  
   - 夹爪控制（开/合）
 
 **数据结构**
 
-- **Images**：RGB 张量 ``[batch_size, 3, 480, 480]``  
+- **Images**：第三人称视角和腕部相机视角的RGB 张量 
 - **Task Descriptions**：自然语言指令  
 - **Actions**：归一化的连续值
-- **Rewards**：基于任务完成的稀疏奖励
+- **Rewards**：基于子任务完成的0/1奖励
 
 算法
 -----------
@@ -61,14 +62,13 @@
 依赖安装
 -----------
 
-方法 1：您可以使用 metaworld 的 RLinf docker 镜像 ``docker pull rlinf/rlinf:agentic-rlinf0.1-metaworld``。
+方法 1：您可以使用 calvin 的 RLinf docker 镜像 ``docker pull rlinf/rlinf:agentic-rlinf0.1-calvin``。
 
 方法 2：通过运行以下命令直接在您的环境中安装依赖（确保您已经安装了 ``uv``）：
 
 .. code:: bash
 
-   bash requirements/install.sh embodied --model openpi --env metaworld
-
+   bash requirements/install.sh embodied --model openpi --env calvin
 
 模型下载
 -----------
@@ -80,15 +80,14 @@
    # 下载模型（选择任一方法）
    # 方法 1: 使用 git clone
    git lfs install
-   git clone https://huggingface.co/RLinf/RLinf-Pi0-MetaWorld
-   git clone https://huggingface.co/RLinf/RLinf-Pi05-MetaWorld
+   git clone https://huggingface.co/RLinf/RLinf-Pi0-CALVIN-ABC-D
+   git clone https://huggingface.co/RLinf/RLinf-Pi05-CALVIN-ABC-D
 
    # 方法 2: 使用 huggingface-hub
    pip install huggingface-hub
-   hf download RLinf/RLinf-Pi0-MetaWorld
-   hf download RLinf/RLinf-Pi05-MetaWorld
+   hf download RLinf/RLinf-Pi0-CALVIN-ABC-D
+   hf download RLinf/RLinf-Pi05-CALVIN-ABC-D
 
-或者，您也可以使用 ModelScope 从 https://www.modelscope.cn/models/RLinf/RLinf-Pi0-MetaWorld 下载模型。
 
 下载后，请确保在配置 yaml 文件中正确指定模型路径。
 
@@ -139,18 +138,13 @@ env 和 rollout 之间的管道重叠，以及与 actor 的共享。
 
 
 **2. 配置文件**
-MetaWorld MT50 多任务联合训练配置文件 （在该任务设定下，训练和推理阶段均在多任务环境当中进行）：
+CALVIN D 任务上训练配置文件：
 
 - π\ :sub:`0`\ + PPO:
-  ``examples/embodiment/config/metaworld_50_ppo_openpi.yaml``
+  ``examples/embodiment/config/calvin_d_d_ppo_openpi.yaml``
 
 - π\ :sub:`0.5`\ + PPO:
-  ``examples/embodiment/config/metaworld_50_ppo_openpi_pi05.yaml``
-
-MetaWorld ML45 联合训练配置文件 （在该任务设定下，训练在45个任务中进行，推理在OOD的5个任务中进行：
-
-- π\ :sub:`0`\ + PPO:
-  ``examples/embodiment/config/metaworld_45_ppo_openpi.yaml``
+  ``examples/embodiment/config/calvin_d_d_ppo_openpi_pi05.yaml``
 
 **3. 启动命令**
 
@@ -161,11 +155,11 @@ MetaWorld ML45 联合训练配置文件 （在该任务设定下，训练在45�
 
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
-例如，要在 MetaWorld 环境中使用 PPO 算法训练 π\ :sub:`0`\ 模型，请运行：
+例如，要在 CALVIN D 任务上使用 PPO 算法训练 π\ :sub:`0`\ 模型，请运行：
 
 .. code:: bash
 
-   bash examples/embodiment/run_embodiment.sh metaworld_50_ppo_openpi
+   bash examples/embodiment/run_embodiment.sh calvin_d_d_ppo_openpi
 
 
 可视化和结果
@@ -217,63 +211,64 @@ MetaWorld ML45 联合训练配置文件 （在该任务设定下，训练在45�
      logger:
        log_path: "../results"
        project_name: rlinf
-       experiment_name: "test_metaworld"
+       experiment_name: "test_calvin"
        logger_backends: ["tensorboard", "wandb"] # tensorboard, wandb, swanlab
 
 
-MetaWorld 结果
+CALVIN 结果
 -------------------------
-下表Diffusion Policy, TinyVLA和SmolVLA的结果参考 `SmolVLA 论文 <https://arxiv.org/abs/2403.04880>`_ 论文得到。π\ :sub:`0`\ 和 π\ :sub:`0.5`\ 的SFT结果是通过LeRobot官方提供的 `数据集 <https://huggingface.co/datasets/lerobot/metaworld_mt50>`_ 重新训练所得。
+下表展示了在 CALVIN D 任务上不同方法和配置的性能对比。avg_num_subtasks 表示平均完成的子任务数量，success_len_1 到 success_len_5 分别表示长度为 1 到 5 的子任务序列的成功率。
 
-.. list-table:: **MetaWorld-MT50 性能对比（Success Rate, %）**
-   :widths: 15 10 10 10 10 10
+.. list-table:: **CALVIN D 任务性能对比**
+   :widths: 20 12 12 12 12 12 12
    :header-rows: 1
 
    * - **Methods**
-     - **Easy**
-     - **Medium**
-     - **Hard**
-     - **Very Hard**
-     - **Avg.**
-   * - Diffusion Policy
-     - 23.1
-     - 10.7
-     - 1.9
-     - 6.1
-     - 10.5
-   * - TinyVLA
-     - 77.6
-     - 21.5
-     - 11.4
-     - 15.8
-     - 31.6
-   * - SmolVLA
-     - 87.1
-     - 51.8
-     - 70.0
-     - 64.0
-     - 68.2
-   * - π\ :sub:`0`\
-     - 77.9
-     - 51.8
-     - 53.3
-     - 20.0
-     - 50.8
-   * - π\ :sub:`0`\  + PPO
-     - **92.1**
-     - **74.6**
-     - 61.7
-     - **84.0**
-     - **78.1**
-   * - π\ :sub:`0.5`\
-     - 68.2
-     - 37.3
-     - 41.7
-     - 28.0
-     - 43.8
-   * - π\ :sub:`0.5`\  + PPO
-     - 86.4
-     - 55.5
-     - **75.0**
-     - 66.0
-     - 70.7
+     - **Avg. Subtasks**
+     - **Len-1**
+     - **Len-2**
+     - **Len-3**
+     - **Len-4**
+     - **Len-5**
+   * - π\ :sub:`0`\ 
+     - 3.766
+     - 0.947
+     - 0.849
+     - 0.743
+     - 0.652
+     - 0.575
+   * - π\ :sub:`0`\ + Flow SDE
+     - 3.944
+     - 0.964
+     - 0.880
+     - 0.775
+     - 0.708
+     - 0.617
+   * - π\ :sub:`0`\ + Flow Noise
+     - 3.919
+     - **0.969**
+     - 0.888
+     - 0.780
+     - 0.683
+     - 0.599
+   * - π\ :sub:`0.5`\ 
+     - 3.838
+     - 0.927
+     - 0.843
+     - 0.767
+     - 0.688
+     - 0.613
+   * - π\ :sub:`0.5`\ + Flow SDE
+     - **4.717**
+     - **0.997**
+     - **0.982**
+     - **0.958**
+     - **0.910**
+     - **0.870**
+   * - π\ :sub:`0.5`\ + Flow Noise
+     - 4.652
+     - 0.996
+     - 0.976
+     - 0.939
+     - 0.896
+     - 0.845
