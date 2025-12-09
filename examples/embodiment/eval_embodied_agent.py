@@ -46,15 +46,13 @@ def main(cfg) -> None:
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
     )
 
-    rollout_group.init_worker().wait()
-    env_group.init_worker().wait()
-
     runner = EmbodiedEvalRunner(
         cfg=cfg,
         rollout=rollout_group,
         env=env_group,
     )
 
+    runner.init_workers()
     runner.run()
 
 

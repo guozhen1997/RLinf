@@ -36,15 +36,15 @@ from rlinf.envs.utils import (
 
 
 class CalvinEnv(gym.Env):
-    def __init__(self, cfg, seed_offset, total_num_processes):
+    def __init__(self, cfg, num_envs, seed_offset, total_num_processes):
         self.seed_offset = seed_offset
         self.cfg = cfg
         self.total_num_processes = total_num_processes
         self.seed = self.cfg.seed + seed_offset
         self._is_start = True
-        self.num_envs = self.cfg.num_envs
+        self.num_envs = num_envs
         self.group_size = self.cfg.group_size
-        self.num_group = self.cfg.num_group
+        self.num_group = num_envs // self.group_size
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
 
         self.ignore_terminations = cfg.ignore_terminations
@@ -92,8 +92,8 @@ class CalvinEnv(gym.Env):
     def get_env_fn_params(self, env_idx=None):
         env_fn_params = []
         if env_idx is None:
-            env_idx = np.arange(self.cfg.num_envs)
-        for env_id in range(self.cfg.num_envs):
+            env_idx = np.arange(self.num_envs)
+        for env_id in range(self.num_envs):
             if env_id not in env_idx:
                 continue
             env_fn_params.append({})
@@ -108,7 +108,7 @@ class CalvinEnv(gym.Env):
         self.cumsum_trial_id_bins = np.cumsum(self.trial_id_bins)
 
     def update_reset_state_ids(self):
-        if self.cfg.only_eval or self.cfg.use_ordered_reset_state_ids:
+        if self.cfg.is_eval or self.cfg.use_ordered_reset_state_ids:
             reset_state_ids = self._get_ordered_reset_state_ids(self.num_group)
         else:
             reset_state_ids = self._get_random_reset_state_ids(self.num_group)
@@ -239,6 +239,29 @@ class CalvinEnv(gym.Env):
             "task_descriptions": self.task_descriptions,
         }
         return obs
+    
+    def _post_process_obs(self, obs):
+        image_tensor = torch.stack(
+            [
+                value.clone().permute(2, 0, 1)
+                for value in obs["images_and_states"]["full_image"]
+            ]
+        )
+        wrist_image_tensor = torch.stack(
+            [
+                value.clone().permute(2, 0, 1)
+                for value in obs["images_and_states"]["wrist_image"]
+            ]
+        )
+        states = obs["images_and_states"]["state"]
+
+        obs = {
+            "images": image_tensor,
+            "wrist_images": wrist_image_tensor,
+            "states": states,
+            "task_descriptions": obs["task_descriptions"],
+        }
+        return obs
 
     def _reconfigure(self, reset_state_ids, env_idx):
         reconfig_env_idx = []
@@ -271,8 +294,13 @@ class CalvinEnv(gym.Env):
         self,
         env_idx: Optional[Union[int, list[int], np.ndarray]] = None,
         reset_state_ids=None,
-        options: Optional[dict] = {},
     ):
+        if self.is_start:
+            reset_state_ids = (
+                self.reset_state_ids if self.use_fixed_reset_state_ids else None
+            )
+            self._is_start = False
+
         if env_idx is None:
             env_idx = np.arange(self.num_envs)
 
@@ -283,6 +311,7 @@ class CalvinEnv(gym.Env):
         self._reconfigure(reset_state_ids, env_idx)
         raw_obs = self.env.get_obs(id=env_idx)
         obs = self._wrap_obs(raw_obs)
+        obs = self._post_process_obs(obs)
         if env_idx is not None:
             self._reset_metrics(env_idx)
         else:
@@ -291,20 +320,6 @@ class CalvinEnv(gym.Env):
         return obs, infos
 
     def step(self, actions=None, auto_reset=True):
-        if actions is None:
-            assert self._is_start, "Actions must be provided after the first reset."
-        if self.is_start:
-            obs, infos = self.reset(
-                reset_state_ids=self.reset_state_ids
-                if self.use_fixed_reset_state_ids
-                else None
-            )
-            self._is_start = False
-            terminations = np.zeros(self.num_envs, dtype=bool)
-            truncations = np.zeros(self.num_envs, dtype=bool)
-
-            return obs, None, to_tensor(terminations), to_tensor(truncations), infos
-
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().numpy()
 
@@ -326,6 +341,8 @@ class CalvinEnv(gym.Env):
                 "task": self.task_descriptions,
             }
             self.add_new_frames(obs, plot_infos)
+
+        obs = self._post_process_obs(obs)
 
         infos = self._record_metrics(step_reward, terminations, infos)
         if self.ignore_terminations:
