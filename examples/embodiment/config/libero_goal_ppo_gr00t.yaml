@@ -20,16 +20,17 @@ runner:
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "test_openpi"
+    experiment_name: "test_gr00t"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1000
   max_steps: -1
 
+  only_eval: False
   val_check_interval: -1
-  save_interval: 40
+  save_interval: 100
   seq_length: 4096
-  max_prompt_length: 50
+  max_prompt_length: 30
 
 algorithm:
   auto_reset: False
@@ -41,15 +42,15 @@ algorithm:
   max_episode_steps: 320
   use_ordered_reset_state_ids: False
   reward_coef: 1.0
-  n_chunk_steps: 64
-  n_eval_chunk_steps: 64
+  n_chunk_steps: ${int_div:${env.train.max_episode_steps}, ${actor.model.num_action_chunks}}
+  n_eval_chunk_steps: ${int_div:${env.train.max_episode_steps}, ${actor.model.num_action_chunks}}
   num_group_envs: 64
   rollout_epoch: 8
   reward_type: chunk_level
   logprob_type: chunk_level
-  entropy_type: token_level
-  update_epoch: 4
+  entropy_type: chunk_level
 
+  update_epoch: 1
   adv_type: gae
   loss_type: actor_critic
   loss_agg_func: "token-mean" 
@@ -99,12 +100,10 @@ rollout:
     queue_name: "action_buffer"
     queue_size: 0
   mode: "colocate"
-  generation_backend: "huggingface"
-  model_dir: "/path/to/model/openpi"
+  backend: "huggingface"
+  model_dir: "/path/to/RLinf-Gr00t-SFT-Goal"
   precision: ${actor.model.precision}
-  recompute_logprobs: False
-  unnorm_key: libero_10
-  enable_offload: False
+  enable_offload: True
   pipeline_stage_num: 1
 
 actor:
@@ -114,48 +113,48 @@ actor:
     queue_name: "replay_buffer"
     queue_size: 0
   training_backend: "fsdp"
-  checkpoint_load_path: "/path/to/model/openpi"
+  checkpoint_load_path: "/path/to/RLinf-Gr00t-SFT-Goal"
   checkpoint_save_path: "../results"
   micro_batch_size: 128
-  global_batch_size: 2048 # maximum : global batch size = micro batch size * actor num_processes.
-  seed: 42
+  global_batch_size: 1024
+  seed: 1234
   enable_offload: False
 
   model:
-    model_name: "openpi"
-    precision: null
-    num_action_chunks: 5 # interface for the env
+    precision: "bf16"
+    trust_remote_code: True
+    is_lora: false
+    model_name: "gr00t"
     action_dim: 7
-    is_lora: False
-    lora_rank: 32
-    gradient_checkpointing: False
+    num_action_chunks: 5
+    denoising_steps: 4
+    policy_setup: "widowx_bridge"
+    obs_converter_type: "libero"
+    embodiment_tag: "libero_franka"
     use_wrist_image: True
-    use_proprio: True
-    num_steps: 5
-    add_value_head: True
-    # openpi specific parameters
-    openpi:
-      config_name: "pi05_libero"
-      num_images_in_input: 2
-      noise_level: 0.3
-      action_chunk: ${actor.model.num_action_chunks}
-      num_steps: ${actor.model.num_steps}
-      train_expert_only: True
-      action_env_dim: ${actor.model.action_dim}
+    rl_head_config:
+      joint_logprob: False
       noise_method: "flow_sde"
-      add_value_head: ${actor.model.add_value_head}
-      value_after_vlm: True
-      value_vlm_mode: "mean_token"
+      ignore_last: False
+      safe_get_logprob: False
+      noise_anneal: False
+      noise_params: [0.7, 0.3, 400]
+      noise_level: 0.5
+      add_value_head: True
+      chunk_critic_input: False
+      detach_critic_input: True
+      valid_action_dim: 7
+      disable_dropout: True
 
   optim:
-    lr: 5.0e-6
-    value_lr: 1.0e-4
+    lr: 2.0e-5
+    value_lr: 2.0e-5
     adam_beta1: 0.9
     adam_beta2: 0.95
     adam_eps: 1.0e-05
     clip_grad: 1.0
     critic_warmup_steps: 0
-
+  
   fsdp_config:                  # below are fsdp configs, for more details, see https://pytorch.org/docs/stable/fsdp.html and https://huggingface.co/docs/accelerate/package_reference/fsdp
 
     strategy: "fsdp"            # FSDP strategy: ["fsdp", "fsdp2"]
@@ -164,7 +163,7 @@ actor:
     # "shard_grad_op" (shard gradients and optimizer states only), 
     # "hybrid_shard" (combines data parallelism and model parallelism - sharding within FSDP groups, replicate across DDP groups),
     # "no_shard" (no sharding)
-    sharding_strategy: "no_shard"
+    sharding_strategy: "full_shard"
 
     cpu_offload: False           # whether to offload parameters and gradients to CPU when not in use，if True, actor's enable_offload should be True too.
     offload_pin_memory: False    # whether FSDP2's CPU offload policy should pin memory when cpu_offload is True
