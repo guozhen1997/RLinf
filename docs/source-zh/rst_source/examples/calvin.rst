@@ -62,22 +62,11 @@
 依赖安装
 -----------
 
-如果您使用的是 Docker 镜像，请通过 `docker pull` 拉取最新镜像以获取所需的依赖项。
-
-具体的环境安装参考CALVIN官方的安装文档 `CALVIN Quick Start <https://github.com/mees/calvin#computer--quick-start>`__。
+请首先确保您处于 RLinf Docker 镜像中或已安装 uv。
 
 .. code:: bash
 
-   git clone --recurse-submodules https://github.com/mees/calvin.git
-   export CALVIN_ROOT=$(pwd)/calvin
-   cd $CALVIN_ROOT
-   pip install wheel cmake==3.18.4
-   cd calvin_env/tacto
-   pip install -e .
-   cd ..
-   pip install -e .
-   cd ../calvin_models
-   pip install -e .
+   bash requirements/install.sh embodied --model openpi --env calvin
 
 模型下载
 -----------
