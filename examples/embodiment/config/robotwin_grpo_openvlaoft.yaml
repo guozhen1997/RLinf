@@ -50,7 +50,7 @@ algorithm:
   n_chunk_steps: 8
   n_eval_chunk_steps: 8
   num_group_envs: 8
-  rollout_epoch: 1 # 64
+  rollout_epoch: 8 # 64
   reward_type: action_level  # action_level or chunk_level
   logprob_type: token_level
   entropy_type: token_level
@@ -120,7 +120,7 @@ actor:
     queue_size: 0
   training_backend: "fsdp"
   micro_batch_size: 32 # 40
-  global_batch_size: 128 # 640
+  global_batch_size: 1024 # 640
   seed: 1234
   enable_offload: True
 
