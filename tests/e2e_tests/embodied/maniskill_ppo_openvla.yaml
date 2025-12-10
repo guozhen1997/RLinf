@@ -1,6 +1,6 @@
 defaults:
-  - env/PutCarrotOnPlateInScene@env.train
-  - env/PutCarrotOnPlateInScene@env.eval
+  - env/manikill_put_carrot_on_plate_in_scene@env.train
+  - env/manikill_put_carrot_on_plate_in_scene@env.eval
   - model/openvla@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout

@@ -1,6 +1,6 @@
 defaults:
-  - env/place_shoe@env.train
-  - env/place_shoe@env.eval
+  - env/robotwin_place_shoe@env.train
+  - env/robotwin_place_shoe@env.eval
   - model/openvla_oft@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
