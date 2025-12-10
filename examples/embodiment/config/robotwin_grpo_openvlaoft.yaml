@@ -41,7 +41,8 @@ runner:
 algorithm:
   auto_reset: False
   ignore_terminations: False
-  use_fixed_reset_state_ids: True
+  # RoboTwin must be false
+  use_fixed_reset_state_ids: False
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 8
