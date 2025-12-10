@@ -76,7 +76,7 @@ class RoboTwinEnv(gym.Env):
         from robotwin.envs.vector_env import VectorEnv
 
         env_seeds = self.reset_state_ids.tolist()
-
+        
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
@@ -279,7 +279,6 @@ class RoboTwinEnv(gym.Env):
                     np.array(step_reward, dtype=np.float32).reshape(-1),
                     device=self.device,
                 )
-
         self._elapsed_steps += actions.shape[1]
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
         if truncated.any():
@@ -299,7 +298,6 @@ class RoboTwinEnv(gym.Env):
             if self.record_metrics:
                 if "success" in infos:
                     infos["episode"]["success_at_end"] = infos["success"].clone()
-
         dones = torch.logical_or(terminations, truncations)
 
         _auto_reset = auto_reset and self.auto_reset
@@ -340,6 +338,7 @@ class RoboTwinEnv(gym.Env):
         chunk_rewards = self._cal_chunk_rewards(step_reward, chunk_step, terminations, infos)
 
         self._elapsed_steps += chunk_actions.shape[1]
+        
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
         if truncated.any():
             truncations = torch.logical_or(truncated, truncations)
@@ -382,7 +381,6 @@ class RoboTwinEnv(gym.Env):
         final_obs = extracted_obs.copy()
         env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]
         final_info = infos.copy()
-
         extracted_obs, infos = self.reset(env_idx=env_idx.tolist())
         # gymnasium calls it final observation but it really is just o_{t+1} or the true next observation
         infos["final_observation"] = final_obs
@@ -460,8 +458,16 @@ class RoboTwinEnv(gym.Env):
         if env_idx is not None and hasattr(self, "reset_state_ids"):
             if self.success_seeds is not None:
                 total_seeds = self.success_seeds.numel()
-                indices = (torch.arange(self.num_group, device=self.success_seeds.device) + self._current_seed_index) % total_seeds
-                reset_state_ids = self.success_seeds[indices]
+                end_index = self._current_seed_index + self.num_group
+                if end_index <= total_seeds:
+                    reset_state_ids = self.success_seeds[self._current_seed_index:end_index]
+                else:
+                    # If exceeds, take from beginning (wrap around)
+                    remaining = self.num_group - (total_seeds - self._current_seed_index)
+                    reset_state_ids = torch.cat([
+                        self.success_seeds[self._current_seed_index:],
+                        self.success_seeds[:remaining]
+                    ])
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
@@ -478,11 +484,20 @@ class RoboTwinEnv(gym.Env):
                 )
             for idx in env_idx:
                 self.reset_state_ids[idx] = reset_state_ids[idx]
+        
         else:
             if self.success_seeds is not None:
                 total_seeds = self.success_seeds.numel()
-                indices = (torch.arange(self.num_group, device=self.success_seeds.device) + self._current_seed_index) % total_seeds
-                reset_state_ids = self.success_seeds[indices]
+                end_index = self._current_seed_index + self.num_group
+                if end_index <= total_seeds:
+                    reset_state_ids = self.success_seeds[self._current_seed_index:end_index]
+                else:
+                    # If exceeds, take from beginning (wrap around)
+                    remaining = self.num_group - (total_seeds - self._current_seed_index)
+                    reset_state_ids = torch.cat([
+                        self.success_seeds[self._current_seed_index:],
+                        self.success_seeds[:remaining]
+                    ])
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
