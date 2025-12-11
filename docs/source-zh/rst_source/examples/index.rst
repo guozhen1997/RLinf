@@ -129,6 +129,23 @@
      </div>
    </div>
 
+   <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/waiting_icon.jpg"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/reward_model.html" target="_blank" style="text-decoration: underline; color: blue;">
+          <b>奖励模型工作流</b>
+         </a><br>
+         训练奖励模型以替换环境成功信号进行强化学习训练
+       </p>
+     </div>
+
+     <!-- 3rd column (blank placeholder) -->
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center; min-height: 200px;">
+       <!-- Empty to preserve grid space -->
+     </div>
+   </div>
 
 
 推理场景
@@ -251,3 +268,5 @@ RLinf的整体设计简洁且模块化，以Worker为抽象封装强化学习训
    gr00t
    reasoning
    coding_online_rl
+   reward_model
+

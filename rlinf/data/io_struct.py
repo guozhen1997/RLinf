@@ -1168,6 +1168,10 @@ class EmbodiedRolloutResult:
         merged_forward_inputs = {}
         for data in self.forward_inputs:
             for k, v in data.items():
+                # Only process Tensor values, skip other types
+                if not isinstance(v, torch.Tensor):
+                    # TODO(guozhen): add warning
+                    continue
                 if k in merged_forward_inputs:
                     merged_forward_inputs[k].append(v)
                 else:

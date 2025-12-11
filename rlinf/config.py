@@ -53,6 +53,7 @@ class SupportedModel(Enum):
     OPENPI = ("openpi", "embodied")
     MLP_POLICY = ("mlp_policy", "embodied")
     GR00T = ("gr00t", "embodied")
+    CNN_POLICY = ("cnn_policy", "embodied")
 
     def __new__(cls, value, category):
         obj = object.__new__(cls)
@@ -757,7 +758,9 @@ def validate_embodied_cfg(cfg):
                 elif "widowx" in robot:
                     return "arm_pd_ee_target_delta_pose_align2_gripper_pd_joint_pos"
                 elif "panda-qpos" in robot:
-                    return None
+                    return "pd_joint_delta_pos"
+                elif "panda-ee" in robot:
+                    return "pd_ee_delta_pos"
                 else:
                     raise NotImplementedError(f"Robot {robot} not supported")
 
@@ -887,19 +890,43 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
     assert cfg.runner.task_type in SUPPORTED_TASK_TYPE, (
         f"task_type must be one of {SUPPORTED_TASK_TYPE}"
     )
+
+    # Check if this is reward model training mode (only reward training, no actor)
+    is_reward_training_only = (
+        hasattr(cfg, "reward")
+        and hasattr(cfg.reward, "training_backend")
+        and cfg.reward.training_backend in SUPPORTED_TRAINING_BACKENDS
+        and not hasattr(cfg, "actor")
+    )
+
     if cfg.runner.task_type == "embodied":
-        cfg = validate_embodied_cfg(cfg)
+        # Only validate embodied cfg if not reward training only
+        if not is_reward_training_only:
+            cfg = validate_embodied_cfg(cfg)
     elif cfg.runner.task_type == "reasoning":
         cfg = validate_reasoning_cfg(cfg)
     elif cfg.runner.task_type == "coding_online_rl":
         cfg = validate_coding_online_rl_cfg(cfg)
 
-    if cfg.algorithm.adv_type in ("grpo", "reinpp_baseline"):
-        assert cfg.algorithm.group_size > 1
+    # Skip actor/critic validation for reward training only mode
+    if is_reward_training_only:
+        # Validate reward config if it exists
+        if hasattr(cfg, "reward") and hasattr(cfg.reward, "training_backend"):
+            if cfg.reward.training_backend == "fsdp":
+                cfg.reward = validate_fsdp_cfg(
+                    cfg.reward, cfg.runner.get("resume_dir", None)
+                )
+        return cfg
 
-    assert cfg.actor.training_backend in SUPPORTED_TRAINING_BACKENDS, (
-        f"Unsupported training_backend {cfg.actor.training_backend}. Supported training backends are {SUPPORTED_TRAINING_BACKENDS}."
-    )
+    # Original validation for actor/critic (for normal training)
+    if hasattr(cfg, "algorithm") and hasattr(cfg.algorithm, "adv_type"):
+        if cfg.algorithm.adv_type in ("grpo", "reinpp_baseline"):
+            assert cfg.algorithm.group_size > 1
+
+    if hasattr(cfg, "actor"):
+        assert cfg.actor.training_backend in SUPPORTED_TRAINING_BACKENDS, (
+            f"Unsupported training_backend {cfg.actor.training_backend}. Supported training backends are {SUPPORTED_TRAINING_BACKENDS}."
+        )
 
     if cfg.actor.training_backend == "megatron":
         cfg.actor = validate_megatron_cfg(cfg.actor)
@@ -928,13 +955,14 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
         )
         cfg.actor = validate_fsdp_cfg(cfg.actor, cfg.runner.get("resume_dir", None))
 
-    if cfg.critic.use_critic_model and cfg.critic.training_backend == "megatron":
-        cfg.critic = validate_megatron_cfg(cfg.critic)
-        cfg.critic = validate_model_cfg_by_hf_config(
-            cfg.critic, cfg.rollout.model.model_path
-        )
-    elif cfg.critic.use_critic_model and cfg.critic.training_backend == "fsdp":
-        cfg.critic = validate_fsdp_cfg(cfg.critic)
+    if hasattr(cfg, "critic") and cfg.critic.use_critic_model:
+        if cfg.critic.training_backend == "megatron":
+            cfg.critic = validate_megatron_cfg(cfg.critic)
+            cfg.critic = validate_model_cfg_by_hf_config(
+                cfg.critic, cfg.rollout.model.model_path
+            )
+        elif cfg.critic.training_backend == "fsdp":
+            cfg.critic = validate_fsdp_cfg(cfg.critic)
 
     return cfg
 
