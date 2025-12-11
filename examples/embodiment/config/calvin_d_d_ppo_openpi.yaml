@@ -147,6 +147,7 @@ actor:
       config_name: "pi0_calvin"
       detach_critic_input: True
       joint_logprob: False
+      action_horizon: 5
 
   optim:
     lr: 5.0e-6

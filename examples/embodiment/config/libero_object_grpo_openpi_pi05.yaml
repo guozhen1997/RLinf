@@ -148,6 +148,9 @@ actor:
     model_type: "openpi"
     num_action_chunks: 5 # interface for the env
     denoising_steps: 3
+    openpi:
+      action_horizon: 10
+      discrete_state_input: False
 
   optim:
     lr: 5.0e-6

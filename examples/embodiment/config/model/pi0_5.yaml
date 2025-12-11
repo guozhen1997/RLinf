@@ -47,3 +47,6 @@ openpi:
   value_after_vlm: False
   value_vlm_mode: "mean_token"
   detach_critic_input: null
+
+  pi05: True
+  discrete_state_input: null

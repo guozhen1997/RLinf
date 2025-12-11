@@ -147,6 +147,8 @@ actor:
       num_images_in_input: 1
       detach_critic_input: True
 
+      action_horizon: 5
+
   optim:
     lr: 1.0e-5
     value_lr: 1.0e-4
