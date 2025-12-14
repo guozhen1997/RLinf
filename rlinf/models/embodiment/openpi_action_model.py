@@ -1,4 +1,4 @@
-# Copyright 2025 The RLinf Authors.
+# Copyright 2025 The RLinf Authors, Tonghe Zhang
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ from rlinf.models.embodiment.modules.value_head import ValueHead
 class OpenPi0Config(Pi0Config):
     # config for rl
     config_name: str = (
-        "pi0_libero"  # pi0_libero, pi05_libero, pi0_metaworld, pi05_metaworld
+        "pi0_libero"  # pi0_libero, pi05_libero, pi0_metaworld, pi05_metaworld, pi0_maniskill, pi05_maniskill
     )
     num_images_in_input: int = 2  # number of images in input
     noise_method: str = "flow_sde"  # flow_sde, flow_noise, flow_cps
@@ -145,7 +145,12 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         if first_process:
             inputs.pop("prompt")
         else:
-            inputs = {key: inputs[key] for key in inputs.keys() if "/" in key}
+            inputs = {
+                value: inputs[value]
+                for value in inputs.keys()
+                if value
+                in ["observation/image", "observation/wrist_image", "observation/state"]
+            }
         # tensor -> numpy
         inputs = jax.tree.map(
             lambda x: np.asarray(x.detach().cpu()) if torch.is_tensor(x) else x, inputs
@@ -247,27 +252,19 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             "entropy": entropy,
         }
 
-    def obs_processor(self, env_obs):
-        # base observation
-        processed_obs = {
-            "observation/image": env_obs["images"],
-            "prompt": env_obs["task_descriptions"],
+    def input_processor(self, env_processed_obs):
+        to_process_obs = {
+            "observation/image": env_processed_obs["images"],
+            "observation/state": env_processed_obs["states"],
+            "prompt": env_processed_obs["task_descriptions"],
         }
-        # state observation
-        if "calvin" in self.config.config_name:
-            state = env_obs["states"]
-            processed_obs["observation/state_ee_pos"] = state[:, :3]
-            processed_obs["observation/state_ee_rot"] = state[:, 3:6]
-            processed_obs["observation/state_gripper"] = state[:, 6:7]
-        else:
-            processed_obs["observation/state"] = env_obs["states"]
-        # wrist image observation
-        if env_obs["wrist_images"] is not None:
-            processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
-        # store used keys
-        return processed_obs
-
-    def precision_processor(self, processed_obs):
+        if env_processed_obs["wrist_images"] is not None:
+            to_process_obs["observation/wrist_image"] = env_processed_obs[
+                "wrist_images"
+            ]
+        # print(f"Debug::env_processed_obs={env_processed_obs}")
+        # print(f"Debug::to_process_obs={to_process_obs}")
+        processed_obs = self.input_transform(to_process_obs)
         device = next(self.parameters()).device
         for key, value in processed_obs.items():
             if isinstance(value, list):
@@ -289,13 +286,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
     def predict_action_batch(
         self, env_obs, mode: Literal["train", "eval"] = "train", compute_values=True
     ) -> tuple[np.ndarray, dict[str, Any]]:
-        to_process_obs = self.obs_processor(env_obs)  # env obs -> policy input obs
-        processed_obs = self.input_transform(
-            to_process_obs
-        )  # policy input obs -> model input obs
-        processed_obs = self.precision_processor(
-            processed_obs
-        )  # obs precision processor
+        # print(f"Debug::env_obs={type(env_obs)}")
+        processed_obs = self.input_processor(env_obs)
         observation = _model.Observation.from_dict(processed_obs)
         outputs = self.sample_actions(
             observation, mode=mode, compute_values=compute_values
@@ -307,16 +299,20 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         forward_inputs = {
             "chains": outputs["chains"],
             "denoise_inds": outputs["denoise_inds"],
+            "observation/image": env_obs["images"],
+            "observation/state": env_obs["states"],
             "tokenized_prompt": processed_obs["tokenized_prompt"],
             "tokenized_prompt_mask": processed_obs["tokenized_prompt_mask"],
         }
-        forward_inputs.update(to_process_obs)
-        forward_inputs.pop("prompt", None)
+        if env_obs["wrist_images"] is not None:
+            forward_inputs["observation/wrist_image"] = env_obs["wrist_images"]
+
         result = {
             "prev_logprobs": outputs["prev_logprobs"],
             "prev_values": outputs["prev_values"],
             "forward_inputs": forward_inputs,
         }
+
         return actions, result
 
     @torch.no_grad()

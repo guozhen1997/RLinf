@@ -1,4 +1,4 @@
-# Copyright 2025 The RLinf Authors.
+# Copyright 2025 The RLinf Authors, Tonghe Zhang
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ from mani_skill.utils.structs.types import SimConfig
 from sapien.physx import PhysxMaterial
 from transforms3d.euler import euler2quat
 
-CARROT_DATASET_DIR = Path(__file__).parent / ".." / "assets" / "carrot"
+CARROT_DATASET_DIR = Path(os.getenv("MANISKILL_ASSET_DIR", Path(__file__).parent / ".." / "assets")) / "carrot"
 
 
 class PutOnPlateInScene25(BaseEnv):
@@ -806,8 +806,9 @@ class PutOnPlateInScene25(BaseEnv):
     asset_download_ids=["bridge_v2_real2sim"],
 )
 class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
-    def __init__(self, obj_set, **kwargs):
+    def __init__(self, obj_set, use_multiple_plates=False, **kwargs):
         self.obj_set = obj_set
+        self.use_multiple_plates = use_multiple_plates
         self._prep_init()
 
         super().__init__(**kwargs)
@@ -822,11 +823,13 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         self.model_db_plate: dict[str, dict] = io_utils.load_json(
             CARROT_DATASET_DIR / "more_plate" / "model_db.json"
         )
-        only_plate_name = list(self.model_db_plate.keys())[0]
-        self.model_db_plate = {
-            k: v for k, v in self.model_db_plate.items() if k == only_plate_name
-        }
-        assert len(self.model_db_plate) == 1
+        # Tonghe added on 12/12/2025 for consistency with openpi experiments. 
+        if not self.use_multiple_plates:
+            only_plate_name = list(self.model_db_plate.keys())[0]
+            self.model_db_plate = {
+                k: v for k, v in self.model_db_plate.items() if k == only_plate_name
+            }
+            assert len(self.model_db_plate) == 1
 
         # random configs
         self.carrot_names = list(self.model_db_carrot.keys())
@@ -908,7 +911,14 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         )
         # Synchronized reset:
         if num_envs_to_reset == self.num_envs:
-            episode_id = episode_id.reshape(self.num_envs)
+            try:
+                episode_id = episode_id.reshape(self.num_envs)
+            except:
+                # print(f"num_envs_to_reset={num_envs_to_reset}")
+                # print(f"episode_id: {episode_id}")
+                # print(f"options['episode_id']={options['episode_id']}")
+                # print(f"self.num_envs: {self.num_envs}")
+                raise ValueError(f"episode_id: {episode_id} cannot be reshaped to {self.num_envs}")
             episode_id = episode_id % ltt
             self.episode_id: torch.Tensor = episode_id
         elif 0 < len(env_idx) and len(env_idx) < self.num_envs:
@@ -940,6 +950,7 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
         lc, lc_offset, lo, lo_offset, lp, lp_offset, l1, l2 = self.basic_obj_infos
+        # print(f"env_idx={env_idx}")
         self._reset_episode_idx(env_idx, self.total_num_trials, options)
 
         self.select_carrot_ids = (
