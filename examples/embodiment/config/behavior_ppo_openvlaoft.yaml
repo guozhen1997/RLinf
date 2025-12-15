@@ -67,7 +67,7 @@ algorithm:
 
   # params for rollout
   sampling_params:
-    use_greedy: False
+    do_sample: True
     temperature_train: 1.0
     temperature_eval: 0.6
     top_k: 50

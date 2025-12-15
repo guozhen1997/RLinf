@@ -65,7 +65,7 @@ algorithm:
   reward_coef: 5.0
 
   sampling_params:
-    use_greedy: False
+    do_sample: True
     temperature_train: 1.6
     temperature_eval: 1.6
     top_k: -1
