@@ -101,6 +101,7 @@ env:
     max_steps_per_rollout_epoch: 512
     use_fixed_reset_state_ids: True
     use_ordered_reset_state_ids: True
+    reset_gripper_open: False
     is_eval: True
     video_cfg:
       save_video: True
