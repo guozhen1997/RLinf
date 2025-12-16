@@ -34,7 +34,10 @@ from mani_skill.utils.structs.types import SimConfig
 from sapien.physx import PhysxMaterial
 from transforms3d.euler import euler2quat
 
-CARROT_DATASET_DIR = Path(os.getenv("MANISKILL_ASSET_DIR", Path(__file__).parent / ".." / "assets")) / "carrot"
+CARROT_DATASET_DIR = (
+    Path(os.getenv("MANISKILL_ASSET_DIR", Path(__file__).parent / ".." / "assets"))
+    / "carrot"
+)
 
 
 class PutOnPlateInScene25(BaseEnv):
@@ -823,7 +826,7 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         self.model_db_plate: dict[str, dict] = io_utils.load_json(
             CARROT_DATASET_DIR / "more_plate" / "model_db.json"
         )
-        # Tonghe added on 12/12/2025 for consistency with openpi experiments. 
+        # Tonghe added on 12/12/2025 for consistency with openpi experiments.
         if not self.use_multiple_plates:
             only_plate_name = list(self.model_db_plate.keys())[0]
             self.model_db_plate = {
@@ -911,14 +914,7 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
         )
         # Synchronized reset:
         if num_envs_to_reset == self.num_envs:
-            try:
-                episode_id = episode_id.reshape(self.num_envs)
-            except:
-                # print(f"num_envs_to_reset={num_envs_to_reset}")
-                # print(f"episode_id: {episode_id}")
-                # print(f"options['episode_id']={options['episode_id']}")
-                # print(f"self.num_envs: {self.num_envs}")
-                raise ValueError(f"episode_id: {episode_id} cannot be reshaped to {self.num_envs}")
+            episode_id = episode_id.reshape(self.num_envs)
             episode_id = episode_id % ltt
             self.episode_id: torch.Tensor = episode_id
         elif 0 < len(env_idx) and len(env_idx) < self.num_envs:

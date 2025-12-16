@@ -21,6 +21,7 @@ from typing_extensions import override
 
 from rlinf.models.embodiment.openpi.policies import maniskill_policy
 
+
 @dataclasses.dataclass(frozen=True)
 class LeRobotManiSkillDataConfig(DataConfigFactory):
     """
@@ -32,7 +33,9 @@ class LeRobotManiSkillDataConfig(DataConfigFactory):
     extra_delta_transform: bool = False
 
     @override
-    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
         # The repack transform is *only* applied to the data coming from the dataset,
         # and *not* during inference. We can use it to make inputs from the dataset look
         # as close as possible to those coming from the inference environment (e.g. match the keys).
@@ -48,13 +51,12 @@ class LeRobotManiSkillDataConfig(DataConfigFactory):
                         "observation/image": "observation.images.top",
                         "observation/state": "observation.state",
                         "actions": "actions",
-                        "prompt": "prompt",   # 'task_descriptions'
+                        "prompt": "prompt",  # 'task_descriptions'
                     }
                 )
             ]
         )
 
- 
         # The data transforms are applied to the data coming from the dataset *and* during inference.
         # Below, we define the transforms for data going into the model (``inputs``) and the transforms
         # for data coming out of the model (``outputs``) (the latter is only used during inference).
@@ -62,7 +64,9 @@ class LeRobotManiSkillDataConfig(DataConfigFactory):
         # how to modify the transforms to match your dataset. Once you created your own transforms, you can
         # replace the transforms below with your own.
         data_transforms = _transforms.Group(
-            inputs=[maniskill_policy.ManiSkillInputs(model_type=model_config.model_type)],
+            inputs=[
+                maniskill_policy.ManiSkillInputs(model_type=model_config.model_type)
+            ],
             outputs=[maniskill_policy.ManiSkillOutputs()],
         )
 
@@ -96,4 +100,3 @@ class LeRobotManiSkillDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
-

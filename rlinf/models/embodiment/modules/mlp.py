@@ -11,8 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import torch.nn as nn
 from collections import OrderedDict
+
+import torch
+import torch.nn as nn
+
 activation_dict = nn.ModuleDict(
     {
         "relu": nn.ReLU(),
@@ -25,6 +28,8 @@ activation_dict = nn.ModuleDict(
         "silu": nn.SiLU(),
     }
 )
+
+
 class MLP(nn.Module):
     def __init__(
         self,
@@ -58,9 +63,9 @@ class MLP(nn.Module):
             # Add module components
             layers = [("linear_1", linear_layer)]
             if use_layernorm and (idx < num_layer - 1 or use_layernorm_final):
-                layers.append(("norm_1", nn.LayerNorm(o_dim)))   # type: ignore
+                layers.append(("norm_1", nn.LayerNorm(o_dim)))  # type: ignore
             if dropout > 0 and (idx < num_layer - 1 or use_drop_final):
-                layers.append(("dropout_1", nn.Dropout(dropout)))   # type: ignore
+                layers.append(("dropout_1", nn.Dropout(dropout)))  # type: ignore
 
             # Add activation function
             act = (
@@ -68,7 +73,7 @@ class MLP(nn.Module):
                 if idx != num_layer - 1
                 else activation_dict[out_activation_type.lower()]
             )
-            layers.append(("act_1", act))   # type: ignore
+            layers.append(("act_1", act))  # type: ignore
 
             # Re-construct module
             module = nn.Sequential(OrderedDict(layers))
@@ -76,10 +81,12 @@ class MLP(nn.Module):
 
         # Initialize the bias of the final linear layer if specified
         if out_bias_init is not None:
-            final_linear = self.moduleList[-1][0]  # Linear layer is first in the last Sequential # type: ignore
+            final_linear = self.moduleList[-1][
+                0
+            ]  # Linear layer is first in the last Sequential # type: ignore
             nn.init.constant_(final_linear.bias, out_bias_init)
             print(f"Initialized the bias of the final linear layer to {out_bias_init}")
-    
+
     def forward(self, x, append=None):
         for layer_ind, m in enumerate(self.moduleList):
             if append is not None and layer_ind in self.append_layers:

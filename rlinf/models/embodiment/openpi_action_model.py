@@ -27,15 +27,14 @@ from openpi.models.pi0_config import Pi0Config
 from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
 
 from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
-from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.models.embodiment.modules.mlp import MLP
+from rlinf.models.embodiment.modules.value_head import ValueHead
+
 
 @dataclass(frozen=True)
 class OpenPi0Config(Pi0Config):
     # config for rl
-    config_name: str = (
-        "pi0_libero"  # pi0_libero, pi05_libero, pi0_metaworld, pi05_metaworld, pi0_maniskill, pi05_maniskill
-    )
+    config_name: str = "pi0_libero"  # pi0_libero, pi05_libero, pi0_metaworld, pi05_metaworld, pi0_maniskill, pi05_maniskill
     num_images_in_input: int = 2  # number of images in input
     noise_method: str = "flow_sde"  # flow_sde, flow_noise, flow_cps
     # noise config for flow-sde
@@ -109,7 +108,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             if self.config.config_name == "pi0_maniskill":
                 value_head_hidden_sizes = [512, 256]
                 value_head_activation = "gelu"
-                self.value_head = MLP([proj_width] + value_head_hidden_sizes + [1],
+                self.value_head = MLP(
+                    [proj_width] + value_head_hidden_sizes + [1],
                     append_dim=0,
                     append_layers=None,
                     activation_type=value_head_activation,
@@ -118,7 +118,8 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                     use_layernorm_final=False,
                     dropout=0.1,
                     use_drop_final=False,
-                    out_bias_init=1.0)
+                    out_bias_init=1.0,
+                )
             else:
                 if self.config.config_name == "pi05_maniskill":
                     value_head_hidden_sizes = (1024, 512, 256)
@@ -132,8 +133,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                     activation=value_head_activation,
                     bias_last=True,
                 )
-            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent. 
-            self.value_head = self.value_head.to(dtype=self.action_out_proj.weight.dtype)
+            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent.
+            self.value_head = self.value_head.to(
+                dtype=self.action_out_proj.weight.dtype
+            )
         self.use_vlm_value = getattr(self.config, "value_after_vlm", False) and getattr(
             self.config, "add_value_head", False
         )
@@ -147,8 +150,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                 noise_logvar_range=self.config.noise_logvar_range,
                 noise_scheduler_type="learn",
             )
-            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent. 
-            self.noise_head = self.noise_head.to(dtype=self.action_out_proj.weight.dtype)
+            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent.
+            self.noise_head = self.noise_head.to(
+                dtype=self.action_out_proj.weight.dtype
+            )
 
     def set_global_step(self, global_step):
         self.global_step = global_step
@@ -204,7 +209,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         # # Debug: detect BFloat16 tensors and show their keys
         # for key, value in inputs.items():
         #     self._check_bf16_tensor(key, value)
-        
+
         # tensor -> numpy (Convert BFloat16/Float16 to float32 for numpy compatibility)
         inputs = jax.tree.map(self._tensor_to_numpy, inputs)
         batch_size = next(v.shape[0] for v in inputs.values() if hasattr(v, "shape"))
@@ -562,7 +567,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             x_t,
             t_input,
         )
-        v_t = self.action_out_proj(suffix_out.to(dtype=self.action_out_proj.weight.dtype))  # [bs,n_action_steps,max_action_dim]
+        v_t = self.action_out_proj(
+            suffix_out.to(dtype=self.action_out_proj.weight.dtype)
+        )  # [bs,n_action_steps,max_action_dim]
         # value prediction
         if (
             self.config.add_value_head
@@ -614,7 +621,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             elif self.config.noise_method == "flow_noise":
                 x0_weight = 1 - (t_input - delta)
                 x1_weight = t_input - delta
-                x_t_std = self.noise_head(suffix_out.to(dtype=self.action_out_proj.weight.dtype))
+                x_t_std = self.noise_head(
+                    suffix_out.to(dtype=self.action_out_proj.weight.dtype)
+                )
             else:
                 raise ValueError(f"Invalid noise method: {self.config.noise_method}")
         x_t_mean = x0_pred * x0_weight + x1_pred * x1_weight

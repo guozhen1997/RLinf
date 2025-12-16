@@ -139,11 +139,15 @@ class ManiskillEnv(gym.Env):
     def _extract_obs_image(self, raw_obs):
         obs_image = raw_obs["sensor_data"]["3rd_view_camera"]["rgb"].to(torch.uint8)
         obs_image = obs_image.permute(0, 3, 1, 2)  # [B, C, H, W]
-        # Tonghe added on 10/03/2025. Reference: page 4, Section III of https://arxiv.org/pdf/2504.16054 
-        proprioception: torch.Tensor = self.env.unwrapped.agent.robot.get_qpos().to(obs_image.device, dtype=torch.float32)  # qpos. To see the link to the definition of get_qpos(), remove the ".unwrapped" and click onto the function. 
-        extracted_obs = {"images": obs_image, 
-                         "states": proprioception, 
-                        "task_descriptions": self.instruction}
+        # Tonghe added on 10/03/2025. Reference: page 4, Section III of https://arxiv.org/pdf/2504.16054
+        proprioception: torch.Tensor = self.env.unwrapped.agent.robot.get_qpos().to(
+            obs_image.device, dtype=torch.float32
+        )  # qpos. To see the link to the definition of get_qpos(), remove the ".unwrapped" and click onto the function.
+        extracted_obs = {
+            "images": obs_image,
+            "states": proprioception,
+            "task_descriptions": self.instruction,
+        }
         return extracted_obs
 
     def _calc_step_reward(self, reward, info):
