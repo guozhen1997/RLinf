@@ -53,6 +53,7 @@ class SupportedModel(Enum):
     OPENPI = ("openpi", "embodied")
     MLP_POLICY = ("mlp_policy", "embodied")
     GR00T = ("gr00t", "embodied")
+    CNN_POLICY = ("cnn_policy", "embodied")
 
     def __new__(cls, value, category):
         obj = object.__new__(cls)

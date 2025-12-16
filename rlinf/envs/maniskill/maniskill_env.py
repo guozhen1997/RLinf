@@ -130,8 +130,31 @@ class ManiskillEnv(gym.Env):
         ).to(self.device)
 
     def _wrap_obs(self, raw_obs):
-        if self.env.unwrapped.obs_mode == "state":
-            wrapped_obs = {"states": raw_obs}
+        if getattr(self.cfg, "wrap_obs_mode", "vla") == "simple":
+            if self.env.unwrapped.obs_mode == "state":
+                wrapped_obs = {
+                    "images": None,
+                    "task_description": None,
+                    "states": raw_obs
+                }
+            elif self.env.unwrapped.obs_mode == "rgb":
+                sensor_data = raw_obs.pop("sensor_data")
+                raw_obs.pop("sensor_param")
+                state = common.flatten_state_dict(
+                    raw_obs, use_torch=True, device=self.device
+                )
+
+                images = dict()
+                for camera_name in sensor_data.keys():
+                    image_tensor = sensor_data[camera_name]["rgb"] # [B, H, W, C]
+                    images[camera_name] = image_tensor.permute(0, 3, 1, 2) # [B, C, H, W]
+                wrapped_obs = {
+                    "images": images,
+                    "task_description": None,
+                    "states": state
+                }
+            else:
+                raise NotImplementedError
         else:
             wrapped_obs = self._extract_obs_image(raw_obs)
         return wrapped_obs
@@ -151,13 +174,14 @@ class ManiskillEnv(gym.Env):
 
     def _calc_step_reward(self, reward, info):
         if getattr(self.cfg, "reward_mode", "default") == "raw":
-            return reward
-        reward = torch.zeros(self.num_envs, dtype=torch.float32).to(
-            self.env.unwrapped.device
-        )  # [B, ]
-        reward += info["is_src_obj_grasped"] * 0.1
-        reward += info["consecutive_grasp"] * 0.1
-        reward += (info["success"] & info["is_src_obj_grasped"]) * 1.0
+            pass
+        else:
+            reward = torch.zeros(self.num_envs, dtype=torch.float32).to(
+                self.env.unwrapped.device
+            )  # [B, ]
+            reward += info["is_src_obj_grasped"] * 0.1
+            reward += info["consecutive_grasp"] * 0.1
+            reward += (info["success"] & info["is_src_obj_grasped"]) * 1.0
         # diff
         reward_diff = reward - self.prev_step_reward
         self.prev_step_reward = reward

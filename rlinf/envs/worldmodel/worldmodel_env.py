@@ -21,7 +21,7 @@ import torch
 from mani_skill.utils import common
 from mani_skill.utils.common import torch_clone_dict
 from mani_skill.utils.structs.types import Array
-from mani_skill.utils.visualization.misc import (
+from rlinf.envs.utils import (
     images_to_video,
     put_info_on_image,
     tile_images,

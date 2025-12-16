@@ -20,6 +20,7 @@ import torch
 from omegaconf import DictConfig
 from torch.distributed.tensor import DTensor
 from torch.multiprocessing.reductions import reduce_tensor
+import itertools
 
 import rlinf.algorithms  # noqa: F401
 from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
@@ -44,7 +45,11 @@ from rlinf.utils.metric_utils import (
     compute_rollout_metrics,
     compute_split_num,
 )
-from rlinf.utils.nested_dict_process import cat_list_of_dict_tensor
+from rlinf.utils.nested_dict_process import (
+    cat_list_of_dict_tensor, 
+    split_dict_to_chunk, 
+    put_tensor_device
+)
 from rlinf.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
@@ -911,11 +916,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
-            rollout_dataloader_iter = get_iterator_k_split(
-                self.rollout_batch,
-                rollout_size // batch_size_per_rank,
+            rollout_global_batch_list = itertools.chain(
+                split_dict_to_chunk(
+                    self.rollout_batch,
+                    rollout_size // batch_size_per_rank,
+                )
             )
-            for train_global_batch in rollout_dataloader_iter:
+            for train_global_batch in rollout_global_batch_list:
                 # split batch into micro_batches
                 train_global_batch_size = train_global_batch["prev_logprobs"].shape[0]
                 assert (
@@ -926,15 +933,16 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 assert train_global_batch_size % self.cfg.actor.micro_batch_size == 0, (
                     f"{train_global_batch_size=}, {self.cfg.actor.micro_batch_size}"
                 )
-                train_micro_batch = get_iterator_k_split(
-                    train_global_batch,
-                    train_global_batch_size // self.cfg.actor.micro_batch_size,
+                train_micro_batch_list = itertools.chain(
+                    split_dict_to_chunk(
+                        train_global_batch,
+                        train_global_batch_size // self.cfg.actor.micro_batch_size,
+                    )
                 )
 
                 self.optimizer.zero_grad()
-                for idx, data in enumerate(train_micro_batch):
-                    for k, v in data.items():
-                        data[k] = v.to(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+                for idx, data in enumerate(train_micro_batch_list):
+                    data = put_tensor_device(data, f"cuda:{int(os.environ['LOCAL_RANK'])}")
                     backward_ctx = self.before_micro_batch(
                         self.model,
                         is_last_micro_batch=(idx + 1) == self.gradient_accumulation,

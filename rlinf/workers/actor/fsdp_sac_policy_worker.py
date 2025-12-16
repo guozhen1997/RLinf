@@ -259,7 +259,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         next_obs = batch["transitions"]["next_obs"]
         with torch.no_grad():
             kwargs = {}
-            if self.cfg.actor.model.model_name in ["openvla", "openvla_oft"]:
+            if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
                 kwargs["temperature"] = (
                     self.cfg.algorithm.sampling_params.temperature_train
                 )
@@ -362,7 +362,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         agg_q = self.cfg.algorithm.get("agg_q", "min")
         curr_obs = batch["transitions"]["obs"]
         kwargs = {}
-        if self.cfg.actor.model.model_name in ["openvla", "openvla_oft"]:
+        if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
             kwargs["temperature"] = self.cfg.algorithm.sampling_params.temperature_train
         pi, log_pi, shared_feature = self.model("sac_forward", obs=curr_obs, **kwargs)
         log_pi = log_pi.sum(dim=-1, keepdim=True)  # sum over the chunk dimension
@@ -398,7 +398,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         curr_obs = batch["transitions"]["obs"]
         with torch.no_grad():
             kwargs = {}
-            if self.cfg.actor.model.model_name in ["openvla", "openvla_oft"]:
+            if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
                 kwargs["temperature"] = (
                     self.cfg.algorithm.sampling_params.temperature_train
                 )

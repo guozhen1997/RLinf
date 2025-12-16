@@ -67,5 +67,9 @@ def get_env_cls(simulator_type, env_cfg=None):
         from rlinf.envs.robocasa.robocasa_env import RobocasaEnv
 
         return RobocasaEnv
+    elif simulator_type == "realworld":
+        from rlinf.envs.realworld.realworld_env import RealworldEnv
+
+        return RealworldEnv
     else:
         raise NotImplementedError(f"Simulator type {simulator_type} not implemented")

@@ -181,6 +181,8 @@ def prepare_actions(
             action_dim=action_dim,
             model_type=model_type,
         )
+    elif simulator_type == "realworld":
+        chunk_actions = raw_chunk_actions
     else:
         raise NotImplementedError
 
