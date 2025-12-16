@@ -364,10 +364,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             )  # [B, act]
         else:
             processed_logits_tensor = logits_tensor
-            processed_logprob_tensor = F.log_softmax(
-                processed_logits_tensor, dim=-1
-            )  # [B, act, vocab_size + 64]
-            idxs = processed_logprob_tensor.argmax(dim=-1)  # [B, act]
+            idxs = processed_logits_tensor.argmax(dim=-1)  # [B, act]
 
         # assert torch.all(idxs >= 0) and torch.all(idxs < self.config.n_action_bins)
         # generated_ids = idxs + (self.vocab_size - self.config.n_action_bins)

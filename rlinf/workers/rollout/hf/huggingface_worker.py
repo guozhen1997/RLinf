@@ -94,7 +94,7 @@ class MultiStepRolloutWorker(Worker):
         }
 
         self._eval_sampling_params = {
-            "do_sample": False,
+            "do_sample": self._sampling_params["do_sample"],
             "temperature": self._sampling_params["temperature_eval"],
             "top_k": self._sampling_params["top_k"],
             "top_p": self._sampling_params["top_p"],
