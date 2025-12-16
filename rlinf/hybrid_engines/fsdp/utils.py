@@ -164,6 +164,19 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, is_openvla_model=Fa
         )
         policies.append(value_head_policy)
 
+    if hasattr(module, "q_head"):
+        from rlinf.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
+
+        if isinstance(module.q_head, MultiCrossQHead):
+            q_head_policy = functools.partial(
+                _module_wrap_policy, module_classes={MultiCrossQHead}
+            )
+        else:
+            q_head_policy = functools.partial(
+                _module_wrap_policy, module_classes={MultiQHead}
+            )
+        policies.append(q_head_policy)
+
     # Add transformer layer policies
     if fsdp_transformer_layer_cls_to_wrap is not None:
         transformer_cls_to_wrap = set()

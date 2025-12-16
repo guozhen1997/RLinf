@@ -37,6 +37,7 @@ class EmbodiedRunner:
         actor: "EmbodiedFSDPActor",
         rollout: "MultiStepRolloutWorker",
         env: "EnvWorker",
+        demo_buffer=None,
         critic=None,
         reward=None,
         run_timer=None,

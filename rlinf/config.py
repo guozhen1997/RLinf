@@ -749,12 +749,14 @@ def validate_embodied_cfg(cfg):
         ):
 
             def get_robot_control_mode(robot: str):
-                if "google_robot_static" in robot:
+                if robot == "panda-qpos":
+                    return "pd_joint_delta_pos"
+                elif robot == "panda-ee-dpos":
+                    return "pd_ee_delta_pos"
+                elif "google_robot_static" in robot:
                     return "arm_pd_ee_delta_pose_align_interpolate_by_planner_gripper_pd_joint_target_delta_pos_interpolate_by_planner"
                 elif "widowx" in robot:
                     return "arm_pd_ee_target_delta_pose_align2_gripper_pd_joint_pos"
-                elif "panda-qpos" in robot:
-                    return None
                 else:
                     raise NotImplementedError(f"Robot {robot} not supported")
 

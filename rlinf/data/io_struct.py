@@ -29,6 +29,11 @@ from rlinf.utils.data_iter_utils import (
     get_iterator_k_split,
     split_list,
 )
+from rlinf.utils.nested_dict_process import (
+    put_tensor_device,
+    split_dict_to_chunk,
+    stack_list_of_dict_tensor,
+)
 
 
 def get_batch_size(
@@ -1047,14 +1052,28 @@ class EnvOutput:
     obs: dict[str, Any]
     final_obs: Optional[dict[str, Any]] = None
     dones: Optional[torch.Tensor] = None  # [B]
+    terminations: Optional[torch.Tensor] = None  # [B]
+    truncations: Optional[torch.Tensor] = None  # [B]
     rewards: Optional[torch.Tensor] = None  # [B]
 
     def __post_init__(self):
-        self.obs = put_tensor_cpu(self.obs)
+        self.obs = put_tensor_device(self.obs, "cpu")
         self.final_obs = (
-            put_tensor_cpu(self.final_obs) if self.final_obs is not None else None
+            put_tensor_device(self.final_obs, "cpu")
+            if self.final_obs is not None
+            else None
         )
         self.dones = self.dones.cpu().contiguous() if self.dones is not None else None
+        self.terminations = (
+            self.terminations.cpu().contiguous()
+            if self.terminations is not None
+            else None
+        )
+        self.truncations = (
+            self.truncations.cpu().contiguous()
+            if self.truncations is not None
+            else None
+        )
         self.rewards = (
             self.rewards.cpu().contiguous() if self.rewards is not None else None
         )
@@ -1084,6 +1103,8 @@ class EnvOutput:
             else None
         )
         env_output_dict["dones"] = self.dones
+        env_output_dict["terminations"] = self.terminations
+        env_output_dict["truncations"] = self.truncations
         env_output_dict["rewards"] = self.rewards
 
         return env_output_dict
@@ -1095,6 +1116,8 @@ class ChunkStepResult:
     prev_logprobs: torch.Tensor = None  # [B, action_dim]
     prev_values: torch.Tensor = None  # [B, 1]
     dones: torch.Tensor = None  # [B, 1]
+    truncations: torch.Tensor = None # [B, 1]
+    terminations: torch.Tensor = None # [B, 1]
     rewards: torch.Tensor = None  # [B, 1]
     forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
 
@@ -1105,11 +1128,14 @@ class ChunkStepResult:
             self.prev_values = self.prev_values.cpu().contiguous()
         if self.dones is not None:
             self.dones = self.dones.cpu().contiguous()
+        if self.terminations is not None:
+            self.terminations = self.terminations.cpu().contiguous()
+        if self.truncations is not None:
+            self.truncations = self.truncations.cpu().contiguous()
         if self.rewards is not None:
             self.rewards = self.rewards.cpu().contiguous()
         if self.forward_inputs:
-            self.forward_inputs = put_tensor_cpu(self.forward_inputs)
-
+            self.forward_inputs = put_tensor_device(self.forward_inputs, "cpu")
 
 @dataclass(kw_only=True)
 class EmbodiedRolloutResult:
@@ -1124,12 +1150,21 @@ class EmbodiedRolloutResult:
     dones: list[torch.Tensor] = field(
         default_factory=list
     )  # lens of results is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
+    terminations: list[torch.Tensor] = field(
+        default_factory=list
+    )  # lens of results is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
+    truncations: list[torch.Tensor] = field(
+        default_factory=list
+    )  # lens of results is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
     rewards: list[torch.Tensor] = field(
         default_factory=list
     )  # lens of results is rollout_epoch * n_chunk_steps
     forward_inputs: list[dict[str, list[torch.Tensor]]] = field(
         default_factory=list
     )  # lens of results is rollout_epoch * n_chunk_steps
+    transitions: list[tuple[dict[str, Any], dict[str, Any]]] = field(
+        default_factory=list
+    ) 
 
     def append_result(self, result: ChunkStepResult):
         if result.prev_logprobs is not None:
@@ -1138,10 +1173,22 @@ class EmbodiedRolloutResult:
             self.prev_values.append(result.prev_values)
         if result.dones is not None:
             self.dones.append(result.dones)
+        if result.truncations is not None:
+            self.truncations.append(result.truncations)
+        if result.terminations is not None:
+            self.terminations.append(result.terminations)
         if result.rewards is not None:
             self.rewards.append(result.rewards)
         if result.forward_inputs:
             self.forward_inputs.append(result.forward_inputs)
+
+    def add_transition(self, obs, next_obs):
+        self.transitions.append(
+            {
+                "obs": put_tensor_device(obs, "cpu"),
+                "next_obs": put_tensor_device(next_obs, "cpu"),
+            }
+        )
 
     def to_dict(self):
         rollout_result_dict = {}
@@ -1160,23 +1207,36 @@ class EmbodiedRolloutResult:
             if len(self.dones) > 0
             else None
         )
+        rollout_result_dict["terminations"] = (
+            torch.stack(self.terminations, dim=0).cpu().contiguous()
+            if len(self.terminations) > 0
+            else None
+        )
+        rollout_result_dict["truncations"] = (
+            torch.stack(self.truncations, dim=0).cpu().contiguous()
+            if len(self.truncations) > 0
+            else None
+        )
         rollout_result_dict["rewards"] = (
             torch.stack(self.rewards, dim=0).cpu().contiguous()
             if len(self.rewards) > 0
             else None
         )
-        merged_forward_inputs = {}
-        for data in self.forward_inputs:
-            for k, v in data.items():
-                if k in merged_forward_inputs:
-                    merged_forward_inputs[k].append(v)
-                else:
-                    merged_forward_inputs[k] = [v]
+
+        merged_forward_inputs = stack_list_of_dict_tensor(self.forward_inputs)
         for k in merged_forward_inputs.keys():
-            assert k not in ["dones", "rewards", "prev_logprobs", "prev_values"]
-            rollout_result_dict[k] = (
-                torch.stack(merged_forward_inputs[k], dim=0).cpu().contiguous()
-            )
+            assert k not in [
+                "dones",
+                "terminations",
+                "truncations",
+                "rewards",
+                "prev_logprobs",
+                "prev_values",
+            ]
+            rollout_result_dict[k] = merged_forward_inputs[k]
+
+        transition_dict = stack_list_of_dict_tensor(self.transitions)
+        rollout_result_dict["transitions"] = transition_dict
 
         assert len(rollout_result_dict["dones"]) == len(
             rollout_result_dict["prev_values"]
@@ -1189,17 +1249,4 @@ class EmbodiedRolloutResult:
         return rollout_result_dict
 
     def to_splited_dict(self, split_size) -> list[dict[str, Any]]:
-        rollout_result_list = []
-        for i in range(split_size):
-            split_dict = self.to_dict()
-            for key, value in split_dict.items():
-                if isinstance(value, torch.Tensor):
-                    # Chunk along batch dimension (dim=1), keep time dimension T as is.
-                    chunks = torch.chunk(value, split_size, dim=1)
-                    split_dict[key] = chunks[i].contiguous()
-                else:
-                    # Non-tensor values are shared across splits.
-                    split_dict[key] = value
-            rollout_result_list.append(split_dict)
-
-        return rollout_result_list
+        return split_dict_to_chunk(self.to_dict(), split_size, dim=1)

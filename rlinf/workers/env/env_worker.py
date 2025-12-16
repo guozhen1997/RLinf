@@ -38,6 +38,8 @@ class EnvWorker(Worker):
         self.simulator_list = []
         self.last_obs_list = []
         self.last_dones_list = []
+        self.last_terminations_list = []
+        self.last_truncations_list = []
         self.eval_simulator_list = []
 
         self._obs_queue_name = cfg.env.channel.queue_name
@@ -125,7 +127,9 @@ class EnvWorker(Worker):
                 )
                 self.last_obs_list.append(extracted_obs)
                 self.last_dones_list.append(dones)
-                self.simulator_list[i].stop_simulator()
+                self.last_terminations_list.append(dones.clone())
+            self.last_truncations_list.append(dones.clone())
+            self.simulator_list[i].stop_simulator()
 
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
@@ -171,6 +175,8 @@ class EnvWorker(Worker):
             else None,
             rewards=chunk_rewards,
             dones=chunk_dones,
+            terminations=chunk_terminations,
+            truncations=chunk_truncations,
         )
         return env_output, env_info
 
@@ -299,9 +305,14 @@ class EnvWorker(Worker):
                         .unsqueeze(1)
                         .repeat(1, self.cfg.actor.model.num_action_chunks)
                     )
+                    terminations = dones.clone()
+                    truncations = dones.clone()
+
                     env_output = EnvOutput(
                         obs=extracted_obs,
                         dones=dones,
+                        terminations=terminations,
+                        truncations=truncations,
                         final_obs=infos["final_observation"]
                         if "final_observation" in infos
                         else None,
@@ -315,6 +326,8 @@ class EnvWorker(Worker):
                         obs=self.last_obs_list[stage_id],
                         rewards=None,
                         dones=self.last_dones_list[stage_id],
+                        terminations=self.last_terminations_list[stage_id],
+                        truncations=self.last_truncations_list[stage_id],
                     )
                     env_output_list.append(env_output)
 
@@ -344,6 +357,12 @@ class EnvWorker(Worker):
 
             self.last_obs_list = [env_output.obs for env_output in env_output_list]
             self.last_dones_list = [env_output.dones for env_output in env_output_list]
+            self.last_truncations_list = [
+                env_output.truncations for env_output in env_output_list
+            ]
+            self.last_terminations_list = [
+                env_output.terminations for env_output in env_output_list
+            ]
             self.finish_rollout()
 
         for simulator in self.simulator_list:

@@ -323,7 +323,11 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         return processed_obs
 
     def predict_action_batch(
-        self, env_obs, mode: Literal["train", "eval"] = "train", compute_values=True
+        self,
+        env_obs,
+        mode: Literal["train", "eval"] = "train",
+        compute_values=True,
+        return_obs=True,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         to_process_obs = self.obs_processor(env_obs)  # env obs -> policy input obs
         processed_obs = self.input_transform(

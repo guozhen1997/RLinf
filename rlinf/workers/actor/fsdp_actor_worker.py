@@ -44,6 +44,7 @@ from rlinf.utils.metric_utils import (
     compute_rollout_metrics,
     compute_split_num,
 )
+from rlinf.utils.nested_dict_process import cat_list_of_dict_tensor
 from rlinf.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
@@ -59,6 +60,43 @@ from rlinf.utils.utils import (
     retrieve_model_state_dict_in_cpu,
 )
 from rlinf.workers.rollout.utils import RankMapper
+
+
+def process_nested_dict_for_adv(nested_dict, rollout_epoch):
+    """
+    original shape: [rollout_epoch x n_chunk_steps, bsz, num_action_chunks, ...]
+    target shape: [n_chunk_steps, rollout_epoch x bsz, num_action_chunks, ...]
+    """
+    ret_dict = {}
+    for key, value in nested_dict.items():
+        if isinstance(value, torch.Tensor):
+            new_value = value.reshape(
+                rollout_epoch, -1, *value.shape[1:]
+            )  # [rollout_epoch, n_chunk_step, bsz, ...]
+            new_value = new_value.transpose(
+                0, 1
+            )  # [n_chunk_step, rollout_epoch, bsz, ...]
+            new_value = new_value.reshape(new_value.shape[0], -1, *new_value.shape[3:])
+            ret_dict[key] = new_value
+        elif isinstance(value, dict):
+            ret_dict[key] = process_nested_dict_for_adv(value, rollout_epoch)
+    return ret_dict
+
+
+def process_nested_dict_for_train(nested_dict, shuffle_id):
+    ret_dict = {}
+    for key, value in nested_dict.items():
+        if key in ["dones", "terminations", "truncations", "prev_values"]:
+            value = value[:-1]
+        if "env_info" in key:
+            raise NotImplementedError
+        if value is None:
+            ret_dict[key] = None
+        if isinstance(value, torch.Tensor):
+            ret_dict[key] = value.reshape(-1, *value.shape[2:])[shuffle_id]
+        elif isinstance(value, dict):
+            ret_dict[key] = process_nested_dict_for_train(value, shuffle_id)
+    return ret_dict
 
 
 class FSDPActor(FSDPModelManager, Worker):
@@ -724,10 +762,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             )
 
         # shape [num_chunk, bsz, chunk_size], cat dim 1
-        for key in recv_list[0].keys():
-            self.rollout_batch[key] = torch.cat(
-                [recv_list[i][key] for i in range(split_num)], dim=1
-            )
+        self.rollout_batch = cat_list_of_dict_tensor(recv_list, dim=1)
 
         self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
@@ -739,15 +774,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         target shape: [n_chunk_steps, rollout_epoch x bsz, num_action_chunks, ...]
         """
         rollout_epoch = self.cfg.algorithm.rollout_epoch
-        for key, value in rollout_batch.items():
-            new_value = value.reshape(
-                rollout_epoch, -1, *value.shape[1:]
-            )  # [rollout_epoch, n_chunk_step, bsz, ...]
-            new_value = new_value.transpose(
-                0, 1
-            )  # [n_chunk_step, rollout_epoch, bsz, ...]
-            new_value = new_value.reshape(new_value.shape[0], -1, *new_value.shape[3:])
-            rollout_batch[key] = new_value
+        rollout_batch = process_nested_dict_for_adv(rollout_batch, rollout_epoch)
 
         if (
             not self.cfg.env.train.auto_reset
@@ -858,15 +885,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         shuffle_id = torch.randperm(rollout_size, generator=g)
 
         with torch.no_grad():
-            for key, value in self.rollout_batch.items():
-                if key in ["dones", "prev_values"]:
-                    value = value[:-1]
-                if "env_info" in key:
-                    continue
-                if value is None:
-                    continue
-                value = value.reshape(rollout_size, *value.shape[2:])
-                self.rollout_batch[key] = value[shuffle_id]
+            self.rollout_batch = process_nested_dict_for_train(
+                self.rollout_batch, shuffle_id
+            )
 
         assert (
             self.cfg.actor.global_batch_size
