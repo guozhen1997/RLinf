@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import os
 from functools import partial
 
@@ -20,7 +21,6 @@ import torch
 from omegaconf import DictConfig
 from torch.distributed.tensor import DTensor
 from torch.multiprocessing.reductions import reduce_tensor
-import itertools
 
 import rlinf.algorithms  # noqa: F401
 from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
@@ -46,9 +46,9 @@ from rlinf.utils.metric_utils import (
     compute_split_num,
 )
 from rlinf.utils.nested_dict_process import (
-    cat_list_of_dict_tensor, 
-    split_dict_to_chunk, 
-    put_tensor_device
+    cat_list_of_dict_tensor,
+    put_tensor_device,
+    split_dict_to_chunk,
 )
 from rlinf.utils.placement import (
     HybridComponentPlacement,
@@ -942,7 +942,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
                 self.optimizer.zero_grad()
                 for idx, data in enumerate(train_micro_batch_list):
-                    data = put_tensor_device(data, f"cuda:{int(os.environ['LOCAL_RANK'])}")
+                    data = put_tensor_device(
+                        data, f"cuda:{int(os.environ['LOCAL_RANK'])}"
+                    )
                     backward_ctx = self.before_micro_batch(
                         self.model,
                         is_last_micro_batch=(idx + 1) == self.gradient_accumulation,

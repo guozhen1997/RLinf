@@ -16,7 +16,7 @@ import os
 import pathlib
 import sys
 import time
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional
 
 import psutil
 import rospy
@@ -62,9 +62,9 @@ class ROSController:
         rospy.init_node("franka_controller", anonymous=True)
 
         # ROS channels
-        self._output_channels: Dict[str, rospy.Publisher] = {}
-        self._input_channels: Dict[str, rospy.Subscriber] = {}
-        self._input_channel_status: Dict[str, bool] = {}
+        self._output_channels: dict[str, rospy.Publisher] = {}
+        self._input_channels: dict[str, rospy.Subscriber] = {}
+        self._input_channel_status: dict[str, bool] = {}
 
     def get_input_channel_status(self, name: str) -> bool:
         """Get the status of a ROS input channel.

@@ -1,24 +1,41 @@
-"""A synchronous vector environment."""
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from copy import deepcopy
-from typing import Any, List, Optional, Tuple, Union, Iterable, Callable
+from typing import Any, Callable, Iterable, Optional, Union
 
 import numpy as np
+from gymnasium import Env, Space
+from gymnasium.vector.utils import batch_space, concatenate, create_empty_array, iterate
 from numpy.typing import NDArray
 
-from gymnasium import Env, Space, spaces
-import numpy as np
-from numpy.typing import NDArray
-from gymnasium.vector.utils import concatenate, create_empty_array, iterate, batch_space
+"""A synchronous vector environment."""
+
+"""This file is mainly adapted from gymnasium==0.29.1. We copied them instead of import them because the change of gymnasium from 0.x.x to 1.x.x is significant. """
+
 
 class SyncVectorEnv:
     """Vectorized environment that serially runs multiple environments.
 
     Example:
         >>> import gymnasium as gym
-        >>> env = gym.vector.SyncVectorEnv([
-        ...     lambda: gym.make("Pendulum-v1", g=9.81),
-        ...     lambda: gym.make("Pendulum-v1", g=1.62)
-        ... ])
+        >>> env = gym.vector.SyncVectorEnv(
+        ...     [
+        ...         lambda: gym.make("Pendulum-v1", g=9.81),
+        ...         lambda: gym.make("Pendulum-v1", g=1.62),
+        ...     ]
+        ... )
         >>> env.reset(seed=42)
         (array([[-0.14995256,  0.9886932 , -0.12224312],
                [ 0.5760367 ,  0.8174238 , -0.91244936]], dtype=float32), {})
@@ -31,7 +48,8 @@ class SyncVectorEnv:
         action_space: Space = None,
         copy: bool = True,
     ):
-        """Vectorized environment that serially runs multiple environments.
+        """
+        Vectorized environment that serially runs multiple environments.
 
         Args:
             env_fns: iterable of callable functions that create the environments.
@@ -40,10 +58,6 @@ class SyncVectorEnv:
             action_space: Action space of a single environment. If ``None``,
                 then the action space of the first environment is taken.
             copy: If ``True``, then the :meth:`reset` and :meth:`step` methods return a copy of the observations.
-
-        Raises:
-            RuntimeError: If the observation space of some sub-environment does not match observation_space
-                (or, by default, the observation space of the first sub-environment).
         """
         self.env_fns = env_fns
         self.envs = [env_fn() for env_fn in env_fns]
@@ -75,10 +89,9 @@ class SyncVectorEnv:
         self._truncateds = np.zeros((self.num_envs,), dtype=np.bool_)
         self._actions = None
 
-
     def reset(
         self,
-        seed: Optional[Union[int, List[int]]] = None,
+        seed: Optional[Union[int, list[int]]] = None,
         options: Optional[dict] = None,
     ):
         """Waits for the calls triggered by :meth:`reset_async` to finish and returns the results.
@@ -116,7 +129,9 @@ class SyncVectorEnv:
         )
         return (deepcopy(self.observations) if self.copy else self.observations), infos
 
-    def step(self, actions) -> Tuple[Any, NDArray[Any], NDArray[Any], NDArray[Any], dict]:
+    def step(
+        self, actions
+    ) -> tuple[Any, NDArray[Any], NDArray[Any], NDArray[Any], dict]:
         """Steps through each of the environments returning the batched results.
 
         Returns:
@@ -218,7 +233,7 @@ class SyncVectorEnv:
                 )
 
         return True
-    
+
     def _add_info(self, infos: dict, info: dict, env_num: int) -> dict:
         """Add env info to the info dictionary of the vectorized environment.
 
@@ -245,8 +260,8 @@ class SyncVectorEnv:
             info_array[env_num], array_mask[env_num] = info[k], True
             infos[k], infos[f"_{k}"] = info_array, array_mask
         return infos
-    
-    def _init_info_arrays(self, dtype: type) -> Tuple[np.ndarray, np.ndarray]:
+
+    def _init_info_arrays(self, dtype: type) -> tuple[np.ndarray, np.ndarray]:
         """Initialize the info array.
 
         Initialize the info array. If the dtype is numeric
@@ -272,10 +287,10 @@ class SyncVectorEnv:
         return array, array_mask
 
 
-    
-
 class NoResetSyncVectorEnv(SyncVectorEnv):
-    def step(self, actions) -> Tuple[Any, NDArray[Any], NDArray[Any], NDArray[Any], dict]:
+    def step(
+        self, actions
+    ) -> tuple[Any, NDArray[Any], NDArray[Any], NDArray[Any], dict]:
         """Steps through each of the environments returning the batched results.
 
         Returns:

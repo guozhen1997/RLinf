@@ -1,31 +1,48 @@
-import numpy as np
-import torch
-import gymnasium as gym
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import copy
 import os
-from typing import Optional
+from typing import Optional, OrderedDict
+
+import gymnasium as gym
+import numpy as np
+import torch
 from omegaconf import OmegaConf
-from rlinf.envs.realworld.venv import NoResetSyncVectorEnv
-import rlinf.envs.realworld.franka.tasks
-from rlinf.envs.utils import (
-    to_tensor, put_info_on_image, tile_images, 
-    save_rollout_video
-)
+
 from rlinf.envs.realworld.common.wrappers import (
-    GripperCloseEnv, 
+    GripperCloseEnv,
+    Quat2EulerWrapper,
+    RelativeFrame,
     SpacemouseIntervention,
-    RelativeFrame, 
-    Quat2EulerWrapper,  
 )
-from typing import OrderedDict
+import rlinf.envs.realworld.franka.tasks
+from rlinf.envs.realworld.venv import NoResetSyncVectorEnv
+from rlinf.envs.utils import (
+    put_info_on_image,
+    save_rollout_video,
+    tile_images,
+    to_tensor,
+)
 
 
 class RealworldEnv(gym.Env):
     def __init__(self, cfg, num_envs, seed_offset, total_num_processes):
         self.cfg = cfg
         self.override_cfg = {
-            "robot_ip": self.cfg.robot_ip, 
-            "camera_serials": self.cfg.camera_serials
+            "robot_ip": self.cfg.robot_ip,
+            "camera_serials": self.cfg.camera_serials,
         }
         override_cfg = OmegaConf.to_container(cfg.get("override_cfg", {}), resolve=True)
         self.override_cfg.update(override_cfg)
@@ -46,7 +63,6 @@ class RealworldEnv(gym.Env):
             )
         self._init_env()
 
-        
         self._is_start = True
         self._init_metrics()
         self._elapsed_steps = np.zeros(self.num_envs, dtype=np.int32)
@@ -58,27 +74,31 @@ class RealworldEnv(gym.Env):
     def _init_env(self):
         env_fns = []
         for _ in range(self.num_envs):
+
             def env_fn():
-                env = gym.make(id=self.cfg.init_params.id, override_cfg=self.override_cfg)
+                env = gym.make(
+                    id=self.cfg.init_params.id, override_cfg=self.override_cfg
+                )
                 env = GripperCloseEnv(env)
                 if not env.config.is_dummy:
                     env = SpacemouseIntervention(env)
                 env = RelativeFrame(env)
                 env = Quat2EulerWrapper(env)
                 return env
+
             env_fns.append(env_fn)
-        
+
         self.env = NoResetSyncVectorEnv(env_fns)
         self.task_descriptions = list(self.env.call("task_description"))
-    
+
     @property
     def total_num_group_envs(self):
         return np.iinfo(np.uint8).max // 2  # TODO
-    
+
     @property
     def is_start(self):
         return self._is_start
-    
+
     @is_start.setter
     def is_start(self, value):
         self._is_start = value
@@ -86,7 +106,7 @@ class RealworldEnv(gym.Env):
     @property
     def elapsed_steps(self):
         return self._elapsed_steps
-    
+
     def _init_metrics(self):
         self.prev_step_reward = np.zeros(self.num_envs)
 
@@ -95,7 +115,7 @@ class RealworldEnv(gym.Env):
         self.returns = np.zeros(self.num_envs)
         self.is_intervened = np.zeros(self.num_envs, dtype=bool)
         self.intervened_steps = np.zeros(self.num_envs, dtype=int)
-    
+
     def _reset_metrics(self, env_idx=None):
         if env_idx is not None:
             mask = np.zeros(self.num_envs, dtype=bool)
@@ -115,7 +135,7 @@ class RealworldEnv(gym.Env):
             self._elapsed_steps[:] = 0
             self.is_intervened[:] = False
             self.intervened_steps[:] = 0
-    
+
     def _record_metrics(self, step_reward, terminations, infos):
         episode_info = {}
         self.returns += step_reward
@@ -134,44 +154,42 @@ class RealworldEnv(gym.Env):
         episode_info["intervened_steps"] = self.intervened_steps
         infos["episode"] = to_tensor(episode_info)
         return infos
-        
-    
-    def reset(self, *, reset_state_ids=None, seed=None, options=None, env_idx=None):
 
+    def reset(self, *, reset_state_ids=None, seed=None, options=None, env_idx=None):
         # TODO: handle partial reset
         raw_obs, infos = self.env.reset(seed=seed, options=options)
-        
+
         extracted_obs = self._wrap_obs(raw_obs)
         if env_idx is not None:
             self._reset_metrics(env_idx)
         else:
             self._reset_metrics()
         return extracted_obs, infos
-    
+
     def _wrap_obs(self, raw_obs):
         """
         raw_obs: Dict of list
         """
-        obs = dict()
-        
+        obs = {}
+
         # Process states
         full_states = []
         raw_states = OrderedDict(sorted(raw_obs["state"].items()))
-        for key, value in raw_states.items():
+        for value in raw_states.values():
             full_states.append(value)
         full_states = np.concatenate(full_states, axis=-1)
         obs["states"] = full_states
 
         # Process images
-        obs["images"] = dict()
+        obs["images"] = {}
         for camera_name in raw_obs["frames"]:
-            image_numpy: np.ndarray = raw_obs["frames"][camera_name] # [B, H, W, C]
-            obs["images"][camera_name] = np.moveaxis(image_numpy, 3, 1) # [B, C, H, W]
+            image_numpy: np.ndarray = raw_obs["frames"][camera_name]  # [B, H, W, C]
+            obs["images"][camera_name] = np.moveaxis(image_numpy, 3, 1)  # [B, C, H, W]
 
         obs = to_tensor(obs)
         obs["task_descriptions"] = self.task_descriptions
         return obs
-    
+
     def step(self, actions=None, auto_reset=True):
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().numpy()
@@ -188,7 +206,7 @@ class RealworldEnv(gym.Env):
             plot_infos = {
                 "rewards": step_reward,
                 "terminations": terminations,
-                "steps": self._elapsed_steps
+                "steps": self._elapsed_steps,
             }
             self.add_new_frames(raw_obs["frames"], plot_infos)
 
@@ -196,7 +214,7 @@ class RealworldEnv(gym.Env):
         if self.ignore_terminations:
             infos["episode"]["success_at_end"] = to_tensor(terminations)
             terminations[:] = False
-        
+
         if "intervene_action" in infos:
             infos["intervene_action"] = torch.from_numpy(infos["intervene_action"])
 
@@ -211,7 +229,6 @@ class RealworldEnv(gym.Env):
             to_tensor(truncations),
             infos,
         )
-    
 
     def chunk_step(self, chunk_actions):
         # chunk_actions: [num_envs, chunk_step, action_dim]
@@ -273,8 +290,7 @@ class RealworldEnv(gym.Env):
             chunk_truncations,
             infos,
         )
-    
-    
+
     def _handle_auto_reset(self, dones, _final_obs, infos):
         final_obs = copy.deepcopy(_final_obs)
         env_idx = np.arange(0, self.num_envs)[dones]
@@ -292,17 +308,16 @@ class RealworldEnv(gym.Env):
         infos["_final_observation"] = dones
         infos["_elapsed_steps"] = dones
         return obs, infos
-    
 
     def _calc_step_reward(self, reward):
         return reward
-    
+
     def _get_random_reset_state_ids(self, num_reset_states):
         reset_state_ids = self._generator.integers(
             low=0, high=self.total_num_group_envs, size=(num_reset_states,)
         )
         return reset_state_ids
-    
+
     def _init_reset_state_ids(self):
         self._generator = torch.Generator()
         self._generator.manual_seed(self.seed)
@@ -323,9 +338,9 @@ class RealworldEnv(gym.Env):
         images = []
         for image in image_obs.values():
             images.append(image)
-        
+
         full_image = tile_images(images)
-        
+
         for env_id in range(self.num_envs):
             info_item = {
                 k: v if np.size(v) == 1 else v[env_id] for k, v in plot_infos.items()
@@ -346,10 +361,7 @@ class RealworldEnv(gym.Env):
             self.render_images,
             output_dir=output_dir,
             video_name=f"{self.video_cnt}",
-            fps=10, 
+            fps=10,
         )
         self.video_cnt += 1
         self.render_images = []
-
-
-

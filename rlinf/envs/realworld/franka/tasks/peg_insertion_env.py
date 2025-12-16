@@ -1,7 +1,24 @@
-import numpy as np
-from ..franka_env import FrankaEnv, FrankaRobotConfig
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import copy
-from dataclasses import field, dataclass
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from ..franka_env import FrankaEnv, FrankaRobotConfig
+
 
 @dataclass
 class PegInsertionConfig(FrankaRobotConfig):
@@ -10,6 +27,7 @@ class PegInsertionConfig(FrankaRobotConfig):
     random_rz_range: float = np.pi / 6
     enable_random_reset: bool = True
     add_gripper_penalty: bool = False
+
     def __post_init__(self):
         self.compliance_param = {
             "translational_stiffness": 2000,
@@ -52,29 +70,31 @@ class PegInsertionConfig(FrankaRobotConfig):
             "rotational_Ki": 0.1,
         }
         self.target_ee_pose = np.array(self.target_ee_pose)
-        self.reset_ee_pose = self.target_ee_pose + np.array([0.0, 0.0, 0.1, 0.0, 0.0, 0.0])
+        self.reset_ee_pose = self.target_ee_pose + np.array(
+            [0.0, 0.0, 0.1, 0.0, 0.0, 0.0]
+        )
         self.reward_threshold = np.array([0.01, 0.01, 0.01, 0.2, 0.2, 0.2])
         self.action_scale = np.array([0.02, 0.1, 1])
         self.ee_pose_limit_min = np.array(
-        [
-            self.target_ee_pose[0] - self.random_xy_range,
-            self.target_ee_pose[1] - self.random_xy_range,
-            self.target_ee_pose[2],
-            self.target_ee_pose[3] - 0.01,
-            self.target_ee_pose[4] - 0.01,
-            self.target_ee_pose[5] - self.random_rz_range,
-        ]
-    )
-        self.ee_pose_limit_max  = np.array(
-        [
-            self.target_ee_pose[0] + self.random_xy_range,
-            self.target_ee_pose[1] + self.random_xy_range,
-            self.target_ee_pose[2] + 0.1,
-            self.target_ee_pose[3] + 0.01,
-            self.target_ee_pose[4] + 0.01,
-            self.target_ee_pose[5] + self.random_rz_range,
-        ]
-    )
+            [
+                self.target_ee_pose[0] - self.random_xy_range,
+                self.target_ee_pose[1] - self.random_xy_range,
+                self.target_ee_pose[2],
+                self.target_ee_pose[3] - 0.01,
+                self.target_ee_pose[4] - 0.01,
+                self.target_ee_pose[5] - self.random_rz_range,
+            ]
+        )
+        self.ee_pose_limit_max = np.array(
+            [
+                self.target_ee_pose[0] + self.random_xy_range,
+                self.target_ee_pose[1] + self.random_xy_range,
+                self.target_ee_pose[2] + 0.1,
+                self.target_ee_pose[3] + 0.01,
+                self.target_ee_pose[4] + 0.01,
+                self.target_ee_pose[5] + self.random_rz_range,
+            ]
+        )
         super().__post_init__()
 
 
@@ -103,4 +123,3 @@ class PegInsertionEnv(FrankaEnv):
         self._interpolate_move(reset_pose, timeout=1)
 
         super().go_to_rest(joint_reset)
-

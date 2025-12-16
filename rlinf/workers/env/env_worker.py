@@ -119,15 +119,21 @@ class EnvWorker(Worker):
 
     def _update_env_cfg(self):
         if self.cfg.env.train.simulator_type == "realworld":
-            if self.cfg.env.train.get("override_cfg", None) is None \
-                or not self.cfg.env.train.override_cfg.get("is_dummy", False):
+            if self.cfg.env.train.get(
+                "override_cfg", None
+            ) is None or not self.cfg.env.train.override_cfg.get("is_dummy", False):
                 self.cfg.env.train.robot_ip = self.hardware_infos[0].config.robot_ip
-                self.cfg.env.train.camera_serials = self.hardware_infos[0].config.camera_serials
+                self.cfg.env.train.camera_serials = self.hardware_infos[
+                    0
+                ].config.camera_serials
         if self.cfg.env.eval.simulator_type == "realworld":
-            if self.cfg.env.train.get("override_cfg", None) is None \
-                or not self.cfg.env.train.override_cfg.get("is_dummy", False):
+            if self.cfg.env.train.get(
+                "override_cfg", None
+            ) is None or not self.cfg.env.train.override_cfg.get("is_dummy", False):
                 self.cfg.env.eval.robot_ip = self.hardware_infos[0].config.robot_ip
-                self.cfg.env.eval.camera_serials = self.hardware_infos[0].config.camera_serials
+                self.cfg.env.eval.camera_serials = self.hardware_infos[
+                    0
+                ].config.camera_serials
 
     def _init_simulator(self):
         if self.cfg.env.train.auto_reset:

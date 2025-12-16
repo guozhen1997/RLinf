@@ -1,29 +1,56 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from functools import partial
+
 import torch
 import torch.nn as nn
-from functools import partial
-from torchvision.models.resnet import ResNet, BasicBlock
+from torchvision.models.resnet import BasicBlock, ResNet
+
 from .utils import init_mlp_weights
+
 
 class MyGroupNorm(nn.GroupNorm):
     """
-    Reorganize the order of params to keep compatible to ResNet. 
+    Reorganize the order of params to keep compatible to ResNet.
     """
-    def __init__(self, num_channels, num_groups, eps = 0.00001, affine = True, device=None, dtype=None):
+
+    def __init__(
+        self,
+        num_channels,
+        num_groups,
+        eps=0.00001,
+        affine=True,
+        device=None,
+        dtype=None,
+    ):
         super().__init__(num_groups, num_channels, eps, affine, device, dtype)
-    
+
+
 class ResNet10(ResNet):
     def __init__(self, pre_pooling=True):
         self.pre_pooling = pre_pooling
         super().__init__(
-            block=BasicBlock, 
-            layers=[1, 1, 1, 1], 
-            num_classes=1000, 
-            norm_layer=partial(MyGroupNorm, num_groups=4, eps=1e-5)
+            block=BasicBlock,
+            layers=[1, 1, 1, 1],
+            num_classes=1000,
+            norm_layer=partial(MyGroupNorm, num_groups=4, eps=1e-5),
         )
-    
+
     def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Remove the last linear. 
+        Remove the last linear.
         """
         x = self.conv1(x)
         x = self.bn1(x)
@@ -40,6 +67,7 @@ class ResNet10(ResNet):
         x = self.avgpool(x)
         return x
 
+
 class SpatialLearnedEmbeddings(nn.Module):
     def __init__(self, height, width, channel, num_features=5):
         super().__init__()
@@ -50,7 +78,7 @@ class SpatialLearnedEmbeddings(nn.Module):
 
         self.kernel = nn.Parameter(
             torch.randn(channel, height, width, num_features)
-        ) # TODO: In SeRL, this is lecun_normal initialization
+        )  # TODO: In SeRL, this is lecun_normal initialization
 
     def forward(self, features):
         """
@@ -66,17 +94,18 @@ class SpatialLearnedEmbeddings(nn.Module):
 
         return out
 
+
 class ResNetEncoder(nn.Module):
     def __init__(self, sample_x, out_dim=256, model_cfg=None):
         super().__init__()
 
         self.out_dim = out_dim
         self.model_cfg = model_cfg
-        
+
         self.num_spatial_blocks = 8
         self.pooling_method = "spatial_learned_embeddings"
         self.use_pretrain = True
-        
+
         self.resnet_backbone = ResNet10(pre_pooling=self.use_pretrain)
         if self.use_pretrain:
             self._load_pretrained_weights()
@@ -93,15 +122,16 @@ class ResNetEncoder(nn.Module):
                 num_features=self.num_spatial_blocks,
             )
             self.dropout = nn.Dropout(0.1)
-        
+
         # final linear
         self.mlp = nn.Sequential(
-            nn.Linear(in_features=channel*self.num_spatial_blocks, out_features=self.out_dim), 
-            nn.LayerNorm(self.out_dim), 
-            nn.Tanh()
+            nn.Linear(
+                in_features=channel * self.num_spatial_blocks, out_features=self.out_dim
+            ),
+            nn.LayerNorm(self.out_dim),
+            nn.Tanh(),
         )
         init_mlp_weights(self.mlp, nonlinearity="tanh")
-        
 
     def _load_pretrained_weights(self):
         model_dict = torch.load(self.model_cfg["pretrained_ckpt_path"])
@@ -116,10 +146,10 @@ class ResNetEncoder(nn.Module):
 
         if self.use_pretrain:
             x = x.detach()
-        
+
         if self.pooling_method == "spatial_learned_embeddings":
             x = self.pooling_layer(x)
             x = self.dropout(x)
-        
+
         x = self.mlp(x)
         return x

@@ -14,7 +14,6 @@
 
 import sys
 import time
-from typing import List
 
 import geometry_msgs.msg as geom_msg
 import numpy as np
@@ -26,12 +25,12 @@ from franka_msgs.msg import ErrorRecoveryActionGoal, FrankaState
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import JointState
 from serl_franka_controllers.msg import ZeroJacobian
-from .franka_robot_state import FrankaRobotState
 
 from rlinf.envs.realworld.common.ros import ROSController
 from rlinf.scheduler import Worker
 from rlinf.utils.logging import get_logger
 
+from .franka_robot_state import FrankaRobotState
 
 
 class FrankaController(Worker):
@@ -158,7 +157,7 @@ class FrankaController(Worker):
         """
         time.sleep(sleep_time)
 
-    def _wait_for_joint(self, target_pos: List[float], timeout: int = 30):
+    def _wait_for_joint(self, target_pos: list[float], timeout: int = 30):
         """Wait for the robot joint to reach the desired position.
 
         Args:
@@ -243,7 +242,7 @@ class FrankaController(Worker):
     def clear_errors(self):
         self._ros.put_channel(self._arm_reset_channel, ErrorRecoveryActionGoal())
 
-    def reset_joint(self, reset_pos: List[float]):
+    def reset_joint(self, reset_pos: list[float]):
         """
         Reset the joint positions of the robot arm.
 

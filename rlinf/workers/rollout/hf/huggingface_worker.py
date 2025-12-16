@@ -14,11 +14,11 @@
 
 import copy
 import gc
+from typing import Any
 
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
-from typing import Any
 
 from rlinf.config import SupportedModel
 from rlinf.data.io_struct import ChunkStepResult, EmbodiedRolloutResult
@@ -115,7 +115,7 @@ class MultiStepRolloutWorker(Worker):
             SupportedModel.OPENPI,
             SupportedModel.MLP_POLICY,
             SupportedModel.GR00T,
-            SupportedModel.CNN_POLICY
+            SupportedModel.CNN_POLICY,
         ]:
             kwargs = {"mode": mode}
 
@@ -144,7 +144,11 @@ class MultiStepRolloutWorker(Worker):
         if env_output["rewards"] is None:
             if hasattr(self.hf_model, "q_head"):
                 real_next_extracted_obs = init_real_next_obs(next_extracted_obs)
-            return env_output["dones"].bool().cpu().contiguous(), None, real_next_extracted_obs
+            return (
+                env_output["dones"].bool().cpu().contiguous(),
+                None,
+                real_next_extracted_obs,
+            )
 
         dones = env_output["dones"].bool().cpu().contiguous()
         rewards = env_output["rewards"].cpu().contiguous()
@@ -214,14 +218,16 @@ class MultiStepRolloutWorker(Worker):
                     next_extracted_obs = self.hf_model.preprocess_env_obs(
                         env_output["obs"]
                     )
-                    dones, rewards, real_next_extracted_obs = self.get_dones_and_rewards(env_output, next_extracted_obs)
+                    dones, rewards, real_next_extracted_obs = (
+                        self.get_dones_and_rewards(env_output, next_extracted_obs)
+                    )
                     actions, result = self.predict(next_extracted_obs)
                     chunk_step_result = ChunkStepResult(
                         prev_logprobs=result["prev_logprobs"],
                         prev_values=result["prev_values"],
                         dones=dones,
-                        truncations=env_output["truncations"], 
-                        terminations=env_output["terminations"], 
+                        truncations=env_output["truncations"],
+                        terminations=env_output["terminations"],
                         rewards=rewards,  # the first step is reset step, reward is none, which will not be appended to the buffer
                         forward_inputs=result["forward_inputs"],
                     )
@@ -241,10 +247,14 @@ class MultiStepRolloutWorker(Worker):
 
                 next_extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                 # Get dones and rewards from environment batch (final step of epoch)
-                dones, rewards, real_next_extracted_obs = self.get_dones_and_rewards(env_output, next_extracted_obs)
+                dones, rewards, real_next_extracted_obs = self.get_dones_and_rewards(
+                    env_output, next_extracted_obs
+                )
                 self.buffer_list[stage_id].dones.append(dones)
                 self.buffer_list[stage_id].truncations.append(env_output["truncations"])
-                self.buffer_list[stage_id].terminations.append(env_output["terminations"])
+                self.buffer_list[stage_id].terminations.append(
+                    env_output["terminations"]
+                )
                 self.buffer_list[stage_id].rewards.append(rewards)
 
                 with self.worker_timer():
@@ -282,7 +292,9 @@ class MultiStepRolloutWorker(Worker):
             for _ in range(n_chunk_steps):
                 for _ in range(self.num_pipeline_stages):
                     env_output = self.recv_env_output()
-                    next_extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
+                    next_extracted_obs = self.hf_model.preprocess_env_obs(
+                        env_output["obs"]
+                    )
                     actions, _ = self.predict(next_extracted_obs, mode="eval")
                     self.send_chunk_actions(actions)
 

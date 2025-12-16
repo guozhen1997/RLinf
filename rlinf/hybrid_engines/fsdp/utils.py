@@ -134,9 +134,8 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, is_openvla_model=Fa
     policies = []
 
     from rlinf.models.embodiment.modules.resnet_utils import ResNet10
-    resnet_policy = functools.partial(
-        _module_wrap_policy, module_classes={ResNet10}
-    )
+
+    resnet_policy = functools.partial(_module_wrap_policy, module_classes={ResNet10})
     policies.append(resnet_policy)
 
     # Add vision transformer policies for OpenVLA models

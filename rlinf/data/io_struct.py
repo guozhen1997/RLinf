@@ -1119,8 +1119,8 @@ class ChunkStepResult:
     prev_logprobs: torch.Tensor = None  # [B, action_dim]
     prev_values: torch.Tensor = None  # [B, 1]
     dones: torch.Tensor = None  # [B, 1]
-    truncations: torch.Tensor = None # [B, 1]
-    terminations: torch.Tensor = None # [B, 1]
+    truncations: torch.Tensor = None  # [B, 1]
+    terminations: torch.Tensor = None  # [B, 1]
     rewards: torch.Tensor = None  # [B, 1]
     forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
 
@@ -1139,6 +1139,7 @@ class ChunkStepResult:
             self.rewards = self.rewards.cpu().contiguous()
         if self.forward_inputs:
             self.forward_inputs = put_tensor_device(self.forward_inputs, "cpu")
+
 
 @dataclass(kw_only=True)
 class EmbodiedRolloutResult:
@@ -1167,7 +1168,7 @@ class EmbodiedRolloutResult:
     )  # lens of results is rollout_epoch * n_chunk_steps
     transitions: list[tuple[dict[str, Any], dict[str, Any]]] = field(
         default_factory=list
-    ) 
+    )
 
     def append_result(self, result: ChunkStepResult):
         if result.prev_logprobs is not None:

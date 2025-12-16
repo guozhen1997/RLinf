@@ -135,7 +135,7 @@ class ManiskillEnv(gym.Env):
                 wrapped_obs = {
                     "images": None,
                     "task_description": None,
-                    "states": raw_obs
+                    "states": raw_obs,
                 }
             elif self.env.unwrapped.obs_mode == "rgb":
                 sensor_data = raw_obs.pop("sensor_data")
@@ -144,14 +144,16 @@ class ManiskillEnv(gym.Env):
                     raw_obs, use_torch=True, device=self.device
                 )
 
-                images = dict()
+                images = {}
                 for camera_name in sensor_data.keys():
-                    image_tensor = sensor_data[camera_name]["rgb"] # [B, H, W, C]
-                    images[camera_name] = image_tensor.permute(0, 3, 1, 2) # [B, C, H, W]
+                    image_tensor = sensor_data[camera_name]["rgb"]  # [B, H, W, C]
+                    images[camera_name] = image_tensor.permute(
+                        0, 3, 1, 2
+                    )  # [B, C, H, W]
                 wrapped_obs = {
                     "images": images,
                     "task_description": None,
-                    "states": state
+                    "states": state,
                 }
             else:
                 raise NotImplementedError

@@ -1,5 +1,20 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+
 
 def normalize(q):
     q = np.array(q, dtype=float)
@@ -8,13 +23,14 @@ def normalize(q):
         raise ValueError("Zero-norm quaternion")
     return q / n
 
+
 # geometry
 def quat_slerp(q0, q1, t):
     """
     Slerp q0 and q1 with t steps.
     This is computed by the 4-dim sphere. And it does not depend on the order of "xyzw".
     """
-    
+
     q0 = normalize(q0)
     q1 = normalize(q1)
 
@@ -53,6 +69,7 @@ def quat_slerp(q0, q1, t):
     results = np.stack(results)
     return results
 
+
 def construct_adjoint_matrix(tcp_pose):
     """
     Construct the adjoint matrix for a spatial velocity vector
@@ -72,6 +89,7 @@ def construct_adjoint_matrix(tcp_pose):
     adjoint_matrix[3:, 3:] = rotation
     adjoint_matrix[3:, :3] = skew_matrix @ rotation
     return adjoint_matrix
+
 
 def construct_homogeneous_matrix(tcp_pose):
     """

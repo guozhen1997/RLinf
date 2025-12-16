@@ -325,7 +325,8 @@ def get_model(cfg: DictConfig, override_config_kwargs=None):
         if cfg.rl_head_config.disable_dropout:
             replace_dropout_with_identity(model)
     elif cfg.model_type == "cnn_policy":
-        from .embodiment.cnn_policy import CNNPolicy, CNNConfig
+        from .embodiment.cnn_policy import CNNConfig, CNNPolicy
+
         model_config = CNNConfig()
         model_config.update_from_dict(OmegaConf.to_container(cfg, resolve=True))
         model = CNNPolicy(model_config)

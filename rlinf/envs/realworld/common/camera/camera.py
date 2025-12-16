@@ -16,7 +16,6 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Tuple
 
 import numpy as np
 
@@ -25,7 +24,7 @@ import numpy as np
 class CameraInfo:
     name: str
     serial_number: str
-    resolution: Tuple[int, int] = (640, 480)
+    resolution: tuple[int, int] = (640, 480)
     fps: int = 15
     enable_depth: bool = False
 
@@ -38,13 +37,16 @@ class Camera:
     def __init__(
         self,
         camera_info: CameraInfo,
-    ):  
+    ):
         import pyrealsense2 as rs  # Intel RealSense cross-platform open-source API
+
         self._camera_info = camera_info
         self._device_info = {}
         for device in rs.context().devices:
             self._device_info[device.get_info(rs.camera_info.serial_number)] = device
-        assert camera_info.serial_number in self._device_info.keys(), f"{self._device_info.keys()=}"
+        assert camera_info.serial_number in self._device_info.keys(), (
+            f"{self._device_info.keys()=}"
+        )
 
         self._serial_number = camera_info.serial_number
         self._device = self._device_info[self._serial_number]
@@ -108,7 +110,7 @@ class Camera:
 
     def _capture_frames(self):
         while self._frame_capturing_start:
-            time.sleep(1/self._camera_info.fps)
+            time.sleep(1 / self._camera_info.fps)
             has_frame, frame = self._read_frame()
             if not has_frame:
                 break
