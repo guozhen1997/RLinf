@@ -1,3 +1,17 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 
 
@@ -44,10 +58,10 @@ def split_dict_to_chunk(data: dict, split_size, dim=0):
 
 
 def concat_batch(data1, data2):
-    batch = dict()
+    batch = {}
     for key, value in data1.items():
         if isinstance(value, torch.Tensor):
-            if not key in data2:
+            if key not in data2:
                 # NOTE: NO WARNING FOR THE CASE THAT DATA2 DOES NOT CONTAIN SOME KEYS IN DATA1
                 continue
             batch[key] = torch.cat([data1[key], data2[key]], dim=0)
@@ -61,7 +75,7 @@ def stack_list_of_dict_tensor(list_of_dict: list, dim=0):
         return {}
     keys = list_of_dict[0].keys()
 
-    ret = dict()
+    ret = {}
     for key in keys:
         _v0 = list_of_dict[0][key]
         if isinstance(_v0, torch.Tensor):
@@ -80,7 +94,7 @@ def cat_list_of_dict_tensor(list_of_dict: list, dim=0):
         return {}
     keys = list_of_dict[0].keys()
 
-    ret = dict()
+    ret = {}
     for key in keys:
         _v0 = list_of_dict[0][key]
         if isinstance(_v0, torch.Tensor):
@@ -92,4 +106,3 @@ def cat_list_of_dict_tensor(list_of_dict: list, dim=0):
         else:
             raise ValueError(f"{key=}, {type(_v0)} is not supported!")
     return ret
-    

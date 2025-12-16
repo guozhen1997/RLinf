@@ -80,6 +80,15 @@ class EmbodiedRunner:
         self.actor.load_checkpoint(actor_checkpoint_path).wait()
         self.global_step = int(resume_dir.split("global_step_")[-1])
 
+    def send_demo_buffer(self):
+        if self.demo_buffer is not None:
+            sub_demo_buffer_ls = self.demo_buffer.split_to_dict(self.actor._world_size)
+
+            for sub_demo_buffer in sub_demo_buffer_ls:
+                self.demo_data_channel.put(sub_demo_buffer, async_op=True)
+            actor_futures = self.actor.recv_demo_data()
+            actor_futures.wait()
+
     def update_rollout_weights(self):
         rollout_futures = self.rollout.sync_model_from_actor()
         actor_futures = self.actor.sync_model_to_rollout()
