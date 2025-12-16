@@ -1,7 +1,7 @@
 defaults:
   - env/maniskill_put_on_plate_in_scene_25_main@env.train
   - env/maniskill_put_on_plate_in_scene_25_main@env.eval
-  - model/openvla@actor.model
+  - model/pi0_5@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
 
@@ -143,7 +143,6 @@ actor:
   enable_offload: False
   # Override the default values in model/pi0_5
   model:
-    model_path: "/path/to/model/RLinf-Pi05-SFT"
     model_type: "openpi"
     num_action_chunks: 5 # interface for the env
     action_dim: 7

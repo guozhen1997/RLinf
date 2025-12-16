@@ -1,4 +1,4 @@
-# Copyright 2025 The RLinf Authors, Tonghe Zhang
+# Copyright 2025 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
 
 from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
-
+from rlinf.models.embodiment.modules.mlp import MLP
 
 @dataclass(frozen=True)
 class OpenPi0Config(Pi0Config):
@@ -106,13 +106,34 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             proj_width = 1024
         # value head
         if self.config.add_value_head:
-            self.value_head = ValueHead(
-                input_dim=proj_width,
-                hidden_sizes=(512, 256, 128),
-                output_dim=1,
-                activation="relu",
-                bias_last=True,
-            )
+            if self.config.config_name == "pi0_maniskill":
+                value_head_hidden_sizes = [512, 256]
+                value_head_activation = "gelu"
+                self.value_head = MLP([proj_width] + value_head_hidden_sizes + [1],
+                    append_dim=0,
+                    append_layers=None,
+                    activation_type=value_head_activation,
+                    out_activation_type="identity",
+                    use_layernorm=True,
+                    use_layernorm_final=False,
+                    dropout=0.1,
+                    use_drop_final=False,
+                    out_bias_init=1.0)
+            else:
+                if self.config.config_name == "pi05_maniskill":
+                    value_head_hidden_sizes = (1024, 512, 256)
+                else:
+                    value_head_hidden_sizes = (512, 256, 128)
+                value_head_activation = "relu"
+                self.value_head = ValueHead(
+                    input_dim=proj_width,
+                    hidden_sizes=value_head_hidden_sizes,
+                    output_dim=1,
+                    activation=value_head_activation,
+                    bias_last=True,
+                )
+            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent. 
+            self.value_head = self.value_head.to(dtype=self.action_out_proj.weight.dtype)
         self.use_vlm_value = getattr(self.config, "value_after_vlm", False) and getattr(
             self.config, "add_value_head", False
         )
@@ -126,9 +147,43 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                 noise_logvar_range=self.config.noise_logvar_range,
                 noise_scheduler_type="learn",
             )
+            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent. 
+            self.noise_head = self.noise_head.to(dtype=self.action_out_proj.weight.dtype)
 
     def set_global_step(self, global_step):
         self.global_step = global_step
+
+    # def _check_bf16_tensor(self, key_path, value):
+    #     """Debug helper to detect BFloat16 tensors and show their keys."""
+    #     if torch.is_tensor(value):
+    #         if value.dtype == torch.bfloat16:
+    #             print(
+    #                 f"WARNING: BFloat16 tensor detected in input_transform at key '{key_path}' "
+    #                 f"with shape {value.shape} and device {value.device}"
+    #             )
+    #     elif isinstance(value, dict):
+    #         for k, v in value.items():
+    #             self._check_bf16_tensor(f"{key_path}.{k}" if key_path else k, v)
+
+    def _tensor_to_numpy(self, x):
+        """Convert tensor to numpy, handling BFloat16/Float16 conversion."""
+        if torch.is_tensor(x):
+            x_cpu = x.detach().cpu()
+            # BFloat16 and Float16 are not supported by numpy, convert to float32
+            if x_cpu.dtype in (torch.bfloat16, torch.float16):
+                x_cpu = x_cpu.float()
+            return np.asarray(x_cpu)
+        return x
+
+    def _tensor_to_numpy_single(self, x, index):
+        """Convert single tensor element to numpy, handling BFloat16/Float16 conversion."""
+        if torch.is_tensor(x):
+            x_cpu = x[index].detach().cpu()
+            # BFloat16 and Float16 are not supported by numpy, convert to float32
+            if x_cpu.dtype in (torch.bfloat16, torch.float16):
+                x_cpu = x_cpu.float()
+            return np.asarray(x_cpu)
+        return x[index]
 
     def setup_wrappers(
         self,
@@ -145,16 +200,13 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         if first_process:
             inputs.pop("prompt")
         else:
-            inputs = {
-                value: inputs[value]
-                for value in inputs.keys()
-                if value
-                in ["observation/image", "observation/wrist_image", "observation/state"]
-            }
-        # tensor -> numpy
-        inputs = jax.tree.map(
-            lambda x: np.asarray(x.detach().cpu()) if torch.is_tensor(x) else x, inputs
-        )
+            inputs = {key: inputs[key] for key in inputs.keys() if "/" in key}
+        # # Debug: detect BFloat16 tensors and show their keys
+        # for key, value in inputs.items():
+        #     self._check_bf16_tensor(key, value)
+        
+        # tensor -> numpy (Convert BFloat16/Float16 to float32 for numpy compatibility)
+        inputs = jax.tree.map(self._tensor_to_numpy, inputs)
         batch_size = next(v.shape[0] for v in inputs.values() if hasattr(v, "shape"))
         # split & transform
         transformed_samples = []
@@ -192,7 +244,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         batch_size = outputs["actions"].shape[0]
         transformed_samples = []
         for i in range(batch_size):
-            sample = jax.tree.map(lambda x: np.asarray(x[i].detach().cpu()), outputs)
+            sample = jax.tree.map(lambda x: self._tensor_to_numpy_single(x, i), outputs)
             sample = self._output_transform(sample)
             transformed_samples.append(sample)
         # recombine
@@ -252,42 +304,71 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             "entropy": entropy,
         }
 
-    def input_processor(self, env_processed_obs):
-        to_process_obs = {
-            "observation/image": env_processed_obs["images"],
-            "observation/state": env_processed_obs["states"],
-            "prompt": env_processed_obs["task_descriptions"],
+    def obs_processor(self, env_obs):
+        # base observation
+        processed_obs = {
+            "observation/image": env_obs["images"],
+            "prompt": env_obs["task_descriptions"],
         }
-        if env_processed_obs["wrist_images"] is not None:
-            to_process_obs["observation/wrist_image"] = env_processed_obs[
-                "wrist_images"
-            ]
-        # print(f"Debug::env_processed_obs={env_processed_obs}")
-        # print(f"Debug::to_process_obs={to_process_obs}")
-        processed_obs = self.input_transform(to_process_obs)
+        # state observation - ensure float32 to prevent BFloat16 conversion issues
+        if "calvin" in self.config.config_name:
+            state = env_obs["states"]
+            processed_obs["observation/state_ee_pos"] = state[:, :3]
+            processed_obs["observation/state_ee_rot"] = state[:, 3:6]
+            processed_obs["observation/state_gripper"] = state[:, 6:7]
+        else:
+            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training.
+            state = env_obs["states"]
+            if torch.is_tensor(state):
+                state = state.to(dtype=torch.float32)
+            processed_obs["observation/state"] = state
+        # wrist image observation
+        if env_obs["wrist_images"] is not None:
+            processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
+        # store used keys
+        return processed_obs
+
+    def precision_processor(self, processed_obs):
         device = next(self.parameters()).device
         for key, value in processed_obs.items():
             if isinstance(value, list):
                 processed_obs[key] = [
+                    # item.to(device=device, dtype=torch.float32 if "state" in key.lower() else None).contiguous()
                     item.to(device=device).contiguous()
                     if torch.is_tensor(item)
                     else item
                     for item in value
                 ]
             elif torch.is_tensor(value):
+                # Preserve float32 for state tensors to avoid BFloat16 conversion issues
+                # if "state" in key.lower():
+                #     processed_obs[key] = value.to(device=device, dtype=torch.float32).contiguous()
+                # else:
                 processed_obs[key] = value.to(device=device).contiguous()
             elif isinstance(value, dict):
                 for sub_key, sub_value in value.items():
-                    processed_obs[key][sub_key] = sub_value.to(
-                        device=device
-                    ).contiguous()
+                    if torch.is_tensor(sub_value):
+                        # Preserve float32 for state tensors
+                        # if "state" in sub_key.lower():
+                        #     processed_obs[key][sub_key] = sub_value.to(
+                        #         device=device, dtype=torch.float32
+                        #     ).contiguous()
+                        # else:
+                        processed_obs[key][sub_key] = sub_value.to(
+                            device=device
+                        ).contiguous()
         return processed_obs
 
     def predict_action_batch(
         self, env_obs, mode: Literal["train", "eval"] = "train", compute_values=True
     ) -> tuple[np.ndarray, dict[str, Any]]:
-        # print(f"Debug::env_obs={type(env_obs)}")
-        processed_obs = self.input_processor(env_obs)
+        to_process_obs = self.obs_processor(env_obs)  # env obs -> policy input obs
+        processed_obs = self.input_transform(
+            to_process_obs
+        )  # policy input obs -> model input obs
+        processed_obs = self.precision_processor(
+            processed_obs
+        )  # obs precision processor
         observation = _model.Observation.from_dict(processed_obs)
         outputs = self.sample_actions(
             observation, mode=mode, compute_values=compute_values
@@ -299,20 +380,16 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         forward_inputs = {
             "chains": outputs["chains"],
             "denoise_inds": outputs["denoise_inds"],
-            "observation/image": env_obs["images"],
-            "observation/state": env_obs["states"],
             "tokenized_prompt": processed_obs["tokenized_prompt"],
             "tokenized_prompt_mask": processed_obs["tokenized_prompt_mask"],
         }
-        if env_obs["wrist_images"] is not None:
-            forward_inputs["observation/wrist_image"] = env_obs["wrist_images"]
-
+        forward_inputs.update(to_process_obs)
+        forward_inputs.pop("prompt", None)
         result = {
             "prev_logprobs": outputs["prev_logprobs"],
             "prev_values": outputs["prev_values"],
             "forward_inputs": forward_inputs,
         }
-
         return actions, result
 
     @torch.no_grad()
@@ -485,7 +562,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             x_t,
             t_input,
         )
-        v_t = self.action_out_proj(suffix_out)  # [bs,n_action_steps,max_action_dim]
+        v_t = self.action_out_proj(suffix_out.to(dtype=self.action_out_proj.weight.dtype))  # [bs,n_action_steps,max_action_dim]
         # value prediction
         if (
             self.config.add_value_head
@@ -537,7 +614,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             elif self.config.noise_method == "flow_noise":
                 x0_weight = 1 - (t_input - delta)
                 x1_weight = t_input - delta
-                x_t_std = self.noise_head(suffix_out)
+                x_t_std = self.noise_head(suffix_out.to(dtype=self.action_out_proj.weight.dtype))
             else:
                 raise ValueError(f"Invalid noise method: {self.config.noise_method}")
         x_t_mean = x0_pred * x0_weight + x1_pred * x1_weight

@@ -27,6 +27,7 @@ from mani_skill.utils.visualization.misc import (
     put_info_on_image,
     tile_images,
 )
+from omegaconf import open_dict
 from omegaconf.omegaconf import OmegaConf
 
 __all__ = ["ManiskillEnv"]
@@ -47,14 +48,16 @@ def extract_termination_from_info(info, num_envs, device):
 
 
 class ManiskillEnv(gym.Env):
-    def __init__(self, cfg, seed_offset, total_num_processes, record_metrics=True):
+    def __init__(
+        self, cfg, num_envs, seed_offset, total_num_processes, record_metrics=True
+    ):
         env_seed = cfg.seed
         self.seed = env_seed + seed_offset
         self.total_num_processes = total_num_processes
         self.auto_reset = cfg.auto_reset
         self.use_rel_reward = cfg.use_rel_reward
         self.ignore_terminations = cfg.ignore_terminations
-        self.num_group = cfg.num_group
+        self.num_group = num_envs // cfg.group_size
         self.group_size = cfg.group_size
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
 
@@ -64,6 +67,8 @@ class ManiskillEnv(gym.Env):
 
         self.cfg = cfg
 
+        with open_dict(cfg):
+            cfg.init_params.num_envs = num_envs
         env_args = OmegaConf.to_container(cfg.init_params, resolve=True)
         self.env: BaseEnv = gym.make(**env_args)
         self.prev_step_reward = torch.zeros(self.num_envs, dtype=torch.float32).to(
@@ -125,9 +130,8 @@ class ManiskillEnv(gym.Env):
         ).to(self.device)
 
     def _wrap_obs(self, raw_obs):
-        # Tonghe corrected: use unwrapped to access the obs_mode attribute.
         if self.env.unwrapped.obs_mode == "state":
-            wrapped_obs = {"images": None, "task_description": None, "state": raw_obs}
+            wrapped_obs = {"states": raw_obs}
         else:
             wrapped_obs = self._extract_obs_image(raw_obs)
         return wrapped_obs
@@ -135,11 +139,11 @@ class ManiskillEnv(gym.Env):
     def _extract_obs_image(self, raw_obs):
         obs_image = raw_obs["sensor_data"]["3rd_view_camera"]["rgb"].to(torch.uint8)
         obs_image = obs_image.permute(0, 3, 1, 2)  # [B, C, H, W]
-        extracted_obs = {"images": obs_image, "task_descriptions": self.instruction}
-        
         # Tonghe added on 10/03/2025. Reference: page 4, Section III of https://arxiv.org/pdf/2504.16054 
-        proprioception: torch.Tensor = self.env.unwrapped.agent.robot.get_qpos().to(obs_image.device)  # qpos. To see the link to the definition of get_qpos(), remove the ".unwrapped" and click onto the function. 
-        extracted_obs["state"] = proprioception
+        proprioception: torch.Tensor = self.env.unwrapped.agent.robot.get_qpos().to(obs_image.device, dtype=torch.float32)  # qpos. To see the link to the definition of get_qpos(), remove the ".unwrapped" and click onto the function. 
+        extracted_obs = {"images": obs_image, 
+                         "states": proprioception, 
+                        "task_descriptions": self.instruction}
         return extracted_obs
 
     def _calc_step_reward(self, reward, info):
@@ -206,8 +210,15 @@ class ManiskillEnv(gym.Env):
         self,
         *,
         seed: Optional[Union[int, list[int]]] = None,
-        options: Optional[dict] = {},
+        options: Optional[dict] = None,
     ):
+        if options is None:
+            seed = self.seed
+            options = (
+                {"episode_id": self.reset_state_ids}
+                if self.use_fixed_reset_state_ids
+                else {}
+            )
         raw_obs, infos = self.env.reset(seed=seed, options=options)
         extracted_obs = self._wrap_obs(raw_obs)
         if "env_idx" in options:
@@ -220,30 +231,26 @@ class ManiskillEnv(gym.Env):
     def step(
         self, actions: Union[Array, dict] = None, auto_reset=True
     ) -> tuple[Array, Array, Array, Array, dict]:
-        if actions is None:
-            assert self._is_start, "Actions must be provided after the first reset."
-        if self.is_start:
-            # print(f"step::self.use_fixed_reset_state_ids={self.use_fixed_reset_state_ids}")
-            # print(f"step::self.reset_state_ids={self.reset_state_ids}")
-            extracted_obs, infos = self.reset(
-                seed=self.seed,
-                options={"episode_id": self.reset_state_ids}
-                if self.use_fixed_reset_state_ids
-                else {},
-            )
-            input_options={"episode_id": self.reset_state_ids} if self.use_fixed_reset_state_ids else {}
-            # print(f"""step::options={input_options}""")
-            self._is_start = False
-            terminations = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            truncations = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            if self.video_cfg.save_video:
-                self.add_new_frames(infos=infos)
-            return extracted_obs, None, terminations, truncations, infos
-
+        # if actions is None:
+        #     assert self._is_start, "Actions must be provided after the first reset."
+        # if self.is_start:
+        #     extracted_obs, infos = self.reset(
+        #         seed=self.seed,
+        #         options={"episode_id": self.reset_state_ids}
+        #         if self.use_fixed_reset_state_ids
+        #         else {},
+        #     )
+        #     input_options={"episode_id": self.reset_state_ids} if self.use_fixed_reset_state_ids else {}
+        #     self._is_start = False
+        #     terminations = torch.zeros(
+        #         self.num_envs, dtype=torch.bool, device=self.device
+        #     )
+        #     truncations = torch.zeros(
+        #         self.num_envs, dtype=torch.bool, device=self.device
+        #     )
+        #     if self.video_cfg.save_video:
+        #         self.add_new_frames(infos=infos)
+        #     return extracted_obs, None, terminations, truncations, infos
         raw_obs, _reward, terminations, truncations, infos = self.env.step(actions)
         extracted_obs = self._wrap_obs(raw_obs)
         step_reward = self._calc_step_reward(_reward, infos)
@@ -316,17 +323,12 @@ class ManiskillEnv(gym.Env):
         )
 
     def _handle_auto_reset(self, dones, extracted_obs, infos):
-        # print(f"Handle autoreset:")
-        # print(f"dones={dones}")
-        
-        
         final_obs = torch_clone_dict(extracted_obs)
         env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]
         options = {"env_idx": env_idx}
         final_info = torch_clone_dict(infos)
         if self.use_fixed_reset_state_ids:
             options.update(episode_id=self.reset_state_ids[env_idx])
-            # print(f"options={options}")
         extracted_obs, infos = self.reset(options=options)
         # gymnasium calls it final observation but it really is just o_{t+1} or the true next observation
         infos["final_observation"] = final_obs
