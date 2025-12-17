@@ -238,12 +238,13 @@ class EnvWorker(Worker):
         )
         return env_output, env_info
 
-    def recv_chunk_actions(self):
+    def recv_chunk_actions(self, mode="train"):
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
         chunk_action = []
         for gather_id in range(self.gather_num):
             chunk_action.append(
                 self.channel.get(
-                    key=f"{self._action_queue_name}_{gather_id + self._rank * self.gather_num}",
+                    key=f"{self._action_queue_name}_{gather_id + self._rank * self.gather_num}_{mode}",
                 )
             )
         chunk_action = np.concatenate(chunk_action, axis=0)
@@ -297,11 +298,12 @@ class EnvWorker(Worker):
 
     def send_env_batch(self, env_batch, mode="train"):
         # split env_batch into num_processes chunks, each chunk contains gather_num env_batch
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
         for gather_id in range(self.gather_num):
             env_batch_i = self.split_env_batch(env_batch, gather_id, mode)
             self.channel.put(
                 item=env_batch_i,
-                key=f"{self._obs_queue_name}_{gather_id + self._rank * self.gather_num}",
+                key=f"{self._obs_queue_name}_{gather_id + self._rank * self.gather_num}_{mode}",
             )
 
     def interact(self):
@@ -417,7 +419,7 @@ class EnvWorker(Worker):
 
             for eval_step in range(n_chunk_steps):
                 for stage_id in range(self.stage_num):
-                    raw_chunk_actions = self.recv_chunk_actions()
+                    raw_chunk_actions = self.recv_chunk_actions(mode="eval")
                     env_output, env_info = self.env_evaluate_step(
                         raw_chunk_actions, stage_id
                     )

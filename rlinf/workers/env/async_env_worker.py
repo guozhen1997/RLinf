@@ -20,98 +20,36 @@ import torch
 from rlinf.data.io_struct import EnvOutput
 from rlinf.scheduler import Channel
 from rlinf.workers.env.env_worker import EnvWorker
-
+import asyncio
 
 class AsyncEnvWorker(EnvWorker):
-    async def evaluate(self):
-        for i in range(self.stage_num):
-            self.eval_simulator_list[i].start_simulator()
-            self.eval_simulator_list[i].is_start = True
-            extracted_obs, _, _, _, infos = self.eval_simulator_list[i].step()
-            env_output = EnvOutput(
-                simulator_type=self.cfg.env.eval.simulator_type,
-                obs=extracted_obs,
-                final_obs=infos["final_observation"]
-                if "final_observation" in infos
-                else None,
-            )
-            await self.send_env_batch(env_output.to_dict(), mode="eval")
-
-        eval_metrics = defaultdict(list)
-
-        for eval_step in range(self.cfg.algorithm.n_eval_chunk_steps):
-            for i in range(self.stage_num):
-                raw_chunk_actions = await self.recv_chunk_actions(mode="eval")
-                env_output, env_info = self.env_evaluate_step(raw_chunk_actions, i)
-
-                for key, value in env_info.items():
-                    eval_metrics[key].append(value)
-                if eval_step == self.cfg.algorithm.n_eval_chunk_steps - 1:
-                    continue
-                await self.send_env_batch(env_output.to_dict(), mode="eval")
-
-        self.finish_rollout(mode="eval")
-        for i in range(self.stage_num):
-            self.eval_simulator_list[i].stop_simulator()
-
-        for key, value in eval_metrics.items():
-            eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
-
-        return eval_metrics
-
-    async def recv_chunk_actions(self, mode="train"):
-        assert mode in ["train", "eval"]
-        chunk_action = []
-        for gather_id in range(self.gather_num):
-            chunk_action.append(
-                await self.channel.get(
-                    key=f"{self._action_queue_name}_{mode}_{gather_id + self._rank * self.gather_num}",
-                    async_op=True,
-                ).async_wait()
-            )
-        chunk_action = np.concatenate(chunk_action, axis=0)
-        return chunk_action
-
-    async def send_env_batch(self, env_batch, mode="train"):
-        assert mode in ["train", "eval"]
-        # split env_batch into num_processes chunks, each chunk contains gather_num env_batch
-        for gather_id in range(self.gather_num):
-            env_batch_i = self.split_env_batch(env_batch, gather_id, mode)
-            await self.channel.put(
-                item=env_batch_i,
-                key=f"{self._obs_queue_name}_{mode}_{gather_id + self._rank * self.gather_num}",
-                async_op=True,
-            ).async_wait()
-
     async def interact(self, env_metric_channel: Channel):
         for simulator in self.simulator_list:
             simulator.start_simulator()
+
+        n_chunk_steps = (
+            self.cfg.env.train.max_steps_per_rollout_epoch
+            // self.cfg.actor.model.num_action_chunks
+        )
 
         for epoch in range(self.cfg.algorithm.rollout_epoch):
             env_metrics = defaultdict(list)
             env_output_list = []
             if not self.cfg.env.train.auto_reset:
                 for i in range(self.stage_num):
-                    self.simulator_list[i].is_start = True
-                    extracted_obs, rewards, terminations, truncations, infos = (
-                        self.simulator_list[i].step()
-                    )
+                    extracted_obs, infos = self.simulator_list[i].reset()
+                    self.last_obs_list.append(extracted_obs)
                     dones = (
-                        torch.logical_or(terminations, truncations)
+                        torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
                         .unsqueeze(1)
                         .repeat(1, self.cfg.actor.model.num_action_chunks)
                     )
-                    terminations = terminations[:, None].repeat(
-                        1, self.cfg.actor.model.num_action_chunks
-                    )
-                    truncations = truncations[:, None].repeat(
-                        1, self.cfg.actor.model.num_action_chunks
-                    )
+                    terminations = dones.clone()
+                    truncations = dones.clone()
 
+                    self.last_dones_list.append(dones)
                     env_output = EnvOutput(
-                        simulator_type=self.cfg.env.train.simulator_type,
                         obs=extracted_obs,
-                        rewards=rewards,
                         dones=dones,
                         terminations=terminations,
                         truncations=truncations,
@@ -125,7 +63,6 @@ class AsyncEnvWorker(EnvWorker):
                 self.num_succ_envs = 0
                 for i in range(self.stage_num):
                     env_output = EnvOutput(
-                        simulator_type=self.cfg.env.train.simulator_type,
                         obs=self.last_obs_list[i],
                         rewards=None,
                         dones=self.last_dones_list[i],
@@ -136,15 +73,16 @@ class AsyncEnvWorker(EnvWorker):
 
             for stage_id in range(self.stage_num):
                 env_output: EnvOutput = env_output_list[stage_id]
-                await self.send_env_batch(env_output.to_dict())
+                self.send_env_batch(env_output.to_dict())
 
-            for _ in range(self.cfg.algorithm.n_chunk_steps):
+            for _ in range(n_chunk_steps):
                 for stage_id in range(self.stage_num):
-                    raw_chunk_actions = await self.recv_chunk_actions()
+                    await asyncio.sleep(0)
+                    raw_chunk_actions = self.recv_chunk_actions()
                     env_output, env_info = self.env_interact_step(
                         raw_chunk_actions, stage_id
                     )
-                    await self.send_env_batch(env_output.to_dict())
+                    self.send_env_batch(env_output.to_dict())
                     env_output_list[stage_id] = env_output
                     for key, value in env_info.items():
                         if (
@@ -157,6 +95,7 @@ class AsyncEnvWorker(EnvWorker):
                                 env_metrics[key].append(value)
                         else:
                             env_metrics[key].append(value)
+
 
             for key, value in env_metrics.items():
                 env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
@@ -174,8 +113,3 @@ class AsyncEnvWorker(EnvWorker):
 
         for simulator in self.simulator_list:
             simulator.stop_simulator()
-
-        for key, value in env_metrics.items():
-            env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
-
-        return env_metrics

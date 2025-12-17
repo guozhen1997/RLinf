@@ -14,16 +14,9 @@
 
 import asyncio
 
-import numpy as np
 import torch
 
-from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import append_to_dict, compute_split_num
-from rlinf.utils.nested_dict_process import (
-    concat_batch,
-    put_tensor_device,
-    split_dict_to_chunk,
-)
 from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
 
@@ -59,8 +52,8 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
                 f"Replay buffer size {len(self.replay_buffer)} < {min_buffer_size}, skipping training"
             )
             return False
+
         train_actor = await self.replay_buffer.is_ready_async(train_actor_steps)
-        replay_buffer_stats = self.replay_buffer.get_stats()
 
         assert (
             self.cfg.actor.global_batch_size
@@ -76,132 +69,16 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
         self.model.train()
         metrics = {}
 
-        global_batch_size_per_rank = (
-            self.cfg.actor.global_batch_size // self._world_size
-        )
-
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
-        for update_idx in range(update_epoch):
-            if self.demo_buffer is not None:
-                replay_batch = self.replay_buffer.sample(
-                    global_batch_size_per_rank // 2
-                )
-                demo_batch = self.demo_buffer.sample(global_batch_size_per_rank // 2)
-                global_batch = concat_batch(replay_batch, demo_batch)
-            else:
-                # Sample batch from replay buffer
-                global_batch = self.replay_buffer.sample(global_batch_size_per_rank)
-
-            train_micro_batch_list = split_dict_to_chunk(
-                global_batch,
-                global_batch_size_per_rank // self.cfg.actor.micro_batch_size,
-            )
-
-            self.qf_optimizer.zero_grad()
-            gbs_critic_loss = 0
-            for batch in train_micro_batch_list:
-                batch = put_tensor_device(batch, device=self.device)
-                critic_loss = self.forward_critic(batch) / self.gradient_accumulation
-                critic_loss.backward()
-                gbs_critic_loss += critic_loss.item()
-            qf_grad_norm = self.model.clip_grad_norm_(
-                max_norm=self.cfg.actor.optim.clip_grad
-            )
-            self.qf_optimizer.step()
-
-            if update_idx % self.critic_actor_ratio == 0 and train_actor:
-                self.optimizer.zero_grad()
-                gbs_actor_loss = 0
-                gbs_entropy = 0
-                for batch in train_micro_batch_list:
-                    batch = put_tensor_device(batch, device=self.device)
-                    actor_loss, entropy = self.forward_actor(batch)
-                    actor_loss = actor_loss / self.gradient_accumulation
-                    actor_loss.backward()
-                    gbs_actor_loss += actor_loss.item()
-                    gbs_entropy += entropy.item() / self.gradient_accumulation
-                actor_grad_norm = self.model.clip_grad_norm_(
-                    max_norm=self.cfg.actor.optim.clip_grad
-                )
-                self.optimizer.step()
-
-                # Update temperature parameter if using automatic entropy tuning
-                if hasattr(self, "base_alpha") and self.base_alpha is not None:
-                    self.alpha_optimizer.zero_grad()
-                    gbs_actor_loss = 0
-                    for batch in train_micro_batch_list:
-                        batch = put_tensor_device(batch, device=self.device)
-                        alpha_loss = (
-                            self.forward_alpha(batch) / self.gradient_accumulation
-                        )
-                        alpha_loss.backward()
-                        gbs_actor_loss += alpha_loss.item()
-                    torch.distributed.all_reduce(
-                        self.base_alpha.grad, op=torch.distributed.ReduceOp.AVG
-                    )
-                    alpha_grad_norm = torch.nn.utils.clip_grad_norm_(
-                        self.base_alpha, self.cfg.actor.optim.clip_grad
-                    )
-                    self.alpha_optimizer.step()
-
-                loss = gbs_actor_loss + gbs_critic_loss
-
-                # Collect metrics
-                metrics_data = {
-                    "sac/total_loss": loss,
-                    "sac/actor_loss": gbs_actor_loss,
-                    "sac/critic_loss": gbs_critic_loss,
-                    "sac/alpha": self.alpha,
-                    "actor/lr": self.optimizer.param_groups[0]["lr"],
-                    "actor/grad_norm": actor_grad_norm,
-                    "actor/entropy": entropy,
-                    "critic/lr": self.qf_optimizer.param_groups[0]["lr"],
-                    "critic/grad_norm": qf_grad_norm,
-                    "alpha/grad_norm": alpha_grad_norm,
-                }
-
-                append_to_dict(metrics, metrics_data)
-
-            # Soft update target network
-            if (
-                self.target_model_initialized
-                and self.update_step % self.cfg.algorithm.get("target_update_freq", 1)
-                == 0
-            ):
-                self.soft_update_target_model()
-
+        for _ in range(update_epoch):
+            await asyncio.sleep(0)
+            metrics_data = self.update_one_epoch(train_actor)
+            append_to_dict(metrics, metrics_data)
             self.update_step += 1
-
-        self.lr_scheduler.step()
-        self.qf_lr_scheduler.step()
-        if hasattr(self, "base_alpha") and self.base_alpha is not None:
-            self.alpha_lr_scheduler.step()
-
-        # Average metrics across updates
-        mean_metric_dict = {}
-        for key, value in metrics.items():
-            if isinstance(value, list) and len(value) > 0:
-                # Convert tensor values to CPU and detach before computing mean
-                cpu_values = []
-                for v in value:
-                    if isinstance(v, torch.Tensor):
-                        cpu_values.append(v.detach().cpu().item())
-                    else:
-                        cpu_values.append(v)
-                mean_metric_dict[key] = np.mean(cpu_values)
-            else:
-                # Handle single values
-                if isinstance(value, torch.Tensor):
-                    mean_metric_dict[key] = value.detach().cpu().item()
-                else:
-                    mean_metric_dict[key] = value
-
-        mean_metric_dict = all_reduce_dict(
-            mean_metric_dict, op=torch.distributed.ReduceOp.AVG
-        )
-        metric_dict = {"train": mean_metric_dict, "replay_buffer": replay_buffer_stats}
+            
+        mean_metric_dict = self.process_train_metrics(metrics)
 
         torch.cuda.synchronize()
         torch.distributed.barrier()
         torch.cuda.empty_cache()
-        return metric_dict
+        return mean_metric_dict

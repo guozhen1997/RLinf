@@ -113,14 +113,9 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
             self.update_rollout_weights()
 
             training_metrics = {
-                f"train/{k}": v for k, v in actor_result[0]["train"].items()
-            }
-            replay_buffer_metrics = {
-                f"replay_buffer/{k}": v
-                for k, v in actor_result[0]["replay_buffer"].items()
+                f"train/{k}": v for k, v in actor_result[0].items()
             }
             self.metric_logger.log(training_metrics, train_step)
-            self.metric_logger.log(replay_buffer_metrics, train_step)
 
             env_metrics = self.get_env_metrics()
             if env_metrics is not None:

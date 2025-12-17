@@ -157,7 +157,7 @@ class MultiStepRolloutWorker(Worker):
         # Handle auto_reset: add bootstrap value to rewards for done episodes
         # Note: currently this is not correct for chunk-size>1 with partial reset
         if dones.any() and self.cfg.env.train.auto_reset:
-            if hasattr(self.hf_model, "value_head"):
+            if hasattr(self.hf_model, "value_head") or hasattr(self.hf_model, "q_head"):
                 final_obs = env_output["final_obs"]
                 with torch.no_grad():
                     final_extracted_obs = self.hf_model.preprocess_env_obs(final_obs)
@@ -292,12 +292,12 @@ class MultiStepRolloutWorker(Worker):
         ):
             for _ in range(n_chunk_steps):
                 for _ in range(self.num_pipeline_stages):
-                    env_output = self.recv_env_output()
+                    env_output = self.recv_env_output(mode="eval")
                     next_extracted_obs = self.hf_model.preprocess_env_obs(
                         env_output["obs"]
                     )
                     actions, _ = self.predict(next_extracted_obs, mode="eval")
-                    self.send_chunk_actions(actions)
+                    self.send_chunk_actions(actions, mode="eval")
 
         if self.enable_offload:
             self.offload_model()
@@ -310,16 +310,18 @@ class MultiStepRolloutWorker(Worker):
     def reload_model(self):
         self.hf_model = self.hf_model.to(self.device)
 
-    def recv_env_output(self):
+    def recv_env_output(self, mode="train"):
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
         env_output = self.channel.get(
-            key=f"{self._obs_queue_name}_{self._rank}",
+            key=f"{self._obs_queue_name}_{self._rank}_{mode}",
         )
         return env_output
 
-    def send_chunk_actions(self, chunk_actions):
+    def send_chunk_actions(self, chunk_actions, mode="train"):
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
         self.channel.put(
             item=chunk_actions,
-            key=f"{self._action_queue_name}_{self._rank}",
+            key=f"{self._action_queue_name}_{self._rank}_{mode}",
         )
 
     def send_rollout_batch(self, stage_id):
