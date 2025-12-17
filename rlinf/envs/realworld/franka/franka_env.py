@@ -239,7 +239,7 @@ class FrankaEnv(gym.Env):
         if not self.config.is_dummy:
             # Convert orientation to euler angles
             euler_angles = np.abs(
-                R.from_quat(self._franka_state.tcp_pose[3:].copy()).as_suler("xyz")
+                R.from_quat(self._franka_state.tcp_pose[3:].copy()).as_euler("xyz")
             )
             position = np.hstack([self._franka_state.tcp_pose[:3], euler_angles])
             target_delta = np.abs(position - self.config.target_ee_pose)
@@ -252,8 +252,8 @@ class FrankaEnv(gym.Env):
                 else:
                     reward = 0
                 self._logger.info(
-                    f"Does not meet success criteria. Target delta: {target_delta}, ",
-                    f"Success threshold: {self.config.reward_threshold}, ",
+                    f"Does not meet success criteria. Target delta: {target_delta}, "
+                    f"Success threshold: {self.config.reward_threshold}, "
                     f"Current reward={reward}",
                 )
 
