@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from vllm.outputs import CompletionOutput
     from vllm.outputs import RequestOutput as VllmRequestOutput
 
-from rlinf.data.datasets.utils import batch_pad_to_fixed_len
+from rlinf.data.utils import batch_pad_to_fixed_len
 from rlinf.scheduler import Channel
 from rlinf.utils.data_iter_utils import (
     get_iterator_k_split,
