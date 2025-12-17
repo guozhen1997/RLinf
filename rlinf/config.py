@@ -686,7 +686,7 @@ def validate_embodied_cfg(cfg):
 
     # process num-envs
     component_placement = HybridComponentPlacement(
-        cfg, Cluster(num_nodes=cfg.cluster.num_nodes)
+        cfg, Cluster(cluster_cfg=cfg.cluster)
     )
     stage_num = cfg.rollout.pipeline_stage_num
     env_world_size = component_placement.get_world_size("env")
