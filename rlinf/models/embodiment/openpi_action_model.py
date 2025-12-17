@@ -133,7 +133,6 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                     activation=value_head_activation,
                     bias_last=True,
                 )
-            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent.
             self.value_head = self.value_head.to(
                 dtype=self.action_out_proj.weight.dtype
             )
@@ -150,7 +149,6 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                 noise_logvar_range=self.config.noise_logvar_range,
                 noise_scheduler_type="learn",
             )
-            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent.
             self.noise_head = self.noise_head.to(
                 dtype=self.action_out_proj.weight.dtype
             )
@@ -322,7 +320,6 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             processed_obs["observation/state_ee_rot"] = state[:, 3:6]
             processed_obs["observation/state_gripper"] = state[:, 6:7]
         else:
-            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training.
             state = env_obs["states"]
             if torch.is_tensor(state):
                 state = state.to(dtype=torch.float32)
@@ -345,20 +342,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
                     for item in value
                 ]
             elif torch.is_tensor(value):
-                # Preserve float32 for state tensors to avoid BFloat16 conversion issues
-                # if "state" in key.lower():
-                #     processed_obs[key] = value.to(device=device, dtype=torch.float32).contiguous()
-                # else:
                 processed_obs[key] = value.to(device=device).contiguous()
             elif isinstance(value, dict):
                 for sub_key, sub_value in value.items():
                     if torch.is_tensor(sub_value):
-                        # Preserve float32 for state tensors
-                        # if "state" in sub_key.lower():
-                        #     processed_obs[key][sub_key] = sub_value.to(
-                        #         device=device, dtype=torch.float32
-                        #     ).contiguous()
-                        # else:
                         processed_obs[key][sub_key] = sub_value.to(
                             device=device
                         ).contiguous()

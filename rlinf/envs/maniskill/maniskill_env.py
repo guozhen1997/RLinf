@@ -139,10 +139,9 @@ class ManiskillEnv(gym.Env):
     def _extract_obs_image(self, raw_obs):
         obs_image = raw_obs["sensor_data"]["3rd_view_camera"]["rgb"].to(torch.uint8)
         obs_image = obs_image.permute(0, 3, 1, 2)  # [B, C, H, W]
-        # Tonghe added on 10/03/2025. Reference: page 4, Section III of https://arxiv.org/pdf/2504.16054
         proprioception: torch.Tensor = self.env.unwrapped.agent.robot.get_qpos().to(
             obs_image.device, dtype=torch.float32
-        )  # qpos. To see the link to the definition of get_qpos(), remove the ".unwrapped" and click onto the function.
+        )
         extracted_obs = {
             "images": obs_image,
             "states": proprioception,
@@ -235,26 +234,6 @@ class ManiskillEnv(gym.Env):
     def step(
         self, actions: Union[Array, dict] = None, auto_reset=True
     ) -> tuple[Array, Array, Array, Array, dict]:
-        # if actions is None:
-        #     assert self._is_start, "Actions must be provided after the first reset."
-        # if self.is_start:
-        #     extracted_obs, infos = self.reset(
-        #         seed=self.seed,
-        #         options={"episode_id": self.reset_state_ids}
-        #         if self.use_fixed_reset_state_ids
-        #         else {},
-        #     )
-        #     input_options={"episode_id": self.reset_state_ids} if self.use_fixed_reset_state_ids else {}
-        #     self._is_start = False
-        #     terminations = torch.zeros(
-        #         self.num_envs, dtype=torch.bool, device=self.device
-        #     )
-        #     truncations = torch.zeros(
-        #         self.num_envs, dtype=torch.bool, device=self.device
-        #     )
-        #     if self.video_cfg.save_video:
-        #         self.add_new_frames(infos=infos)
-        #     return extracted_obs, None, terminations, truncations, infos
         raw_obs, _reward, terminations, truncations, infos = self.env.step(actions)
         extracted_obs = self._wrap_obs(raw_obs)
         step_reward = self._calc_step_reward(_reward, infos)

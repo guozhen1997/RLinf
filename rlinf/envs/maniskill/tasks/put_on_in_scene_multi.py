@@ -946,7 +946,6 @@ class PutOnPlateInScene25MainV3(PutOnPlateInScene25):
 
     def _initialize_episode_pre(self, env_idx: torch.Tensor, options: dict):
         lc, lc_offset, lo, lo_offset, lp, lp_offset, l1, l2 = self.basic_obj_infos
-        # print(f"env_idx={env_idx}")
         self._reset_episode_idx(env_idx, self.total_num_trials, options)
 
         self.select_carrot_ids = (
