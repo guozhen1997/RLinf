@@ -28,6 +28,7 @@ if typing.TYPE_CHECKING:
     from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
     from rlinf.workers.env.env_worker import EnvWorker
     from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
+from rlinf.scheduler import Channel
 
 
 class EmbodiedRunner:
@@ -46,8 +47,12 @@ class EmbodiedRunner:
         self.actor = actor
         self.rollout = rollout
         self.env = env
+        self.demo_buffer = demo_buffer
         self.critic = critic
         self.reward = reward
+
+        if self.demo_buffer is not None:
+            self.demo_data_channel = Channel.create(self.cfg.data.channel.name)
 
         # this timer checks if we should stop training
         self.run_timer = run_timer
@@ -124,6 +129,7 @@ class EmbodiedRunner:
             desc="Global Step",
             ncols=800,
         )
+        self.send_demo_buffer()
         for _step in range(start_step, self.max_steps):
             # set global step
             self.actor.set_global_step(self.global_step)

@@ -51,7 +51,8 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         self.critic = critic
         self.reward = reward
         self.demo_buffer = demo_buffer
-        self.demo_data_channel = Channel.create("DemoData")
+        if self.demo_buffer is not None:
+            self.demo_data_channel = Channel.create(self.cfg.data.channel.name)
 
         # this timer checks if we should stop training
         self.run_timer = run_timer

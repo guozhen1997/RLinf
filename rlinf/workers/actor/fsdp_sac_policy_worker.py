@@ -52,6 +52,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         self.demo_buffer = None
         self.alpha_optimizer = None
         self.update_step = 0
+        if self.cfg.get("data", None) is not None:
+            self.demo_data_channel = self.connect_channel(self.cfg.data.channel.name)
 
     def init_worker(self):
         self.setup_model_and_optimizer(initialize_target=True)
