@@ -467,28 +467,33 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             )
 
             self.qf_optimizer.zero_grad()
-            gbs_critic_loss = 0
+            gbs_critic_loss = []
             for batch in train_micro_batch_list:
                 batch = put_tensor_device(batch, device=self.device)
                 critic_loss = self.forward_critic(batch) / self.gradient_accumulation
                 critic_loss.backward()
-                gbs_critic_loss += critic_loss.item()
+                gbs_critic_loss.append(critic_loss.item() * self.gradient_accumulation)
             qf_grad_norm = self.model.clip_grad_norm_(
                 max_norm=self.cfg.actor.optim.clip_grad
             )
             self.qf_optimizer.step()
+            metrics_data = {
+                "sac/critic_loss": np.mean(gbs_critic_loss),
+                "critic/lr": self.qf_optimizer.param_groups[0]["lr"],
+                "critic/grad_norm": qf_grad_norm,
+            }
 
             if update_idx % self.critic_actor_ratio == 0 and train_actor:
                 self.optimizer.zero_grad()
-                gbs_actor_loss = 0
-                gbs_entropy = 0
+                gbs_actor_loss = []
+                gbs_entropy = []
                 for batch in train_micro_batch_list:
                     batch = put_tensor_device(batch, device=self.device)
                     actor_loss, entropy = self.forward_actor(batch)
                     actor_loss = actor_loss / self.gradient_accumulation
                     actor_loss.backward()
-                    gbs_actor_loss += actor_loss.item()
-                    gbs_entropy += entropy.item() / self.gradient_accumulation
+                    gbs_actor_loss.append(actor_loss.item() * self.gradient_accumulation)
+                    gbs_entropy.append(entropy.item())
                 actor_grad_norm = self.model.clip_grad_norm_(
                     max_norm=self.cfg.actor.optim.clip_grad
                 )
@@ -497,14 +502,14 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 # Update temperature parameter if using automatic entropy tuning
                 if hasattr(self, "base_alpha") and self.base_alpha is not None:
                     self.alpha_optimizer.zero_grad()
-                    gbs_actor_loss = 0
+                    gbs_alpha_loss = []
                     for batch in train_micro_batch_list:
                         batch = put_tensor_device(batch, device=self.device)
                         alpha_loss = (
                             self.forward_alpha(batch) / self.gradient_accumulation
                         )
                         alpha_loss.backward()
-                        gbs_actor_loss += alpha_loss.item()
+                        gbs_alpha_loss.append(alpha_loss.item() * self.gradient_accumulation)
                     torch.distributed.all_reduce(
                         self.base_alpha.grad, op=torch.distributed.ReduceOp.AVG
                     )
@@ -513,26 +518,23 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                     )
                     self.alpha_optimizer.step()
 
-                loss = gbs_actor_loss + gbs_critic_loss
-
                 # Collect metrics
-                metrics_data = {
-                    "sac/total_loss": loss,
-                    "sac/actor_loss": gbs_actor_loss,
-                    "sac/critic_loss": gbs_critic_loss,
+                metrics_data.update({
+                    "sac/actor_loss": np.mean(gbs_actor_loss),
+                    
+                    "sac/alpha_loss": np.mean(gbs_alpha_loss), 
                     "sac/alpha": self.alpha,
                     "actor/lr": self.optimizer.param_groups[0]["lr"],
                     "actor/grad_norm": actor_grad_norm,
-                    "actor/entropy": entropy,
-                    "critic/lr": self.qf_optimizer.param_groups[0]["lr"],
-                    "critic/grad_norm": qf_grad_norm,
+                    "actor/entropy": np.mean(gbs_entropy),
+
                     "alpha/grad_norm": alpha_grad_norm,
                     "replay_buffer/size": len(self.replay_buffer),
                     "replay_buffer/utilization": len(self.replay_buffer)
                     / self.replay_buffer.capacity,
-                }
+                })
 
-                append_to_dict(metrics, metrics_data)
+            append_to_dict(metrics, metrics_data)
 
             # Soft update target network
             if (
