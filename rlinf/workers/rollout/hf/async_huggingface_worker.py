@@ -51,20 +51,20 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             desc="Generating Rollout Epochs",
             disable=(self._rank != 0),
         ):
-            extracted_obs = [None for i in range(self.num_pipeline_stages)]
+            last_extracted_obs = [None for i in range(self.num_pipeline_stages)]
             for chunk_step in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     await asyncio.sleep(0)
                     env_output = self.recv_env_output()
 
-                    next_extracted_obs = self.hf_model.preprocess_env_obs(
+                    extracted_obs = self.hf_model.preprocess_env_obs(
                         env_output["obs"]
                     )
-                    dones, rewards, real_next_extracted_obs = self.get_dones_and_rewards(
-                        env_output, next_extracted_obs
+                    dones, rewards, real_extracted_obs = self.get_dones_and_rewards(
+                        env_output, extracted_obs
                     )
 
-                    actions, result = self.predict(next_extracted_obs)
+                    actions, result = self.predict(extracted_obs)
 
                     await self.buffer_list[stage_id].add(
                         "truncations", env_output["truncations"].bool().cpu().contiguous()
@@ -77,22 +77,22 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                         await self.buffer_list[stage_id].add("rewards", rewards)
                     await self.buffer_list[stage_id].add_result(result)
 
-                    if extracted_obs[stage_id] is not None and hasattr(
+                    if last_extracted_obs[stage_id] is not None and hasattr(
                         self.hf_model, "q_head"
                     ):
                         await self.buffer_list[stage_id].add_transition(
-                            extracted_obs[stage_id], real_next_extracted_obs
+                            last_extracted_obs[stage_id], real_extracted_obs
                         )
 
-                    extracted_obs[stage_id] = next_extracted_obs
+                    last_extracted_obs[stage_id] = extracted_obs
 
                     self.send_chunk_actions(actions)
 
             for i in range(self.num_pipeline_stages):
                 env_output = self.recv_env_output()
-                next_extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
-                dones, rewards, real_next_extracted_obs = self.get_dones_and_rewards(
-                    env_output, next_extracted_obs
+                extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
+                dones, rewards, real_extracted_obs = self.get_dones_and_rewards(
+                    env_output, extracted_obs
                 )
                 await self.buffer_list[i].add(
                         "truncations", env_output["truncations"].bool().cpu().contiguous()
@@ -105,14 +105,14 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     await self.buffer_list[i].add("rewards", rewards)
 
                 with self.worker_timer():
-                    actions, result = self.predict(next_extracted_obs)
+                    actions, result = self.predict(extracted_obs)
                 if "prev_values" in result:
                     await self.buffer_list[i].add(
                         "prev_values", result["prev_values"].cpu().contiguous()
                     )
                 if hasattr(self.hf_model, "q_head"):
                     await self.buffer_list[i].add_transition(
-                        extracted_obs[i], real_next_extracted_obs
+                        last_extracted_obs[i], real_extracted_obs
                     )
 
         for task in tasks:

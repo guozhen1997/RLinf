@@ -26,7 +26,7 @@ from rlinf.models import get_model, get_vla_model_config_and_processor
 from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.workers.rollout.hf.utils import init_real_next_obs
+from rlinf.workers.rollout.hf.utils import init_real_obs
 
 
 class MultiStepRolloutWorker(Worker):
@@ -129,7 +129,7 @@ class MultiStepRolloutWorker(Worker):
         return actions, result
 
     def get_dones_and_rewards(
-        self, env_output: dict[str, torch.Tensor], next_extracted_obs: dict[str, Any]
+        self, env_output: dict[str, torch.Tensor], extracted_obs: dict[str, Any]
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, dict[str, Any] | None]:
         """
         Get dones and rewards from environment batch, handling auto_reset if needed.
@@ -138,17 +138,17 @@ class MultiStepRolloutWorker(Worker):
             env_output: Environment batch containing dones, rewards, and optionally final_obs
 
         Returns:
-            Tuple of (dones, rewards, real_next_extracted_obs). dones and rewards are tensors.
+            Tuple of (dones, rewards, real_extracted_obs). dones and rewards are tensors.
         """
         # First step: no rewards yet, only dones
-        real_next_extracted_obs = None
+        real_extracted_obs = None
         if env_output["rewards"] is None:
             if hasattr(self.hf_model, "q_head"):
-                real_next_extracted_obs = init_real_next_obs(next_extracted_obs)
+                real_extracted_obs = init_real_obs(extracted_obs)
             return (
                 env_output["dones"].bool().cpu().contiguous(),
                 None,
-                real_next_extracted_obs,
+                real_extracted_obs,
             )
 
         dones = env_output["dones"].bool().cpu().contiguous()
@@ -162,7 +162,7 @@ class MultiStepRolloutWorker(Worker):
                 with torch.no_grad():
                     final_extracted_obs = self.hf_model.preprocess_env_obs(final_obs)
                     if hasattr(self.hf_model, "q_head"):
-                        real_next_extracted_obs = init_real_next_obs(
+                        real_extracted_obs = init_real_obs(
                             final_extracted_obs
                         )
                     actions, result = self.predict(final_extracted_obs)
@@ -178,9 +178,9 @@ class MultiStepRolloutWorker(Worker):
                 # Add bootstrap value to the last step of done episodes
                 rewards[:, -1] += self.cfg.algorithm.gamma * final_values.cpu()
 
-        if real_next_extracted_obs is None and hasattr(self.hf_model, "q_head"):
-            real_next_extracted_obs = init_real_next_obs(next_extracted_obs)
-        return dones, rewards, real_next_extracted_obs
+        if real_extracted_obs is None and hasattr(self.hf_model, "q_head"):
+            real_extracted_obs = init_real_obs(extracted_obs)
+        return dones, rewards, real_extracted_obs
 
     def sync_model_from_actor(self):
         """Sync model parameters from the actor worker."""
@@ -210,19 +210,19 @@ class MultiStepRolloutWorker(Worker):
             desc="Generating Rollout Epochs",
             disable=(self._rank != 0),
         ):
-            extracted_obs = [None for i in range(self.num_pipeline_stages)]
+            last_extracted_obs = [None for i in range(self.num_pipeline_stages)]
 
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     env_output = self.recv_env_output()
 
-                    next_extracted_obs = self.hf_model.preprocess_env_obs(
+                    extracted_obs = self.hf_model.preprocess_env_obs(
                         env_output["obs"]
                     )
-                    dones, rewards, real_next_extracted_obs = (
-                        self.get_dones_and_rewards(env_output, next_extracted_obs)
+                    dones, rewards, real_extracted_obs = (
+                        self.get_dones_and_rewards(env_output, extracted_obs)
                     )
-                    actions, result = self.predict(next_extracted_obs)
+                    actions, result = self.predict(extracted_obs)
                     chunk_step_result = ChunkStepResult(
                         prev_logprobs=result["prev_logprobs"],
                         prev_values=result["prev_values"],
@@ -233,23 +233,23 @@ class MultiStepRolloutWorker(Worker):
                         forward_inputs=result["forward_inputs"],
                     )
                     self.buffer_list[stage_id].append_result(chunk_step_result)
-                    if extracted_obs[stage_id] is not None and hasattr(
+                    if last_extracted_obs[stage_id] is not None and hasattr(
                         self.hf_model, "q_head"
                     ):
                         self.buffer_list[stage_id].add_transition(
-                            extracted_obs[stage_id], real_next_extracted_obs
+                            last_extracted_obs[stage_id], real_extracted_obs
                         )
-                    extracted_obs[stage_id] = next_extracted_obs
+                    last_extracted_obs[stage_id] = extracted_obs
 
                     self.send_chunk_actions(actions)
 
             for stage_id in range(self.num_pipeline_stages):
                 env_output = self.recv_env_output()
 
-                next_extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
+                extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                 # Get dones and rewards from environment batch (final step of epoch)
-                dones, rewards, real_next_extracted_obs = self.get_dones_and_rewards(
-                    env_output, next_extracted_obs
+                dones, rewards, real_extracted_obs = self.get_dones_and_rewards(
+                    env_output, extracted_obs
                 )
                 self.buffer_list[stage_id].dones.append(dones)
                 self.buffer_list[stage_id].truncations.append(env_output["truncations"])
@@ -259,7 +259,7 @@ class MultiStepRolloutWorker(Worker):
                 self.buffer_list[stage_id].rewards.append(rewards)
 
                 with self.worker_timer():
-                    actions, result = self.predict(next_extracted_obs)
+                    actions, result = self.predict(extracted_obs)
                 # For the final step, we only need prev_values for bootstrapping
                 # This is a special case that doesn't create a full ChunkStepResult
                 if "prev_values" in result:
@@ -268,7 +268,7 @@ class MultiStepRolloutWorker(Worker):
                     )
                 if hasattr(self.hf_model, "q_head"):
                     self.buffer_list[stage_id].add_transition(
-                        extracted_obs[stage_id], real_next_extracted_obs
+                        last_extracted_obs[stage_id], real_extracted_obs
                     )
 
         for i in range(self.num_pipeline_stages):
@@ -293,10 +293,10 @@ class MultiStepRolloutWorker(Worker):
             for _ in range(n_chunk_steps):
                 for _ in range(self.num_pipeline_stages):
                     env_output = self.recv_env_output(mode="eval")
-                    next_extracted_obs = self.hf_model.preprocess_env_obs(
+                    extracted_obs = self.hf_model.preprocess_env_obs(
                         env_output["obs"]
                     )
-                    actions, _ = self.predict(next_extracted_obs, mode="eval")
+                    actions, _ = self.predict(extracted_obs, mode="eval")
                     self.send_chunk_actions(actions, mode="eval")
 
         if self.enable_offload:
