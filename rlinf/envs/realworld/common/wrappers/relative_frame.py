@@ -100,7 +100,7 @@ class RelativeFrame(gym.Wrapper):
 
             # Reconstruct transformed tcp_pose vector
             p_r_o = T_r_o[:3, 3]
-            quat_r_o = R.from_matrix(T_r_o[:3, :3]).as_quat()
+            quat_r_o = R.from_matrix(T_r_o[:3, :3].copy()).as_quat()
             obs["state"]["tcp_pose"] = np.concatenate((p_r_o, quat_r_o))
 
         return obs

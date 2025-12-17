@@ -109,7 +109,6 @@ class MultiStepRolloutWorker(Worker):
             if mode == "train"
             else self._eval_sampling_params
         )
-        kwargs["return_obs"] = not hasattr(self.hf_model, "q_head")
 
         if SupportedModel(self.cfg.actor.model.model_type) in [
             SupportedModel.OPENPI,
@@ -118,6 +117,8 @@ class MultiStepRolloutWorker(Worker):
             SupportedModel.CNN_POLICY,
         ]:
             kwargs = {"mode": mode}
+        
+        kwargs["return_obs"] = not hasattr(self.hf_model, "q_head")
 
         with torch.no_grad():
             actions, result = self.hf_model.predict_action_batch(

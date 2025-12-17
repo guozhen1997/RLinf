@@ -124,7 +124,7 @@ class FrankaController(Worker):
         In exp, this func is about 30 Hz
         """
         tmatrix = np.array(list(msg.O_T_EE)).reshape(4, 4).T
-        r = R.from_matrix(tmatrix[:3, :3])
+        r = R.from_matrix(tmatrix[:3, :3].copy())
         self._state.tcp_pose = np.concatenate([tmatrix[:3, -1], r.as_quat()])
 
         self._state.arm_joint_velocity = np.array(list(msg.dq)).reshape((7,))

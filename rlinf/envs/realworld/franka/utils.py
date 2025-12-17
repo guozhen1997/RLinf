@@ -75,7 +75,7 @@ def construct_adjoint_matrix(tcp_pose):
     Construct the adjoint matrix for a spatial velocity vector
     :args: tcp_pose: (x, y, z, qx, qy, qz, qw)
     """
-    rotation = R.from_quat(tcp_pose[3:]).as_matrix()
+    rotation = R.from_quat(tcp_pose[3:].copy()).as_matrix()
     translation = np.array(tcp_pose[:3])
     skew_matrix = np.array(
         [

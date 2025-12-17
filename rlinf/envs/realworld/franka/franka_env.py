@@ -117,7 +117,7 @@ class FrankaEnv(gym.Env):
             self._reset_pose = np.concatenate(
                 [
                     self.config.reset_ee_pose[:3],
-                    R.from_euler("xyz", self.config.reset_ee_pose[3:]).as_quat(),
+                    R.from_euler("xyz", self.config.reset_ee_pose[3:].copy()).as_quat(),
                 ]
             ).copy()
         else:
@@ -197,7 +197,7 @@ class FrankaEnv(gym.Env):
         if not self.config.is_dummy:
             self.next_position[3:] = (
                 R.from_euler("xyz", action[3:6] * self.config.action_scale[1])
-                * R.from_quat(self._franka_state.tcp_pose[3:])
+                * R.from_quat(self._franka_state.tcp_pose[3:].copy())
             ).as_quat()
 
             gripper_action = action[6] * self.config.action_scale[2]
@@ -239,7 +239,7 @@ class FrankaEnv(gym.Env):
         if not self.config.is_dummy:
             # Convert orientation to euler angles
             euler_angles = np.abs(
-                R.from_quat((self._franka_state.tcp_pose[3:])).as_suler("xyz")
+                R.from_quat(self._franka_state.tcp_pose[3:].copy()).as_suler("xyz")
             )
             position = np.hstack([self._franka_state.tcp_pose[:3], euler_angles])
             target_delta = np.abs(position - self.config.target_ee_pose)
@@ -431,7 +431,7 @@ class FrankaEnv(gym.Env):
         position[:3] = np.clip(
             position[:3], self._xyz_safe_space.low, self._xyz_safe_space.high
         )
-        euler = R.from_quat(position[3:]).as_euler("xyz")
+        euler = R.from_quat(position[3:].copy()).as_euler("xyz")
 
         # Clip first euler angle separately due to discontinuity from pi to -pi
         sign = np.sign(euler[0])
@@ -533,7 +533,7 @@ class FrankaEnv(gym.Env):
         T_r_o = self.T_b_r_inv @ T_b_o
 
         p_r_o = T_r_o[:3, 3]
-        quat_r_o = R.from_matrix(T_r_o[:3, :3]).as_quat()
+        quat_r_o = R.from_matrix(T_r_o[:3, :3].copy()).as_quat()
         state["tcp_pose"] = np.concatenate([p_r_o, quat_r_o], axis=0)
 
         return state
