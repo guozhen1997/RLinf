@@ -196,7 +196,7 @@ class MultiStepRolloutWorker(Worker):
         intervene_flags = env_output["intervene_flags"]
         if intervene_actions is not None:
             if "action" in forward_inputs:
-                policy_action = forward_inputs["action"] 
+                policy_action = forward_inputs["action"].to(intervene_actions.device)
                 action = intervene_actions * intervene_flags[..., None] + policy_action * (~intervene_flags[..., None])
                 forward_inputs["action"]  = action
             else:
