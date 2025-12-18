@@ -105,21 +105,34 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             proj_width = 1024
         # value head
         if self.config.add_value_head:
-            if self.config.config_name == "pi05_maniskill":
-                value_head_hidden_sizes = (1024, 512, 256)
+            if self.config.config_name == "pi0_maniskill":
+                value_head_hidden_sizes = [512, 256]
+                value_head_activation = "gelu"
+                self.value_head = MLP([proj_width] + value_head_hidden_sizes + [1],
+                    append_dim=0,
+                    append_layers=None,
+                    activation_type=value_head_activation,
+                    out_activation_type="identity",
+                    use_layernorm=True,
+                    use_layernorm_final=False,
+                    dropout=0.1,
+                    use_drop_final=False,
+                    out_bias_init=1.0)
             else:
-                value_head_hidden_sizes = (512, 256, 128)
-            value_head_activation = "relu"
-            self.value_head = ValueHead(
-                input_dim=proj_width,
-                hidden_sizes=value_head_hidden_sizes,
-                output_dim=1,
-                activation=value_head_activation,
-                bias_last=True,
-            )
-            self.value_head = self.value_head.to(
-                dtype=self.action_out_proj.weight.dtype
-            )
+                if self.config.config_name == "pi05_maniskill":
+                    value_head_hidden_sizes = (1024, 512, 256)
+                else:
+                    value_head_hidden_sizes = (512, 256, 128)
+                value_head_activation = "relu"
+                self.value_head = ValueHead(
+                    input_dim=proj_width,
+                    hidden_sizes=value_head_hidden_sizes,
+                    output_dim=1,
+                    activation=value_head_activation,
+                    bias_last=True,
+                )
+            # Tonghe added on 12/15/2025. To prevent BFloat16 conversion issues during training. Make precision consistent. 
+            self.value_head = self.value_head.to(dtype=self.action_out_proj.weight.dtype)
         self.use_vlm_value = getattr(self.config, "value_after_vlm", False) and getattr(
             self.config, "add_value_head", False
         )
