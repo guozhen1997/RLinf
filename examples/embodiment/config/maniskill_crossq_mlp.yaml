@@ -27,7 +27,7 @@ runner:
     experiment_name: "sac_mlp"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
-  max_epochs: 1000
+  max_epochs: 8000
   max_steps: -1
 
   only_eval: False
@@ -42,7 +42,7 @@ algorithm:
   group_size: 1
   agg_q: min
 
-  rollout_epoch: 500
+  rollout_epoch: 1
   eval_rollout_epoch: 1
 
   adv_type: embodied_sac
@@ -57,10 +57,13 @@ algorithm:
   initial_alpha: 0.01  # Initial temperature value
   target_entropy: -4  # Target entropy (-action_dim)
   alpha_lr: 3.0e-4  # Learning rate for temperature parameter
+
+  q_head_type: "crossq"  # Use CrossQ head for Q-value estimation
+  critic_actor_ratio: 2
   
   # Replay buffer settings
   replay_buffer_capacity: 500000
-  min_buffer_size: 1  # Minimum buffer size before training starts
+  min_buffer_size: 0  # Minimum buffer size before training starts
   target_update_freq: 1  # Frequency of target network updates
 
   # params for rollout
@@ -92,10 +95,10 @@ env:
     ignore_terminations: True
     use_fixed_reset_state_ids: False
     max_episode_steps: 50 # max episode steps for truncation
-    max_steps_per_rollout_epoch: 50
+    max_steps_per_rollout_epoch: 2
   
   eval:
-    total_num_envs: 32
+    total_num_envs: 16
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 50
@@ -146,6 +149,8 @@ actor:
     precision: "32"
     add_value_head: False
     add_q_head: True
+
+    q_head_type: "crossq"
 
 
   optim:
