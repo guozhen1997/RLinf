@@ -1,4 +1,4 @@
-# Copyright 2025 The RLinf Authors
+# Copyright 2025 The RLinf Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,19 +53,6 @@ class ManiSkillInputs(transforms.DataTransformFn):
     model_type: _model.ModelType
 
     def __call__(self, data: dict) -> dict:
-        """
-
-        print(f"data={data.keys()}") # data=dict_keys(['observation/image', 'observation/state', 'prompt'])
-
-        Return values:
-        inputs: dict, keys=['state', 'image', 'image_mask', 'prompt']
-            state: torch.shape=8, float32
-            image:dict[str, torch.Tensor]
-                base_0_rgb: torch.shape=(480, 640, 3), uint8
-                ...
-            ...
-        """
-
         # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
         # stores as float32 (C,H,W), gets skipped for policy inference.
         # Keep this for your own dataset, but if your dataset stores the images
@@ -106,11 +93,6 @@ class ManiSkillInputs(transforms.DataTransformFn):
         # stored in "prompt"; the output dict always needs to have the key "prompt").
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
-
-        # print(f"inputs={inputs.keys()}")
-
-        # print(f"inputs/image/base_0_rgb={inputs['image']['base_0_rgb'].shape}, {inputs['image']['base_0_rgb'].dtype}")
-        # print(f"inputs/state={inputs['state'].shape}, {inputs['state'].dtype}")
         return inputs
 
 
