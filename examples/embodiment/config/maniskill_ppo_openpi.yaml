@@ -165,7 +165,7 @@ actor:
       action_env_dim: ${actor.model.action_dim}
       noise_method: "flow_noise"
       action_horizon: 8
-      noise_params: [0.16, 0.12, 200] # Tonghe appended. noise_start, noise_end, anneal_steps
+      noise_params: [0.16, 0.12, 200]
       detach_critic_input: True
       joint_logprob: True # False for flow_sde, True for flow_noise     
       value_after_vlm: False      # pi0: False. pi0.5: True

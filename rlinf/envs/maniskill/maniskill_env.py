@@ -154,7 +154,7 @@ class ManiskillEnv(gym.Env):
             return reward
         reward = torch.zeros(self.num_envs, dtype=torch.float32).to(
             self.env.unwrapped.device
-        )  # [B, ]   # unwrapped added by Tonghe on 10/03/2025.
+        )  # [B, ]
         reward += info["is_src_obj_grasped"] * 0.1
         reward += info["consecutive_grasp"] * 0.1
         reward += (info["success"] & info["is_src_obj_grasped"]) * 1.0
