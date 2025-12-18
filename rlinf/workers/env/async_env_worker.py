@@ -56,6 +56,8 @@ class AsyncEnvWorker(EnvWorker):
                         final_obs=infos["final_observation"]
                         if "final_observation" in infos
                         else None,
+                        intervene_actions=None, 
+                        intervene_flags=None
                     )
                     env_output_list.append(env_output)
             else:
@@ -68,6 +70,8 @@ class AsyncEnvWorker(EnvWorker):
                         dones=self.last_dones_list[i],
                         terminations=self.last_terminations_list[i],
                         truncations=self.last_truncations_list[i],
+                        intervene_actions=self.last_intervened_info_list[i][0], 
+                        intervene_flags=self.last_intervened_info_list[i][1]
                     )
                     env_output_list.append(env_output)
 
@@ -108,6 +112,10 @@ class AsyncEnvWorker(EnvWorker):
             ]
             self.last_terminations_list = [
                 env_output.terminations for env_output in env_output_list
+            ]
+            self.last_intervened_info_list = [
+                (env_output.intervene_actions, env_output.intervene_flags) 
+                for env_output in env_output_list
             ]
             self.finish_rollout()
 

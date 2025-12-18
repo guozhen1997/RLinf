@@ -113,7 +113,7 @@ class RealworldEnv(gym.Env):
         self.success_once = np.zeros(self.num_envs, dtype=bool)
         self.fail_once = np.zeros(self.num_envs, dtype=bool)
         self.returns = np.zeros(self.num_envs)
-        self.is_intervened = np.zeros(self.num_envs, dtype=bool)
+        self.intervened_once = np.zeros(self.num_envs, dtype=bool)
         self.intervened_steps = np.zeros(self.num_envs, dtype=int)
 
     def _reset_metrics(self, env_idx=None):
@@ -125,7 +125,7 @@ class RealworldEnv(gym.Env):
             self.fail_once[mask] = False
             self.returns[mask] = 0
             self._elapsed_steps[mask] = 0
-            self.is_intervened[mask] = False
+            self.intervened_once[mask] = False
             self.intervened_steps[mask] = 0
         else:
             self.prev_step_reward[:] = 0
@@ -133,7 +133,7 @@ class RealworldEnv(gym.Env):
             self.fail_once[:] = False
             self.returns[:] = 0.0
             self._elapsed_steps[:] = 0
-            self.is_intervened[:] = False
+            self.intervened_once[:] = False
             self.intervened_steps[:] = 0
 
     def _record_metrics(self, step_reward, terminations, infos):
@@ -144,13 +144,13 @@ class RealworldEnv(gym.Env):
             # TODO: not suitable for multiple envs
             for env_id in range(self.num_envs):
                 if infos["intervene_action"][env_id] is not None:
-                    self.is_intervened[env_id] = True
+                    self.intervened_once[env_id] = True
                     self.intervened_steps += 1
         episode_info["success_once"] = self.success_once.copy()
         episode_info["return"] = self.returns.copy()
         episode_info["episode_len"] = self.elapsed_steps.copy()
         episode_info["reward"] = episode_info["return"] / episode_info["episode_len"]
-        episode_info["is_intervened"] = self.is_intervened
+        episode_info["intervened_once"] = self.intervened_once
         episode_info["intervened_steps"] = self.intervened_steps
         infos["episode"] = to_tensor(episode_info)
         return infos
@@ -215,8 +215,17 @@ class RealworldEnv(gym.Env):
             infos["episode"]["success_at_end"] = to_tensor(terminations)
             terminations[:] = False
 
+    
+        intervene_action = np.zeros_like(actions)
+        intervene_flag = np.zeros((self.num_envs, ), dtype=bool)
         if "intervene_action" in infos:
-            infos["intervene_action"] = torch.from_numpy(infos["intervene_action"])
+            for env_id in range(self.num_envs):
+                env_intervene_action = infos["intervene_action"][env_id]
+                if env_intervene_action is not None:
+                    intervene_action[env_id] = env_intervene_action.copy()
+                    intervene_flag[env_id] = True
+        infos["intervene_action"] = intervene_action
+        infos["intervene_flag"] = intervene_flag
 
         dones = terminations | truncations
         _auto_reset = auto_reset and self.auto_reset
@@ -239,16 +248,16 @@ class RealworldEnv(gym.Env):
         raw_chunk_terminations = []
         raw_chunk_truncations = []
 
-        intervene_actions = torch.from_numpy(np.zeros_like(chunk_actions))
-        intervene_flag = torch.zeros(chunk_size, dtype=bool)
+        raw_chunk_intervene_actions = []
+        raw_chunk_intervene_flag = []
         for i in range(chunk_size):
             actions = chunk_actions[:, i]
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
                 actions, auto_reset=False
             )
             if "intervene_action" in infos:
-                intervene_actions[i] = infos["intervene_action"]
-                intervene_flag[i] = True
+                raw_chunk_intervene_actions.append(infos["intervene_action"])
+                raw_chunk_intervene_flag.append(infos["intervene_flag"])
 
             chunk_rewards.append(step_reward)
             raw_chunk_terminations.append(terminations)
@@ -266,8 +275,10 @@ class RealworldEnv(gym.Env):
         past_truncations = raw_chunk_truncations.any(dim=1)
         past_dones = torch.logical_or(past_terminations, past_truncations)
 
-        infos["intervene_action"] = intervene_actions.reshape(self.num_envs, -1)
-        infos["intervene_flag"] = intervene_flag
+        infos["intervene_action"] = torch.stack(
+            raw_chunk_intervene_actions, dim=1
+        ).reshape(self.num_envs, -1)
+        infos["intervene_flag"] = torch.stack(raw_chunk_intervene_flag, dim=1)
 
         if past_dones.any() and self.auto_reset:
             extracted_obs, infos = self._handle_auto_reset(

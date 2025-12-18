@@ -191,6 +191,18 @@ class MultiStepRolloutWorker(Worker):
         gc.collect()
         torch.cuda.empty_cache()
 
+    def update_intervene_actions(self, env_output, result):
+        intervene_actions = env_output["intervene_actions"]
+        intervene_flags = env_output["intervene_flags"]
+        if intervene_actions is not None:
+            if "action" in result["forward_inputs"]:
+                policy_action = result["forward_inputs"]["action"] 
+                action = intervene_actions * intervene_flags[..., None] + policy_action * (~intervene_flags[..., None])
+                result["forward_inputs"]["action"]  = action
+            else:
+                raise NotImplementedError(f"{result['forward_inputs'].keys()=}")
+        return result
+
     def generate(self):
         if self.enable_offload:
             self.reload_model()
@@ -211,10 +223,16 @@ class MultiStepRolloutWorker(Worker):
             disable=(self._rank != 0),
         ):
             last_extracted_obs = [None for i in range(self.num_pipeline_stages)]
+            last_forward_inputs = [None for i in range(self.num_pipeline_stages)] # save actions
 
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     env_output = self.recv_env_output()
+
+                    if last_forward_inputs[stage_id] is not None:
+                        last_forward_inputs[stage_id] = self.update_intervene_actions(
+                            env_output, last_forward_inputs[stage_id]
+                        )
 
                     extracted_obs = self.hf_model.preprocess_env_obs(
                         env_output["obs"]
@@ -230,7 +248,7 @@ class MultiStepRolloutWorker(Worker):
                         truncations=env_output["truncations"],
                         terminations=env_output["terminations"],
                         rewards=rewards,  # the first step is reset step, reward is none, which will not be appended to the buffer
-                        forward_inputs=result["forward_inputs"],
+                        forward_inputs=last_forward_inputs[stage_id],
                     )
                     self.buffer_list[stage_id].append_result(chunk_step_result)
                     if last_extracted_obs[stage_id] is not None and hasattr(
@@ -240,11 +258,15 @@ class MultiStepRolloutWorker(Worker):
                             last_extracted_obs[stage_id], real_extracted_obs
                         )
                     last_extracted_obs[stage_id] = extracted_obs
+                    last_forward_inputs[stage_id] = result["forward_input"]
 
                     self.send_chunk_actions(actions)
 
             for stage_id in range(self.num_pipeline_stages):
                 env_output = self.recv_env_output()
+                last_forward_inputs[stage_id] = self.update_intervene_actions(
+                    env_output, last_forward_inputs[stage_id]
+                )
 
                 extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                 # Get dones and rewards from environment batch (final step of epoch)
@@ -257,6 +279,7 @@ class MultiStepRolloutWorker(Worker):
                     env_output["terminations"]
                 )
                 self.buffer_list[stage_id].rewards.append(rewards)
+                self.buffer_list[stage_id].forward_inputs.append(last_forward_inputs[stage_id])
 
                 with self.worker_timer():
                     actions, result = self.predict(extracted_obs)

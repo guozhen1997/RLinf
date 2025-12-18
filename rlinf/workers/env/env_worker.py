@@ -40,6 +40,7 @@ class EnvWorker(Worker):
         self.last_dones_list = []
         self.last_terminations_list = []
         self.last_truncations_list = []
+        self.last_intervened_info_list = []
         self.eval_simulator_list = []
 
         self._obs_queue_name = cfg.env.channel.queue_name
@@ -149,6 +150,7 @@ class EnvWorker(Worker):
                 self.last_dones_list.append(dones)
                 self.last_terminations_list.append(dones.clone())
             self.last_truncations_list.append(dones.clone())
+            self.last_intervened_info_list.append((None, None))
             self.simulator_list[i].stop_simulator()
 
     def env_interact_step(
@@ -187,6 +189,13 @@ class EnvWorker(Worker):
                 final_info = infos["final_info"]
                 for key in final_info["episode"]:
                     env_info[key] = final_info["episode"][key][chunk_dones[:, -1]].cpu()
+        
+        intervene_actions = infos["intervene_action"] if "intervene_action" in infos else None
+        intervene_flags = infos["intervene_flag"] if "intervene_flag" in infos else None
+        if self.cfg.env.train.auto_reset and chunk_dones.any():
+            if "intervene_action" in infos["final_info"]:
+                intervene_actions = infos["final_info"]["intervene_action"]
+                intervene_flags = infos["final_info"]["intervene_flag"]
 
         env_output = EnvOutput(
             obs=extracted_obs,
@@ -197,6 +206,8 @@ class EnvWorker(Worker):
             dones=chunk_dones,
             terminations=chunk_terminations,
             truncations=chunk_truncations,
+            intervene_actions=intervene_actions, 
+            intervene_flags=intervene_flags
         )
         return env_output, env_info
 
@@ -338,6 +349,8 @@ class EnvWorker(Worker):
                         final_obs=infos["final_observation"]
                         if "final_observation" in infos
                         else None,
+                        intervene_actions=None, 
+                        intervene_flags=None
                     )
                     env_output_list.append(env_output)
             else:
@@ -350,6 +363,8 @@ class EnvWorker(Worker):
                         dones=self.last_dones_list[stage_id],
                         terminations=self.last_terminations_list[stage_id],
                         truncations=self.last_truncations_list[stage_id],
+                        intervene_actions=self.last_intervened_info_list[stage_id][0], 
+                        intervene_flags=self.last_intervened_info_list[stage_id][1]
                     )
                     env_output_list.append(env_output)
 
@@ -384,6 +399,10 @@ class EnvWorker(Worker):
             ]
             self.last_terminations_list = [
                 env_output.terminations for env_output in env_output_list
+            ]
+            self.last_intervened_info_list = [
+                (env_output.intervene_actions, env_output.intervene_flags) 
+                for env_output in env_output_list
             ]
             self.finish_rollout()
 
