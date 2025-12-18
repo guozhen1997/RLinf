@@ -156,18 +156,6 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
     def set_global_step(self, global_step):
         self.global_step = global_step
 
-    # def _check_bf16_tensor(self, key_path, value):
-    #     """Debug helper to detect BFloat16 tensors and show their keys."""
-    #     if torch.is_tensor(value):
-    #         if value.dtype == torch.bfloat16:
-    #             print(
-    #                 f"WARNING: BFloat16 tensor detected in input_transform at key '{key_path}' "
-    #                 f"with shape {value.shape} and device {value.device}"
-    #             )
-    #     elif isinstance(value, dict):
-    #         for k, v in value.items():
-    #             self._check_bf16_tensor(f"{key_path}.{k}" if key_path else k, v)
-
     def _tensor_to_numpy(self, x):
         """Convert tensor to numpy, handling BFloat16/Float16 conversion."""
         if torch.is_tensor(x):
