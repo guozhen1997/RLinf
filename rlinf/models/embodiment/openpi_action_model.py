@@ -105,34 +105,18 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             proj_width = 1024
         # value head
         if self.config.add_value_head:
-            if self.config.config_name == "pi0_maniskill":
-                value_head_hidden_sizes = [512, 256]
-                value_head_activation = "gelu"
-                self.value_head = MLP(
-                    [proj_width] + value_head_hidden_sizes + [1],
-                    append_dim=0,
-                    append_layers=None,
-                    activation_type=value_head_activation,
-                    out_activation_type="identity",
-                    use_layernorm=True,
-                    use_layernorm_final=False,
-                    dropout=0.1,
-                    use_drop_final=False,
-                    out_bias_init=1.0,
-                )
+            if self.config.config_name == "pi05_maniskill":
+                value_head_hidden_sizes = (1024, 512, 256)
             else:
-                if self.config.config_name == "pi05_maniskill":
-                    value_head_hidden_sizes = (1024, 512, 256)
-                else:
-                    value_head_hidden_sizes = (512, 256, 128)
-                value_head_activation = "relu"
-                self.value_head = ValueHead(
-                    input_dim=proj_width,
-                    hidden_sizes=value_head_hidden_sizes,
-                    output_dim=1,
-                    activation=value_head_activation,
-                    bias_last=True,
-                )
+                value_head_hidden_sizes = (512, 256, 128)
+            value_head_activation = "relu"
+            self.value_head = ValueHead(
+                input_dim=proj_width,
+                hidden_sizes=value_head_hidden_sizes,
+                output_dim=1,
+                activation=value_head_activation,
+                bias_last=True,
+            )
             self.value_head = self.value_head.to(
                 dtype=self.action_out_proj.weight.dtype
             )
@@ -192,9 +176,6 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
             inputs.pop("prompt")
         else:
             inputs = {key: inputs[key] for key in inputs.keys() if "/" in key}
-        # # Debug: detect BFloat16 tensors and show their keys
-        # for key, value in inputs.items():
-        #     self._check_bf16_tensor(key, value)
 
         # tensor -> numpy (Convert BFloat16/Float16 to float32 for numpy compatibility)
         inputs = jax.tree.map(self._tensor_to_numpy, inputs)
@@ -323,7 +304,6 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         for key, value in processed_obs.items():
             if isinstance(value, list):
                 processed_obs[key] = [
-                    # item.to(device=device, dtype=torch.float32 if "state" in key.lower() else None).contiguous()
                     item.to(device=device).contiguous()
                     if torch.is_tensor(item)
                     else item
