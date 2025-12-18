@@ -27,7 +27,7 @@ from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.placement import HybridComponentPlacement
 from rlinf.workers.rollout.hf.utils import init_real_obs
-
+from rlinf.utils.nested_dict_process import put_tensor_device
 
 class MultiStepRolloutWorker(Worker):
     def __init__(self, cfg: DictConfig):
@@ -191,17 +191,17 @@ class MultiStepRolloutWorker(Worker):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def update_intervene_actions(self, env_output, result):
+    def update_intervene_actions(self, env_output, forward_inputs):
         intervene_actions = env_output["intervene_actions"]
         intervene_flags = env_output["intervene_flags"]
         if intervene_actions is not None:
-            if "action" in result["forward_inputs"]:
-                policy_action = result["forward_inputs"]["action"] 
+            if "action" in forward_inputs:
+                policy_action = forward_inputs["action"] 
                 action = intervene_actions * intervene_flags[..., None] + policy_action * (~intervene_flags[..., None])
-                result["forward_inputs"]["action"]  = action
+                forward_inputs["action"]  = action
             else:
-                raise NotImplementedError(f"{result['forward_inputs'].keys()=}")
-        return result
+                raise NotImplementedError(f"{forward_inputs.keys()=}")
+        return forward_inputs
 
     def generate(self):
         if self.enable_offload:
@@ -258,7 +258,7 @@ class MultiStepRolloutWorker(Worker):
                             last_extracted_obs[stage_id], real_extracted_obs
                         )
                     last_extracted_obs[stage_id] = extracted_obs
-                    last_forward_inputs[stage_id] = result["forward_input"]
+                    last_forward_inputs[stage_id] = result["forward_inputs"]
 
                     self.send_chunk_actions(actions)
 
@@ -279,7 +279,9 @@ class MultiStepRolloutWorker(Worker):
                     env_output["terminations"]
                 )
                 self.buffer_list[stage_id].rewards.append(rewards)
-                self.buffer_list[stage_id].forward_inputs.append(last_forward_inputs[stage_id])
+                self.buffer_list[stage_id].forward_inputs.append(
+                    put_tensor_device(last_forward_inputs[stage_id], "cpu")
+                )
 
                 with self.worker_timer():
                     actions, result = self.predict(extracted_obs)

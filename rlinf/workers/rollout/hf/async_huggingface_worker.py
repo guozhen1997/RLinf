@@ -21,6 +21,7 @@ from rlinf.data.io_struct import AsyncEmbodiedRolloutBuffer
 from rlinf.scheduler import Channel
 from rlinf.utils.metric_utils import compute_split_num
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
+from rlinf.utils.nested_dict_process import put_tensor_device
 
 
 class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
@@ -52,10 +53,17 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             disable=(self._rank != 0),
         ):
             last_extracted_obs = [None for i in range(self.num_pipeline_stages)]
+            last_results = [None for i in range(self.num_pipeline_stages)]
+
             for chunk_step in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     await asyncio.sleep(0)
                     env_output = self.recv_env_output()
+
+                    if last_results[stage_id] is not None:
+                        last_results[stage_id]["forward_inputs"] = self.update_intervene_actions(
+                            env_output, last_results[stage_id]["forward_inputs"]
+                        )
 
                     extracted_obs = self.hf_model.preprocess_env_obs(
                         env_output["obs"]
@@ -75,7 +83,8 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     await self.buffer_list[stage_id].add("dones", dones)
                     if rewards is not None:
                         await self.buffer_list[stage_id].add("rewards", rewards)
-                    await self.buffer_list[stage_id].add_result(result)
+                    if last_results[stage_id] is not None:
+                        await self.buffer_list[stage_id].add_result(last_results[stage_id])
 
                     if last_extracted_obs[stage_id] is not None and hasattr(
                         self.hf_model, "q_head"
@@ -85,6 +94,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                         )
 
                     last_extracted_obs[stage_id] = extracted_obs
+                    last_results[stage_id] = result
 
                     self.send_chunk_actions(actions)
 
@@ -103,6 +113,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 await self.buffer_list[i].add("dones", dones)
                 if rewards is not None:
                     await self.buffer_list[i].add("rewards", rewards)
+                if last_results is not None:
+                    await self.buffer_list[i].add_result(
+                        put_tensor_device(last_results[i], "cpu")
+                    )
 
                 with self.worker_timer():
                     actions, result = self.predict(extracted_obs)

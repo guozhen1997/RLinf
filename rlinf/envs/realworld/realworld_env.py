@@ -224,8 +224,8 @@ class RealworldEnv(gym.Env):
                 if env_intervene_action is not None:
                     intervene_action[env_id] = env_intervene_action.copy()
                     intervene_flag[env_id] = True
-        infos["intervene_action"] = intervene_action
-        infos["intervene_flag"] = intervene_flag
+        infos["intervene_action"] = to_tensor(intervene_action)
+        infos["intervene_flag"] = to_tensor(intervene_flag)
 
         dones = terminations | truncations
         _auto_reset = auto_reset and self.auto_reset
