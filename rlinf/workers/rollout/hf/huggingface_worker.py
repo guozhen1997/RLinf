@@ -197,7 +197,14 @@ class MultiStepRolloutWorker(Worker):
         if intervene_actions is not None:
             if "action" in forward_inputs:
                 policy_action = forward_inputs["action"].to(intervene_actions.device)
+                policy_action = policy_action.reshape(
+                    policy_action.shape[0], self.hf_model.num_action_chunks, -1
+                )
+                intervene_actions = intervene_actions.reshape(
+                    intervene_actions.shape[0], self.hf_model.num_action_chunks, -1
+                )
                 action = intervene_actions * intervene_flags[..., None] + policy_action * (~intervene_flags[..., None])
+                action = action.reshape(action.shape[0], -1)
                 forward_inputs["action"]  = action
             else:
                 raise NotImplementedError(f"{forward_inputs.keys()=}")

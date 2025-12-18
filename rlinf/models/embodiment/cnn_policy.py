@@ -149,6 +149,10 @@ class CNNPolicy(BasePolicy):
             )
         else:
             self.action_scale = None
+    
+    @property
+    def num_action_chunks(self):
+        return self.cfg.num_action_chunks
 
     def preprocess_env_obs(self, env_obs):
         device = next(self.parameters()).device
