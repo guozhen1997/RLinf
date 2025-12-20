@@ -34,7 +34,7 @@ from rlinf.scheduler import Cluster
     version_base="1.1", config_path="config", config_name="realworld_collect_data"
 )
 def main(cfg):
-    cluster = Cluster(cluster_cfg=cfg.cluster)
+    Cluster(cluster_cfg=cfg.cluster)
 
     success_needed = 20
     success_cnt = 0
@@ -46,7 +46,7 @@ def main(cfg):
             "camera_serials": [
                 "CAMERA_SERIAL_NUMBER",
             ],
-            "target_ee_pose": "TARGET_EE_POSE_AS_LIST", # pos and euler angles
+            "target_ee_pose": "TARGET_EE_POSE_AS_LIST",  # pos and euler angles
         },
     )
 

@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
+
 from .franka import FrankaEnv, FrankaRobotConfig, FrankaRobotState
 
 __all__ = ["FrankaEnv", "FrankaRobotConfig", "FrankaRobotState"]
+
+package_name = __name__ + ".franka.tasks"
+importlib.import_module(f"{package_name}")
