@@ -1059,8 +1059,8 @@ class EnvOutput:
     truncations: Optional[torch.Tensor] = None  # [B]
     rewards: Optional[torch.Tensor] = None  # [B]
 
-    intervene_actions: Optional[torch.Tensor] = None # [B]
-    intervene_flags: Optional[torch.Tensor] = None # [B]
+    intervene_actions: Optional[torch.Tensor] = None  # [B]
+    intervene_flags: Optional[torch.Tensor] = None  # [B]
 
     def __post_init__(self):
         self.obs = put_tensor_device(self.obs, "cpu")
@@ -1085,7 +1085,7 @@ class EnvOutput:
         )
         self.intervene_actions = (
             self.intervene_actions.cpu().contiguous()
-            if self.intervene_actions is not None 
+            if self.intervene_actions is not None
             else None
         )
         self.intervene_flags = (

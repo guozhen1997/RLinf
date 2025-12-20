@@ -13,8 +13,8 @@
 # limitations under the License.
 
 import os
-from typing import Any, Optional, Union, Optional
-from PIL import Image, ImageDraw, ImageFont
+from typing import Any, Optional, Union
+
 import imageio
 import numpy as np
 import torch

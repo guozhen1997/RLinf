@@ -12,15 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 from collections import defaultdict
 
-import numpy as np
 import torch
 
 from rlinf.data.io_struct import EnvOutput
 from rlinf.scheduler import Channel
 from rlinf.workers.env.env_worker import EnvWorker
-import asyncio
+
 
 class AsyncEnvWorker(EnvWorker):
     async def interact(self, env_metric_channel: Channel):
@@ -56,8 +56,8 @@ class AsyncEnvWorker(EnvWorker):
                         final_obs=infos["final_observation"]
                         if "final_observation" in infos
                         else None,
-                        intervene_actions=None, 
-                        intervene_flags=None
+                        intervene_actions=None,
+                        intervene_flags=None,
                     )
                     env_output_list.append(env_output)
             else:
@@ -70,8 +70,8 @@ class AsyncEnvWorker(EnvWorker):
                         dones=self.last_dones_list[i],
                         terminations=self.last_terminations_list[i],
                         truncations=self.last_truncations_list[i],
-                        intervene_actions=self.last_intervened_info_list[i][0], 
-                        intervene_flags=self.last_intervened_info_list[i][1]
+                        intervene_actions=self.last_intervened_info_list[i][0],
+                        intervene_flags=self.last_intervened_info_list[i][1],
                     )
                     env_output_list.append(env_output)
 
@@ -100,7 +100,6 @@ class AsyncEnvWorker(EnvWorker):
                         else:
                             env_metrics[key].append(value)
 
-
             for key, value in env_metrics.items():
                 env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
             env_metric_channel.put(env_metrics)
@@ -114,7 +113,7 @@ class AsyncEnvWorker(EnvWorker):
                 env_output.terminations for env_output in env_output_list
             ]
             self.last_intervened_info_list = [
-                (env_output.intervene_actions, env_output.intervene_flags) 
+                (env_output.intervene_actions, env_output.intervene_flags)
                 for env_output in env_output_list
             ]
             self.finish_rollout()

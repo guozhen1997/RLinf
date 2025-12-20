@@ -14,14 +14,15 @@
 
 import asyncio
 import gc
+
 import torch
 from tqdm import tqdm
 
 from rlinf.data.io_struct import AsyncEmbodiedRolloutBuffer
 from rlinf.scheduler import Channel
 from rlinf.utils.metric_utils import compute_split_num
-from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 from rlinf.utils.nested_dict_process import put_tensor_device
+from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
 class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
@@ -61,13 +62,13 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     env_output = self.recv_env_output()
 
                     if last_results[stage_id] is not None:
-                        last_results[stage_id]["forward_inputs"] = self.update_intervene_actions(
-                            env_output, last_results[stage_id]["forward_inputs"]
+                        last_results[stage_id]["forward_inputs"] = (
+                            self.update_intervene_actions(
+                                env_output, last_results[stage_id]["forward_inputs"]
+                            )
                         )
 
-                    extracted_obs = self.hf_model.preprocess_env_obs(
-                        env_output["obs"]
-                    )
+                    extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                     dones, rewards, real_extracted_obs = self.get_dones_and_rewards(
                         env_output, extracted_obs
                     )
@@ -75,16 +76,20 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     actions, result = self.predict(extracted_obs)
 
                     await self.buffer_list[stage_id].add(
-                        "truncations", env_output["truncations"].bool().cpu().contiguous()
+                        "truncations",
+                        env_output["truncations"].bool().cpu().contiguous(),
                     )
                     await self.buffer_list[stage_id].add(
-                        "terminations", env_output["terminations"].bool().cpu().contiguous()
+                        "terminations",
+                        env_output["terminations"].bool().cpu().contiguous(),
                     )
                     await self.buffer_list[stage_id].add("dones", dones)
                     if rewards is not None:
                         await self.buffer_list[stage_id].add("rewards", rewards)
                     if last_results[stage_id] is not None:
-                        await self.buffer_list[stage_id].add_result(last_results[stage_id])
+                        await self.buffer_list[stage_id].add_result(
+                            last_results[stage_id]
+                        )
 
                     if last_extracted_obs[stage_id] is not None and hasattr(
                         self.hf_model, "q_head"
@@ -105,8 +110,8 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     env_output, extracted_obs
                 )
                 await self.buffer_list[i].add(
-                        "truncations", env_output["truncations"].bool().cpu().contiguous()
-                    )
+                    "truncations", env_output["truncations"].bool().cpu().contiguous()
+                )
                 await self.buffer_list[i].add(
                     "terminations", env_output["terminations"].bool().cpu().contiguous()
                 )

@@ -411,16 +411,13 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         alpha_loss = -alpha * (log_pi.mean() + self.target_entropy)
         return alpha_loss
 
-    
     def update_one_epoch(self, train_actor):
         global_batch_size_per_rank = (
             self.cfg.actor.global_batch_size // self._world_size
         )
-        
+
         if self.demo_buffer is not None:
-            replay_batch = self.replay_buffer.sample(
-                global_batch_size_per_rank // 2
-            )
+            replay_batch = self.replay_buffer.sample(global_batch_size_per_rank // 2)
             demo_batch = self.demo_buffer.sample(global_batch_size_per_rank // 2)
             global_batch = concat_batch(replay_batch, demo_batch)
         else:
@@ -475,11 +472,11 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 gbs_alpha_loss = []
                 for batch in train_micro_batch_list:
                     batch = put_tensor_device(batch, device=self.device)
-                    alpha_loss = (
-                        self.forward_alpha(batch) / self.gradient_accumulation
-                    )
+                    alpha_loss = self.forward_alpha(batch) / self.gradient_accumulation
                     alpha_loss.backward()
-                    gbs_alpha_loss.append(alpha_loss.item() * self.gradient_accumulation)
+                    gbs_alpha_loss.append(
+                        alpha_loss.item() * self.gradient_accumulation
+                    )
                 torch.distributed.all_reduce(
                     self.base_alpha.grad, op=torch.distributed.ReduceOp.AVG
                 )
@@ -488,34 +485,33 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 )
                 self.alpha_optimizer.step()
                 self.alpha_lr_scheduler.step()
-            
-
 
             # Collect metrics
-            metrics_data.update({
-                "sac/actor_loss": np.mean(gbs_actor_loss),
-                
-                "sac/alpha_loss": np.mean(gbs_alpha_loss), 
-                "sac/alpha": self.alpha,
-                "actor/lr": self.optimizer.param_groups[0]["lr"],
-                "actor/grad_norm": actor_grad_norm,
-                "actor/entropy": np.mean(gbs_entropy),
-
-                "alpha/grad_norm": alpha_grad_norm,
-            })
-                # Soft update target network
+            metrics_data.update(
+                {
+                    "sac/actor_loss": np.mean(gbs_actor_loss),
+                    "sac/alpha_loss": np.mean(gbs_alpha_loss),
+                    "sac/alpha": self.alpha,
+                    "actor/lr": self.optimizer.param_groups[0]["lr"],
+                    "actor/grad_norm": actor_grad_norm,
+                    "actor/entropy": np.mean(gbs_entropy),
+                    "alpha/grad_norm": alpha_grad_norm,
+                }
+            )
+        # Soft update target network
         if (
             self.target_model_initialized
-            and self.update_step % self.cfg.algorithm.get("target_update_freq", 1)
-            == 0
+            and self.update_step % self.cfg.algorithm.get("target_update_freq", 1) == 0
         ):
             self.soft_update_target_model()
-        
+
         return metrics_data
 
     def process_train_metrics(self, metrics):
         replay_buffer_stats = self.replay_buffer.get_stats()
-        replay_buffer_stats = {f"replay_buffer/{key}": value for key, value in replay_buffer_stats.items()}
+        replay_buffer_stats = {
+            f"replay_buffer/{key}": value for key, value in replay_buffer_stats.items()
+        }
         append_to_dict(metrics, replay_buffer_stats)
         # Average metrics across updates
         mean_metric_dict = {}
@@ -584,7 +580,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             self.update_step += 1
 
         mean_metric_dict = self.process_train_metrics(metrics)
-        
+
         torch.cuda.synchronize()
         torch.distributed.barrier()
         torch.cuda.empty_cache()

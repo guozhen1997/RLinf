@@ -27,7 +27,6 @@ from rlinf.envs.realworld.common.wrappers import (
     RelativeFrame,
     SpacemouseIntervention,
 )
-import rlinf.envs.realworld.franka.tasks
 from rlinf.envs.realworld.venv import NoResetSyncVectorEnv
 from rlinf.envs.utils import (
     put_info_on_image,
@@ -215,9 +214,8 @@ class RealworldEnv(gym.Env):
             infos["episode"]["success_at_end"] = to_tensor(terminations)
             terminations[:] = False
 
-    
         intervene_action = np.zeros_like(actions)
-        intervene_flag = np.zeros((self.num_envs, ), dtype=bool)
+        intervene_flag = np.zeros((self.num_envs,), dtype=bool)
         if "intervene_action" in infos:
             for env_id in range(self.num_envs):
                 env_intervene_action = infos["intervene_action"][env_id]

@@ -230,6 +230,7 @@ def validate_rollout_cfg(cfg, algorithm_cfg):
 def validate_model_cfg_by_hf_config(cfg, hf_model_path):
     # validate by hf config
     from transformers import AutoConfig
+
     hf_config = AutoConfig.from_pretrained(hf_model_path, trust_remote_code=True)
 
     if "Qwen2ForCausalLM" in hf_config.architectures:

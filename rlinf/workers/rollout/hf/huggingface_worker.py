@@ -25,9 +25,10 @@ from rlinf.data.io_struct import ChunkStepResult, EmbodiedRolloutResult
 from rlinf.models import get_model, get_vla_model_config_and_processor
 from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.metric_utils import compute_split_num
+from rlinf.utils.nested_dict_process import put_tensor_device
 from rlinf.utils.placement import HybridComponentPlacement
 from rlinf.workers.rollout.hf.utils import init_real_obs
-from rlinf.utils.nested_dict_process import put_tensor_device
+
 
 class MultiStepRolloutWorker(Worker):
     def __init__(self, cfg: DictConfig):
@@ -117,7 +118,7 @@ class MultiStepRolloutWorker(Worker):
             SupportedModel.CNN_POLICY,
         ]:
             kwargs = {"mode": mode}
-        
+
         kwargs["return_obs"] = not hasattr(self.hf_model, "q_head")
 
         with torch.no_grad():
@@ -162,9 +163,7 @@ class MultiStepRolloutWorker(Worker):
                 with torch.no_grad():
                     final_extracted_obs = self.hf_model.preprocess_env_obs(final_obs)
                     if hasattr(self.hf_model, "q_head"):
-                        real_extracted_obs = init_real_obs(
-                            final_extracted_obs
-                        )
+                        real_extracted_obs = init_real_obs(final_extracted_obs)
                     actions, result = self.predict(final_extracted_obs)
                     if "prev_values" in result:
                         _final_values = result["prev_values"]
@@ -203,9 +202,11 @@ class MultiStepRolloutWorker(Worker):
                 intervene_actions = intervene_actions.reshape(
                     intervene_actions.shape[0], self.hf_model.num_action_chunks, -1
                 )
-                action = intervene_actions * intervene_flags[..., None] + policy_action * (~intervene_flags[..., None])
+                action = intervene_actions * intervene_flags[
+                    ..., None
+                ] + policy_action * (~intervene_flags[..., None])
                 action = action.reshape(action.shape[0], -1)
-                forward_inputs["action"]  = action
+                forward_inputs["action"] = action
             else:
                 raise NotImplementedError(f"{forward_inputs.keys()=}")
         return forward_inputs
@@ -230,7 +231,9 @@ class MultiStepRolloutWorker(Worker):
             disable=(self._rank != 0),
         ):
             last_extracted_obs = [None for i in range(self.num_pipeline_stages)]
-            last_forward_inputs = [None for i in range(self.num_pipeline_stages)] # save actions
+            last_forward_inputs = [
+                None for i in range(self.num_pipeline_stages)
+            ]  # save actions
 
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
@@ -241,11 +244,9 @@ class MultiStepRolloutWorker(Worker):
                             env_output, last_forward_inputs[stage_id]
                         )
 
-                    extracted_obs = self.hf_model.preprocess_env_obs(
-                        env_output["obs"]
-                    )
-                    dones, rewards, real_extracted_obs = (
-                        self.get_dones_and_rewards(env_output, extracted_obs)
+                    extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
+                    dones, rewards, real_extracted_obs = self.get_dones_and_rewards(
+                        env_output, extracted_obs
                     )
                     actions, result = self.predict(extracted_obs)
                     chunk_step_result = ChunkStepResult(
@@ -325,9 +326,7 @@ class MultiStepRolloutWorker(Worker):
             for _ in range(n_chunk_steps):
                 for _ in range(self.num_pipeline_stages):
                     env_output = self.recv_env_output(mode="eval")
-                    extracted_obs = self.hf_model.preprocess_env_obs(
-                        env_output["obs"]
-                    )
+                    extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                     actions, _ = self.predict(extracted_obs, mode="eval")
                     self.send_chunk_actions(actions, mode="eval")
 

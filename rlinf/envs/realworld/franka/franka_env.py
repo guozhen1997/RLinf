@@ -65,7 +65,9 @@ class FrankaRobotConfig:
 
     # Positions are stored in eular angles (xyz for position, rzryrx for orientation)
     # It will be converted to quaternions internally
-    target_ee_pose: np.ndarray = field(default_factory=lambda: np.array([0.5, 0.0, 0.1, -3.14, 0.0, 0.0]))
+    target_ee_pose: np.ndarray = field(
+        default_factory=lambda: np.array([0.5, 0.0, 0.1, -3.14, 0.0, 0.0])
+    )
     reset_ee_pose: np.ndarray = field(default_factory=lambda: np.zeros(6))
     joint_reset_qpos: list[float] = field(
         default_factory=lambda: [0, 0, 0, -1.9, -0, 2, 0]
