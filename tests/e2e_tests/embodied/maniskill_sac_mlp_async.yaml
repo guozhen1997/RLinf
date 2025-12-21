@@ -10,7 +10,7 @@ hydra:
     dir: .
   output_subdir: null
   searchpath:
-    - file://${oc.env:REPO_PATH}/config/
+    - file://${oc.env:REPO_PATH}/examples/embodiment/config
 
 cluster:
   num_nodes: 1
@@ -22,9 +22,9 @@ cluster:
 runner:
   task_type: embodied
   logger:
-    log_path: "../results"
+    log_path: /workspace/results/
     project_name: rlinf
-    experiment_name: "sac_mlp"
+    experiment_name: "ci-test"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 10
@@ -70,8 +70,10 @@ algorithm:
     top_k: 50
     top_p: 1.0
     repetition_penalty: 1.0
+    add_BOS: False
 
   # length argument for autoregressive sampling
+  # max length means max amount of tokens to generate
   length_params:
     max_new_token: 7
     max_length: 1024
@@ -94,7 +96,7 @@ env:
     max_steps_per_rollout_epoch: 50
   
   eval:
-    total_num_envs: 32
+    total_num_envs: 16
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 50

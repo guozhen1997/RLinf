@@ -68,6 +68,7 @@ jobs:
               - '.github/workflows/docker-build.yml'
             shared_filter: &shared
               - *install
+              - 'rlinf/data'
               - 'rlinf/scheduler/**'
               - 'rlinf/utils/**'
               - 'rlinf/workers/actor/**'
@@ -81,6 +82,8 @@ jobs:
               - 'toolkits/**'
             embodied_filter: &embodied
               - *shared
+              - 'rlinf/runners/async_embodied_runner.py'
+              - 'rlinf/data/replay_buffer.py'
               - 'rlinf/envs/**'
               - 'rlinf/workers/env/**'
               - 'rlinf/models/embodiment/**'
