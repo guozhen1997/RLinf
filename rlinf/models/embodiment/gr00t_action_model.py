@@ -31,6 +31,7 @@ from gr00t.model.gr00t_n1 import GR00T_N1_5, GR00T_N1_5_Config
 from torch.distributions import Normal
 from transformers.feature_extraction_utils import BatchFeature
 
+from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.gr00t.simulation_io import (
     ACTION_CONVERSION,
     OBS_CONVERSION,
@@ -43,7 +44,7 @@ from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
 
-class FlowMatchingActionHeadForRLActionPrediction(FlowmatchingActionHead):
+class FlowMatchingActionHeadForRLActionPrediction(BasePolicy, FlowmatchingActionHead):
     def __init__(
         self,
         config: FlowmatchingActionHeadConfig,
