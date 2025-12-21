@@ -13,30 +13,24 @@
 # limitations under the License.
 
 
-import copy
-import os
-import pickle as pkl
-
 import time
-import gymnasium as gym
-import hydra
-import numpy as np
 
-from rlinf.envs.realworld.common.wrappers import (
-    GripperCloseEnv,
-    Quat2EulerWrapper,
-    RelativeFrame,
-    SpacemouseIntervention,
-)
-from rlinf.scheduler import Cluster, NodePlacementStrategy
-from rlinf.envs.realworld.franka.franka_controller import FrankaController
+import numpy as np
 from scipy.spatial.transform import Rotation as R
+
+from rlinf.envs.realworld.franka.franka_controller import FrankaController
+from rlinf.scheduler import Cluster, NodePlacementStrategy
+
 
 def main(cfg):
     robot_ip = "ROBOT_IP_ADDRESS"
     cluster = Cluster(cluster_cfg=cfg.cluster)
-    placement = NodePlacementStrategy(node_ranks=[0, ])
-    
+    placement = NodePlacementStrategy(
+        node_ranks=[
+            0,
+        ]
+    )
+
     controller = FrankaController.create_group(robot_ip).launch(
         cluster=cluster, placement_strategy=placement
     )
@@ -59,10 +53,10 @@ def main(cfg):
                 tcp_pose = controller.get_state().tcp_pose
                 r = R.from_quat(tcp_pose[3:].copy())
                 euler = r.as_euler("xyz")
-                print(np.concatenate([tcp_pose[:3], euler]))    
+                print(np.concatenate([tcp_pose[:3], euler]))
             else:
                 print(f"Unknown cmd: {cmd_str}")
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             break
         time.sleep(1.0)
 
