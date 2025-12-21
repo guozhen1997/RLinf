@@ -11,6 +11,7 @@ group_size: 1
 use_fixed_reset_state_ids: False
 max_steps_per_rollout_epoch: 100
 max_episode_steps: 100
+use_spacemouse: True
 
 # Placeholder for dummy realworld env
 # If camera and robot are connected, will be overriden in the code
@@ -19,7 +20,7 @@ camera_serials: ["0123456789", ]
 
 
 video_cfg:
-  save_video: False
+  save_video: True
   info_on_video: True
   video_base_dir: ${runner.logger.log_path}/video/train
 

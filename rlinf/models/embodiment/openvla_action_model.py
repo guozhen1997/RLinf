@@ -48,6 +48,7 @@ from transformers.tokenization_utils import (
 )
 from transformers.utils import TensorType
 
+from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.model_utils import (
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
@@ -470,7 +471,7 @@ class VLALogitsProcessor(LogitsProcessor):
         return scores_processed
 
 
-class OpenVLAForRLActionPrediction(OpenVLAForBatchActionPrediction):
+class OpenVLAForRLActionPrediction(BasePolicy, OpenVLAForBatchActionPrediction):
     def __init__(
         self,
         config,

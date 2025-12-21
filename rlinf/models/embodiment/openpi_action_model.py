@@ -26,6 +26,7 @@ from openpi.models import model as _model
 from openpi.models.pi0_config import Pi0Config
 from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
 
+from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
@@ -64,7 +65,7 @@ class OpenPi0Config(Pi0Config):
     value_vlm_mode: str = "mean_token"  # last_token, mean_token, first_token
 
 
-class OpenPi0ForRLActionPrediction(PI0Pytorch):
+class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
     """
     Pi0 model for reinforcement learning action prediction.
     """

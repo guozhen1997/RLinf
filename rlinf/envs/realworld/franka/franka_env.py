@@ -293,7 +293,9 @@ class FrankaEnv(gym.Env):
         return observation, {}
 
     def go_to_rest(self, joint_reset=False):
-        self._controller.reconfigure_compliance_params(self.config.precision_param)
+        self._controller.reconfigure_compliance_params(
+            self.config.precision_param
+        ).wait()
         if joint_reset:
             self._controller.reset_joint(self.config.joint_reset_qpos).wait()
             time.sleep(0.5)
