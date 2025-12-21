@@ -280,7 +280,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                     sample_idx = torch.randint(
                         0,
                         all_qf_next_target.shape[-1],
-                        (self.critic_subsample_size, ),
+                        (self.critic_subsample_size,),
                         generator=self.critic_sample_generator,
                         device=self.device,
                     )

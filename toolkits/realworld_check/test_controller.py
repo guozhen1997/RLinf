@@ -1,0 +1,71 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import copy
+import os
+import pickle as pkl
+
+import time
+import gymnasium as gym
+import hydra
+import numpy as np
+
+from rlinf.envs.realworld.common.wrappers import (
+    GripperCloseEnv,
+    Quat2EulerWrapper,
+    RelativeFrame,
+    SpacemouseIntervention,
+)
+from rlinf.scheduler import Cluster, NodePlacementStrategy
+from rlinf.envs.realworld.franka.franka_controller import FrankaController
+from scipy.spatial.transform import Rotation as R
+
+def main(cfg):
+    robot_ip = "ROBOT_IP_ADDRESS"
+    cluster = Cluster(cluster_cfg=cfg.cluster)
+    placement = NodePlacementStrategy(node_ranks=[0, ])
+    
+    controller = FrankaController.create_group(robot_ip).launch(
+        cluster=cluster, placement_strategy=placement
+    )
+
+    start_time = time.time()
+    while not controller.is_robot_up().wait()[0]:
+        time.sleep(0.5)
+        if time.time() - start_time > 30:
+            print(
+                f"Waited {time.time() - start_time} seconds for Franka robot to be ready."
+            )
+    while True:
+        try:
+            cmd_str = input("Please input cmd:")
+            if cmd_str == "q":
+                break
+            elif cmd_str == "getpos":
+                print(controller.get_state().tcp_pose)
+            elif cmd_str == "getpos_euler":
+                tcp_pose = controller.get_state().tcp_pose
+                r = R.from_quat(tcp_pose[3:].copy())
+                euler = r.as_euler("xyz")
+                print(np.concatenate([tcp_pose[:3], euler]))    
+            else:
+                print(f"Unknown cmd: {cmd_str}")
+        except KeyboardInterrupt as e:
+            break
+        time.sleep(1.0)
+
+
+if __name__ == "__main__":
+    main()

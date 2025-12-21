@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import os
 import queue
 import threading
 import time
@@ -21,7 +22,6 @@ from dataclasses import dataclass, field
 from itertools import cycle
 from typing import Optional
 
-import os
 import cv2
 import gymnasium as gym
 import numpy as np
@@ -46,13 +46,12 @@ class ImageDisplayer(threading.Thread):
             warnings.warn(
                 "No display found. ImageDisplayer will not run. Set DISPLAY environment variable to enable."
             )
-            return 
+            return
 
         while True:
             img_array = self.queue.get()  # retrieve an image from the queue
             if img_array is None:  # None is our signal to exit
                 break
-            
 
             frame = np.concatenate(
                 [v for k, v in img_array.items() if "full" not in k], axis=0
