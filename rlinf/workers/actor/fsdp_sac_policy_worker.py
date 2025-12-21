@@ -215,7 +215,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         self.critic_actor_ratio = self.cfg.algorithm.get("critic_actor_ratio", 1)
         self.critic_subsample_size = self.cfg.algorithm.get("critic_subsample_size", -1)
-        self.critic_sample_generator = torch.Generator()
+        self.critic_sample_generator = torch.Generator(self.device)
         self.critic_sample_generator.manual_seed(seed)
 
     def soft_update_target_model(self, tau: Optional[float] = None):
@@ -279,12 +279,14 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 if self.critic_subsample_size > 0:
                     sample_idx = torch.randint(
                         0,
-                        all_qf_next_target.shape[0],
-                        self.critic_subsample_size,
+                        all_qf_next_target.shape[-1],
+                        (self.critic_subsample_size, ),
                         generator=self.critic_sample_generator,
                         device=self.device,
                     )
-                    all_qf_next_target = all_qf_next_target[sample_idx]
+                    all_qf_next_target = all_qf_next_target.index_select(
+                        dim=-1, index=sample_idx
+                    )
 
                 if agg_q == "min":
                     qf_next_target, _ = torch.min(
