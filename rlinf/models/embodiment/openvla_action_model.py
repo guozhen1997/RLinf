@@ -604,6 +604,7 @@ class OpenVLAForRLActionPrediction(BasePolicy, OpenVLAForBatchActionPrediction):
         env_obs=None,
         calulate_logprobs=True,
         calulate_values=True,
+        return_obs=True,
         **kwargs,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         do_sample = kwargs.pop("do_sample")

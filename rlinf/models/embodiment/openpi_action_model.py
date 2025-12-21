@@ -235,7 +235,7 @@ class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
         if "mode" in kwargs and kwargs["mode"] == "sft":
             observation = data["observation"]
             actions = data["actions"]
-            return super().forward(observation, actions)
+            return PI0Pytorch.forward(self, observation, actions)
         # get kwargs
         compute_values = kwargs.get("compute_values", False)
         chains = data["chains"]

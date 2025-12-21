@@ -44,7 +44,7 @@ from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
 
-class FlowMatchingActionHeadForRLActionPrediction(BasePolicy, FlowmatchingActionHead):
+class FlowMatchingActionHeadForRLActionPrediction(FlowmatchingActionHead):
     def __init__(
         self,
         config: FlowmatchingActionHeadConfig,
@@ -391,7 +391,7 @@ class FlowMatchingActionHeadForRLActionPrediction(BasePolicy, FlowmatchingAction
         )
 
 
-class GR00T_N1_5_ForRLActionPrediction(GR00T_N1_5):
+class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
     """
     GR00T_N1_5 model for reinforcement learning action prediction.
     It's a combination of the Gr00tPolicy and GR00T_N1_5 model.
