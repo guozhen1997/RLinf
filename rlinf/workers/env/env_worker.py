@@ -149,9 +149,9 @@ class EnvWorker(Worker):
                 self.last_obs_list.append(extracted_obs)
                 self.last_dones_list.append(dones)
                 self.last_terminations_list.append(dones.clone())
-            self.last_truncations_list.append(dones.clone())
-            self.last_intervened_info_list.append((None, None))
-            self.simulator_list[i].stop_simulator()
+                self.last_truncations_list.append(dones.clone())
+                self.last_intervened_info_list.append((None, None))
+                self.simulator_list[i].stop_simulator()
 
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int

@@ -802,7 +802,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             rewards = rollout_batch[
                 "rewards"
             ]  # [n_chunk_step, batch, num_action_chunks]
-            if self.rollout_batch.get("loss_mask", None) is not None:
+            if rollout_batch.get("loss_mask", None) is not None:
                 rewards = rewards * rollout_batch["loss_mask"]
             n_chunk_step, batch_size, num_action_chunks = rewards.shape
 
@@ -839,9 +839,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             )  # [n_chunk_step, batch, 1]
 
             # update loss_mask
-            if self.rollout_batch.get("loss_mask", None) is not None:
+            if rollout_batch.get("loss_mask", None) is not None:
                 rollout_batch["loss_mask"] = (
-                    reward_filter_mask & self.rollout_batch["loss_mask"]
+                    reward_filter_mask & rollout_batch["loss_mask"]
                 )
             else:
                 rollout_batch["loss_mask"] = reward_filter_mask
