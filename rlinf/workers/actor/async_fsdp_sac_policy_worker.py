@@ -16,18 +16,19 @@ import asyncio
 
 import torch
 
+from rlinf.scheduler import Channel
 from rlinf.utils.metric_utils import append_to_dict, compute_split_num
 from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
 
 class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
-    async def start_replay_buffer(self, data_channel):
+    async def start_replay_buffer(self, replay_channel: Channel):
         send_num = self._component_placement.get_world_size("rollout") * self.stage_num
         recv_num = self._component_placement.get_world_size("actor")
         split_num = compute_split_num(send_num, recv_num)
         replay_buffer_task = asyncio.create_task(
             self.replay_buffer.run(
-                self.cfg, data_channel=data_channel, split_num=split_num
+                self.cfg, data_channel=replay_channel, split_num=split_num
             )
         )
         await replay_buffer_task

@@ -20,8 +20,6 @@ from omegaconf.dictconfig import DictConfig
 
 from rlinf.runners.embodied_runner import EmbodiedRunner
 from rlinf.scheduler import Channel
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.metric_utils import compute_evaluate_metrics
 from rlinf.utils.runner_utils import check_progress
 
@@ -48,36 +46,13 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         reward=None,
         run_timer=None,
     ):
-        self.cfg = cfg
-        self.actor = actor
-        self.rollout = rollout
-        self.env = env
-        self.critic = critic
-        self.reward = reward
-        self.demo_buffer = demo_buffer
-        if self.demo_buffer is not None:
-            self.demo_data_channel = Channel.create("DemoBufferChannel")
+        super().__init__(
+            cfg, actor, rollout, env, demo_buffer, critic, reward, run_timer
+        )
 
-        # this timer checks if we should stop training
-        self.run_timer = run_timer
-
-        self.consumed_samples = 0
-        # the step here is GRPO step
-        self.global_step = 0
-
-        # compute `max_steps`
-        self.set_max_steps()
-
-        self.timer = ScopedTimer(reduction="max", sync_cuda=False)
-
-        self.metric_logger = MetricLogger(cfg)
-        self.env_metric_channel = Channel.create("env_metric_buffer")
-        self.rollout_channel = Channel.create("replay_buffer")
-
-    def generate_rollouts(self):
-        env_handle = self.env.interact(self.env_metric_channel)
-        rollout_handle = self.rollout.generate(self.rollout_channel)
-        return env_handle, rollout_handle
+        # Data channels
+        self.env_metric_channel = Channel.create("EnvMetric")
+        self.replay_channel = Channel.create("ReplayBuffer")
 
     def get_env_metrics(self):
         try:
@@ -95,8 +70,17 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         start_step = self.global_step
         self.send_demo_buffer()
 
-        env_handle, rollout_handle = self.generate_rollouts()
-        self.actor.start_replay_buffer(self.rollout_channel)
+        self.env.interact(
+            input_channel=self.rollout_channel,
+            output_channel=self.env_channel,
+            env_metric_channel=self.env_metric_channel,
+        )
+        self.rollout.generate(
+            input_channel=self.env_channel,
+            output_channel=self.rollout_channel,
+            replay_channel=self.replay_channel,
+        )
+        self.actor.start_replay_buffer(self.replay_channel)
 
         train_step = start_step
         while train_step < self.max_steps:
@@ -109,8 +93,7 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
                 eval_metrics = {f"eval/{k}": v for k, v in eval_metrics.items()}
                 self.metric_logger.log(data=eval_metrics, step=train_step)
 
-            actor_handle = self.actor.run_training()
-            actor_result = actor_handle.wait()
+            actor_result = self.actor.run_training().wait()
             if not actor_result[0]:
                 time.sleep(1.0)
                 continue
@@ -125,7 +108,7 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
                 rollout_metrics = {f"env/{k}": v for k, v in env_metrics.items()}
                 self.metric_logger.log(rollout_metrics, train_step)
 
-            run_val, save_model, is_train_end = check_progress(
+            _, save_model, _ = check_progress(
                 self.global_step,
                 self.max_steps,
                 self.cfg.runner.val_check_interval,

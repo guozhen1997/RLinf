@@ -239,8 +239,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                     target_param.data.mul_(1.0 - tau)
                     target_param.data.add_(online_param.data * tau)
 
-    async def recv_rollout_batch(self):
-        await super().recv_rollout_batch()
+    def recv_rollout_batch(self, input_channel: Channel):
+        super().recv_rollout_batch(input_channel)
         self.replay_buffer.add_rollout_batch(self.rollout_batch)
 
     async def recv_demo_data(self, input_channel: Channel):
