@@ -20,6 +20,7 @@ from omegaconf.dictconfig import DictConfig
 
 from rlinf.runners.embodied_runner import EmbodiedRunner
 from rlinf.scheduler import Channel
+from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.metric_utils import compute_evaluate_metrics
 from rlinf.utils.runner_utils import check_progress
 
@@ -68,14 +69,15 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
 
     def run(self):
         start_step = self.global_step
+        self.update_rollout_weights()
         self.send_demo_buffer()
 
-        self.env.interact(
+        env_handle: Handle = self.env.interact(
             input_channel=self.rollout_channel,
             output_channel=self.env_channel,
             env_metric_channel=self.env_metric_channel,
         )
-        self.rollout.generate(
+        rollout_handle: Handle = self.rollout.generate(
             input_channel=self.env_channel,
             output_channel=self.rollout_channel,
             replay_channel=self.replay_channel,
@@ -118,4 +120,10 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
             )
             if save_model:
                 self._save_checkpoint()
+
+        self.env.stop().wait()
+        self.rollout.stop().wait()
+        env_handle.wait()
+        rollout_handle.wait()
+
         self._save_checkpoint()

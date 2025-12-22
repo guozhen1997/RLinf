@@ -30,9 +30,9 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             AsyncEmbodiedRolloutBuffer() for _ in range(self.num_pipeline_stages)
         ]
 
-        tasks = []
+        self.buffer_tasks: list[asyncio.Task] = []
         for buffer in self.buffer_list:
-            tasks.append(
+            self.buffer_tasks.append(
                 asyncio.create_task(
                     buffer.run(replay_channel, self.get_actor_split_num())
                 )
@@ -43,18 +43,19 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             // self.cfg.actor.model.num_action_chunks
         )
 
-        for _ in tqdm(
-            range(self.cfg.algorithm.rollout_epoch),
+        progress_bar = tqdm(
+            total=None,
             desc="Generating Rollout Epochs",
             disable=(self._rank != 0),
-        ):
+        )
+
+        while not self.should_stop:
             last_extracted_obs = [None for i in range(self.num_pipeline_stages)]
             last_results = [None for i in range(self.num_pipeline_stages)]
 
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
-                    await asyncio.sleep(0)
-                    env_output = self.recv_env_output(input_channel)
+                    env_output = await self.recv_env_output(input_channel)
 
                     if last_results[stage_id] is not None:
                         last_results[stage_id]["forward_inputs"] = (
@@ -99,7 +100,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     self.send_chunk_actions(output_channel, actions)
 
             for i in range(self.num_pipeline_stages):
-                env_output = self.recv_env_output(input_channel)
+                env_output = await self.recv_env_output(input_channel)
                 extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                 dones, rewards, real_extracted_obs = self.get_dones_and_rewards(
                     env_output, extracted_obs
@@ -129,5 +130,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                         last_extracted_obs[i], real_extracted_obs
                     )
 
-        for task in tasks:
-            await task
+            progress_bar.update(1)
+
+    async def stop(self):
+        self.should_stop = True
+        for buffer in self.buffer_list:
+            await buffer.stop()
+        await asyncio.gather(*self.buffer_tasks)

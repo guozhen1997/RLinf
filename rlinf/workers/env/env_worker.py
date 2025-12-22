@@ -34,6 +34,7 @@ class EnvWorker(Worker):
         self.cfg = cfg
         self.train_video_cnt = 0
         self.eval_video_cnt = 0
+        self.should_stop = False
 
         self.simulator_list = []
         self.last_obs_list = []

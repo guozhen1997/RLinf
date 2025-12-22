@@ -35,6 +35,7 @@ class MultiStepRolloutWorker(Worker):
         Worker.__init__(self)
 
         self.cfg = cfg
+        self.should_stop = False
 
         self.actor_group_name = cfg.actor.group_name
         self.device = torch.cuda.current_device()
@@ -176,9 +177,11 @@ class MultiStepRolloutWorker(Worker):
             real_extracted_obs = init_real_obs(extracted_obs)
         return dones, rewards, real_extracted_obs
 
-    def sync_model_from_actor(self):
+    async def sync_model_from_actor(self):
         """Sync model parameters from the actor worker."""
-        param_state_dict = self.recv(self.actor_group_name, src_rank=self._rank)
+        param_state_dict = await self.recv(
+            self.actor_group_name, src_rank=self._rank, async_op=True
+        ).async_wait()
 
         self.hf_model.load_state_dict(param_state_dict)
         del param_state_dict
@@ -206,7 +209,7 @@ class MultiStepRolloutWorker(Worker):
                 raise NotImplementedError(f"{forward_inputs.keys()=}")
         return forward_inputs
 
-    def generate(
+    async def generate(
         self, input_channel: Channel, output_channel: Channel, actor_channel: Channel
     ):
         if self.enable_offload:
@@ -234,7 +237,7 @@ class MultiStepRolloutWorker(Worker):
 
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
-                    env_output = self.recv_env_output(input_channel)
+                    env_output = await self.recv_env_output(input_channel)
 
                     if last_forward_inputs[stage_id] is not None:
                         last_forward_inputs[stage_id] = self.update_intervene_actions(
@@ -268,7 +271,7 @@ class MultiStepRolloutWorker(Worker):
                     self.send_chunk_actions(output_channel, actions)
 
             for stage_id in range(self.num_pipeline_stages):
-                env_output = self.recv_env_output(input_channel)
+                env_output = await self.recv_env_output(input_channel)
                 last_forward_inputs[stage_id] = self.update_intervene_actions(
                     env_output, last_forward_inputs[stage_id]
                 )
@@ -307,7 +310,7 @@ class MultiStepRolloutWorker(Worker):
         if self.enable_offload:
             self.offload_model()
 
-    def evaluate(self, input_channel: Channel, output_channel: Channel):
+    async def evaluate(self, input_channel: Channel, output_channel: Channel):
         if self.enable_offload:
             self.reload_model()
 
@@ -322,7 +325,7 @@ class MultiStepRolloutWorker(Worker):
         ):
             for _ in range(n_chunk_steps):
                 for _ in range(self.num_pipeline_stages):
-                    env_output = self.recv_env_output(input_channel, mode="eval")
+                    env_output = await self.recv_env_output(input_channel, mode="eval")
                     extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                     actions, _ = self.predict(extracted_obs, mode="eval")
                     self.send_chunk_actions(output_channel, actions, mode="eval")
@@ -338,20 +341,20 @@ class MultiStepRolloutWorker(Worker):
     def reload_model(self):
         self.hf_model = self.hf_model.to(self.device)
 
-    def recv_env_output(
+    async def recv_env_output(
         self, input_channel: Channel, mode="train"
     ) -> dict[str, torch.Tensor]:
         assert mode in ["train", "eval"], f"{mode=} is not supported"
-        env_output = input_channel.get(
-            key=f"{self._rank}_{mode}",
-        )
+        # Use asyncio so that it can run alongside async weight syncing
+        env_output = await input_channel.get(
+            key=f"{self._rank}_{mode}", async_op=True
+        ).async_wait()
         return env_output
 
     def send_chunk_actions(self, output_channel: Channel, chunk_actions, mode="train"):
         assert mode in ["train", "eval"], f"{mode=} is not supported"
         output_channel.put(
-            item=chunk_actions,
-            key=f"{self._rank}_{mode}",
+            item=chunk_actions, key=f"{self._rank}_{mode}", async_op=True
         )
 
     def send_rollout_batch(self, actor_channel: Channel, stage_id: int):
@@ -359,7 +362,7 @@ class MultiStepRolloutWorker(Worker):
         split_num = self.get_actor_split_num()
         splitted_rollout_result = self.buffer_list[stage_id].to_splitted_dict(split_num)
         for i in range(split_num):
-            actor_channel.put(item=splitted_rollout_result[i])
+            actor_channel.put(item=splitted_rollout_result[i], async_op=True)
 
     def get_actor_split_num(self):
         send_num = self.placement.get_world_size("rollout") * self.num_pipeline_stages
