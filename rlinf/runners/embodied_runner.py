@@ -13,29 +13,30 @@
 # limitations under the License.
 
 import os
-import typing
+from typing import TYPE_CHECKING
 
+from omegaconf.dictconfig import DictConfig
 from tqdm import tqdm
 
+from rlinf.scheduler import Channel
 from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.metric_utils import compute_evaluate_metrics
 from rlinf.utils.runner_utils import check_progress
 
-if typing.TYPE_CHECKING:
-    from omegaconf.dictconfig import DictConfig
+if TYPE_CHECKING:
 
     from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+    from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
     from rlinf.workers.env.env_worker import EnvWorker
     from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
-from rlinf.scheduler import Channel
 
 
 class EmbodiedRunner:
     def __init__(
         self,
-        cfg: "DictConfig",
-        actor: "EmbodiedFSDPActor",
+        cfg: DictConfig,
+        actor: "EmbodiedFSDPActor" | "EmbodiedSACFSDPPolicy",
         rollout: "MultiStepRolloutWorker",
         env: "EnvWorker",
         demo_buffer=None,
@@ -52,7 +53,7 @@ class EmbodiedRunner:
         self.reward = reward
 
         if self.demo_buffer is not None:
-            self.demo_data_channel = Channel.create(self.cfg.data.channel.name)
+            self.demo_data_channel = Channel.create("DemoBufferChannel")
 
         # this timer checks if we should stop training
         self.run_timer = run_timer
@@ -91,7 +92,7 @@ class EmbodiedRunner:
 
             for sub_demo_buffer in sub_demo_buffer_ls:
                 self.demo_data_channel.put(sub_demo_buffer, async_op=True)
-            actor_futures = self.actor.recv_demo_data()
+            actor_futures = self.actor.recv_demo_data(self.demo_data_channel)
             actor_futures.wait()
 
     def update_rollout_weights(self):

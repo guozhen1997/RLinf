@@ -14,32 +14,36 @@
 
 import asyncio
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from omegaconf.dictconfig import DictConfig
 
-from rlinf.data.replay_buffer import SACReplayBuffer
 from rlinf.runners.embodied_runner import EmbodiedRunner
 from rlinf.scheduler import Channel
 from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.metric_utils import compute_evaluate_metrics
 from rlinf.utils.runner_utils import check_progress
-from rlinf.workers.actor.async_fsdp_sac_policy_worker import AsyncEmbodiedSACFSDPPolicy
-from rlinf.workers.env.async_env_worker import AsyncEnvWorker
-from rlinf.workers.rollout.hf.async_huggingface_worker import (
-    AsyncMultiStepRolloutWorker,
-)
+
+if TYPE_CHECKING:
+    from rlinf.data.replay_buffer import SACReplayBuffer
+    from rlinf.workers.actor.async_fsdp_sac_policy_worker import (
+        AsyncEmbodiedSACFSDPPolicy,
+    )
+    from rlinf.workers.env.async_env_worker import AsyncEnvWorker
+    from rlinf.workers.rollout.hf.async_huggingface_worker import (
+        AsyncMultiStepRolloutWorker,
+    )
 
 
 class AsyncEmbodiedRunner(EmbodiedRunner):
     def __init__(
         self,
         cfg: DictConfig,
-        actor: AsyncEmbodiedSACFSDPPolicy,
-        rollout: AsyncMultiStepRolloutWorker,
-        env: AsyncEnvWorker,
-        demo_buffer: Optional[SACReplayBuffer] = None,
+        actor: "AsyncEmbodiedSACFSDPPolicy",
+        rollout: "AsyncMultiStepRolloutWorker",
+        env: "AsyncEnvWorker",
+        demo_buffer: Optional["SACReplayBuffer"] = None,
         critic=None,
         reward=None,
         run_timer=None,
@@ -52,7 +56,7 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         self.reward = reward
         self.demo_buffer = demo_buffer
         if self.demo_buffer is not None:
-            self.demo_data_channel = Channel.create(self.cfg.data.channel.name)
+            self.demo_data_channel = Channel.create("DemoBufferChannel")
 
         # this timer checks if we should stop training
         self.run_timer = run_timer

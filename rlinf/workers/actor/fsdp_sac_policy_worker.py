@@ -28,6 +28,7 @@ from rlinf.hybrid_engines.fsdp import (
     FSDP,
     FSDPModule,
 )
+from rlinf.scheduler import Channel
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import (
     append_to_dict,
@@ -52,8 +53,6 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         self.demo_buffer = None
         self.alpha_optimizer = None
         self.update_step = 0
-        if self.cfg.get("data", None) is not None:
-            self.demo_data_channel = self.connect_channel(self.cfg.data.channel.name)
 
     def init_worker(self):
         self.setup_model_and_optimizer(initialize_target=True)
@@ -244,8 +243,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         await super().recv_rollout_batch()
         self.replay_buffer.add_rollout_batch(self.rollout_batch)
 
-    async def recv_demo_data(self):
-        demo_data = await self.demo_data_channel.get(async_op=True).async_wait()
+    async def recv_demo_data(self, input_channel: Channel):
+        demo_data = await input_channel.get(async_op=True).async_wait()
         self.demo_buffer = SACReplayBuffer.create_from_buffer(
             demo_data, seed=self.cfg.actor.seed
         )
