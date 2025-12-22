@@ -37,7 +37,8 @@ class AsyncEnvWorker(EnvWorker):
             // self.cfg.actor.model.num_action_chunks
         )
 
-        for epoch in range(self.cfg.algorithm.rollout_epoch):
+        epoch = 0
+        while not self.should_stop:
             env_metrics = defaultdict(list)
             env_output_list = []
             if not self.cfg.env.train.auto_reset:
@@ -122,6 +123,9 @@ class AsyncEnvWorker(EnvWorker):
                 for env_output in env_output_list
             ]
             self.finish_rollout()
+            epoch += 1
 
+    async def stop(self):
+        self.should_stop = True
         for simulator in self.simulator_list:
             simulator.stop_simulator()

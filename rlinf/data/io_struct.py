@@ -1287,6 +1287,8 @@ class AsyncEmbodiedRolloutBuffer:
 
     batches_per_send = 1
 
+    should_stop = False
+
     @staticmethod
     def create_from_dict(data_dict_list):
         data_dict_keys = data_dict_list[0].keys()
@@ -1400,6 +1402,9 @@ class AsyncEmbodiedRolloutBuffer:
 
     async def run(self, data_channel, split_num):
         cnt = 0
-        while True:
+        while not self.should_stop:
             cnt += 1
             await self.send_data(data_channel, split_num)
+
+    async def stop(self):
+        self.should_stop = True
