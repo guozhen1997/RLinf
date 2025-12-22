@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 from omegaconf.dictconfig import DictConfig
 from tqdm import tqdm
@@ -36,7 +36,7 @@ class EmbodiedRunner:
     def __init__(
         self,
         cfg: DictConfig,
-        actor: "EmbodiedFSDPActor" | "EmbodiedSACFSDPPolicy",
+        actor: Union["EmbodiedFSDPActor", "EmbodiedSACFSDPPolicy"],
         rollout: "MultiStepRolloutWorker",
         env: "EnvWorker",
         demo_buffer=None,
