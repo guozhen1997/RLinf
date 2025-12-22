@@ -104,6 +104,23 @@ def process_nested_dict_for_train(nested_dict, shuffle_id):
     return ret_dict
 
 
+def get_nested_k_split_for_specific_keys(nested_dict, num_splits, key_list):
+    """
+    Get k-split iterator for some keys in nested_dict.
+    """
+    extra_dict = {}
+    for key in key_list:
+        if key not in nested_dict.keys():
+            continue
+        value = nested_dict[key]
+        extra_dict[key] = split_dict_to_chunk(value, num_splits)
+    # {key1: [d1, d2, ...], key2: [d1, d2, ...]} -> [{key1: d1, key2: d1}, {key1: d2, key2: d2}, ...]
+    extra_list = [
+        {k: extra_dict[k][i] for k in extra_dict.keys()} for i in range(num_splits)
+    ]
+    return extra_list
+
+
 class FSDPActor(FSDPModelManager, Worker):
     def __init__(
         self, cfg: DictConfig, placement: ModelParallelComponentPlacement
@@ -908,13 +925,20 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
-            rollout_global_batch_list = itertools.chain(
-                split_dict_to_chunk(
+            extra_dataloader_iter = itertools.chain(
+                get_nested_k_split_for_specific_keys(
                     self.rollout_batch,
-                    rollout_size // batch_size_per_rank,
+                    num_splits=rollout_size // batch_size_per_rank,
+                    key_list=["obs"],
                 )
             )
-            for train_global_batch in rollout_global_batch_list:
+            rollout_dataloader_iter = get_iterator_k_split(
+                self.rollout_batch,
+                rollout_size // batch_size_per_rank,
+            )
+            for train_global_batch, extra_global_batch in zip(
+                rollout_dataloader_iter, extra_dataloader_iter
+            ):
                 # split batch into micro_batches
                 train_global_batch_size = train_global_batch["prev_logprobs"].shape[0]
                 assert (
@@ -925,15 +949,25 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 assert train_global_batch_size % self.cfg.actor.micro_batch_size == 0, (
                     f"{train_global_batch_size=}, {self.cfg.actor.micro_batch_size}"
                 )
-                train_micro_batch_list = itertools.chain(
-                    split_dict_to_chunk(
-                        train_global_batch,
-                        train_global_batch_size // self.cfg.actor.micro_batch_size,
+
+                extra_micro_batch = itertools.chain(
+                    get_nested_k_split_for_specific_keys(
+                        extra_global_batch,
+                        num_splits=train_global_batch_size
+                        // self.cfg.actor.micro_batch_size,
+                        key_list=["obs"],
                     )
+                )
+                train_micro_batch = get_iterator_k_split(
+                    train_global_batch,
+                    train_global_batch_size // self.cfg.actor.micro_batch_size,
                 )
 
                 self.optimizer.zero_grad()
-                for idx, data in enumerate(train_micro_batch_list):
+                for idx, (data, extra_data) in enumerate(
+                    zip(train_micro_batch, extra_micro_batch)
+                ):
+                    data.update(extra_data)
                     data = put_tensor_device(
                         data, f"cuda:{int(os.environ['LOCAL_RANK'])}"
                     )

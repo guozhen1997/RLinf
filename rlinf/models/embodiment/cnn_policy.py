@@ -183,11 +183,7 @@ class CNNPolicy(BasePolicy):
         sample_action=False,
         **kwargs,
     ):
-        obs = {}
-        for key, value in data.items():
-            if key.startswith("obs/"):
-                obs[key[len("obs/") :]] = value
-
+        obs = data["obs"]
         action = data["action"]
 
         full_feature, visual_feature = self.get_feature(obs)
@@ -299,8 +295,9 @@ class CNNPolicy(BasePolicy):
             chunk_values = torch.zeros_like(chunk_logprobs[..., :1])
         forward_inputs = {"action": action}
         if return_obs:
+            forward_inputs["obs"] = {}
             for key, value in env_obs.items():
-                forward_inputs[f"obs/{key}"] = value
+                forward_inputs["obs"][key] = value
 
         result = {
             "prev_logprobs": chunk_logprobs,

@@ -1255,7 +1255,8 @@ class EmbodiedRolloutResult:
             rollout_result_dict[k] = merged_forward_inputs[k]
 
         transition_dict = stack_list_of_dict_tensor(self.transitions)
-        rollout_result_dict["transitions"] = transition_dict
+        if len(transition_dict) > 0:
+            rollout_result_dict["transitions"] = transition_dict
 
         assert len(rollout_result_dict["dones"]) == len(
             rollout_result_dict["prev_values"]
