@@ -1267,7 +1267,7 @@ class EmbodiedRolloutResult:
 
         return rollout_result_dict
 
-    def to_splited_dict(self, split_size) -> list[dict[str, Any]]:
+    def to_splitted_dict(self, split_size) -> list[dict[str, Any]]:
         return split_dict_to_chunk(self.to_dict(), split_size, dim=1)
 
 

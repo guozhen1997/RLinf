@@ -83,13 +83,11 @@ jobs:
               - 'toolkits/**'
             embodied_filter: &embodied
               - *shared
-              - 'rlinf/runners/async_embodied_runner.py'
-              - 'rlinf/data/replay_buffer.py'
               - 'rlinf/envs/**'
               - 'rlinf/workers/env/**'
               - 'rlinf/models/embodiment/**'
               - 'rlinf/models/worldmodel/**'
-              - 'rlinf/runners/embodied_*.py'
+              - 'rlinf/runners/*embodied*.py'
               - 'examples/embodiment/**'
               - 'tests/e2e_tests/embodied/**'
               - '.github/workflows/embodied-e2e-tests.yml'

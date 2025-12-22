@@ -13,26 +13,19 @@
 # limitations under the License.
 
 import asyncio
-import gc
 
-import torch
 from tqdm import tqdm
 
 from rlinf.data.io_struct import AsyncEmbodiedRolloutBuffer
 from rlinf.scheduler import Channel
-from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.nested_dict_process import put_tensor_device
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
 class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
-    def get_split_num(self):
-        send_num = self.placement.get_world_size("rollout") * self.num_pipeline_stages
-        recv_num = self.placement.get_world_size("actor")
-        split_num = compute_split_num(recv_num, send_num)
-        return split_num
-
-    async def generate(self, data_channel: Channel):
+    async def generate(
+        self, input_channel: Channel, output_channel: Channel, replay_channel: Channel
+    ):
         self.buffer_list: list[AsyncEmbodiedRolloutBuffer] = [
             AsyncEmbodiedRolloutBuffer() for _ in range(self.num_pipeline_stages)
         ]
@@ -40,7 +33,9 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         tasks = []
         for buffer in self.buffer_list:
             tasks.append(
-                asyncio.create_task(buffer.run(data_channel, self.get_split_num()))
+                asyncio.create_task(
+                    buffer.run(replay_channel, self.get_actor_split_num())
+                )
             )
 
         n_chunk_steps = (
@@ -56,10 +51,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             last_extracted_obs = [None for i in range(self.num_pipeline_stages)]
             last_results = [None for i in range(self.num_pipeline_stages)]
 
-            for chunk_step in range(n_chunk_steps):
+            for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     await asyncio.sleep(0)
-                    env_output = self.recv_env_output()
+                    env_output = self.recv_env_output(input_channel)
 
                     if last_results[stage_id] is not None:
                         last_results[stage_id]["forward_inputs"] = (
@@ -101,10 +96,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     last_extracted_obs[stage_id] = extracted_obs
                     last_results[stage_id] = result
 
-                    self.send_chunk_actions(actions)
+                    self.send_chunk_actions(output_channel, actions)
 
             for i in range(self.num_pipeline_stages):
-                env_output = self.recv_env_output()
+                env_output = self.recv_env_output(input_channel)
                 extracted_obs = self.hf_model.preprocess_env_obs(env_output["obs"])
                 dones, rewards, real_extracted_obs = self.get_dones_and_rewards(
                     env_output, extracted_obs
@@ -136,13 +131,3 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
 
         for task in tasks:
             await task
-
-    async def sync_model_from_actor(self):
-        param_state_dict = await self.recv(
-            self.actor_group_name, src_rank=self._rank, async_op=True
-        ).async_wait()
-        self.hf_model.load_state_dict(param_state_dict)
-
-        del param_state_dict
-        gc.collect()
-        torch.cuda.empty_cache()

@@ -356,12 +356,16 @@ class MultiStepRolloutWorker(Worker):
 
     def send_rollout_batch(self, actor_channel: Channel, stage_id: int):
         # send rollout_batch to actor
+        split_num = self.get_actor_split_num()
+        splitted_rollout_result = self.buffer_list[stage_id].to_splitted_dict(split_num)
+        for i in range(split_num):
+            actor_channel.put(item=splitted_rollout_result[i])
+
+    def get_actor_split_num(self):
         send_num = self.placement.get_world_size("rollout") * self.num_pipeline_stages
         recv_num = self.placement.get_world_size("actor")
         split_num = compute_split_num(recv_num, send_num)
-        splited_rollout_result = self.buffer_list[stage_id].to_splited_dict(split_num)
-        for i in range(split_num):
-            actor_channel.put(item=splited_rollout_result[i])
+        return split_num
 
     def set_global_step(self, global_step):
         if hasattr(self.hf_model, "set_global_step"):

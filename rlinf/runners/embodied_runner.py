@@ -27,9 +27,16 @@ from rlinf.utils.metric_utils import compute_evaluate_metrics
 from rlinf.utils.runner_utils import check_progress
 
 if TYPE_CHECKING:
+    from rlinf.workers.actor.async_fsdp_sac_policy_worker import (
+        AsyncEmbodiedSACFSDPPolicy,
+    )
     from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
     from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
+    from rlinf.workers.env.async_env_worker import AsyncEnvWorker
     from rlinf.workers.env.env_worker import EnvWorker
+    from rlinf.workers.rollout.hf.async_huggingface_worker import (
+        AsyncMultiStepRolloutWorker,
+    )
     from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
@@ -37,9 +44,11 @@ class EmbodiedRunner:
     def __init__(
         self,
         cfg: DictConfig,
-        actor: Union["EmbodiedFSDPActor", "EmbodiedSACFSDPPolicy"],
-        rollout: "MultiStepRolloutWorker",
-        env: "EnvWorker",
+        actor: Union[
+            "EmbodiedFSDPActor", "EmbodiedSACFSDPPolicy", "AsyncEmbodiedSACFSDPPolicy"
+        ],
+        rollout: Union["MultiStepRolloutWorker", "AsyncMultiStepRolloutWorker"],
+        env: Union["EnvWorker", "AsyncEnvWorker"],
         demo_buffer: Optional[SACReplayBuffer] = None,
         critic=None,
         reward=None,

@@ -23,7 +23,12 @@ from rlinf.workers.env.env_worker import EnvWorker
 
 
 class AsyncEnvWorker(EnvWorker):
-    async def interact(self, env_metric_channel: Channel):
+    async def interact(
+        self,
+        input_channel: Channel,
+        output_channel: Channel,
+        env_metric_channel: Channel,
+    ):
         for simulator in self.simulator_list:
             simulator.start_simulator()
 
@@ -77,16 +82,16 @@ class AsyncEnvWorker(EnvWorker):
 
             for stage_id in range(self.stage_num):
                 env_output: EnvOutput = env_output_list[stage_id]
-                self.send_env_batch(env_output.to_dict())
+                self.send_env_batch(output_channel, env_output.to_dict())
 
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.stage_num):
                     await asyncio.sleep(0)
-                    raw_chunk_actions = self.recv_chunk_actions()
+                    raw_chunk_actions = self.recv_chunk_actions(input_channel)
                     env_output, env_info = self.env_interact_step(
                         raw_chunk_actions, stage_id
                     )
-                    self.send_env_batch(env_output.to_dict())
+                    self.send_env_batch(output_channel, env_output.to_dict())
                     env_output_list[stage_id] = env_output
                     for key, value in env_info.items():
                         if (
