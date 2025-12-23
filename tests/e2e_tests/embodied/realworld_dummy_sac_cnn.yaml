@@ -86,6 +86,9 @@ env:
     override_cfg:
       is_dummy: True
       target_ee_pose: [0, 0, 0, 0, 0, 0]
+      # Dummy placeholders for robot and camera
+      robot_ip: 0.0.0.0
+      camera_serials: ["0123456789", ]
     auto_reset: True
     ignore_terminations: True
     use_fixed_reset_state_ids: False
@@ -95,6 +98,9 @@ env:
     override_cfg:
       is_dummy: True
       target_ee_pose: [0, 0, 0, 0, 0, 0]
+      # Dummy placeholders for robot and camera
+      robot_ip: 0.0.0.0
+      camera_serials: ["0123456789", ]
 
 
 rollout:

@@ -14,6 +14,7 @@
 
 import copy
 import os
+from functools import partial
 from typing import Optional, OrderedDict
 
 import gymnasium as gym
@@ -34,17 +35,22 @@ from rlinf.envs.utils import (
     tile_images,
     to_tensor,
 )
+from rlinf.scheduler import Worker
 
 
 class RealworldEnv(gym.Env):
     def __init__(self, cfg, num_envs, seed_offset, total_num_processes):
+        assert num_envs == 1, (
+            f"Currently, only 1 realworld env can be started per worker, but {num_envs=} is received."
+        )
+        assert Worker.current_worker is not None, (
+            "RealworldEnv must be created within its Worker process."
+        )
+
         self.cfg = cfg
-        self.override_cfg = {
-            "robot_ip": self.cfg.robot_ip,
-            "camera_serials": self.cfg.camera_serials,
-        }
-        override_cfg = OmegaConf.to_container(cfg.get("override_cfg", {}), resolve=True)
-        self.override_cfg.update(override_cfg)
+        self.override_cfg = OmegaConf.to_container(
+            cfg.get("override_cfg", {}), resolve=True
+        )
 
         self.video_cfg = cfg.video_cfg
 
@@ -56,10 +62,6 @@ class RealworldEnv(gym.Env):
         self.num_group = num_envs // cfg.group_size
         self.group_size = cfg.group_size
 
-        if self.num_envs != 1:
-            raise NotImplementedError(
-                f"Currently, the code only supports 1 env, but {self.num_envs=} is received."
-            )
         self._init_env()
 
         self._is_start = True
@@ -70,23 +72,24 @@ class RealworldEnv(gym.Env):
         self.video_cnt = 0
         self.render_images = []
 
+    def _create_env(self, env_idx: int):
+        assert "env_idx" not in self.override_cfg, (
+            "env_idx is a reserved key in override_cfg. Please remove it from override_cfg."
+        )
+        self.override_cfg["env_idx"] = env_idx
+        env = gym.make(id=self.cfg.init_params.id, override_cfg=self.override_cfg)
+        env = GripperCloseEnv(env)
+        if not env.config.is_dummy and env.config.use_spacemouse:
+            env = SpacemouseIntervention(env)
+        env = RelativeFrame(env)
+        env = Quat2EulerWrapper(env)
+        return env
+
     def _init_env(self):
-        env_fns = []
-        for _ in range(self.num_envs):
-
-            def env_fn():
-                env = gym.make(
-                    id=self.cfg.init_params.id, override_cfg=self.override_cfg
-                )
-                env = GripperCloseEnv(env)
-                if not env.config.is_dummy and env.config.use_spacemouse:
-                    env = SpacemouseIntervention(env)
-                env = RelativeFrame(env)
-                env = Quat2EulerWrapper(env)
-                return env
-
-            env_fns.append(env_fn)
-
+        env_fns = [
+            partial(self._create_env, env_idx=env_idx)
+            for env_idx in range(self.num_envs)
+        ]
         self.env = NoResetSyncVectorEnv(env_fns)
         self.task_descriptions = list(self.env.call("task_description"))
 

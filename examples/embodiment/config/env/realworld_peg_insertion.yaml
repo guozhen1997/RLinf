@@ -13,12 +13,6 @@ max_steps_per_rollout_epoch: 100
 max_episode_steps: 100
 use_spacemouse: True
 
-# Placeholder for dummy realworld env
-# If camera and robot are connected, will be overriden in the code
-robot_ip: 0.0.0.0
-camera_serials: ["0123456789", ]
-
-
 video_cfg:
   save_video: True
   info_on_video: True

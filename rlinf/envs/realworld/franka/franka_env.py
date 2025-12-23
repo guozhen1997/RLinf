@@ -13,11 +13,8 @@
 # limitations under the License.
 
 import copy
-import os
 import queue
-import threading
 import time
-import warnings
 from dataclasses import dataclass, field
 from itertools import cycle
 from typing import Optional
@@ -28,43 +25,20 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from rlinf.envs.realworld.common.camera import Camera, CameraInfo
-from rlinf.scheduler import Cluster, NodePlacementStrategy, Worker
+from rlinf.envs.realworld.common.video_player import VideoPlayer
+from rlinf.scheduler import Cluster, FrankaHWInfo, NodePlacementStrategy, Worker
 from rlinf.utils.logging import get_logger
 
 from .franka_robot_state import FrankaRobotState
 from .utils import construct_adjoint_matrix, construct_homogeneous_matrix, quat_slerp
 
 
-class ImageDisplayer(threading.Thread):
-    def __init__(self, queue):
-        threading.Thread.__init__(self)
-        self.queue = queue
-        self.daemon = True  # make this a daemon thread
-
-    def run(self):
-        if os.environ.get("DISPLAY") is None:
-            warnings.warn(
-                "No display found. ImageDisplayer will not run. Set DISPLAY environment variable to enable."
-            )
-            return
-
-        while True:
-            img_array = self.queue.get()  # retrieve an image from the queue
-            if img_array is None:  # None is our signal to exit
-                break
-
-            frame = np.concatenate(
-                [v for k, v in img_array.items() if "full" not in k], axis=0
-            )
-
-            cv2.imshow("RealSense Cameras", frame)
-            cv2.waitKey(1)
-
-
 @dataclass
 class FrankaRobotConfig:
-    robot_ip: str
-    camera_serials: list[str] = field(default=list)
+    env_idx: int = -1  # Index of the environment, used when multiple robots are connected to one machine
+    robot_ip: Optional[str] = None
+    camera_serials: Optional[list[str]] = None
+    enable_camera_player: bool = True
 
     is_dummy: bool = False
     use_dense_reward: bool = False
@@ -101,19 +75,6 @@ class FrankaRobotConfig:
     save_video_path: Optional[str] = None
     joint_reset_cycle: int = 200  # Number of resets before resetting joints
 
-    def __post_init__(self):
-        self.cameras = [
-            CameraInfo(name=f"wrist_{i + 1}", serial_number=n)
-            for i, n in enumerate(self.camera_serials)
-        ]
-
-    def update_from_dict(self, config_dict):
-        for key, value in config_dict.items():
-            if hasattr(self, key):
-                self.__setattr__(key, value)
-            else:
-                warnings.warn(f"{self.__class__} does not contain the key {key=}")
-
 
 class FrankaEnv(gym.Env):
     """Franka robot arm environment. This is adapted from SERL's FrankaEnv."""
@@ -130,35 +91,25 @@ class FrankaEnv(gym.Env):
                 ]
             ).copy()
         else:
-            self._reset_pose = np.zeros(
-                7,
-            )
+            self._reset_pose = np.zeros(7)
         self._num_steps = 0
         self._joint_reset_cycle = cycle(range(self.config.joint_reset_cycle))
         next(self._joint_reset_cycle)  # Initialize the cycle
 
-        # Launch Franka controller on the same node as the env
-        # TODO: Support launching on different nodes
-        cluster = Cluster()
-        if Worker.current_worker is None:
-            self._node_id = 0
-        else:
-            self._node_id = Worker.current_worker._cluster_node_rank
-        placement = NodePlacementStrategy(node_ranks=[self._node_id])
-
         # Init action and observation spaces
+        assert (
+            self.config.camera_serials is not None
+            and len(self.config.camera_serials) > 0
+        ), "At least one camera serial must be provided for FrankaEnv."
         self._init_action_obs_spaces()
 
         if self.config.is_dummy:
             return
 
-        from .franka_controller import FrankaController
+        self._setup_hardware()
 
-        self._controller = FrankaController.create_group(self.config.robot_ip).launch(
-            cluster=cluster, placement_strategy=placement
-        )
-        start_time = time.time()
         # Wait for the robot to be ready
+        start_time = time.time()
         while not self._controller.is_robot_up().wait()[0]:
             time.sleep(0.5)
             if time.time() - start_time > 30:
@@ -171,13 +122,39 @@ class FrankaEnv(gym.Env):
         self._franka_state = self._controller.get_state().wait()[0]
 
         # Init cameras
-        if self.config.cameras is not None:
-            self._cameras: list[Camera] = []
-            self._open_cameras(self.config.cameras)
+        self._open_cameras()
+        # Video player for displaying camera frames
+        self.camera_player = VideoPlayer(self.config.enable_camera_player)
 
-        self.display_img_queue = queue.Queue()
-        self.displayer = ImageDisplayer(self.display_img_queue)
-        self.displayer.start()
+    def _setup_hardware(self):
+        from .franka_controller import FrankaController
+
+        cluster = Cluster()
+        worker = Worker.current_worker
+        assert worker is not None, (
+            "FrankaEnv must be created within its Worker process."
+        )
+        assert self.config.env_idx >= 0, "env_idx must be set for FrankaEnv."
+
+        # Setup Franka IP and camera serials
+        franka_infos: list[FrankaHWInfo] = worker.hardware_infos
+        assert len(franka_infos) > self.config.env_idx, (
+            f"Not enough Franka robots assigned to env worker rank {worker._rank}. Got {len(franka_infos)} robots, but requires at least {self.config.env_idx}. Please check the num_envs setting in config and hardware assignment config."
+        )
+        franka_info = franka_infos[self.config.env_idx]
+        # Only set robot_ip and camera_serials if they are not provided in config
+        if self.config.robot_ip is None:
+            self.config.robot_ip = franka_info.config.robot_ip
+        if self.config.camera_serials is None:
+            self.config.camera_serials = franka_info.config.camera_serials
+
+        # Launch Franka controller on the same node as the env
+        placement = NodePlacementStrategy(node_ranks=[worker._cluster_node_rank])
+        self._controller = FrankaController.create_group(self.config.robot_ip).launch(
+            cluster=cluster,
+            placement_strategy=placement,
+            name=f"FrankaController-{worker._rank}-{self.config.env_idx}",
+        )
 
     def transform_action_ee_to_base(self, action):
         action[:6] = np.linalg.inv(self.adjoint_matrix) @ action[:6]
@@ -370,15 +347,22 @@ class FrankaEnv(gym.Env):
                         f"wrist_{k + 1}": gym.spaces.Box(
                             0, 255, shape=(128, 128, 3), dtype=np.uint8
                         )
-                        for k in range(len(self.config.cameras))
+                        for k in range(len(self.config.camera_serials))
                     }
                 ),
             }
         )
         self._base_observation_space = copy.deepcopy(self.observation_space)
 
-    def _open_cameras(self, camera_info: list[CameraInfo]):
-        for info in camera_info:
+    def _open_cameras(self):
+        self._cameras: list[Camera] = []
+        if self.config.camera_serials is None:
+            return
+        camera_infos = [
+            CameraInfo(name=f"wrist_{i + 1}", serial_number=n)
+            for i, n in enumerate(self.config.camera_serials)
+        ]
+        for info in camera_infos:
             camera = Camera(info)
             if not self.config.is_dummy:
                 camera.open()
@@ -429,10 +413,10 @@ class FrankaEnv(gym.Env):
                 )
                 time.sleep(5)
                 camera.close()
-                self._open_cameras(self.config.cameras)
+                self._open_cameras()
                 return self._get_camera_frames()
 
-        self.display_img_queue.put(display_frames)
+        self.camera_player.put_frame(display_frames)
         return frames
 
     # Robot actions

@@ -14,7 +14,7 @@
 
 from .channel import Channel, ChannelWorker, WeightedItem
 from .cluster import Cluster, ClusterConfig
-from .hardware import AcceleratorType, AcceleratorUtil
+from .hardware import AcceleratorType, AcceleratorUtil, FrankaHWInfo, HardwareInfo
 from .placement import (
     ComponentPlacement,
     FlexiblePlacementStrategy,
@@ -27,6 +27,8 @@ from .worker import Worker, WorkerAddress, WorkerGroupFuncResult
 __all__ = [
     "AcceleratorUtil",
     "AcceleratorType",
+    "HardwareInfo",
+    "FrankaHWInfo",
     "Cluster",
     "ClusterConfig",
     "ComponentPlacement",
