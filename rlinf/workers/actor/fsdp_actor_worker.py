@@ -116,7 +116,7 @@ def get_nested_k_split_for_specific_keys(nested_dict, num_splits, key_list):
         if isinstance(value, dict):
             extra_dict[key] = split_dict_to_chunk(value, num_splits)
         elif isinstance(value, torch.Tensor):
-            extra_dict[key] = torch.chunk(value, num_splits, dim=0)
+            continue
         else:
             raise NotImplementedError(
                 f"Only support dict and tensor type, but got {type(value)}"
