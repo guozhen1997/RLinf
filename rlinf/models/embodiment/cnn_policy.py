@@ -169,7 +169,7 @@ class CNNPolicy(BasePolicy):
             full_images = obs["full_images"][key]
             if full_images.shape[3] == 3:
                 # [B, H, W, C] -> [B, C, H, W]
-                full_images = full_images.permute(0, 3, 2, 1)
+                full_images = full_images.permute(0, 3, 1, 2)
             visual_features.append(self.encoders[key](full_images))
         visual_feature = torch.cat(visual_features, dim=-1)
         if detach_encoder:
