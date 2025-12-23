@@ -19,6 +19,7 @@ import pickle as pkl
 
 import hydra
 import numpy as np
+from tqdm import tqdm
 
 from rlinf.envs.realworld.realworld_env import RealworldEnv
 from rlinf.scheduler import Cluster, ComponentPlacement, Worker
@@ -29,7 +30,7 @@ class DataCollector(Worker):
         super().__init__()
 
         self.cfg = cfg
-        self.success_needed = 20
+        self.num_data_episodes = cfg.runner.num_data_episodes
         self.total_cnt = 0
         self.env = RealworldEnv(
             cfg.env.train, num_envs=1, seed_offset=0, total_num_processes=1
@@ -37,41 +38,62 @@ class DataCollector(Worker):
 
         self.transitions = []
 
+    def _extract_obs(self, obs):
+        for key in obs:
+            obs[key] = obs[key][0]
+        return obs
+
     def run(self):
         obs, _ = self.env.reset()
         success_cnt = 0
-        self.log_info("Start collecting data...")
-        while success_cnt < self.success_needed:
-            action = np.zeros((6,))
-            next_obs, rew, done, truncated, info = self.env.step(action)
+        progress_bar = tqdm(
+            range(self.num_data_episodes), desc="Collecting Data Episodes:"
+        )
+        while success_cnt < self.num_data_episodes:
+            action = np.zeros((1, 6))
+            next_obs, reward, done, _, info = self.env.step(action)
             if "intervene_action" in info:
                 action = info["intervene_action"]
 
-            transition = copy.deepcopy(
+            # Handle vector env
+            obs = self._extract_obs(obs)
+            next_obs = self._extract_obs(next_obs)
+            action = action[0]
+            reward = reward[0]
+            done = done[0]
+
+            transition = {
+                "obs": obs,
+                "next_obs": next_obs,
+            }
+            data = copy.deepcopy(
                 {
-                    "observations": obs,
+                    "transitions": transition,
                     "actions": action,
-                    "next_observations": next_obs,
-                    "rewards": rew,
-                    "masks": 1.0 - done,
+                    "rewards": reward,
+                    "masks": ~done,
                     "dones": done,
                 }
             )
-            self.transitions.append(transition)
+            self.transitions.append(data)
 
             obs = next_obs
 
             if done:
-                success_cnt += rew
+                success_cnt += reward
                 self.total_cnt += 1
                 self.log_info(
-                    f"{rew}\tGot {success_cnt} successes of {self.total_cnt} trials. {self.success_needed} successes needed."
+                    f"{reward}\tGot {success_cnt} successes of {self.total_cnt} trials. {self.num_data_episodes} successes needed."
                 )
                 obs, _ = self.env.reset()
+                progress_bar.update(1)
+            else:
+                self.log_info("Done is False, continue current episode.")
+
         save_file_path = os.path.join(self.cfg.runner.logger.log_path, "data.pkl")
         with open(save_file_path, "wb") as f:
             pkl.dump(self.transitions, f)
-            self.log_info(f"Saved {self.success_needed} demos to {save_file_path}")
+            self.log_info(f"Saved {self.num_data_episodes} demos to {save_file_path}")
 
         self.env.close()
 
