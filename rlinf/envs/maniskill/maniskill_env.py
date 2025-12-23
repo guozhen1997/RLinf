@@ -169,7 +169,7 @@ class ManiskillEnv(gym.Env):
             obs_image.device, dtype=torch.float32
         )
         extracted_obs = {
-            "full_images": obs_image,
+            "main_images": obs_image,
             "states": proprioception,
             "task_descriptions": self.instruction,
         }
@@ -404,7 +404,7 @@ class ManiskillEnv(gym.Env):
 
     def add_new_frames_from_obs(self, raw_obs):
         """For debugging render"""
-        raw_imgs = common.to_numpy(raw_obs["full_images"])
+        raw_imgs = common.to_numpy(raw_obs["main_images"])
         raw_full_img = tile_images(raw_imgs, nrows=int(np.sqrt(self.num_envs)))
         self.render_images.append(raw_full_img)
 

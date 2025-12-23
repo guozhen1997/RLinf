@@ -120,7 +120,7 @@ class BehaviorEnv(gym.Env):
                     zed_image = v["rgb"].to(torch.uint8)[..., :3]
 
         return {
-            "full_images": zed_image,  # [H, W, C]
+            "main_images": zed_image,  # [H, W, C]
             "wrist_images": torch.stack(
                 [left_image, right_image], axis=0
             ),  # [N_IMG, H, W, C]
@@ -133,8 +133,8 @@ class BehaviorEnv(gym.Env):
             extracted_obs_list.append(extracted_obs)
 
         obs = {
-            "full_images": torch.stack(
-                [obs["full_images"] for obs in extracted_obs_list], axis=0
+            "main_images": torch.stack(
+                [obs["main_images"] for obs in extracted_obs_list], axis=0
             ),  # [N_ENV, H, W, C]
             "wrist_images": torch.stack(
                 [obs["wrist_images"] for obs in extracted_obs_list], axis=0

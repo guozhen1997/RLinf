@@ -271,7 +271,7 @@ class MetaWorldEnv(gym.Env):
         states = images_and_states["state"]
 
         obs = {
-            "full_images": full_image_tensor,
+            "main_images": full_image_tensor,
             "states": states,
             "task_descriptions": self.task_descriptions,
         }
@@ -454,7 +454,7 @@ class MetaWorldEnv(gym.Env):
 
     def add_new_frames(self, obs, plot_infos):
         images = []
-        obs_batch = obs["full_images"]
+        obs_batch = obs["main_images"]
         for env_id in range(obs_batch.shape[0]):
             info_item = {
                 k: v if np.size(v) == 1 else v[env_id] for k, v in plot_infos.items()

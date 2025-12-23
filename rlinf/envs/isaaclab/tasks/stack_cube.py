@@ -79,7 +79,7 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         )
 
         env_obs = {
-            "full_images": table_image,
+            "main_images": table_image,
             "task_descriptions": instruction,
             "states": states,
             "wrist_images": wrist_image,

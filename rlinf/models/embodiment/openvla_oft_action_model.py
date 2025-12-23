@@ -214,12 +214,12 @@ class OpenVLAOFTForRLActionPrediction(BasePolicy, OpenVLAOFTForActionPrediction)
                 f"In: What action should the robot take to {t.lower()}?\nOut: "
                 for t in env_obs["task_descriptions"]
             ]
-            if env_obs["full_images"].ndim == 4:
-                env_obs["full_images"] = env_obs["full_images"].unsqueeze(1)
-            assert env_obs["full_images"].ndim == 5
+            if env_obs["main_images"].ndim == 4:
+                env_obs["main_images"] = env_obs["main_images"].unsqueeze(1)
+            assert env_obs["main_images"].ndim == 5
 
             all_images = [
-                env_obs["full_images"].permute(0, 1, 4, 2, 3)
+                env_obs["main_images"].permute(0, 1, 4, 2, 3)
             ]  # [B, 1, H, W, C] -> [B, 1, C, H, W]
             if self.vision_backbone.get_num_images_in_input() > 1:
                 if env_obs["wrist_images"].ndim == 4:

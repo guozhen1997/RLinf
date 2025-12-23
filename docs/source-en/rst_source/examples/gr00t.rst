@@ -48,7 +48,7 @@ Environment
 
 **Data Structure**
 
--  **Images**: Main-view and wrist-view RGB tensors, respectively named as "full_images" and "wrist_images" with shape
+-  **Images**: Main-view and wrist-view RGB tensors, respectively named as "main_images" and "wrist_images" with shape
    ``[batch_size, 224, 224, 3]``
 -  **States**: End-effector position, orientation, and gripper state
 -  **Task Descriptions**: Natural-language instructions

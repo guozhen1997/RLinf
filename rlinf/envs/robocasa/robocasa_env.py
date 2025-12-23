@@ -346,7 +346,7 @@ class RobocasaEnv(gym.Env):
 
         # Flatten structure to match libero format
         obs = {
-            "full_images": full_image_tensor,
+            "main_images": full_image_tensor,
             "wrist_images": wrist_image_tensor,
             "states": states,
             "task_descriptions": [

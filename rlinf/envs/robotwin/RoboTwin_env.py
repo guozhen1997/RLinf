@@ -565,7 +565,7 @@ class RoboTwin(gym.Env):
             img = cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR)
             return img
 
-        obs_venv = {"full_images": [], "states": [], "task_descriptions": []}
+        obs_venv = {"main_images": [], "states": [], "task_descriptions": []}
         reward_venv = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )  # [B, ]
@@ -584,7 +584,7 @@ class RoboTwin(gym.Env):
             imgs = np.array(imgs)
 
             # TODO output is 6 3 224 224, we just use first images
-            obs_venv["full_images"].append(torch.from_numpy(imgs).to(self.device))
+            obs_venv["main_images"].append(torch.from_numpy(imgs).to(self.device))
             obs_venv["states"].append(torch.from_numpy(result["state"]).to(self.device))
             obs_venv["task_descriptions"].append("")
             reward_venv[i] = torch.from_numpy(result["reward"]).to(self.device)
@@ -593,7 +593,7 @@ class RoboTwin(gym.Env):
             info_venv["return_poses"].append(
                 torch.from_numpy(result["return_poses"]).to(self.device)
             )
-        obs_venv["full_images"] = torch.stack(obs_venv["full_images"])
+        obs_venv["main_images"] = torch.stack(obs_venv["main_images"])
         obs_venv["states"] = torch.stack(obs_venv["states"])
         return obs_venv, reward_venv, terminated_venv, truncated_venv, info_venv
 

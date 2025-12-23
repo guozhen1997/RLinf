@@ -283,7 +283,7 @@ class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
     def obs_processor(self, env_obs):
         # base observation
         processed_obs = {
-            "observation/image": env_obs["full_images"],
+            "observation/image": env_obs["main_images"],
             "prompt": env_obs["task_descriptions"],
         }
         # state observation - ensure float32 to prevent BFloat16 conversion issues

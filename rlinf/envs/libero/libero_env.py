@@ -287,7 +287,7 @@ class LiberoEnv(gym.Env):
         states = images_and_states["state"]
 
         obs = {
-            "full_images": full_image_tensor,
+            "main_images": full_image_tensor,
             "wrist_images": wrist_image_tensor,
             "states": states,
             "task_descriptions": self.task_descriptions,

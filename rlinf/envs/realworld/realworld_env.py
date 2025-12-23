@@ -180,9 +180,11 @@ class RealworldEnv(gym.Env):
         obs["states"] = full_states
 
         # Process images
-        obs["full_images"] = {}
+        obs["main_images"] = {}
         for camera_name in raw_obs["frames"]:
-            obs["full_images"][camera_name] = raw_obs["frames"][camera_name]  # [B, H, W, C]
+            obs["main_images"][camera_name] = raw_obs["frames"][
+                camera_name
+            ]  # [B, H, W, C]
 
         obs = to_tensor(obs)
         obs["task_descriptions"] = self.task_descriptions
