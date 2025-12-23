@@ -42,7 +42,7 @@ class OpenVLAOFTForRLActionPrediction(BasePolicy, OpenVLAOFTForActionPrediction)
     def __init__(
         self, config: OpenVLAOFTConfig, action_dim, num_action_chunks, add_value_head
     ) -> None:
-        super().__init__(config)
+        OpenVLAOFTForActionPrediction.__init__(self, config)
 
         self.action_dim = action_dim
         self.num_action_chunks = num_action_chunks
@@ -453,7 +453,7 @@ class OpenVLAOFTForRLActionPrediction(BasePolicy, OpenVLAOFTForActionPrediction)
 
         self.input_processor = input_processor
 
-    def forward(
+    def default_forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: torch.Tensor = None,

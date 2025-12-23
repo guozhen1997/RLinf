@@ -481,7 +481,7 @@ class OpenVLAForRLActionPrediction(BasePolicy, OpenVLAForBatchActionPrediction):
         num_action_chunks,
         add_value_head,
     ):
-        super().__init__(config)
+        OpenVLAForBatchActionPrediction.__init__(self, config)
         self._init_logits_processor()
 
         action_norm_stats = self.get_action_stats(unnorm_key)
@@ -505,7 +505,7 @@ class OpenVLAForRLActionPrediction(BasePolicy, OpenVLAForBatchActionPrediction):
         self.logits_processors = LogitsProcessorList()
         self.logits_processors.append(VLALogitsProcessor(self.config.n_action_bins))
 
-    def forward(
+    def default_forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,

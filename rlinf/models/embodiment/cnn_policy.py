@@ -199,6 +199,20 @@ class CNNPolicy(BasePolicy):
         x = torch.cat([visual_feature, state_embed], dim=1)
         return x, visual_feature
 
+    def forward(self, forward_type="default_forward", **kwargs):
+        if forward_type == "sac_forward":
+            return self.sac_forward(**kwargs)
+        elif forward_type == "sac_q_forward":
+            return self.sac_q_forward(**kwargs)
+        elif forward_type == "crossq_forward":
+            return self.crossq_forward(**kwargs)
+        elif forward_type == "crossq_q_forward":
+            return self.crossq_q_forward(**kwargs)
+        elif forward_type == "default_forward":
+            return self.default_forward(**kwargs)
+        else:
+            raise NotImplementedError
+
     def default_forward(
         self,
         data,
@@ -208,7 +222,13 @@ class CNNPolicy(BasePolicy):
         sample_action=False,
         **kwargs,
     ):
-        obs = data["obs"]
+        obs = {
+            "main_images": data["main_images"],
+            "states": data["states"],
+        }
+        if "extra_view_images" in data:
+            obs["extra_view_images"] = data["extra_view_images"]
+
         action = data["action"]
 
         full_feature, visual_feature = self.get_feature(obs)
@@ -320,9 +340,10 @@ class CNNPolicy(BasePolicy):
             chunk_values = torch.zeros_like(chunk_logprobs[..., :1])
         forward_inputs = {"action": action}
         if return_obs:
-            forward_inputs["obs"] = {}
-            for key, value in env_obs.items():
-                forward_inputs["obs"][key] = value
+            forward_inputs["main_images"] = env_obs["main_images"]
+            forward_inputs["states"] = env_obs["states"]
+            if "extra_view_images" in env_obs:
+                forward_inputs["extra_view_images"] = env_obs["extra_view_images"]
 
         result = {
             "prev_logprobs": chunk_logprobs,

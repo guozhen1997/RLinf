@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import itertools
 import os
 from functools import partial
 
@@ -932,20 +931,11 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
-            extra_dataloader_iter = itertools.chain(
-                get_nested_k_split_for_specific_keys(
-                    self.rollout_batch,
-                    num_splits=rollout_size // batch_size_per_rank,
-                    key_list=["obs"],
-                )
-            )
             rollout_dataloader_iter = get_iterator_k_split(
                 self.rollout_batch,
                 rollout_size // batch_size_per_rank,
             )
-            for train_global_batch, extra_global_batch in zip(
-                rollout_dataloader_iter, extra_dataloader_iter
-            ):
+            for train_global_batch in rollout_dataloader_iter:
                 # split batch into micro_batches
                 train_global_batch_size = train_global_batch["prev_logprobs"].shape[0]
                 assert (
@@ -957,24 +947,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     f"{train_global_batch_size=}, {self.cfg.actor.micro_batch_size}"
                 )
 
-                extra_micro_batch = itertools.chain(
-                    get_nested_k_split_for_specific_keys(
-                        extra_global_batch,
-                        num_splits=train_global_batch_size
-                        // self.cfg.actor.micro_batch_size,
-                        key_list=["obs"],
-                    )
-                )
                 train_micro_batch = get_iterator_k_split(
                     train_global_batch,
                     train_global_batch_size // self.cfg.actor.micro_batch_size,
                 )
 
                 self.optimizer.zero_grad()
-                for idx, (data, extra_data) in enumerate(
-                    zip(train_micro_batch, extra_micro_batch)
-                ):
-                    data.update(extra_data)
+                for idx, data in enumerate(train_micro_batch):
                     data = put_tensor_device(
                         data, f"cuda:{int(os.environ['LOCAL_RANK'])}"
                     )

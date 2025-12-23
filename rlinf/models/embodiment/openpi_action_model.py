@@ -90,7 +90,7 @@ class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
     ):
         # Override `sample_actions` to prevent parent class polymorphic call
         sample_actions_func = self.sample_actions
-        super().__init__(config)
+        PI0Pytorch.__init__(self, config)
         self.sample_actions = sample_actions_func
         self.global_step = 0
         # assert
@@ -227,15 +227,24 @@ class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
         outputs["actions"] = outputs["actions"][:, : self.config.action_chunk]
         return outputs
 
-    def forward(
+    def forward(self, forward_type="default_forward", **kwargs):
+        if forward_type == "sft_forward":
+            return self.sft_forward(**kwargs)
+        elif forward_type == "default_forward":
+            return self.default_forward(**kwargs)
+        else:
+            raise NotImplementedError
+
+    def sft_forward(self, data, **kwargs):
+        observation = data["observation"]
+        actions = data["actions"]
+        return PI0Pytorch.forward(self, observation, actions)
+
+    def default_forward(
         self,
         data: dict[str, torch.Tensor],
         **kwargs,
     ) -> dict[str, Any]:
-        if "mode" in kwargs and kwargs["mode"] == "sft":
-            observation = data["observation"]
-            actions = data["actions"]
-            return PI0Pytorch.forward(self, observation, actions)
         # get kwargs
         compute_values = kwargs.get("compute_values", False)
         chains = data["chains"]

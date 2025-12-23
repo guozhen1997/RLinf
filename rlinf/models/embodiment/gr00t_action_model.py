@@ -424,7 +424,7 @@ class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
         obs_converter_type: str = "libero",
         output_action_chunks: int = 1,
     ):
-        super().__init__(config, local_model_path)
+        GR00T_N1_5.__init__(self, config, local_model_path)
         # The param loading is after construction in from_pretrained(), so it should be safe to to so.
         action_head_cfg = FlowmatchingActionHeadConfig(**config.action_head_cfg)
         self.action_head = FlowMatchingActionHeadForRLActionPrediction(
@@ -455,7 +455,7 @@ class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
 
     def eval(self):
         self._modality_transform.eval()
-        super().eval()
+        GR00T_N1_5.eval(self)
 
     def _check_state_is_batched(self, obs: dict[str, Any]) -> bool:
         for k, v in obs.items():
@@ -463,7 +463,7 @@ class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
                 return False
         return True
 
-    def forward(
+    def default_forward(
         self,
         data: dict[str, torch.Tensor],
         compute_logprobs: bool = True,
