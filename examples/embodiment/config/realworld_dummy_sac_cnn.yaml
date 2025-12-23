@@ -121,7 +121,6 @@ actor:
   enable_offload: False
 
   model:
-    image_keys: ["wrist_1", ]
     state_dim: 19
     action_dim: 6
 

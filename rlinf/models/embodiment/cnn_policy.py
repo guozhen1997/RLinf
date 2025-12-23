@@ -30,7 +30,7 @@ from .modules.value_head import ValueHead
 @dataclass
 class CNNConfig:
     image_size: list[int] = field(default_factory=list)
-    image_keys: list[str] = field(default_factory=str)
+    image_num: int = 1
     action_dim: int = 4
     state_dim: int = 29
     num_action_chunks: int = 1
@@ -71,15 +71,17 @@ class CNNPolicy(BasePolicy):
         self.cfg = cfg
         self.in_channels = self.cfg.image_size[0]
 
-        self.encoders = nn.ModuleDict()
+        self.encoders = nn.ModuleList()
         encoder_out_dim = 0
         if self.cfg.backbone == "resnet":
             sample_x = torch.randn(1, *self.cfg.image_size)
-            for key in self.cfg.image_keys:
-                self.encoders[key] = ResNetEncoder(
-                    sample_x, out_dim=256, model_cfg=self.cfg.extra_config
+            for img_id in range(self.cfg.image_num):
+                self.encoders.append(
+                    ResNetEncoder(
+                        sample_x, out_dim=256, model_cfg=self.cfg.extra_config
+                    )
                 )
-                encoder_out_dim += self.encoders[key].out_dim
+                encoder_out_dim += self.encoders[img_id].out_dim
         else:
             raise NotImplementedError
 
@@ -158,19 +160,26 @@ class CNNPolicy(BasePolicy):
         device = next(self.parameters()).device
         processed_env_obs = {}
         processed_env_obs["states"] = env_obs["states"].clone().to(device)
-        processed_env_obs["main_images"] = {}
-        for key, value in env_obs["main_images"].items():
-            processed_env_obs["main_images"][key] = value.clone().to(device).float() / 255.0
+        processed_env_obs["main_images"] = (
+            env_obs["main_images"].clone().to(device).float() / 255.0
+        )
+        if env_obs.get("extra_view_images", None) is not None:
+            processed_env_obs["extra_view_images"] = (
+                env_obs["extra_view_images"].clone().to(device).float() / 255.0
+            )
         return processed_env_obs
 
     def get_feature(self, obs, detach_encoder=False):
         visual_features = []
-        for key in self.cfg.image_keys:
-            main_images = obs["main_images"][key]
-            if main_images.shape[3] == 3:
+        for img_id in range(self.cfg.image_num):
+            if img_id == 0:
+                images = obs["main_images"]
+            else:
+                images = obs["extra_view_images"][:, img_id - 1]
+            if images.shape[3] == 3:
                 # [B, H, W, C] -> [B, C, H, W]
-                main_images = main_images.permute(0, 3, 1, 2)
-            visual_features.append(self.encoders[key](main_images))
+                images = images.permute(0, 3, 1, 2)
+            visual_features.append(self.encoders[img_id](images))
         visual_feature = torch.cat(visual_features, dim=-1)
         if detach_encoder:
             visual_feature = visual_feature.detach()

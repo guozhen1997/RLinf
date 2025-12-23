@@ -180,11 +180,12 @@ class RealworldEnv(gym.Env):
         obs["states"] = full_states
 
         # Process images
-        obs["main_images"] = {}
-        for camera_name in raw_obs["frames"]:
-            obs["main_images"][camera_name] = raw_obs["frames"][
-                camera_name
-            ]  # [B, H, W, C]
+        obs["main_images"] = raw_obs["frames"]["wrist_1"]
+        raw_images = OrderedDict(sorted(raw_obs["frames"].items()))
+        raw_images.pop("wrist_1")
+
+        if raw_images:
+            obs["extra_view_images"] = np.stack(list(raw_images.values()), axis=1)
 
         obs = to_tensor(obs)
         obs["task_descriptions"] = self.task_descriptions

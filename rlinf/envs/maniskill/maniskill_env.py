@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from typing import Optional, Union
+from typing import Optional, OrderedDict, Union
 
 import gymnasium as gym
 import numpy as np
@@ -133,8 +133,6 @@ class ManiskillEnv(gym.Env):
         if getattr(self.cfg, "wrap_obs_mode", "vla") == "simple":
             if self.env.unwrapped.obs_mode == "state":
                 wrapped_obs = {
-                    "images": None,
-                    "task_description": None,
                     "states": raw_obs,
                 }
             elif self.env.unwrapped.obs_mode == "rgb":
@@ -144,15 +142,18 @@ class ManiskillEnv(gym.Env):
                     raw_obs, use_torch=True, device=self.device
                 )
 
-                images = {}
-                for camera_name in sensor_data.keys():
-                    image_tensor = sensor_data[camera_name]["rgb"]  # [B, H, W, C]
-                    images[camera_name] = image_tensor.permute(
-                        0, 3, 1, 2
-                    )  # [B, C, H, W]
+                main_images = sensor_data["base_camera"]["rgb"]
+                sorted_images = OrderedDict(sorted(sensor_data.items()))
+                sorted_images.pop("base_camera")
+                extra_view_images = (
+                    torch.stack([v["rgb"] for v in sorted_images.values()], dim=1)
+                    if sorted_images
+                    else None
+                )
+
                 wrapped_obs = {
-                    "images": images,
-                    "task_description": None,
+                    "main_images": main_images,
+                    "extra_view_images": extra_view_images,
                     "states": state,
                 }
             else:

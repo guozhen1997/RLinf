@@ -36,6 +36,8 @@ obs_key_map = {
     "state": "states",
 }
 
+main_image_key = "wrist_1"
+
 
 def convert_data():
     torch_trajs = []
@@ -47,11 +49,16 @@ def convert_data():
             "next_obs": {"images": {}, "states": None},
         }
         # observations
+        extra_images = []
         for key, value in traj["observations"]["frames"].items():
-            print(f"{key=}, {value.shape=}")
             tgt_value = torch.from_numpy(value)
-            tgt_value = tgt_value.permute(2, 0, 1).float() / 255
-            torch_traj["transitions"]["obs"]["images"][key] = tgt_value
+            if key == main_image_key:
+                torch_traj["transitions"]["obs"]["main_images"] = tgt_value
+            else:
+                extra_images.append(tgt_value)
+        torch_traj["transitions"]["obs"]["extra_images"] = torch.stack(
+            extra_images, dim=1
+        )
 
         raw_states = OrderedDict(sorted(traj["observations"]["state"].items()))
         full_states = []
@@ -61,10 +68,16 @@ def convert_data():
         torch_traj["transitions"]["obs"]["states"] = torch.from_numpy(full_states)
 
         # next observations
+        next_extra_images = []
         for key, value in traj["next_observations"]["frames"].items():
             tgt_value = torch.from_numpy(value)
-            tgt_value = tgt_value.permute(2, 0, 1).float() / 255
-            torch_traj["transitions"]["next_obs"]["images"][key] = tgt_value
+            if key == main_image_key:
+                torch_traj["transitions"]["next_obs"]["main_images"] = tgt_value
+            else:
+                next_extra_images.append(tgt_value)
+        torch_traj["transitions"]["next_obs"]["extra_images"] = torch.stack(
+            next_extra_images, dim=1
+        )
 
         raw_states = OrderedDict(sorted(traj["next_observations"]["state"].items()))
         full_states = []
