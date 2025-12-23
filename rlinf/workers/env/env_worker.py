@@ -36,13 +36,14 @@ class EnvWorker(Worker):
         self.eval_video_cnt = 0
         self.should_stop = False
 
-        self.simulator_list = []
+        self.env_list: list[EnvManager] = []
+        self.eval_env_list: list[EnvManager] = []
+
         self.last_obs_list = []
         self.last_dones_list = []
         self.last_terminations_list = []
         self.last_truncations_list = []
         self.last_intervened_info_list = []
-        self.eval_simulator_list = []
 
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
         assert (
@@ -72,16 +73,14 @@ class EnvWorker(Worker):
     def init_worker(self):
         enable_offload = self.cfg.env.enable_offload
 
-        train_env_cls = get_env_cls(
-            self.cfg.env.train.simulator_type, self.cfg.env.train
-        )
-        eval_env_cls = get_env_cls(self.cfg.env.eval.simulator_type, self.cfg.env.eval)
+        train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train)
+        eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
 
         self._update_env_cfg()
 
         if not self.only_eval:
             for stage_id in range(self.stage_num):
-                self.simulator_list.append(
+                self.env_list.append(
                     EnvManager(
                         self.cfg.env.train,
                         rank=self._rank,
@@ -94,7 +93,7 @@ class EnvWorker(Worker):
                 )
         if self.enable_eval:
             for stage_id in range(self.stage_num):
-                self.eval_simulator_list.append(
+                self.eval_env_list.append(
                     EnvManager(
                         self.cfg.env.eval,
                         rank=self._rank,
@@ -107,10 +106,10 @@ class EnvWorker(Worker):
                 )
 
         if not self.only_eval:
-            self._init_simulator()
+            self._init_env()
 
     def _update_env_cfg(self):
-        if self.cfg.env.train.simulator_type == "realworld":
+        if self.cfg.env.train.env_type == "realworld":
             if self.cfg.env.train.get(
                 "override_cfg", None
             ) is None or not self.cfg.env.train.override_cfg.get("is_dummy", False):
@@ -118,7 +117,7 @@ class EnvWorker(Worker):
                 self.cfg.env.train.camera_serials = self.hardware_infos[
                     0
                 ].config.camera_serials
-        if self.cfg.env.eval.simulator_type == "realworld":
+        if self.cfg.env.eval.env_type == "realworld":
             if self.cfg.env.train.get(
                 "override_cfg", None
             ) is None or not self.cfg.env.train.override_cfg.get("is_dummy", False):
@@ -127,11 +126,11 @@ class EnvWorker(Worker):
                     0
                 ].config.camera_serials
 
-    def _init_simulator(self):
+    def _init_env(self):
         if self.cfg.env.train.auto_reset:
             for i in range(self.stage_num):
-                self.simulator_list[i].start_simulator()
-                extracted_obs, _ = self.simulator_list[i].reset()
+                self.env_list[i].start_env()
+                extracted_obs, _ = self.env_list[i].reset()
                 dones = (
                     torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
                     .unsqueeze(1)
@@ -142,7 +141,7 @@ class EnvWorker(Worker):
                 self.last_terminations_list.append(dones.clone())
                 self.last_truncations_list.append(dones.clone())
                 self.last_intervened_info_list.append((None, None))
-                self.simulator_list[i].stop_simulator()
+                self.env_list[i].stop_env()
 
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
@@ -152,7 +151,7 @@ class EnvWorker(Worker):
         """
         chunk_actions = prepare_actions(
             raw_chunk_actions=chunk_actions,
-            simulator_type=self.cfg.env.train.simulator_type,
+            env_type=self.cfg.env.train.env_type,
             model_type=self.cfg.actor.model.model_type,
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
             action_dim=self.cfg.actor.model.action_dim,
@@ -161,7 +160,7 @@ class EnvWorker(Worker):
         env_info = {}
 
         extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = (
-            self.simulator_list[stage_id].chunk_step(chunk_actions)
+            self.env_list[stage_id].chunk_step(chunk_actions)
         )
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         if not self.cfg.env.train.auto_reset:
@@ -212,7 +211,7 @@ class EnvWorker(Worker):
         """
         chunk_actions = prepare_actions(
             raw_chunk_actions=raw_actions,
-            simulator_type=self.cfg.env.train.simulator_type,
+            env_type=self.cfg.env.train.env_type,
             model_type=self.cfg.actor.model.model_type,
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
             action_dim=self.cfg.actor.model.action_dim,
@@ -221,7 +220,7 @@ class EnvWorker(Worker):
         env_info = {}
 
         extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = (
-            self.eval_simulator_list[stage_id].chunk_step(chunk_actions)
+            self.eval_env_list[stage_id].chunk_step(chunk_actions)
         )
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
 
@@ -259,16 +258,16 @@ class EnvWorker(Worker):
         if mode == "train":
             if self.cfg.env.train.video_cfg.save_video:
                 for i in range(self.stage_num):
-                    self.simulator_list[i].flush_video()
+                    self.env_list[i].flush_video()
             for i in range(self.stage_num):
-                self.simulator_list[i].update_reset_state_ids()
+                self.env_list[i].update_reset_state_ids()
         elif mode == "eval":
             if self.cfg.env.eval.video_cfg.save_video:
                 for i in range(self.stage_num):
-                    self.eval_simulator_list[i].flush_video()
+                    self.eval_env_list[i].flush_video()
             if not self.cfg.env.eval.auto_reset:
                 for i in range(self.stage_num):
-                    self.eval_simulator_list[i].update_reset_state_ids()
+                    self.eval_env_list[i].update_reset_state_ids()
 
     def split_env_batch(self, env_batch, gather_id, mode):
         env_batch_i = {}
@@ -311,8 +310,8 @@ class EnvWorker(Worker):
             )
 
     def interact(self, input_channel: Channel, output_channel: Channel):
-        for simulator in self.simulator_list:
-            simulator.start_simulator()
+        for env in self.env_list:
+            env.start_env()
 
         n_chunk_steps = (
             self.cfg.env.train.max_steps_per_rollout_epoch
@@ -324,8 +323,8 @@ class EnvWorker(Worker):
             env_output_list = []
             if not self.cfg.env.train.auto_reset:
                 for stage_id in range(self.stage_num):
-                    self.simulator_list[stage_id].is_start = True
-                    extracted_obs, infos = self.simulator_list[stage_id].reset()
+                    self.env_list[stage_id].is_start = True
+                    extracted_obs, infos = self.env_list[stage_id].reset()
                     dones = (
                         torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
                         .unsqueeze(1)
@@ -399,8 +398,8 @@ class EnvWorker(Worker):
             ]
             self.finish_rollout()
 
-        for simulator in self.simulator_list:
-            simulator.stop_simulator()
+        for env in self.env_list:
+            env.stop_env()
 
         for key, value in env_metrics.items():
             env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
@@ -411,7 +410,7 @@ class EnvWorker(Worker):
         eval_metrics = defaultdict(list)
 
         for stage_id in range(self.stage_num):
-            self.eval_simulator_list[stage_id].start_simulator()
+            self.eval_env_list[stage_id].start_env()
 
         n_chunk_steps = (
             self.cfg.env.eval.max_steps_per_rollout_epoch
@@ -419,8 +418,8 @@ class EnvWorker(Worker):
         )
         for _ in range(self.cfg.algorithm.eval_rollout_epoch):
             for stage_id in range(self.stage_num):
-                self.eval_simulator_list[stage_id].is_start = True
-                extracted_obs, infos = self.eval_simulator_list[stage_id].reset()
+                self.eval_env_list[stage_id].is_start = True
+                extracted_obs, infos = self.eval_env_list[stage_id].reset()
                 env_output = EnvOutput(
                     obs=extracted_obs,
                     final_obs=infos["final_observation"]
@@ -448,7 +447,7 @@ class EnvWorker(Worker):
 
             self.finish_rollout(mode="eval")
         for stage_id in range(self.stage_num):
-            self.eval_simulator_list[stage_id].stop_simulator()
+            self.eval_env_list[stage_id].stop_env()
 
         for key, value in eval_metrics.items():
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()

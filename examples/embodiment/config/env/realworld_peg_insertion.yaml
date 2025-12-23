@@ -1,4 +1,4 @@
-simulator_type: realworld
+env_type: realworld
 
 total_num_envs: null
 

@@ -1085,10 +1085,10 @@ The path is
 
 .. code:: yaml
 
-  simulator_type: libero
+  env_type: libero
   task_suite_name: libero_10
 
-``simulator_type``: Specifies the simulator type (libero for Libero benchmark).
+``env_type``: Specifies the simulator type (libero for Libero benchmark).
 
 ``task_suite_name``: Specifies the task suite (libero_10 for 10-task benchmark).
 
