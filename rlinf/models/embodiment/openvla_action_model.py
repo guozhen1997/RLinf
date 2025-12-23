@@ -48,6 +48,7 @@ from transformers.tokenization_utils import (
 )
 from transformers.utils import TensorType
 
+from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.model_utils import (
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
@@ -470,7 +471,7 @@ class VLALogitsProcessor(LogitsProcessor):
         return scores_processed
 
 
-class OpenVLAForRLActionPrediction(OpenVLAForBatchActionPrediction):
+class OpenVLAForRLActionPrediction(BasePolicy, OpenVLAForBatchActionPrediction):
     def __init__(
         self,
         config,
@@ -533,7 +534,8 @@ class OpenVLAForRLActionPrediction(OpenVLAForBatchActionPrediction):
         if compute_values:
             output_hidden_states = True
 
-        outputs = super().forward(
+        outputs = OpenVLAForBatchActionPrediction.forward(
+            self=self,
             input_ids=input_ids,
             attention_mask=attention_mask,
             pixel_values=pixel_values,
@@ -603,6 +605,7 @@ class OpenVLAForRLActionPrediction(OpenVLAForBatchActionPrediction):
         env_obs=None,
         calulate_logprobs=True,
         calulate_values=True,
+        return_obs=True,
         **kwargs,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         do_sample = kwargs.pop("do_sample")

@@ -31,6 +31,7 @@ from gr00t.model.gr00t_n1 import GR00T_N1_5, GR00T_N1_5_Config
 from torch.distributions import Normal
 from transformers.feature_extraction_utils import BatchFeature
 
+from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.gr00t.simulation_io import (
     ACTION_CONVERSION,
     OBS_CONVERSION,
@@ -390,7 +391,7 @@ class FlowMatchingActionHeadForRLActionPrediction(FlowmatchingActionHead):
         )
 
 
-class GR00T_N1_5_ForRLActionPrediction(GR00T_N1_5):
+class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
     """
     GR00T_N1_5 model for reinforcement learning action prediction.
     It's a combination of the Gr00tPolicy and GR00T_N1_5 model.

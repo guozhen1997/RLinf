@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import os
 from functools import partial
 
@@ -44,6 +45,11 @@ from rlinf.utils.metric_utils import (
     compute_rollout_metrics,
     compute_split_num,
 )
+from rlinf.utils.nested_dict_process import (
+    cat_list_of_dict_tensor,
+    put_tensor_device,
+    split_dict_to_chunk,
+)
 from rlinf.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
@@ -59,6 +65,67 @@ from rlinf.utils.utils import (
     retrieve_model_state_dict_in_cpu,
 )
 from rlinf.workers.rollout.utils import RankMapper
+
+
+def process_nested_dict_for_adv(nested_dict, rollout_epoch):
+    """
+    original shape: [rollout_epoch x n_chunk_steps, bsz, num_action_chunks, ...]
+    target shape: [n_chunk_steps, rollout_epoch x bsz, num_action_chunks, ...]
+    """
+    ret_dict = {}
+    for key, value in nested_dict.items():
+        if isinstance(value, torch.Tensor):
+            new_value = value.reshape(
+                rollout_epoch, -1, *value.shape[1:]
+            )  # [rollout_epoch, n_chunk_step, bsz, ...]
+            new_value = new_value.transpose(
+                0, 1
+            )  # [n_chunk_step, rollout_epoch, bsz, ...]
+            new_value = new_value.reshape(new_value.shape[0], -1, *new_value.shape[3:])
+            ret_dict[key] = new_value
+        elif isinstance(value, dict):
+            ret_dict[key] = process_nested_dict_for_adv(value, rollout_epoch)
+    return ret_dict
+
+
+def process_nested_dict_for_train(nested_dict, shuffle_id):
+    ret_dict = {}
+    for key, value in nested_dict.items():
+        if key in ["dones", "terminations", "truncations", "prev_values"]:
+            value = value[:-1]
+        if "env_info" in key:
+            raise NotImplementedError
+        if value is None:
+            ret_dict[key] = None
+        if isinstance(value, torch.Tensor):
+            ret_dict[key] = value.reshape(-1, *value.shape[2:])[shuffle_id]
+        elif isinstance(value, dict):
+            ret_dict[key] = process_nested_dict_for_train(value, shuffle_id)
+    return ret_dict
+
+
+def get_nested_k_split_for_specific_keys(nested_dict, num_splits, key_list):
+    """
+    Get k-split iterator for some keys in nested_dict.
+    """
+    extra_dict = {}
+    for key in key_list:
+        if key not in nested_dict.keys():
+            continue
+        value = nested_dict[key]
+        if isinstance(value, dict):
+            extra_dict[key] = split_dict_to_chunk(value, num_splits)
+        elif isinstance(value, torch.Tensor):
+            continue
+        else:
+            raise NotImplementedError(
+                f"Only support dict and tensor type, but got {type(value)}"
+            )
+    # {key1: [d1, d2, ...], key2: [d1, d2, ...]} -> [{key1: d1, key2: d1}, {key1: d2, key2: d2}, ...]
+    extra_list = [
+        {k: extra_dict[k][i] for k in extra_dict.keys()} for i in range(num_splits)
+    ]
+    return extra_list
 
 
 class FSDPActor(FSDPModelManager, Worker):
@@ -716,10 +783,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             recv_list.append(input_channel.get())
 
         # shape [num_chunk, bsz, chunk_size], cat dim 1
-        for key in recv_list[0].keys():
-            self.rollout_batch[key] = torch.cat(
-                [recv_list[i][key] for i in range(split_num)], dim=1
-            )
+        self.rollout_batch = cat_list_of_dict_tensor(recv_list, dim=1)
 
         self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
@@ -731,15 +795,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         target shape: [n_chunk_steps, rollout_epoch x bsz, num_action_chunks, ...]
         """
         rollout_epoch = self.cfg.algorithm.rollout_epoch
-        for key, value in rollout_batch.items():
-            new_value = value.reshape(
-                rollout_epoch, -1, *value.shape[1:]
-            )  # [rollout_epoch, n_chunk_step, bsz, ...]
-            new_value = new_value.transpose(
-                0, 1
-            )  # [n_chunk_step, rollout_epoch, bsz, ...]
-            new_value = new_value.reshape(new_value.shape[0], -1, *new_value.shape[3:])
-            rollout_batch[key] = new_value
+        rollout_batch = process_nested_dict_for_adv(rollout_batch, rollout_epoch)
 
         if (
             not self.cfg.env.train.auto_reset
@@ -762,7 +818,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             rewards = rollout_batch[
                 "rewards"
             ]  # [n_chunk_step, batch, num_action_chunks]
-            if self.rollout_batch.get("loss_mask", None) is not None:
+            if rollout_batch.get("loss_mask", None) is not None:
                 rewards = rewards * rollout_batch["loss_mask"]
             n_chunk_step, batch_size, num_action_chunks = rewards.shape
 
@@ -799,9 +855,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             )  # [n_chunk_step, batch, 1]
 
             # update loss_mask
-            if self.rollout_batch.get("loss_mask", None) is not None:
+            if rollout_batch.get("loss_mask", None) is not None:
                 rollout_batch["loss_mask"] = (
-                    reward_filter_mask & self.rollout_batch["loss_mask"]
+                    reward_filter_mask & rollout_batch["loss_mask"]
                 )
             else:
                 rollout_batch["loss_mask"] = reward_filter_mask
@@ -850,15 +906,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         shuffle_id = torch.randperm(rollout_size, generator=g)
 
         with torch.no_grad():
-            for key, value in self.rollout_batch.items():
-                if key in ["dones", "prev_values"]:
-                    value = value[:-1]
-                if "env_info" in key:
-                    continue
-                if value is None:
-                    continue
-                value = value.reshape(rollout_size, *value.shape[2:])
-                self.rollout_batch[key] = value[shuffle_id]
+            self.rollout_batch = process_nested_dict_for_train(
+                self.rollout_batch, shuffle_id
+            )
 
         assert (
             self.cfg.actor.global_batch_size
@@ -882,11 +932,20 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
+            extra_dataloader_iter = itertools.chain(
+                get_nested_k_split_for_specific_keys(
+                    self.rollout_batch,
+                    num_splits=rollout_size // batch_size_per_rank,
+                    key_list=["obs"],
+                )
+            )
             rollout_dataloader_iter = get_iterator_k_split(
                 self.rollout_batch,
                 rollout_size // batch_size_per_rank,
             )
-            for train_global_batch in rollout_dataloader_iter:
+            for train_global_batch, extra_global_batch in zip(
+                rollout_dataloader_iter, extra_dataloader_iter
+            ):
                 # split batch into micro_batches
                 train_global_batch_size = train_global_batch["prev_logprobs"].shape[0]
                 assert (
@@ -897,15 +956,28 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 assert train_global_batch_size % self.cfg.actor.micro_batch_size == 0, (
                     f"{train_global_batch_size=}, {self.cfg.actor.micro_batch_size}"
                 )
+
+                extra_micro_batch = itertools.chain(
+                    get_nested_k_split_for_specific_keys(
+                        extra_global_batch,
+                        num_splits=train_global_batch_size
+                        // self.cfg.actor.micro_batch_size,
+                        key_list=["obs"],
+                    )
+                )
                 train_micro_batch = get_iterator_k_split(
                     train_global_batch,
                     train_global_batch_size // self.cfg.actor.micro_batch_size,
                 )
 
                 self.optimizer.zero_grad()
-                for idx, data in enumerate(train_micro_batch):
-                    for k, v in data.items():
-                        data[k] = v.to(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+                for idx, (data, extra_data) in enumerate(
+                    zip(train_micro_batch, extra_micro_batch)
+                ):
+                    data.update(extra_data)
+                    data = put_tensor_device(
+                        data, f"cuda:{int(os.environ['LOCAL_RANK'])}"
+                    )
                     backward_ctx = self.before_micro_batch(
                         self.model,
                         is_last_micro_batch=(idx + 1) == self.gradient_accumulation,

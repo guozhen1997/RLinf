@@ -144,7 +144,7 @@ Main YAML + ``config/env/eval/libero_goal.yaml``:
 ==========================  =============================================
 Field                       Purpose
 ==========================  =============================================
-``simulator_type``          Must be ``libero``
+``env_type``          Must be ``libero``
 ``task_suite_name``         LIBERO split (e.g. ``libero_goal``)
 ``max_episode_steps``       Episode horizon (default 512)
 ``seed``                    Environment seed

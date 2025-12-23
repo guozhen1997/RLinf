@@ -26,6 +26,7 @@ from openpi.models import model as _model
 from openpi.models.pi0_config import Pi0Config
 from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
 
+from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
@@ -64,7 +65,7 @@ class OpenPi0Config(Pi0Config):
     value_vlm_mode: str = "mean_token"  # last_token, mean_token, first_token
 
 
-class OpenPi0ForRLActionPrediction(PI0Pytorch):
+class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
     """
     Pi0 model for reinforcement learning action prediction.
     """
@@ -234,7 +235,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         if "mode" in kwargs and kwargs["mode"] == "sft":
             observation = data["observation"]
             actions = data["actions"]
-            return super().forward(observation, actions)
+            return PI0Pytorch.forward(self, observation, actions)
         # get kwargs
         compute_values = kwargs.get("compute_values", False)
         chains = data["chains"]
@@ -323,7 +324,11 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch):
         return processed_obs
 
     def predict_action_batch(
-        self, env_obs, mode: Literal["train", "eval"] = "train", compute_values=True
+        self,
+        env_obs,
+        mode: Literal["train", "eval"] = "train",
+        compute_values=True,
+        return_obs=True,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         to_process_obs = self.obs_processor(env_obs)  # env obs -> policy input obs
         processed_obs = self.input_transform(
