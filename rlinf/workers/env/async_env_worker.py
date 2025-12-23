@@ -29,8 +29,8 @@ class AsyncEnvWorker(EnvWorker):
         output_channel: Channel,
         env_metric_channel: Channel,
     ):
-        for simulator in self.simulator_list:
-            simulator.start_simulator()
+        for env in self.env_list:
+            env.start_env()
 
         n_chunk_steps = (
             self.cfg.env.train.max_steps_per_rollout_epoch
@@ -43,7 +43,7 @@ class AsyncEnvWorker(EnvWorker):
             env_output_list = []
             if not self.cfg.env.train.auto_reset:
                 for i in range(self.stage_num):
-                    extracted_obs, infos = self.simulator_list[i].reset()
+                    extracted_obs, infos = self.env_list[i].reset()
                     self.last_obs_list.append(extracted_obs)
                     dones = (
                         torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
@@ -127,5 +127,5 @@ class AsyncEnvWorker(EnvWorker):
 
     async def stop(self):
         self.should_stop = True
-        for simulator in self.simulator_list:
-            simulator.stop_simulator()
+        for env in self.env_list:
+            env.stop_env()

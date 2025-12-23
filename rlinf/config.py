@@ -746,8 +746,8 @@ def validate_embodied_cfg(cfg):
 
     with open_dict(cfg):
         if (
-            cfg.env.train.simulator_type == "maniskill"
-            or cfg.env.eval.simulator_type == "maniskill"
+            cfg.env.train.env_type == "maniskill"
+            or cfg.env.eval.env_type == "maniskill"
         ):
 
             def get_robot_control_mode(robot: str):
@@ -769,8 +769,7 @@ def validate_embodied_cfg(cfg):
                 cfg.actor.model.policy_setup
             )
         elif (
-            cfg.env.train.simulator_type == "behavior"
-            or cfg.env.eval.simulator_type == "behavior"
+            cfg.env.train.env_type == "behavior" or cfg.env.eval.env_type == "behavior"
         ):
             import omnigibson as og
 
