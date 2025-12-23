@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .franka import FrankaConfig, FrankaHWInfo
+from .video_player import VideoPlayer
 
-__all__ = ["FrankaConfig", "FrankaHWInfo"]
+__all__ = ["VideoPlayer"]

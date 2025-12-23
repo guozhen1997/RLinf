@@ -97,7 +97,6 @@ class PegInsertionConfig(FrankaRobotConfig):
                 self.target_ee_pose[5] + self.random_rz_range,
             ]
         )
-        super().__post_init__()
 
 
 class PegInsertionEnv(FrankaEnv):
