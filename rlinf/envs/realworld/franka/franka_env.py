@@ -99,7 +99,7 @@ class FrankaRobotConfig:
     enable_gripper_penalty: bool = True
     gripper_penalty: float = 0.1
     save_video_path: Optional[str] = None
-    joint_reset_cycle: int = 200  # Number of resets before resetting joints
+    joint_reset_cycle: int = 20000  # Number of resets before resetting joints
 
     def __post_init__(self):
         self.cameras = [

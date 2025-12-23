@@ -88,7 +88,7 @@ franka = [
     "pyyaml",
     "rospkg",
     "empy==3.3.4",
-    "gymnasium",
+    "gymnasium==0.29.1",
     "pyrealsense2",
     "pyquaternion",
     "opencv-python",

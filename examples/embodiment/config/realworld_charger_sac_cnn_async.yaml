@@ -20,7 +20,7 @@ cluster:
       placement: 0-0
     env:
       node_group: franka
-      placement: 0-0
+      placement: 0
     rollout:
       node_group: "4090"
       placement: 0-0
@@ -65,13 +65,9 @@ runner:
 
 algorithm:
   update_epoch: 32
-  auto_reset: True
-  ignore_terminations: True
-  use_fixed_reset_state_ids: False
   group_size: 1
   agg_q: min
 
-  rollout_epoch: 1
   eval_rollout_epoch: 1
 
   adv_type: embodied_sac
@@ -88,8 +84,8 @@ algorithm:
   alpha_lr: 3.0e-4  # Learning rate for temperature parameter
   
   # Replay buffer settings
-  replay_buffer_capacity: 100000
-  min_buffer_size: 0  # Minimum buffer size before training starts
+  replay_buffer_capacity: 20000
+  min_buffer_size: 1  # Minimum buffer size before training starts
   target_update_freq: 1  # Frequency of target network updates
 
   # params for rollout
@@ -114,15 +110,13 @@ env:
   train:
     total_num_envs: 1
     override_cfg:
-      is_dummy: True
-      target_ee_pose: [0, 0, 0, 0, 0, 0]
-  
-  eval:
-    total_num_envs: 1
-    override_cfg:
-      is_dummy: True
-      target_ee_pose: [0, 0, 0, 0, 0, 0]
-
+      is_dummy: False
+      use_dense_reward: True
+      target_ee_pose: TARGET_EE_POSE
+      random_xy_range: 0.02
+      random_z_range_low: -0.005
+      random_z_range_high: 0.05
+      random_rz_range: 0.35 # About np.pi/9
 
 rollout:
   group_name: "RolloutGroup"

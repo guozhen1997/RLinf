@@ -24,6 +24,8 @@ from ..franka_env import FrankaEnv, FrankaRobotConfig
 class PegInsertionConfig(FrankaRobotConfig):
     target_ee_pose: np.ndarray = field(default_factory=lambda: np.zeros(6))
     random_xy_range: float = 0.05
+    random_z_range_low: float = 0.0
+    random_z_range_high: float = 0.1
     random_rz_range: float = np.pi / 6
     enable_random_reset: bool = True
     add_gripper_penalty: bool = False
@@ -71,7 +73,7 @@ class PegInsertionConfig(FrankaRobotConfig):
         }
         self.target_ee_pose = np.array(self.target_ee_pose)
         self.reset_ee_pose = self.target_ee_pose + np.array(
-            [0.0, 0.0, 0.1, 0.0, 0.0, 0.0]
+            [0.0, 0.0, self.random_z_range_high, 0.0, 0.0, 0.0]
         )
         self.reward_threshold = np.array([0.01, 0.01, 0.01, 0.2, 0.2, 0.2])
         self.action_scale = np.array([0.02, 0.1, 1])
@@ -79,7 +81,7 @@ class PegInsertionConfig(FrankaRobotConfig):
             [
                 self.target_ee_pose[0] - self.random_xy_range,
                 self.target_ee_pose[1] - self.random_xy_range,
-                self.target_ee_pose[2],
+                self.target_ee_pose[2] - self.random_z_range_low,
                 self.target_ee_pose[3] - 0.01,
                 self.target_ee_pose[4] - 0.01,
                 self.target_ee_pose[5] - self.random_rz_range,
@@ -89,7 +91,7 @@ class PegInsertionConfig(FrankaRobotConfig):
             [
                 self.target_ee_pose[0] + self.random_xy_range,
                 self.target_ee_pose[1] + self.random_xy_range,
-                self.target_ee_pose[2] + 0.1,
+                self.target_ee_pose[2] + self.random_z_range_high,
                 self.target_ee_pose[3] + 0.01,
                 self.target_ee_pose[4] + 0.01,
                 self.target_ee_pose[5] + self.random_rz_range,
