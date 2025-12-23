@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -35,7 +36,8 @@ class CNNConfig:
     state_dim: int = 29
     num_action_chunks: int = 1
     backbone: str = "resnet"
-    extra_config: dict[str, Any] = field(default_factory=dict)
+    model_path: Optional[str] = None
+    encoder_config: dict[str, Any] = field(default_factory=dict)
     add_value_head: bool = False
     add_q_head: bool = False
     q_head_type: str = "default"
@@ -64,6 +66,16 @@ class CNNConfig:
             if self.backbone == "resnet":
                 self.std_range = (1e-5, 5)
 
+        assert self.model_path is not None, "Please specify the model_path."
+        assert "ckpt_name" in self.encoder_config, (
+            "Please specify the ckpt_name in encoder_config to load pretrained encoder weights."
+        )
+        ckpt_path = os.path.join(self.model_path, self.encoder_config["ckpt_name"])
+        assert os.path.exists(ckpt_path), (
+            f"Pretrained encoder weights not found at {ckpt_path} with model path {self.model_path} and encoder ckpt name {self.encoder_config['ckpt_name']}"
+        )
+        self.encoder_config["ckpt_path"] = ckpt_path
+
 
 class CNNPolicy(BasePolicy):
     def __init__(self, cfg: CNNConfig):
@@ -78,7 +90,7 @@ class CNNPolicy(BasePolicy):
             for img_id in range(self.cfg.image_num):
                 self.encoders.append(
                     ResNetEncoder(
-                        sample_x, out_dim=256, model_cfg=self.cfg.extra_config
+                        sample_x, out_dim=256, encoder_cfg=self.cfg.encoder_config
                     )
                 )
                 encoder_out_dim += self.encoders[img_id].out_dim

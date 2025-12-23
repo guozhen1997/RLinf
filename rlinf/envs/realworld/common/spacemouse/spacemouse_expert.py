@@ -15,7 +15,6 @@
 import threading
 
 import numpy as np
-import pyspacemouse
 
 
 class SpaceMouseExpert:
@@ -26,6 +25,8 @@ class SpaceMouseExpert:
     """
 
     def __init__(self):
+        import pyspacemouse
+
         pyspacemouse.open()
 
         self.state_lock = threading.Lock()
@@ -36,6 +37,8 @@ class SpaceMouseExpert:
         self.thread.start()
 
     def _read_spacemouse(self):
+        import pyspacemouse
+
         while True:
             state = pyspacemouse.read()
             with self.state_lock:

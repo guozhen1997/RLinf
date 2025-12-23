@@ -96,11 +96,11 @@ class SpatialLearnedEmbeddings(nn.Module):
 
 
 class ResNetEncoder(nn.Module):
-    def __init__(self, sample_x, out_dim=256, model_cfg=None):
+    def __init__(self, sample_x, out_dim=256, encoder_cfg=None):
         super().__init__()
 
         self.out_dim = out_dim
-        self.model_cfg = model_cfg
+        self.encoder_cfg = encoder_cfg
 
         self.num_spatial_blocks = 8
         self.pooling_method = "spatial_learned_embeddings"
@@ -134,7 +134,10 @@ class ResNetEncoder(nn.Module):
         init_mlp_weights(self.mlp, nonlinearity="tanh")
 
     def _load_pretrained_weights(self):
-        model_dict = torch.load(self.model_cfg["pretrained_ckpt_path"])
+        assert "ckpt_path" in self.encoder_cfg, (
+            "Please use model_path and ckpt_name to specify the pretrained encoder weights path."
+        )
+        model_dict = torch.load(self.encoder_cfg["ckpt_path"])
         self.resnet_backbone.load_state_dict(model_dict)
 
     def _freeze_backbone_weights(self):
