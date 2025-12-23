@@ -15,9 +15,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 0-0
-    env: 0-0
-    rollout: 0-0
+    actor,env,rollout: 0
 
 runner:
   task_type: embodied
@@ -27,7 +25,7 @@ runner:
     experiment_name: "ci-test"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
-  max_epochs: 10
+  max_epochs: 2
   max_steps: -1
 
   only_eval: False
@@ -108,8 +106,7 @@ rollout:
 
   model:
     precision: ${actor.model.precision}
-    extra_config:
-      pretrained_ckpt_path: "/workspace/dataset/resnet/resnet10_pretrained.pt"
+    model_path: "/workspace/dataset/resnet"
 
 actor:
   group_name: "ActorGroup"
@@ -124,6 +121,7 @@ actor:
   enable_offload: False
 
   model:
+    model_path: "/workspace/dataset/resnet"
     state_dim: 19
     action_dim: 6
 
