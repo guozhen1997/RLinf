@@ -158,15 +158,19 @@ class CNNPolicy(BasePolicy):
         device = next(self.parameters()).device
         processed_env_obs = {}
         processed_env_obs["states"] = env_obs["states"].clone().to(device)
-        processed_env_obs["images"] = {}
-        for key, value in env_obs["images"].items():
-            processed_env_obs["images"][key] = value.clone().to(device).float() / 255.0
+        processed_env_obs["full_images"] = {}
+        for key, value in env_obs["full_images"].items():
+            processed_env_obs["full_images"][key] = value.clone().to(device).float() / 255.0
         return processed_env_obs
 
     def get_feature(self, obs, detach_encoder=False):
         visual_features = []
         for key in self.cfg.image_keys:
-            visual_features.append(self.encoders[key](obs["images"][key]))
+            full_images = obs["full_images"][key]
+            if full_images.shape[3] == 3:
+                # [B, H, W, C] -> [B, C, H, W]
+                full_images = full_images.permute(0, 3, 2, 1)
+            visual_features.append(self.encoders[key](full_images))
         visual_feature = torch.cat(visual_features, dim=-1)
         if detach_encoder:
             visual_feature = visual_feature.detach()
