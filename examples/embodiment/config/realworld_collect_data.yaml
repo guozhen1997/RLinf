@@ -35,3 +35,11 @@ runner:
     project_name: rlinf
     experiment_name: "collect-data"
     logger_backends: ["tensorboard"] # wandb, swanlab
+
+env:
+  group_name: "EnvGroup"
+
+  train:
+    use_spacemouse: True
+    override_cfg:
+      target_ee_pose: [0, 0, 0, 0, 0, 0]
