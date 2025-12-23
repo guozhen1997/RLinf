@@ -180,10 +180,9 @@ class RealworldEnv(gym.Env):
         obs["states"] = full_states
 
         # Process images
-        obs["images"] = {}
+        obs["full_images"] = {}
         for camera_name in raw_obs["frames"]:
-            image_numpy: np.ndarray = raw_obs["frames"][camera_name]  # [B, H, W, C]
-            obs["images"][camera_name] = np.moveaxis(image_numpy, 3, 1)  # [B, C, H, W]
+            obs["full_images"][camera_name] = raw_obs["frames"][camera_name]  # [B, H, W, C]
 
         obs = to_tensor(obs)
         obs["task_descriptions"] = self.task_descriptions
