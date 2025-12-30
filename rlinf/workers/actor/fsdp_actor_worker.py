@@ -601,58 +601,47 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
         self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
-    def _process_received_rollout_batch(self, rollout_batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _process_received_rollout_batch(
+        self, rollout_batch: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """
-        输入 rollout_batch 的每个 tensor 形状（第0维）是把 rollout_epoch 和 n_chunk_steps 展平后的：
-            原始: [rollout_epoch * n_chunk_steps, bsz, num_action_chunks, ...]
-        目标是把时间维 n_chunk_steps 放到最前面，并把 rollout_epoch 合并进 batch：
-            目标: [n_chunk_steps, rollout_epoch * bsz, num_action_chunks, ...]
+        original shape: [rollout_epoch x n_chunk_steps, bsz, num_action_chunks, ...]
+        target shape: [n_chunk_steps, rollout_epoch x bsz, num_action_chunks, ...]
         """
         rollout_epoch = self.cfg.algorithm.rollout_epoch
-
-        # 1) 对 batch 中每个字段统一做 reshape/transpose，以对齐维度语义
         for key, value in rollout_batch.items():
-            # value: [rollout_epoch*n_chunk_steps, bsz, num_action_chunks, ...]
-            # reshape -> [rollout_epoch, n_chunk_steps, bsz, num_action_chunks, ...]
-            new_value = value.reshape(rollout_epoch, -1, *value.shape[1:])
-
-            # transpose -> [n_chunk_steps, rollout_epoch, bsz, num_action_chunks, ...]
-            new_value = new_value.transpose(0, 1)
-
-            # 合并 rollout_epoch 和 bsz -> [n_chunk_steps, rollout_epoch*bsz, num_action_chunks, ...]
-            # new_value.shape[3:] 从第3维开始保留 (num_action_chunks, ...)
+            new_value = value.reshape(
+                rollout_epoch, -1, *value.shape[1:]
+            )  # [rollout_epoch, n_chunk_step, bsz, ...]
+            new_value = new_value.transpose(
+                0, 1
+            )  # [n_chunk_step, rollout_epoch, bsz, ...]
             new_value = new_value.reshape(new_value.shape[0], -1, *new_value.shape[3:])
-
             rollout_batch[key] = new_value
 
-        # 2) 如果环境不会自动 reset 且不忽略终止信号，则根据 dones 计算 loss_mask
-        if (not self.cfg.env.train.auto_reset and not self.cfg.env.train.ignore_terminations):
-            # dones: [n_chunk_steps, batch(=rollout_epoch*bsz), num_action_chunks]
-            dones = rollout_batch["dones"]
-
-            # loss_mask: 终止后的时间步/位置置 False，用于屏蔽无效数据
-            # loss_mask_sum: 每条样本有效步数统计（用于归一化/均值等）
+        if (
+            not self.cfg.env.train.auto_reset
+            and not self.cfg.env.train.ignore_terminations
+        ):
+            dones = rollout_batch[
+                "dones"
+            ]  # [n_chunk_step, rollout_epoch x bsz, num_action_chunks]
             loss_mask, loss_mask_sum = compute_loss_mask(dones)
 
-            # 若 reward_type 为 chunk_level，则把 num_action_chunks 维压缩成 1
             if self.cfg.algorithm.reward_type == "chunk_level":
-                # 只要任意 chunk 有效，就认为该 step 有效（需与你的任务语义一致）
                 loss_mask = loss_mask.any(dim=-1, keepdim=True)
                 loss_mask_sum = loss_mask_sum[..., -1:]
 
             rollout_batch["loss_mask"] = loss_mask
             rollout_batch["loss_mask_sum"] = loss_mask_sum
 
-        # 3) reward_filter：按 prompt 级别过滤样本（整组丢弃），通过更新 loss_mask 实现
+        # filter data by rewards
         if self.cfg.algorithm.get("filter_rewards", False):
-            # rewards: [n_chunk_steps, batch, num_action_chunks]
-            rewards = rollout_batch["rewards"]
-
-            # 更合理的是 rollout_batch.get("loss_mask")
+            rewards = rollout_batch[
+                "rewards"
+            ]  # [n_chunk_step, batch, num_action_chunks]
             if self.rollout_batch.get("loss_mask", None) is not None:
-                # 仅统计有效时间步的 reward（终止后的 reward 不计）
                 rewards = rewards * rollout_batch["loss_mask"]
-
             n_chunk_step, batch_size, num_action_chunks = rewards.shape
 
             group_size = self.cfg.algorithm.group_size
@@ -661,39 +650,37 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             )
             n_prompts = batch_size // group_size
 
-            # 将 rewards 变形为按 rollout（batch）汇总的矩阵
-            # [n_chunk_steps, batch, num_action_chunks] -> [batch, n_chunk_steps, num_action_chunks]
-            rewards = rewards.transpose(0, 1)
-
-            # 把时间维与 chunk 维展平成一个 step 维：每条 rollout 的总步数
+            # calculate rewards by prompt
+            rewards = rewards.transpose(
+                0, 1
+            )  # [batch, n_chunk_step, num_action_chunks]
             rewards = rewards.reshape(rewards.shape[0], -1)  # [batch, n_step]
+            reward_matrix = rewards.reshape(
+                n_prompts, group_size, rewards.shape[-1]
+            )  # [n_prompts, group_size, n_step]
+            reward_matrix = reward_matrix.sum(dim=-1)  # [n_prompts, group_size]
+            mean_reward_in_group = reward_matrix.mean(dim=1)  # [n_prompts]
 
-            # 按 prompt 分组：[n_prompts, group_size, n_step]
-            reward_matrix = rewards.reshape(n_prompts, group_size, rewards.shape[-1])
-
-            # 对每条 rollout 的 n_step 求和，得到总回报：[n_prompts, group_size]
-            reward_matrix = reward_matrix.sum(dim=-1)
-
-            # 每个 prompt 在组内的平均回报：[n_prompts]
-            mean_reward_in_group = reward_matrix.mean(dim=1)
-
-            # 根据区间过滤 prompt：只保留平均回报在 [lower, upper] 内的 prompt
+            # mask
             reward_filter_mask = (
                 mean_reward_in_group >= self.cfg.algorithm.rewards_lower_bound
             ) & (
                 mean_reward_in_group <= self.cfg.algorithm.rewards_upper_bound
             )  # [n_prompts]
 
-            # 将 prompt 级 mask 扩展到 rollout 级（每个 prompt 对应 group_size 条 rollout）
-            reward_filter_mask = reward_filter_mask.repeat_interleave(group_size)  # [batch]
+            # extend mask dimension
+            reward_filter_mask = reward_filter_mask.repeat_interleave(
+                group_size
+            )  # [batch]
+            reward_filter_mask = (
+                reward_filter_mask.unsqueeze(0).expand(n_chunk_step, -1).unsqueeze(-1)
+            )  # [n_chunk_step, batch, 1]
 
-            # 再扩展到时间维与 chunk 维（作为 loss_mask 使用）
-            reward_filter_mask = reward_filter_mask.unsqueeze(0).expand(n_chunk_step, -1).unsqueeze(-1)
-            # shape: [n_chunk_steps, batch, 1]
-
-            # 更新 loss_mask：只有通过 reward_filter 的数据才参与训练梯度
+            # update loss_mask
             if self.rollout_batch.get("loss_mask", None) is not None:
-                rollout_batch["loss_mask"] = reward_filter_mask & self.rollout_batch["loss_mask"]
+                rollout_batch["loss_mask"] = (
+                    reward_filter_mask & self.rollout_batch["loss_mask"]
+                )
             else:
                 rollout_batch["loss_mask"] = reward_filter_mask
 
@@ -730,7 +717,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             "rollout_epoch": self.cfg.algorithm.get("rollout_epoch", 1),
         }
 
-        # 计算优势函数和回报
         advantages_and_returns = calculate_adv_and_returns(**kwargs)
 
         self.rollout_batch.update(advantages_and_returns)
@@ -740,7 +726,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 "loss_mask_sum": kwargs["loss_mask_sum"],
             }
         )
-        # 计算rollout的指标
         rollout_metrics = compute_rollout_metrics(self.rollout_batch)
         return rollout_metrics
 
@@ -791,7 +776,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
-            debug_datas = {"res": []}
             rollout_dataloader_iter = get_iterator_k_split(
                 self.rollout_batch,
                 rollout_size // batch_size_per_rank,
@@ -871,9 +855,8 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         "critic_warmup": self.optimizer_steps
                         < self.critic_warmup_steps,
                     }
-                    
                     loss, metrics_data = policy_loss(**kwargs)
-                    
+
                     entropy_loss = torch.tensor(0.0, device=torch.cuda.current_device())
                     if (
                         self.cfg.algorithm.entropy_bonus > 0
@@ -889,7 +872,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         entropy_loss = masked_mean(entropy, mask=loss_mask)
                         loss -= self.cfg.algorithm.entropy_bonus * entropy_loss
                     metrics_data["entropy_loss"] = entropy_loss.detach().item()
-                    metrics_data["loss_before_scaling"] = loss.detach().item()
+
                     loss /= self.gradient_accumulation
                     with backward_ctx:
                         self.grad_scaler.scale(loss).backward()
@@ -907,7 +890,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 if len(lr_list) > 1:
                     data["critic/lr"] = lr_list[1]
                 append_to_dict(metrics, data)
-                
         # put LR scheduler step here
         self.lr_scheduler.step()
         self.optimizer.zero_grad()

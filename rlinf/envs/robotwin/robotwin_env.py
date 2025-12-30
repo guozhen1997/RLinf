@@ -32,7 +32,14 @@ __all__ = ["RoboTwinEnv"]
 
 
 class RoboTwinEnv(gym.Env):
-    def __init__(self, cfg, seed_offset, mode="train", total_num_processes=None, record_metrics=True):
+    def __init__(
+        self,
+        cfg,
+        seed_offset,
+        mode="train",
+        total_num_processes=None,
+        record_metrics=True,
+    ):
         self.mode = mode
         env_seed = cfg.seed
         self.seed = env_seed + seed_offset
@@ -77,7 +84,7 @@ class RoboTwinEnv(gym.Env):
         from robotwin.envs.vector_env import VectorEnv
 
         env_seeds = self.reset_state_ids.tolist()
-        
+
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
@@ -196,9 +203,6 @@ class RoboTwinEnv(gym.Env):
         return extracted_obs
 
     def _calc_step_reward(self, terminations):
-        # reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-
-        # reward += terminations * 1.0
         reward = self.cfg.reward_coef * terminations
 
         reward_diff = reward - self.prev_step_reward
@@ -259,7 +263,9 @@ class RoboTwinEnv(gym.Env):
             # [n_envs, action_dim] -> [n_envs, 1, action_dim]
             actions = actions[:, None, :]
 
-        raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(actions)
+        raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
+            actions
+        )
         extracted_obs = self._extract_obs_image(raw_obs)
         infos = list_of_dict_to_dict_of_list(info_list)
 
@@ -281,7 +287,7 @@ class RoboTwinEnv(gym.Env):
                     device=self.device,
                 )
         self._elapsed_steps += actions.shape[1]
-        
+
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
         if truncated.any():
             truncations = torch.logical_or(truncated, truncations)
@@ -307,7 +313,7 @@ class RoboTwinEnv(gym.Env):
             extracted_obs, infos = self._handle_auto_reset(dones, extracted_obs, infos)
 
         return extracted_obs, step_reward, terminations, truncations, infos
-    
+
     # 增加一个mode用于控制eval/train
     def chunk_step(self, chunk_actions, mode="eval"):
         if isinstance(chunk_actions, torch.Tensor):
@@ -317,7 +323,9 @@ class RoboTwinEnv(gym.Env):
         num_envs = chunk_actions.shape[0]
         chunk_step = chunk_actions.shape[1]
 
-        raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(chunk_actions)
+        raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
+            chunk_actions
+        )
         extracted_obs = self._extract_obs_image(raw_obs)
         infos = list_of_dict_to_dict_of_list(info_list)
         if isinstance(terminations, list):
@@ -338,10 +346,12 @@ class RoboTwinEnv(gym.Env):
                     device=self.device,
                 )
 
-        chunk_rewards = self._cal_chunk_rewards(step_reward, chunk_step, terminations, infos)
+        chunk_rewards = self._cal_chunk_rewards(
+            step_reward, chunk_step, terminations, infos
+        )
 
         self._elapsed_steps += chunk_actions.shape[1]
-        
+
         truncated = self._elapsed_steps >= self.cfg.max_episode_steps
         if truncated.any():
             truncations = torch.logical_or(truncated, truncations)
@@ -425,10 +435,12 @@ class RoboTwinEnv(gym.Env):
         self.render_images.append(full_image)
 
     def _init_reset_state_ids(self):
-        if self.cfg.get("seeds_path", None) is not None and os.path.exists(self.cfg.seeds_path):
+        if self.cfg.get("seeds_path", None) is not None and os.path.exists(
+            self.cfg.seeds_path
+        ):
             with open(self.cfg.seeds_path, "r") as f:
                 data = json.load(f)
-            
+
             success_seeds = data[self.task_name].get("success_seeds", None)
             if success_seeds is not None:
                 success_seeds = torch.as_tensor(success_seeds, dtype=torch.long)
@@ -460,15 +472,20 @@ class RoboTwinEnv(gym.Env):
                 total_seeds = self.success_seeds.numel()
                 end_index = self._current_seed_index + self.num_group
                 if end_index <= total_seeds:
-                    reset_state_ids = self.success_seeds[self._current_seed_index:end_index]
+                    reset_state_ids = self.success_seeds[
+                        self._current_seed_index : end_index
+                    ]
                 else:
                     # If exceeds, take from beginning (wrap around)
-                    remaining = self.num_group - (total_seeds - self._current_seed_index)
-                    reset_state_ids = torch.cat([
-                        self.success_seeds[self._current_seed_index:],
-                        self.success_seeds[:remaining]
-                    ])
-                # # repeat_interleave 按 group_size 重复，适用于GRPO算法
+                    remaining = self.num_group - (
+                        total_seeds - self._current_seed_index
+                    )
+                    reset_state_ids = torch.cat(
+                        [
+                            self.success_seeds[self._current_seed_index :],
+                            self.success_seeds[:remaining],
+                        ]
+                    )
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )
@@ -486,21 +503,27 @@ class RoboTwinEnv(gym.Env):
                 )
             for idx in env_idx:
                 self.reset_state_ids[idx] = reset_state_ids[idx]
-        
+
         else:
-            # 
+            #
             if self.success_seeds is not None:
                 total_seeds = self.success_seeds.numel()
                 end_index = self._current_seed_index + self.num_group
                 if end_index <= total_seeds:
-                    reset_state_ids = self.success_seeds[self._current_seed_index:end_index]
+                    reset_state_ids = self.success_seeds[
+                        self._current_seed_index : end_index
+                    ]
                 else:
                     # If exceeds, take from beginning (wrap around)
-                    remaining = self.num_group - (total_seeds - self._current_seed_index)
-                    reset_state_ids = torch.cat([
-                        self.success_seeds[self._current_seed_index:],
-                        self.success_seeds[:remaining]
-                    ])
+                    remaining = self.num_group - (
+                        total_seeds - self._current_seed_index
+                    )
+                    reset_state_ids = torch.cat(
+                        [
+                            self.success_seeds[self._current_seed_index :],
+                            self.success_seeds[:remaining],
+                        ]
+                    )
                 reset_state_ids = reset_state_ids.repeat_interleave(
                     repeats=self.group_size
                 )

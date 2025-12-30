@@ -25,27 +25,29 @@ def compute_split_num(num, split_num):
 def count_trajectories(metrics_dict):
     """
     Count the total number of trajectories from metrics dictionary.
-    
+
     Args:
         metrics_dict: Dictionary of metrics where each value is a tensor after concatenation.
                      Each tensor's first dimension represents the number of trajectories.
-    
+
     Returns:
         int: Total number of trajectories. If metrics_dict is empty, returns 0.
     """
     if not metrics_dict:
         return 0
-    
+
     # Use the first metric tensor to get the trajectory count
     # All metrics should have the same first dimension (number of trajectories)
     first_key = next(iter(metrics_dict.keys()))
     first_tensor = metrics_dict[first_key]
-    
+
     if isinstance(first_tensor, torch.Tensor):
         return first_tensor.shape[0]
     elif isinstance(first_tensor, list):
         # If it's a list of tensors, sum up all trajectory counts
-        return sum(t.shape[0] if isinstance(t, torch.Tensor) else len(t) for t in first_tensor)
+        return sum(
+            t.shape[0] if isinstance(t, torch.Tensor) else len(t) for t in first_tensor
+        )
     else:
         raise TypeError(f"Unsupported tensor type: {type(first_tensor)}")
 
@@ -53,13 +55,13 @@ def count_trajectories(metrics_dict):
 def compute_evaluate_metrics(eval_metrics_list):
     """
     List of evaluate metrics, list length stands for rollout process
-    
+
     Returns:
         dict: Aggregated metrics with mean values and trajectory count
     """
     all_eval_metrics = {}
     env_info_keys = eval_metrics_list[0].keys()
-    
+
     # Count trajectories from each process
     # If num_trajectories is already in the metrics, use it; otherwise count from tensor shape
     trajectory_counts = []
@@ -76,7 +78,7 @@ def compute_evaluate_metrics(eval_metrics_list):
         all_eval_metrics[key] = (
             torch.concat(all_eval_metrics[key]).float().mean().numpy()
         )
-    
+
     # Add total trajectory count to metrics
     all_eval_metrics["num_trajectories"] = sum(trajectory_counts)
 
@@ -147,37 +149,20 @@ def append_to_dict(data, new_data):
             data[key] = []
         data[key].append(val)
 
+
 def compute_loss_mask(dones):
-    '''
-    batch中的每一条数据代表一条trajectory，计算每个trajectory的有效掩码；
-    标记「有效动作步骤」（未终止的回合），屏蔽「已终止回合的后续无效步骤」
-    '''
-    '''
-    dones: 终止标志张量，形状 [n_chunk_step + 1, actual_bsz, num_action_chunks]
-        - n_chunk_step: 分块动作的步数（轨迹长度）
-        - actual_bsz: 实际批次大小（rollout_epoch × batch_size）
-        - num_action_chunks: 每个时间步的动作分块数（如机械臂多维度动作分块）
-    '''
-    
-    # 21 * 1 * 25
     _, actual_bsz, num_action_chunks = dones.shape
     n_chunk_step = dones.shape[0] - 1
-
-    # 525 * 1
-    # 展平dones，适配分块动作的维度合并, # [n_chunk_step + 1 * rollout_epoch , bsz]
     flattened_dones = dones.transpose(1, 2).reshape(
         -1, actual_bsz
     )  # [n_chunk_step + 1, rollout_epoch x bsz]
-    
     flattened_dones = flattened_dones[
         -(n_chunk_step * num_action_chunks + 1) :
     ]  # [n_steps+1, actual-bsz]
-
     flattened_loss_mask = (flattened_dones.cumsum(dim=0) == 0)[
         :-1
     ]  # [n_steps, actual-bsz]
-    
-    # reshape: 500 * 25 -> 20 * 1 * 25
+
     loss_mask = flattened_loss_mask.reshape(n_chunk_step, num_action_chunks, actual_bsz)
     loss_mask = loss_mask.transpose(
         1, 2

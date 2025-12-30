@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import gc
 
-import copy
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
@@ -58,7 +58,6 @@ class MultiStepRolloutWorker(Worker):
             self.hf_model.setup_config_and_processor(
                 model_config, self.cfg, input_processor
             )
-        # rollout model in eval mode
         self.hf_model.eval()
 
         self.setup_sample_params()
@@ -181,8 +180,9 @@ class MultiStepRolloutWorker(Worker):
             for _ in range(self.stage_num):
                 env_output = self.recv_env_output()
                 # eval must do_sample=False
-                actions, _ = self.predict(env_output["obs"], do_sample=False, mode="eval")
-
+                actions, _ = self.predict(
+                    env_output["obs"], do_sample=False, mode="eval"
+                )
                 self.send_chunk_actions(actions)
 
         if self.cfg.rollout.get("enable_offload", False):

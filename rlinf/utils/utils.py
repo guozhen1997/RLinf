@@ -105,18 +105,13 @@ def configure_batch_sizes(rank, mbs, gbs, dp=1):
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis=None):
     """Compute mean of tensor with a masked values."""
-    # auto_reset ignore_termianl not all false
     if mask is None:
         return values.mean(axis=axis)
-    # avoid zero division
     elif (~mask).all():
         mask = mask.expand_as(values)
         return (values * mask).sum(axis=axis)
-    # 
     else:
-        # mask expand value's dim 
         # e.g., values: [B, T, D], mask: [B, T, 1]
-        # mask
         mask = mask.expand_as(values)
         return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
 

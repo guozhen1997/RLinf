@@ -73,7 +73,6 @@ class EmbodiedRunner:
             f"resume_dir {actor_checkpoint_path} does not exist."
         )
         self.actor.load_checkpoint(actor_checkpoint_path).wait()
-        # recover global step
         self.global_step = int(resume_dir.split("global_step_")[-1])
 
     def update_rollout_weights(self):
@@ -95,9 +94,7 @@ class EmbodiedRunner:
         return env_metrics
 
     def evaluate(self):
-        # 和环境交互进行eval：返回成功率、奖励
         env_futures = self.env.evaluate()
-        # 用模型生成序列，评价模型的生成质量、token-level 分布、值函数稳定性
         rollout_futures = self.rollout.evaluate()
         env_results = env_futures.wait()
         rollout_futures.wait()
@@ -111,16 +108,13 @@ class EmbodiedRunner:
             initial=start_step,
             total=self.max_steps,
             desc="Global Step",
-            ncols=800,      # 
+            ncols=800,
         )
         for _step in range(start_step, self.max_steps):
             # set global step
             self.actor.set_global_step(self.global_step)
             self.rollout.set_global_step(self.global_step)
             eval_metrics = {}
-            # 判断是否需要做评估：
-            # - _step % val_check_interval == 0：到了评估间隔
-            # - val_check_interval > 0：配置中启用了 eval（否则设为 -1）
             if (
                 _step % self.cfg.runner.val_check_interval == 0
                 and self.cfg.runner.val_check_interval > 0
@@ -139,7 +133,6 @@ class EmbodiedRunner:
 
                 # compute advantages and returns.
                 with self.timer("cal_adv_and_returns"):
-                    # 计算优势函数和回报
                     actor_futures = self.actor.compute_advantages_and_returns()
                     actor_rollout_metrics = actor_futures.wait()
 
@@ -201,7 +194,6 @@ class EmbodiedRunner:
 
     def set_max_steps(self):
         self.num_steps_per_epoch = 1
-        # 就等于max_epochs
         self.max_steps = self.num_steps_per_epoch * self.cfg.runner.max_epochs
 
         if (max_steps := self.cfg.runner.get("max_steps", -1)) >= 0:

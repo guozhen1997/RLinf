@@ -1,7 +1,6 @@
 simulator_type: robotwin
 auto_reset: ${algorithm.auto_reset}
 ignore_terminations: ${algorithm.ignore_terminations}
-# 
 use_rel_reward: True
 use_custom_reward: True
 seed: 0
@@ -19,7 +18,6 @@ video_cfg:
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 
 assets_path: "/mnt/public/peihong/codes/RLinf_RoboTwin_gz"
-
 seeds_path: /mnt/public/peihong/codes/SimpleVLA-RL/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds(old).json
 
 reward_coef: 5.0
@@ -37,8 +35,6 @@ task_config:
   use_seed: false
   save_freq: 15
   embodiment: [piper, piper, 0.6]
-  # embodiment: ['aloha-agilex']
-
   language_num: 100
   domain_randomization:
     random_background: true
@@ -53,8 +49,6 @@ task_config:
     wrist_camera_type: D435
     collect_head_camera: true
     collect_wrist_camera: false
-    # collect_wrist_camera: true
-
   data_type:
     rgb: true
     third_view: false
@@ -62,13 +56,12 @@ task_config:
     pointcloud: false
     observer: false
     endpose: false
-    # endpose: true
     qpos: true
     mesh_segmentation: false
     actor_segmentation: false
   pcd_down_sample_num: 1024
   pcd_crop: true
   save_path: ./data
-  clear_cache_freq: 1     # default: 5; 如果报错就改小，及时清理Sapien的缓存
+  clear_cache_freq: 1
   collect_data: true
   eval_video_log: true
