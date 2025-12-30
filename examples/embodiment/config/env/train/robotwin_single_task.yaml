@@ -18,6 +18,8 @@ video_cfg:
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 
 assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
+seeds_path: "/mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds.json"
+
 
 task_config:
   task_name: place_empty_cup

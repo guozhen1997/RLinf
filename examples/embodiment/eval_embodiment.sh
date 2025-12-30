@@ -23,8 +23,8 @@ export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
 LIBERO_PATH=/opt/libero
-# export ROBOTWIN_PATH="/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
-export ROBOTWIN_PATH="/mnt/public/wph/codes/RoboTwin_now"
+export ROBOTWIN_PATH="/mnt/public/peihong/codes/Robotwin_support"
+
 export PYTHONPATH=${REPO_PATH}:${LIBERO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 echo "PYTHONPATH: $PYTHONPATH"
 export CUDA_LAUNCH_BLOCKING=1
@@ -44,7 +44,9 @@ else
     CONFIG_NAME=$1
 fi
 
-LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')" #/$(date +'%Y%m%d-%H:%M:%S')"
+# LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')" #/$(date +'%Y%m%d-%H:%M:%S')"
+LOG_DIR="${REPO_PATH}/logs/eval" #/$(date +'%Y%m%d-%H:%M:%S')"
+
 MEGA_LOG_FILE="${LOG_DIR}/eval_embodiment.log"
 mkdir -p "${LOG_DIR}"
 CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"

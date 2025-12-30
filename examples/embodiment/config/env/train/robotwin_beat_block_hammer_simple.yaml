@@ -7,23 +7,29 @@ seed: 0
 num_group: ${algorithm.num_group_envs}
 group_size: ${algorithm.group_size}
 use_fixed_reset_state_ids: ${algorithm.use_fixed_reset_state_ids}
-max_episode_steps: 400
-only_eval: True
+max_episode_steps: 200
+only_eval: False
 
 video_cfg:
   save_video: True
   info_on_video: True
-  video_base_dir: ${runner.logger.log_path}/video/eval
+  video_base_dir: ${runner.logger.log_path}/video/train
 
 num_envs: ${multiply:${algorithm.group_size}, ${algorithm.num_group_envs}}
 
-assets_path: "/mnt/public/guozhen/test_robotwin/robotwin_assets"
+reward_coef: 5.0
+filter_rewards: True
+rewards_lower_bound: 0.5
+rewards_upper_bound: 4.5
 
-seeds_path: "/mnt/public/wph/codes/SimpleVLA-RL/SimpleVLA-RL-main/verl/utils/envs/robotwin2/seeds/robotwin2_eval_seeds.json"
+assets_path: "/mnt/public/peihong/codes/RLinf_RoboTwin_gz"
+seeds_path: /mnt/public/peihong/codes/SimpleVLA-RL/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds(old).json
+# seeds_path: "/mnt/public/peihong/codes/SimpleVLA-RL/robotwin2_train_beat_block_hammer_seeds.json"
+
 
 task_config:
-  task_name: stack_bowls_two
-  step_lim: 400
+  task_name: beat_block_hammer
+  step_lim: 200
   # if you want to modify the config, please check the following tutorial first:
   # https://robotwin-platform.github.io/doc/usage/configurations.html
   render_freq: 0
@@ -58,6 +64,6 @@ task_config:
   pcd_down_sample_num: 1024
   pcd_crop: true
   save_path: ./data
-  clear_cache_freq: 5
+  clear_cache_freq: 1
   collect_data: true
   eval_video_log: true

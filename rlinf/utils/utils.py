@@ -105,7 +105,6 @@ def configure_batch_sizes(rank, mbs, gbs, dp=1):
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis=None):
     """Compute mean of tensor with a masked values."""
-    print(f"debug wph: masked_mean values.shape: {values.shape}, mask.shape: {mask.shape}")
     # auto_reset ignore_termianl not all false
     if mask is None:
         return values.mean(axis=axis)

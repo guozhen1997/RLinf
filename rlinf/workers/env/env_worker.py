@@ -135,6 +135,7 @@ class EnvWorker(Worker):
                     env = RoboTwinEnv(
                         cfg=self.cfg.env.train,
                         seed_offset=self._rank,
+                        mode="train",
                     )
                     self.simulator_list.append(env)
             if self.cfg.runner.val_check_interval > 0 or only_eval:
@@ -142,6 +143,7 @@ class EnvWorker(Worker):
                     env = RoboTwinEnv(
                         cfg=self.cfg.env.eval,
                         seed_offset=self._rank,
+                        mode="eval",
                     )
                     self.eval_simulator_list.append(env)
         elif self.cfg.env.train.simulator_type == "behavior":
@@ -218,7 +220,7 @@ class EnvWorker(Worker):
         env_info = {}
 
         extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = (
-            self.simulator_list[stage_id].chunk_step(chunk_actions)
+            self.simulator_list[stage_id].chunk_step(chunk_actions, mode="train")
         )
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         if not self.cfg.env.train.auto_reset:
@@ -267,7 +269,7 @@ class EnvWorker(Worker):
         env_info = {}
                     
         extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = (
-            self.eval_simulator_list[stage_id].chunk_step(chunk_actions)
+            self.eval_simulator_list[stage_id].chunk_step(chunk_actions, mode="eval")
         )
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
 

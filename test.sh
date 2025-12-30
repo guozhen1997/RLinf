@@ -1,3 +1,6 @@
-export ROBOTWIN_PATH="/mnt/public/wph/codes/RoboTwin_now"
-export PYTHONPATH="/mnt/public/wph/codes/RLinf:/opt/libero:/mnt/public/wph/codes/RoboTwin_now:/mnt/public/wph/codes/RLinf:/opt/libero:$PYTHONPATH"
+export ROBOTWIN_PATH="/mnt/public/peihong/codes/Robotwin_support"
+
+export ROBOT_PLATFORM=ALOHA # $ROBOT_PLATFORM
+export PYTHONPATH="/mnt/public/peihong/codes/RLinf:/opt/libero:${ROBOTWIN_PATH}:/mnt/public/peihong/codes/RLinf:/opt/libero:$PYTHONPATH"
 python tests/unit_tests/test_robotwin_env.py
+# python tests/unit_tests/test_model.py

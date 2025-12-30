@@ -13,7 +13,7 @@ export PYOPENGL_PLATFORM="egl"
 export LIBERO_REPO_PATH="/opt/libero"
 
 # export ROBOTWIN_PATH="/mnt/public/guozhen/test_robotwin/RLinf_RoboTwin"
-export ROBOTWIN_PATH="/mnt/public/wph/codes/RoboTwin_now"
+export ROBOTWIN_PATH="/mnt/public/peihong/codes/Robotwin_support"
 export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
 # Base path to the BEHAVIOR dataset, which is the BEHAVIOR-1k repo's dataset folder
@@ -34,14 +34,17 @@ export ROBOT_PLATFORM=ALOHA # $ROBOT_PLATFORM
 if [ -z "$1" ]; then
     # CONFIG_NAME="maniskill_ppo_openvlaoft"
     # CONFIG_NAME="robotwin_ppo_openvlaoft_train_place_empty_cup_simple"
-    CONFIG_NAME="robotwin_grpo_openvlaoft"
-
+    CONFIG_NAME="robotwin_grpo_openvlaoft_copy"
+    # CONFIG_NAME="robotwin_ppo_openvlaoft"
+    # CONFIG_NAME="robotwin_ppo_openvlaoft_eval"
 else
     CONFIG_NAME=$1
 fi
 
 echo "Using Python at $(which python)"
-LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')" #/$(date +'%Y%m%d-%H:%M:%S')"
+# LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')" #/$(date +'%Y%m%d-%H:%M:%S')"
+LOG_DIR="${REPO_PATH}/logs/beat_block_hammer_lr_5e-5" 
+
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
 mkdir -p "${LOG_DIR}"
 CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
