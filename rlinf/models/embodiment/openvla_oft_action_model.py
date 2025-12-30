@@ -43,6 +43,10 @@ from rlinf.models.embodiment.model_utils import (
 from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.utils.torch_functionals import pad_tensor_to_length
 
+IGNORE_INDEX = -100
+ACTION_TOKEN_BEGIN_IDX = 31743
+STOP_INDEX = 2  # '</s>'
+
 # ================ Robotwin-specific functions ================
 
 
@@ -276,6 +280,21 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
         return actions
 
+    def _prepare_labels_for_action_prediction(self, labels, input_ids):
+        """Creates labels tensor for action prediction if not provided"""
+        # Extend labels tensor with fake action labels
+        ARBITRARY_ACTION_TOKEN_IDX = ACTION_TOKEN_BEGIN_IDX + 1
+        labels_extension = (
+            torch.ones((labels.shape[0], input_ids.shape[-1] - labels.shape[-1])).to(labels.device).to(labels.dtype)
+            * ARBITRARY_ACTION_TOKEN_IDX
+        )
+        labels = torch.cat([labels, labels_extension], dim=-1)
+
+        # Replace last label token with stop token
+        labels[:, -1] = STOP_INDEX
+
+        return labels
+    
     @torch.no_grad()
     def predict_action_batch(
         self,
@@ -298,20 +317,13 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                 "proprio": [],
             }
             
-            # print(f"debug wph: all_obs_image_shape: {env_obs['images'].shape}", flush=True)
-            
             for i in range(len(env_obs["task_descriptions"])):
                 task_description = env_obs["task_descriptions"][i]
                 image = np.array(env_obs["images"][i])
                 
-                # print(f"debug wph: image shape: {image.shape}", flush=True)
-                # print("debug wph: [predict_action_batch] image shape before PIL:", image.shape, image.dtype, flush=True)
-                # print("debug wph: [predict_action_batch] image ndim:", getattr(image, "ndim", "NA"), flush=True)
-
-                # 有待考虑，不完全对，如果是 (C, H, W)，就转成 (H, W, C)
+                
                 if image.ndim == 3 and image.shape[0] in (1, 3):
                     image = np.transpose(image, (1, 2, 0))  # CHW -> HWC
-                    # print(f"debug wph: transposed image shape: {image.shape}", flush=True)
 
                 if image.dtype != np.uint8:
                     image = image.astype(np.uint8)
@@ -424,7 +436,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             attention_mask = batchdata["attention_mask"]
             pixel_values = batchdata["pixel_values"]
             proprio = batchdata.get("proprio", None)
-
+            
             input_ids = pad_tensor_to_length(
                 input_ids,
                 max_seq_len=self.max_prompt_length,
@@ -451,135 +463,161 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         # last token is space ` `
         assert torch.all(input_ids[:, -1] == 29871)
         assert torch.all(attention_mask[:, -1] == 1)
-
-        n_prompt_tokens = input_ids.shape[-1] - 1
-        # Calculate number of patches (including proprio token and/or diffusion timestep embedding if present)
-        n_patches = (
-            self.vision_backbone.get_num_patches()
-            * self.vision_backbone.get_num_images_in_input()
-        )
-        use_proprio = self.proprio_projector is not None and proprio is not None
-        if use_proprio:
-            n_patches += 1
-
+        
+        labels = input_ids.clone()
+        IGNORE_INDEX = -100
+        labels[:] = IGNORE_INDEX
+        
+        # padding_idx is 32000
+        padding_idx = 32000
+        NUM_PROMPT_TOKENS = input_ids.ne(32000).sum(dim=1) - 1
+        
         # llm inputs
         input_ids, attention_mask = self._prepare_input_for_action_prediction(
             input_ids, attention_mask
         )
-        assert torch.all(input_ids[:, -1] == STOP_INDEX)  # [B, L + act + 1, D]
-        assert torch.all(
-            attention_mask[:, -1 - self.action_dim * self.num_action_chunks :] == 1
-        )  # [B, L + act + 1]
+        labels = self._prepare_labels_for_action_prediction(labels, input_ids)
+        
+        #here to convert padding from before to last
+        padding_mask = input_ids.ne(padding_idx)
+        
+        assert torch.all(padding_mask==attention_mask.ne(0))
+        padding_mask = padding_mask.int() 
+        sorted_indices = torch.argsort(padding_mask, dim=1, descending=True, stable=True)
+        input_ids = torch.gather(input_ids, 1, sorted_indices)
+        attention_mask = torch.gather(attention_mask, 1, sorted_indices)
+        labels = torch.gather(labels, 1, sorted_indices)
+                
+        # assert use_film==False
+        # Get input embeddings and action masks
+        input_embeddings = self.get_input_embeddings()(input_ids)
+        all_actions_mask = self._process_action_masks(labels)
 
-        # multimodal
-        mm_embeddings, mm_attention_mask = self._build_embedding(
-            input_ids, attention_mask, pixel_values, proprio=proprio
-        )
-        multimodal_position_ids = (mm_attention_mask.long().cumsum(-1) - 1).masked_fill(
-            mm_attention_mask == 0, 1
+        # Extract language embeddings
+        language_embeddings = input_embeddings[~all_actions_mask].reshape(
+            input_embeddings.shape[0], -1, input_embeddings.shape[2]
         )
 
+        # Process vision features
+        projected_patch_embeddings = self._process_vision_features(pixel_values, language_embeddings, use_film=self.use_film)
+
+        # Add proprioceptive features if provided
+        use_proprio = self.proprio_projector is not None and proprio is not None
+        if use_proprio:
+            proprio = torch.Tensor(proprio).to(projected_patch_embeddings.device, dtype=projected_patch_embeddings.dtype)
+            projected_patch_embeddings = self._process_proprio_features(
+                projected_patch_embeddings, proprio, self.proprio_projector
+            )
+            
+        # Calculate number of patches (including proprio token and/or diffusion timestep embedding if present)
+        NUM_PATCHES = self.vision_backbone.get_num_patches() * self.vision_backbone.get_num_images_in_input()
+        if use_proprio:
+            NUM_PATCHES += 1
+        
+        all_actions_mask = all_actions_mask.unsqueeze(-1)  # (B, seq_len, 1)
+        input_embeddings = input_embeddings * ~all_actions_mask
+
+        # Build multimodal embeddings and attention mask
+        multimodal_embeddings, multimodal_attention_mask = self._build_multimodal_attention(
+            input_embeddings, projected_patch_embeddings, attention_mask
+        )
+        
         # Forward pass through language model
-        outputs = self.language_model(
+        language_model_output = self.language_model(
             input_ids=None,
-            attention_mask=mm_attention_mask,
-            position_ids=multimodal_position_ids,
+            attention_mask=multimodal_attention_mask,
+            position_ids=None,
             past_key_values=None,
-            inputs_embeds=mm_embeddings,
+            inputs_embeds=multimodal_embeddings,
             labels=None,
             use_cache=None,
             output_attentions=False,
             output_hidden_states=True,
             return_dict=True,
         )
+        
+        NUM_PROMPT_TOKENS = NUM_PROMPT_TOKENS + NUM_PATCHES
+        batch_size = language_model_output.logits.shape[0]
+        device = language_model_output.logits.device
 
-        # Extract hidden states for action tokens
-        last_hidden_states = outputs.hidden_states[-1]  # (B, seq_len, D)
-        assert last_hidden_states.shape[1] == mm_embeddings.shape[1]
 
-        logits_tensor = outputs.logits[
-            :,
-            n_patches + n_prompt_tokens : n_patches
-            + n_prompt_tokens
-            + self.action_dim * self.num_action_chunks,
-            :,
-        ]  # [B, act, vocab_size + 64]
+        start_indices = NUM_PROMPT_TOKENS.unsqueeze(1)  # [batch_size, 1]
+        position_offsets = torch.arange(self.action_dim * self.num_action_chunks, device=device).unsqueeze(0)  # [1, seq_length]
+        seq_indices = start_indices + position_offsets  # [batch_size, ACTION_DIM*NUM_ACTIONS_CHUNK]
 
+        last_hidden_states = language_model_output.hidden_states[-1]
+        assert last_hidden_states.shape[1] == multimodal_embeddings.shape[1]
         last_hidden_states = last_hidden_states[
             :, -self.action_dim * self.num_action_chunks - 2 : -2
         ]
-
-        logits_tensor[..., : self.vocab_size - self.config.n_action_bins] = -torch.inf
-        logits_tensor[..., self.vocab_size :] = -torch.inf
-
-        if do_sample:
-            processed_logits_tensor = logits_tensor / kwargs["temperature"]
-            top_k = min(kwargs["top_k"], processed_logits_tensor.size(-1))  # Safety check
-            if top_k > 0:
-                logits_warper = TopKLogitsWarper(
-                    top_k
-                )  # since here is logprob instead of logits, we use 0 instead of -inf
-                processed_logits_tensor = logits_warper(None, processed_logits_tensor)
-
-            processed_logprob_tensor = F.log_softmax(
-                processed_logits_tensor, dim=-1
-            )  # [B, act, vocab_size + 64]
-            probs_tensor = torch.exp(
-                processed_logprob_tensor
-            )  # [B, act, vocab_size + 64]
-            probs_flat = probs_tensor.view(
-                -1, processed_logprob_tensor.shape[-1]
-            )  # [B * act, vocab_size + 64]
-
-            sample_flat = torch.multinomial(
-                probs_flat, num_samples=1, replacement=True
-            )  # [B * act, 1]
-            idxs = sample_flat.view(
-                processed_logprob_tensor.shape[0], processed_logprob_tensor.shape[1]
-            )  # [B, act]
+        
+        # [batch_size, ACTION_DIM*NUM_ACTIONS_CHUNK, vocab_size]
+        action_logits = language_model_output.logits[
+            torch.arange(batch_size, device=device).unsqueeze(-1),  
+            seq_indices, 
+            :
+        ]
+        action_logits = action_logits[..., -256-64:-64]
+        
+        if do_sample == False:
+            #padding + only get last 256 token
+            reponse_ids = action_logits.argmax(dim=-1)                                  
         else:
-            processed_logits_tensor = logits_tensor
-            idxs = processed_logits_tensor.argmax(dim=-1)  # [B, act]
+            temperature = kwargs["temperature"]
+            assert temperature>0            
 
-        # assert torch.all(idxs >= 0) and torch.all(idxs < self.config.n_action_bins)
-        # generated_ids = idxs + (self.vocab_size - self.config.n_action_bins)
+            action_logits = action_logits / temperature
+            # 
+            probs = F.log_softmax(
+                action_logits, dim=-1
+            )
+            probs = torch.exp(
+                probs
+            )
+            
+            probs_flat = probs.reshape(-1, probs.shape[-1])
+            reponse_ids = torch.multinomial(probs_flat, num_samples=1,replacement=True)
+            reponse_ids = reponse_ids.view(action_logits.shape[0], action_logits.shape[1])                 
+        #
+        final_reponse_ids = reponse_ids + (self.vocab_size - 256)
+        
         assert torch.all(
-            idxs >= self.vocab_size - self.config.n_action_bins
-        ) and torch.all(idxs < self.vocab_size)
-
-        chunk_action_tokens = idxs.reshape(-1, self.action_dim)
-        predicted_action_token_ids = chunk_action_tokens.cpu().numpy()
+            final_reponse_ids >= self.vocab_size - self.config.n_action_bins
+        ) and torch.all(final_reponse_ids < self.vocab_size)
+        
+        chunk_action_tokens = reponse_ids
+                
+        predicted_action_token_ids = final_reponse_ids.cpu().numpy()
+        
         discretized_actions = self.vocab_size - predicted_action_token_ids
         discretized_actions = np.clip(
             discretized_actions - 1, a_min=0, a_max=self.bin_centers.shape[0] - 1
         )
-        normalized_actions = self.bin_centers[discretized_actions]  # [B, dim]
+        normalized_actions = self.bin_centers[discretized_actions]
         normalized_actions = normalized_actions.reshape(-1, self.action_dim)
-
+        
         # Unnormalize predicted actions
         actions = self._unnormalize_actions(normalized_actions, self.unnorm_key)
-        actions = actions.reshape(idxs.shape)
+        
+        #verl add!
+        actions = actions.reshape(-1, self.num_action_chunks, self.action_dim)
 
-        action_logits = processed_logits_tensor.permute(
+        # [batch_size, 256, ACTION_DIM*NUM_ACTIONS_CHUNK]
+        action_logits = action_logits.permute(
             0, 2, 1
-        )  # [B, vocab-size, action-dim]
-        action_logits[:, : self.vocab_size - self.config.n_action_bins] = -torch.inf
-        action_logits[:, self.vocab_size :] = -torch.inf
-
-        chunk_logprobs = compute_logprobs_from_logits(logits=action_logits, target=idxs)
+        )  
+        
+        # [batch_size, 256, ACTION_DIM*NUM_ACTIONS_CHUNK] and [batch_size, ACTION_DIM*NUM_ACTIONS_CHUNK]
+        chunk_logprobs = compute_logprobs_from_logits(logits=action_logits, target=reponse_ids)
 
         if hasattr(self, "value_head") and calulate_values:
             hidden_features = last_hidden_states[
                 :, -self.action_dim * self.num_action_chunks
-            ]  # [batch_size, hidden_dim]
-
-            chunk_values = self.value_head(hidden_features)  # [batch_size, 1]
+            ]
+            chunk_values = self.value_head(hidden_features)
         else:
             chunk_values = torch.zeros_like(chunk_logprobs[..., :1])
-
-        chunk_actions = actions.reshape(-1, self.num_action_chunks, self.action_dim)
-        chunk_action_tokens = idxs.reshape(-1, self.num_action_chunks, self.action_dim)
-
+        
         forward_inputs["action_tokens"] = chunk_action_tokens
 
         result = {
@@ -587,9 +625,10 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             "prev_values": chunk_values,
             "forward_inputs": forward_inputs,
         }
+        return actions, result
+        
 
-        return chunk_actions, result
-
+    
     def preprocess_for_train(self, data):
         # action-token: [bsz, chunk-step, action-dim] -> [bsz, chunk-step x action-dim]
         for key in ["action_tokens"]:
@@ -619,6 +658,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             cfg.actor.model.model_dir, trust_remote_code=True
         )
 
+
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -642,7 +682,12 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
 
             action_tokens = data["action_tokens"]
 
-        n_prompt_tokens = input_ids.shape[-1] - 1
+        labels = input_ids.clone()
+        IGNORE_INDEX = -100
+        labels[:] = IGNORE_INDEX
+        padding_idx = 32000
+        NUM_PROMPT_TOKENS = input_ids.ne(32000).sum(dim=1) - 1
+        
 
         # assert torch.all(input_ids[:, 0] == 1)
         # assert torch.all(attention_mask[:, 0] == 1)
@@ -655,39 +700,57 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
         input_ids, attention_mask = self._prepare_input_for_action_prediction(
             input_ids, attention_mask
         )
-        assert torch.all(input_ids[:, -1] == STOP_INDEX)  # [B, L + act + 1, D]
-        assert torch.all(
-            input_ids[:, -self.action_dim * self.num_action_chunks - 2] == 29871
+        labels = self._prepare_labels_for_action_prediction(labels, input_ids)
+        padding_mask = input_ids.ne(padding_idx)
+        assert torch.all(padding_mask==attention_mask.ne(0))
+        
+        padding_mask = padding_mask.int() 
+        sorted_indices = torch.argsort(padding_mask, dim=1, descending=True, stable=True)
+        input_ids = torch.gather(input_ids, 1, sorted_indices)
+        attention_mask = torch.gather(attention_mask, 1, sorted_indices)
+        labels = torch.gather(labels, 1, sorted_indices)
+        
+        input_embeddings = self.get_input_embeddings()(input_ids)
+        all_actions_mask = self._process_action_masks(labels)
+        # Extract language embeddings
+        language_embeddings = input_embeddings[~all_actions_mask].reshape(
+            input_embeddings.shape[0], -1, input_embeddings.shape[2]
         )
-        assert torch.all(
-            attention_mask[:, -2 - self.action_dim * self.num_action_chunks :] == 1
-        )  # [B, L + act + 1]
 
-        # Calculate number of patches (including proprio token and/or diffusion timestep embedding if present)
-        n_patches = (
-            self.vision_backbone.get_num_patches()
-            * self.vision_backbone.get_num_images_in_input()
-        )
+        # Process vision features
+        projected_patch_embeddings = self._process_vision_features(pixel_values, language_embeddings, use_film=self.use_film)
+
+        # Add proprioceptive features if provided
         use_proprio = self.proprio_projector is not None and proprio is not None
         if use_proprio:
-            n_patches += 1
+            proprio = torch.Tensor(proprio).to(projected_patch_embeddings.device, dtype=projected_patch_embeddings.dtype)
+            projected_patch_embeddings = self._process_proprio_features(
+                projected_patch_embeddings, proprio, self.proprio_projector
+            )
+            
+        # Calculate number of patches (including proprio token and/or diffusion timestep embedding if present)
+        NUM_PATCHES = self.vision_backbone.get_num_patches() * self.vision_backbone.get_num_images_in_input()
+        if use_proprio:
+            NUM_PATCHES += 1
+        
+        all_actions_mask = all_actions_mask.unsqueeze(-1)  # (B, seq_len, 1)
+        input_embeddings = input_embeddings * ~all_actions_mask
 
-        # multimodal
-        mm_embeddings, mm_attention_mask = self._build_embedding(
-            input_ids, attention_mask, pixel_values, proprio=proprio
-        )
-        multimodal_position_ids = mm_attention_mask.cumsum(dim=1) - 1
+        # Build multimodal embeddings and attention mask
+        multimodal_embeddings, multimodal_attention_mask = self._build_multimodal_attention(
+            input_embeddings, projected_patch_embeddings, attention_mask
+        )   
 
         if compute_values:
             output_hidden_states = True
 
         # Forward pass through language model
-        outputs = self.language_model(
+        language_model_output = self.language_model(
             input_ids=None,
-            attention_mask=mm_attention_mask,
-            position_ids=multimodal_position_ids,
+            attention_mask=multimodal_attention_mask,
+            position_ids=None,
             past_key_values=None,
-            inputs_embeds=mm_embeddings,
+            inputs_embeds=multimodal_embeddings,
             labels=None,
             use_cache=use_cache,
             output_attentions=False,
@@ -699,28 +762,28 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
             return outputs
 
         if compute_logprobs:
-            logits = outputs.logits[
-                :,
-                n_patches + n_prompt_tokens : n_patches
-                + n_prompt_tokens
-                + self.action_dim * self.num_action_chunks,
-                :,
-            ]  # [B, act, vocab_size + 64]
+            NUM_PROMPT_TOKENS = NUM_PROMPT_TOKENS + NUM_PATCHES
+            batch_size = language_model_output.logits.shape[0]
+            device = language_model_output.logits.device
 
-            processed_logits_tensor = logits / data["temperature"]
-            top_k = min(data["top_k"], processed_logits_tensor.size(-1))  # Safety check
-            if top_k > 0:
-                logits_warper = TopKLogitsWarper(
-                    top_k
-                )  # since here is logprob instead of logits, we use 0 instead of -inf
-                processed_logits_tensor = logits_warper(None, processed_logits_tensor)
+            start_indices = NUM_PROMPT_TOKENS.unsqueeze(1)  # [batch_size, 1]
+            position_offsets = torch.arange(self.action_dim * self.num_action_chunks, device=device).unsqueeze(0)  # [1, seq_length]
+            seq_indices = start_indices + position_offsets  # [batch_size, ACTION_DIM*NUM_ACTIONS_CHUNK]
 
-            action_logits = processed_logits_tensor.permute(
+            
+            action_logits = language_model_output.logits[
+                torch.arange(batch_size, device=device).unsqueeze(-1),  
+                seq_indices, 
+                :
+            ]
+            action_logits = action_logits[..., -256-64:-64]
+            
+            action_logits = action_logits / data["temperature"]
+            
+            action_logits = action_logits.permute(
                 0, 2, 1
-            )  # [B, vocab-size, action-dim]
-            action_logits[:, : self.vocab_size - self.config.n_action_bins] = -torch.inf
-            action_logits[:, self.vocab_size :] = -torch.inf
-
+            )              
+            
             logprobs = compute_logprobs_from_logits(
                 logits=action_logits, target=action_tokens
             )
@@ -730,7 +793,7 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction):
                 entropy = compute_entropy_from_logits(logits=action_logits)
 
         if hasattr(self, "value_head") and compute_values:
-            last_hidden_state = outputs.hidden_states[-1]
+            last_hidden_state = language_model_output.hidden_states[-1]
             hidden_features = last_hidden_state[
                 :, -self.action_dim * self.num_action_chunks - 2
             ]  # [batch_size, hidden_dim]
