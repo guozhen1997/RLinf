@@ -388,6 +388,8 @@ class EnvWorker(Worker):
             self.finish_rollout()
 
         for env in self.env_list:
+            if self.cfg.env.enable_offload:
+                env.close()
             env.stop_env()
 
         for key, value in env_metrics.items():
@@ -436,6 +438,8 @@ class EnvWorker(Worker):
 
             self.finish_rollout(mode="eval")
         for stage_id in range(self.stage_num):
+            if self.cfg.env.enable_offload:
+                self.eval_env_list[stage_id].close()
             self.eval_env_list[stage_id].stop_env()
 
         for key, value in eval_metrics.items():
