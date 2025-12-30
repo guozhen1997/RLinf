@@ -304,11 +304,8 @@ if __name__ == "__main__":
 
     # for i in need_to_test:
     #     print(f"{i}", end=" ")
-        
+    
     for env_name in need_to_test:
         print(f"\n===== Testing {env_name} =====")
         run_test_with_timeout(env_name, timeout=60)
 
-    # for env_name in env_names:
-    #     print(f"\n===== Testing {env_name} =====")
-    #     run_test_with_timeout(env_name, timeout=60)
