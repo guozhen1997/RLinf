@@ -1,6 +1,6 @@
 defaults:
-  - env/robotwin_single_task@env.train
-  - env/robotwin_single_task@env.eval
+  - env/robotwin_place_empyt_cup@env.train
+  - env/robotwin_place_empyt_cup@env.eval
   - model/openvla_oft@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
@@ -30,8 +30,8 @@ runner:
 
   only_eval: False
   eval_policy_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
-  val_check_interval: 25
-  save_interval: 25
+  val_check_interval: 20
+  save_interval: 20
   seq_length: 4096
   max_prompt_length: 512
   resume_dir: null
@@ -63,6 +63,9 @@ algorithm:
   gae_lambda: 0.95
 
   reward_coef: 5.0
+  filter_rewards: True
+  rewards_lower_bound: 0.5
+  rewards_upper_bound: 4.5
 
   # params for rollout
   sampling_params:
@@ -84,19 +87,17 @@ env:
   group_name: "EnvGroup"
   enable_offload: True
 
-  # Override the default values in env/robotwin_single_task
+  # Override the default values in env/robotwin_place_empyt_cup
   train:
     total_num_envs: 128
-    filter_rewards: True
-    rewards_lower_bound: 0.5
-    rewards_upper_bound: 4.5
+    reward_coef: ${algorithm.reward_coef}
     max_episode_steps: 200
     max_steps_per_rollout_epoch: 200
     group_size: ${algorithm.group_size}
     seeds_path: "/mnt/project_rlinf/guozhen/test_robotwin/SimpleVLA-RL/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds.json"
 
   eval:
-    total_num_envs: 256
+    total_num_envs: 128
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 200
@@ -142,6 +143,7 @@ actor:
     center_crop: True
 
     is_lora: True
+    max_prompt_length: 512
 
   optim:
     lr: 5.0e-5

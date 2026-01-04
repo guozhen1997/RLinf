@@ -29,10 +29,6 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers.generation import TopKLogitsWarper
 
 from rlinf.models.embodiment.base_policy import BasePolicy
-from rlinf.models.embodiment.model_utils import (
-    compute_entropy_from_logits,
-    compute_logprobs_from_logits,
-)
 from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.models.embodiment.openvla_oft.openvla_utils import (
     find_checkpoint_file,
@@ -40,6 +36,10 @@ from rlinf.models.embodiment.openvla_oft.openvla_utils import (
     normalize_proprio,
 )
 from rlinf.utils.torch_functionals import pad_tensor_to_length
+from rlinf.utils.utils import (
+    compute_entropy_from_logits,
+    compute_logprobs_from_logits,
+)
 
 
 class OpenVLAOFTRLConfig(OpenVLAConfig):
@@ -273,8 +273,6 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction, BasePolicy)
             logprobs: Computed logprobs, shape [B, action_dim * num_action_chunks]
             entropy: Computed entropy (optional), shape [B, action_dim * num_action_chunks]
         """
-        # Permute to [B, 256, action_dim * num_action_chunks]
-        action_logits = action_logits.permute(0, 2, 1)
 
         logprobs = compute_logprobs_from_logits(
             logits=action_logits, target=action_tokens
@@ -383,7 +381,6 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction, BasePolicy)
                 action_logits = logits_warper(None, action_logits)
 
             probs = torch.softmax(action_logits, dim=-1)
-            probs = torch.exp(probs)
 
             probs_flat = probs.reshape(-1, probs.shape[-1])
             reponse_ids = torch.multinomial(probs_flat, num_samples=1, replacement=True)
