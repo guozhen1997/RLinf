@@ -196,9 +196,7 @@ class RoboTwinEnv(gym.Env):
         return extracted_obs
 
     def _calc_step_reward(self, terminations):
-        reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-
-        reward += terminations * 1.0
+        reward = self.cfg.reward_coef * terminations
 
         reward_diff = reward - self.prev_step_reward
         self.prev_step_reward = reward
@@ -209,8 +207,12 @@ class RoboTwinEnv(gym.Env):
             return reward
 
     def _cal_chunk_rewards(self, step_reward, chunk_step, terminations, infos):
+        n_steps_to_run = np.array(
+            [[0] for i in range(self.num_envs)]
+        )  # infos.get("n_steps_to_run", np.array([[0] for i in range(self.num_envs)]))
+
         n_steps_to_run = torch.as_tensor(
-            np.array(infos["n_steps_to_run"]).reshape(-1), device=self.device
+            np.array(n_steps_to_run).reshape(-1), device=self.device
         )
         chunk_rewards = torch.zeros(self.num_envs, chunk_step, device=self.device)
         for env_id in range(self.num_envs):
