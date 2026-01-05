@@ -74,7 +74,6 @@ class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
 
     @property
     def _no_split_modules(self) -> list[str]:
-        # Currently, PaliGemmaForConditionalGeneration only support DDP, as many of it's modules are called without forward
         if self.config.train_expert_only:
             return [
                 "GemmaDecoderLayer",

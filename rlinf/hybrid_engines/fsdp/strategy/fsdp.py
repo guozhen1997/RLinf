@@ -320,7 +320,12 @@ class FSDPStrategy(FSDPStrategyBase):
             total_norm = total_norm ** (1.0 / norm_type)
 
         grad_norm = float(total_norm.item())
-        clip_coef = max_norm / (total_norm + 1e-6)
+
+        # Only apply clipping when the total norm exceeds the maximum allowed norm.
+        # This avoids unnecessary scaling and potential numerical issues for very small norms.
+        if grad_norm == 0.0 or grad_norm <= max_norm:
+            return grad_norm
+        clip_coef = max_norm / total_norm
         clip_coef = torch.clamp(clip_coef, max=1.0)
         for g in grads:
             g.mul_(clip_coef.to(device=g.device, dtype=g.dtype))

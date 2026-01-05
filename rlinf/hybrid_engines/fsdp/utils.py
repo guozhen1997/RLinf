@@ -519,7 +519,7 @@ def get_grad_norm_for_mixed_precision(
     grad_norm = torch.linalg.vector_norm(
         torch.stack(
             [
-                torch.linalg.vector_norm(grad.detach(), norm_type, dtype=torch.float32)
+                torch.linalg.vector_norm(grad, norm_type, dtype=torch.float32)
                 for grad in grads
             ],
         ),
