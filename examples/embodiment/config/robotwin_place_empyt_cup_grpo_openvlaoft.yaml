@@ -130,7 +130,7 @@ actor:
   # Override the default values in model/openvla_oft
   model:
     model_path: "/mnt/project_rlinf/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
-
+    implement_version: "offical"
     model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14

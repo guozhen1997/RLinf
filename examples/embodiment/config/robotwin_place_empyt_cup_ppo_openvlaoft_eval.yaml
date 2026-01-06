@@ -115,7 +115,8 @@ actor:
 
   model:
     model_path: "/mnt/project_rlinf/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
-    model_name: "openvla_oft"
+    model_type: "openvla_oft"
+    implement_version: "offical"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14
     use_proprio: True
