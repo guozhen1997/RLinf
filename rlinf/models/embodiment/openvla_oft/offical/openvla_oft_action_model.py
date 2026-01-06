@@ -28,7 +28,7 @@ from prismatic.vla.constants import (
 from torch.nn.utils.rnn import pad_sequence
 from transformers.generation import TopKLogitsWarper
 
-from rlinf.models.embodiment.base_policy import BasePolicy
+from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
 from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.models.embodiment.openvla_oft.openvla_utils import (
     find_checkpoint_file,
@@ -571,8 +571,8 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction, BasePolicy)
         ).masked_fill(multimodal_attention_mask == 0, 1)
         return multimodal_embeddings, multimodal_attention_mask, multimodal_position_ids
 
-    def forward(self, forward_type="default_forward", **kwargs):
-        if forward_type == "default_forward":
+    def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
+        if forward_type == ForwardType.DEFAULT:
             return self.default_forward(**kwargs)
         else:
             raise NotImplementedError

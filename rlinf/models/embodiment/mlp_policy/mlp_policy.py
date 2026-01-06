@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
 
-from rlinf.models.embodiment.base_policy import BasePolicy
+from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
 from rlinf.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
 from rlinf.models.embodiment.modules.utils import get_act_func, layer_init
 from rlinf.models.embodiment.modules.value_head import ValueHead
@@ -33,7 +33,6 @@ class MLPPolicy(BasePolicy):
         add_q_head,
         q_head_type="default",
     ):
-        super().__init__()
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.num_action_chunks = num_action_chunks
@@ -103,16 +102,16 @@ class MLPPolicy(BasePolicy):
         device = next(self.parameters()).device
         return {"states": env_obs["states"].to(device)}
 
-    def forward(self, forward_type="default_forward", **kwargs):
-        if forward_type == "sac_forward":
+    def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
+        if forward_type == ForwardType.SAC:
             return self.sac_forward(**kwargs)
-        elif forward_type == "sac_q_forward":
+        elif forward_type == ForwardType.SAC_Q:
             return self.sac_q_forward(**kwargs)
-        elif forward_type == "crossq_forward":
+        elif forward_type == ForwardType.CROSSQ:
             return self.crossq_forward(**kwargs)
-        elif forward_type == "crossq_q_forward":
+        elif forward_type == ForwardType.CROSSQ_Q:
             return self.crossq_q_forward(**kwargs)
-        elif forward_type == "default_forward":
+        elif forward_type == ForwardType.DEFAULT:
             return self.default_forward(**kwargs)
         else:
             raise NotImplementedError
