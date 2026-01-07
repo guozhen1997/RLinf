@@ -84,8 +84,9 @@ def get_model(cfg: DictConfig):
             for param in model.value_head.parameters():
                 param.requires_grad = True
 
-    # Set name attribute for all modules to enable FSDP wrap policy by name
-    _set_module_names(model)
+    if model_type == SupportedModel.OPENPI:
+        # Set name attribute for all modules to enable FSDP wrap policy by name
+        _set_module_names(model)
 
     return model
 
