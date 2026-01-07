@@ -544,7 +544,11 @@ install_franka_env() {
 }
 
 install_robotwin_env() {
-    uv sync --extra robotwin --active
+    uv pip install mplib==0.2.1
+
+    uv pip install git+${GITHUB_PREFIX}https://github.com/facebookresearch/pytorch3d.git  --no-build-isolation
+    uv pip install warp-lang
+    uv pip install git+${GITHUB_PREFIX}https://github.com/NVlabs/curobo.git  --no-build-isolation
 
     # patch sapien and mplib for robotwin
     SAPIEN_LOCATION=$(uv pip show sapien | grep 'Location' | awk '{print $2}')/sapien

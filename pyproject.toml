@@ -87,11 +87,6 @@ embodied = [
     "zarr",
     "openai",
 ]
-robotwin = [
-    "mplib==0.2.1",
-    "pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git",
-    "curobo @ git+https://github.com/NVlabs/curobo.git",
-]
 franka = [
     "pyyaml",
     "rospkg",
@@ -124,9 +119,6 @@ override-dependencies = [
     "tensorflow-addons==0.23.0",
     "hydra-core==1.4.0.dev1",
 ]
-
-[tool.uv.extra-build-dependencies]
-pytorch3d = ["torch"]
 
 [tool.ruff]
 line-length = 88
