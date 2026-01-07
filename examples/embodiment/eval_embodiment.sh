@@ -21,7 +21,7 @@ export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
 LIBERO_PATH=/opt/libero
-export ROBOTWIN_PATH="/mnt/public/guozhen/test_robotwin/RoboTwin"
+export ROBOTWIN_PATH="/mnt/project_rlinf/guozhen/test_robotwin2/RoboTwin"
 export PYTHONPATH=${REPO_PATH}:${LIBERO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
 export CUDA_LAUNCH_BLOCKING=1

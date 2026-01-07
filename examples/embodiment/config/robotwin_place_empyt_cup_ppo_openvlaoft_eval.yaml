@@ -1,6 +1,6 @@
 defaults:
-  - env/robotwin_single_task@env.train
-  - env/robotwin_single_task@env.eval
+  - env/robotwin_place_empyt_cup@env.train
+  - env/robotwin_place_empyt_cup@env.eval
   - model/openvla_oft@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
@@ -83,13 +83,14 @@ env:
   group_name: "EnvGroup"
   enable_offload: False
   eval:
-    total_num_envs: 32
+    total_num_envs: 256
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 200
     max_steps_per_rollout_epoch: 200
     group_size: 1
     use_fixed_reset_state_ids: True
+    seeds_path: "/mnt/project_rlinf/guozhen/test_robotwin/SimpleVLA-RL/verl/utils/envs/robotwin2/seeds/robotwin2_eval_seeds.json"
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
@@ -101,7 +102,7 @@ rollout:
   pipeline_stage_num: 1
   model:
     model_type: "openvla_oft"
-    model_path: "/mnt/public/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+    model_path: "/mnt/project_rlinf/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
     precision: ${actor.model.precision}
 
 actor:
@@ -113,7 +114,7 @@ actor:
   enable_offload: True
 
   model:
-    model_path: "/mnt/public/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+    model_path: "/mnt/project_rlinf/guozhen/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
     model_name: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14
@@ -127,7 +128,7 @@ actor:
 
     add_value_head: True
 
-    max_prompt_length: 128
+    max_prompt_length: 512
 
   optim:
     lr: 1.0e-4

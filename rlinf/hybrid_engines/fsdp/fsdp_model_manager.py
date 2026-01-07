@@ -295,6 +295,11 @@ class FSDPModelManager:
         Args:
             save_path: the directory to save checkpoint.
         """
+        if self.is_weight_offloaded:
+            self.load_param_and_grad(self.device)
+        if self.is_optimizer_offloaded:
+            self.load_optimizer(self.device)
+
         self._strategy.save_checkpoint(
             self.model_path,
             self.model,

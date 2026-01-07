@@ -115,7 +115,6 @@ def compute_ppo_actor_loss(
     # This handles token_level mode: ratio [bsz, num_chunks, action_dim], loss_mask [bsz, num_chunks, 1]
     if (
         len(ratio.shape) > 2
-        and ratio.shape[:-1] == loss_mask.shape[:-1]
         and loss_mask.shape[-1] == 1
         and ratio.shape[-1] > 1
     ):

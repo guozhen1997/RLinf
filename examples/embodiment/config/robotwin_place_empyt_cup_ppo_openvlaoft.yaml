@@ -1,6 +1,6 @@
 defaults:
-  - env/robotwin_single_task@env.train
-  - env/robotwin_single_task@env.eval
+  - env/robotwin_place_empyt_cup@env.train
+  - env/robotwin_place_empyt_cup@env.eval
   - model/openvla_oft@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
@@ -35,7 +35,7 @@ runner:
   val_check_interval: -1
   save_interval: 100
   seq_length: 4096
-  max_prompt_length: 128
+  max_prompt_length: 512
 
   resume_dir: null
 
@@ -86,7 +86,7 @@ env:
   group_name: "EnvGroup"
   enable_offload: True
 
-  # Override the default values in env/robotwin_single_task
+  # Override the default values in env/robotwin_place_empyt_cup
   train:
     total_num_envs: 2
   eval:
@@ -135,6 +135,7 @@ actor:
     center_crop: True
 
     add_value_head: True
+    max_prompt_length: 512
 
   optim:
     lr: 5.0e-6

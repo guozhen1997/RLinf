@@ -29,10 +29,10 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers.generation import TopKLogitsWarper
 
 from rlinf.models.embodiment.base_policy import BasePolicy
-from rlinf.models.embodiment.model_utils import (
-    compute_entropy_from_logits,
-    compute_logprobs_from_logits,
-)
+# from rlinf.utils.utils import (
+#     compute_entropy_from_logits,
+#     compute_logprobs_from_logits,
+# )
 from rlinf.models.embodiment.modules.value_head import ValueHead
 from rlinf.models.embodiment.openvla_oft.openvla_utils import (
     find_checkpoint_file,
@@ -40,6 +40,30 @@ from rlinf.models.embodiment.openvla_oft.openvla_utils import (
     normalize_proprio,
 )
 from rlinf.utils.torch_functionals import pad_tensor_to_length
+
+import torch.nn.functional as F
+
+
+def compute_logprobs_from_logits(logits, target):
+    logprobs = -F.cross_entropy(
+        logits, target=target, reduction="none"
+    )  # [B, action-dim]
+    return logprobs
+
+
+def compute_entropy_from_logits(logits, epsilon=1e-10):
+    """
+    Compute entropy by logits.
+
+    Args:
+        logits: [B, vocab-size, seq-len]
+    Returns:
+        entropy: [B, seq-len]
+    """
+    all_probs = F.softmax(logits, dim=1)  # [B, vocab-size, seq-len]
+    all_log_probs = torch.log(all_probs + epsilon)
+    entropy = -torch.sum(all_probs * all_log_probs, dim=1)  # [B, seq-len]
+    return entropy
 
 
 class OpenVLAOFTRLConfig(OpenVLAConfig):
@@ -383,7 +407,6 @@ class OpenVLAOFTForRLActionPrediction(OpenVLAOFTForActionPrediction, BasePolicy)
                 action_logits = logits_warper(None, action_logits)
 
             probs = torch.softmax(action_logits, dim=-1)
-            probs = torch.exp(probs)
 
             probs_flat = probs.reshape(-1, probs.shape[-1])
             reponse_ids = torch.multinomial(probs_flat, num_samples=1, replacement=True)
