@@ -17,52 +17,88 @@ The primary objective is to develop a model capable of performing robotic manipu
 3. **Action Generation**: Producing precise robotic actions (position, rotation, gripper control).
 4. **Reinforcement Learning**: Optimizing the policy via PPO with environment feedback.
 
-RLinf RoboTwinEnv Environment
------------------------
+RoboTwinEnv Environment
+--------------------------
 
-**RLinf RoboTwinEnv Environment**
+**RoboTwinEnv Environment**
 
 - **Environment**: RLinf framework provides the RoboTwinEnv environment for reinforcement learning training based on the RoboTwin 2.0 simulation platform.
-- **Task**: Control a robotic arm to perform various manipulation tasks. RLinf RoboTwinEnv currently supports **20 tasks** (all with dense reward functions implemented), and users can select tasks for training as needed.
+- **Task**: Control a robotic arm to perform various manipulation tasks. RLinf RoboTwinEnv currently supports **47 tasks**, and users can select tasks for training as needed.
 
-  **Place Tasks**
-  
-  - ``place_empty_cup``: Place an empty cup on a coaster
-  - ``place_shoe``: Place a single shoe
-  - ``place_dual_shoes``: Place two shoes
-  - ``place_fan``: Place a fan
-  - ``place_bread_skillet``: Place bread on a skillet
-  - ``place_a2b_left``: Place objects from left to right
-  - ``place_a2b_right``: Place objects from right to left
+  **Placement Tasks**
+
+  - ``adjust_bottle``: Pick up the bottle on the table headup with the correct arm.
+  - ``place_a2b_left``: Use appropriate arm to place object A on the left of object B.
+  - ``place_a2b_right``: Use appropriate arm to place object A on the right of object B.
+  - ``place_bread_basket``: If there is one bread on the table, use one arm to grab the bread and put it in the basket, if there are two breads on the table, use two arms to simultaneously grab up two breads and put them in the basket.
+  - ``place_bread_skillet``: Use one arm to grab the bread on the table and put it into the skillet.
+  - ``place_burger_fries``: Use dual arm to pick the hamburg and frenchfries and put them onto the tray.
+  - ``place_can_basket``: Use one arm to pick up the can, put it into the basket, and use another arm to lift the basket.
+  - ``place_cans_plasticbox``: Use dual arm to pick and place cans into plasticbox.
+  - ``place_container_plate``: Place the container onto the plate.
+  - ``place_empty_cup``: Use an arm to place the empty cup on the coaster.
+  - ``place_fan``: Grab the fan and place it on a colored mat, and make sure the fan is facing the robot.
+  - ``place_mouse_pad``: Grab the mouse and place it on a colored mat.
+  - ``place_object_basket``: Use one arm to grab the target object and put it in the basket, then use the other arm to grab the basket, and finally move the basket slightly away.
+  - ``place_object_stand``: Use appropriate arm to place the object on the stand.
+  - ``place_phone_stand``: Pick up the phone and put it on the phone stand.
+  - ``place_shoe``: Use one arm to grab the shoe from the table and place it on the mat.
+  - ``place_dual_shoes``: Use both arms to pick up the two shoes on the table and put them in the shoebox, with the shoe tip pointing to the left.
 
   **Pick Tasks**
-  
-  - ``pick_dual_bottles``: Pick two bottles
-  - ``pick_diverse_bottles``: Pick diverse bottles
 
-  **Stack Tasks**
+  - ``pick_dual_bottles``: Pick up one bottle with one arm, and pick up another bottle with the other arm.
+  - ``pick_diverse_bottles``: Pick up one bottle with one arm, and pick up another bottle with the other arm.
+  - ``move_can_pot``: There is a can and a pot on the table, use one arm to pick up the can and move it to beside the pot.
+  - ``move_pillbottle_pad``: Use one arm to pick the pillbottle and place it onto the pad.
+  - ``move_playingcard_away``: Pick up the playing card and move it away from the table.
+  - ``move_stapler_pad``: Use appropriate arm to move the stapler to a colored mat.
+  - ``grab_roller``: Use both arms to grab the roller on the table.
+  - ``lift_pot``: Use arms to lift the pot.
+  - ``put_bottles_dustbin``: Use arms to grab the bottles and put them into the dustbin to the left of the table.
+
+  **Stacking Tasks**
   
-  - ``stack_blocks_two``: Stack two blocks
-  - ``stack_blocks_three``: Stack three blocks
-  - ``stack_bowls_two``: Stack two bowls
-  - ``stack_bowls_three``: Stack three bowls
+  - ``stack_blocks_two``: Stack the green block on the red block.
+  - ``stack_blocks_three``: Stack the blue block on the green block, and then stack the green block on the red block.
+  - ``stack_bowls_two``: Stack the two bowls on top of each other.
+  - ``stack_bowls_three``: Stack the three bowls on top of each other.
 
   **Ranking Tasks**
   
-  - ``blocks_ranking_rgb``: Rank blocks by RGB color
-  - ``blocks_ranking_size``: Rank blocks by size
+  - ``blocks_ranking_rgb``: Arrange the blocks in the order of red, green, and blue from left to right.
+  - ``blocks_ranking_size``: Arrange the blocks from largest to smallest, from left to right.
 
-  **Interaction Tasks**
+  **Tool Use & Interaction Tasks**
   
-  - ``click_alarmclock``: Click an alarm clock
-  - ``click_bell``: Click a bell
-  - ``beat_block_hammer``: Beat a block with a hammer
-  - ``adjust_bottle``: Adjust bottle position
+  - ``click_alarmclock``: Click the alarm clock's center of the top side button on the table.
+  - ``click_bell``: Click the bell's top center on the table.
+  - ``beat_block_hammer``: Grab the hammer and hit the block.
+  - ``open_microwave``: Use one arm to open the microwave.
+  - ``press_stapler``: Use one arm to press the stapler.
+  - ``stamp_seal``: Grab the stamp and stamp onto the specific color mat.
+  - ``turn_switch``: Use the robotic arm to click the switch.
+
+  **Handover Tasks**
+  - ``handover_block``: Use the left arm to grasp the red block, handover it to the right arm, and then place it on the blue pad.
+  - ``handover_mic``: Use one arm to grasp the microphone and handover it to the other arm.
+
+  **Pouring, Dumping & Shaking Tasks**
+
+  - ``shake_bottle``: Shake the bottle with proper arm.
+  - ``shake_bottle_horizontally``: Shake the bottle horizontally with proper arm.
+  - ``dump_bin_bigbin``: Grab the small bin and pour the balls into the big bin.
+
+  **Hanging & Special Tasks**
+
+  - ``hanging_mug``: Use the left arm to pick up the mug and adjust its pose, then use the right arm to pick it up again and hang it onto the rack.
+  - ``scan_object``: Use one arm to hold the scanner, use the other arm to hold the object, and complete the scanning.
+  - ``rotate_qrcode``: Pick up the QR code board and rotate it so that the QR code faces the robot.
 
   .. note::
-     More tasks are under continuous development. The RoboTwin platform plans to support over 50 tasks, and dense reward function implementations will gradually extend to all tasks.
+     Currently three tasks are not yet supported: ``open_laptop``, ``place_object_scale``, and ``put_object_cabinet``. Additionally, dense reward functions are still under development and will gradually be extended to all tasks.
 
-- **Observation**: The observation returned by RLinf RoboTwinEnv is a dictionary (dict) containing the following fields:
+- **Observation**: The observation returned by RLinf RoboTwinEnv environment is a dictionary (dict) containing the following fields:
 
   - ``images``: Head camera RGB images
 
@@ -114,94 +150,43 @@ Method 1: Using Docker Image (Recommended)
 
 RLinf provides a pre-configured RoboTwin environment Docker image that includes all required dependencies and can be used directly, **skipping all subsequent installation steps**.
 
-.. code-block:: bash
+.. code:: bash
 
-   # Pull the RoboTwin environment image
-   docker pull rlinf/robotwin:latest
-   
-   # Run container (basic usage)
-   docker run -it --gpus all rlinf/robotwin:latest
-   
-   # Run container (mount data directories, recommended)
-   docker run -it --gpus all \
-     -v /path/to/robotwin_assets:/opt/robotwin_assets \
-     -v /path/to/models:/opt/models \
-     -v /path/to/results:/opt/results \
-     rlinf/robotwin:latest
+   docker run -it --rm --gpus all \
+      --shm-size 20g \
+      --network host \
+      --name rlinf \
+      -v .:/workspace/RLinf \
+      rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
+      # If you need to download the image faster in China, you can use:
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robocasa
 
 .. note::
    The Docker image includes:
    
-   - RLinf RoboTwinEnv environment
-   - ``embodied`` and ``robotwin`` extra dependencies
-   - RoboTwin platform-related dependencies
+   - RLinf RoboTwin environment dependencies
    - Compatibility patches applied
-   - Support for OpenVLA, OpenVLA-OFT, and OpenPI models
+   - Support for OpenVLA-OFT, OpenPI models
 
    **After using the Docker image, you can directly proceed to the** `Model Download`_ **and** `Running Scripts`_ **sections, skipping all subsequent installation steps.**
 
 Method 2: Manual Installation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you need to install in a local environment, you can use the following two methods:
+Use the ``requirements/install.sh`` script with the ``--env robotwin`` parameter to install the RoboTwin environment. Replace the ``--model openvla-oft`` parameter with the corresponding model name (``openvla``, ``openvla-oft``, or ``openpi``) based on the model you want to train:
 
-**Method 2.1: Using Installation Script (Recommended)**
+.. code:: bash
 
-Use the ``requirements/install.sh`` script with the ``--robotwin`` parameter to install the RoboTwin environment. Replace the first parameter with the corresponding model name (``openvla``, ``openvla-oft``, or ``openpi``) based on the model you want to train:
+   # To speed up dependency installation in China, you can add `--use-mirror` to the install.sh command below
 
-.. code-block:: bash
-
-   # Create a virtual environment
-   uv venv --python=3.11 --name openvla-oft-robotwin
-   source ./venv/openvla-oft-robotwin/bin/activate
-
-   # Example with OpenVLA-OFT (for RoboTwin)
-   bash requirements/install.sh openvla-oft --robotwin
+   bash requirements/install.sh embodied --model openvla-oft --env robotwin
+   source .venv/bin/activate
 
 This script will automatically:
 
-- Install ``embodied`` and ``robotwin`` extra dependencies
-- Install RoboTwin platform-related dependencies
+- Install RLinf RoboTwin environment dependencies
 - Apply RoboTwin compatibility patches (fixing compatibility issues between sapien and mplib)
 - Install dependencies for the corresponding VLA model
-
-**Method 2.2: Fully Manual Installation**
-
-If you want full manual control over the installation process, follow these steps:
-
-.. code-block:: bash
-
-   # Step 1: Create a virtual environment
-   uv venv --python=3.11 --name openvla-oft-robotwin
-   source ./venv/openvla-oft-robotwin/bin/activate
-
-   # Step 2: Install RLinf base dependencies and RoboTwin extra
-   uv pip install -e ".[embodied,robotwin]"
-   
-   # Step 3: Install system dependencies for embodied environment
-   bash requirements/install_embodied_deps.sh
-   
-   # Step 4: Apply RoboTwin compatibility patches
-   bash requirements/patch_sapien_mplib_for_robotwin.sh
-   
-   # Step 5: Install corresponding dependencies based on the model used (example with OpenVLA-OFT)
-   # OpenVLA-OFT:
-   uv pip install -r requirements/openvla_oft.txt
-
-.. note::
-   **Dependency Conflict Note**: ``mplib==0.2.1`` is required for RoboTwin but conflicts with ManiSkill.
-   If you need both ManiSkill and RoboTwin, it is recommended to:
-   
-   - Use separate virtual environments for each
-   - Or install ``embodied`` first, then use the ``robotwin`` extra as needed
-
-.. note::
-   **Compatibility Patch Note**: The patch script fixes the following issues:
-   
-   - Encoding issues in ``sapien/wrapper/urdf_loader.py``
-   - Collision detection logic in ``mplib/planner.py``
-   
-   If using the ``install.sh`` script, patches are automatically applied and do not need to be run manually.
 
 Assets Download
 -----------------------
@@ -232,7 +217,7 @@ Before starting training, you need to download the corresponding SFT model:
    pip install huggingface-hub
    huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin
 
-After downloading, ensure that the model path is correctly specified in the configuration yaml file (``actor.model.model_dir``).
+After downloading, ensure that the model path is correctly specified in the configuration yaml file (``actor.model.model_path``).
 
 Running Scripts
 -------------------
@@ -245,8 +230,9 @@ Using the OpenVLA-OFT model as an example, the following key parameters need to 
 
    actor:
      model:
-       model_dir: "/path/to/RLinf-OpenVLAOFT-RoboTwin"  # SFT model path
-       model_name: "openvla_oft"
+       model_path: "/path/to/RLinf-OpenVLAOFT-RoboTwin"  # SFT model path
+       model_type: "openvla_oft"                         # Model type set to openvla_oft
+       implement_version: "offical"                      # openvla_oft implementation version (RLinf OpenVLA-OFT model implementation integrates the official OFT version and RLinf SFT fine-tuned version, RoboTwin environment uses the official version)
        action_dim: 14                                    # RoboTwin action dimension (14D)
        use_proprio: True                                 # Whether to use proprioception information
        proprio_dim: 14                                   # Proprioception dimension (must match action_dim)
@@ -262,11 +248,11 @@ In the environment configuration file, the following key parameters need to be s
 
 .. code-block:: yaml
 
-   env/train: robotwin_single_task
-   env/eval: robotwin_single_task
+   env/train: robotwin_place_empyt_cup
+   env/eval: robotwin_place_empyt_cup
    
-   # In env/train/robotwin_single_task.yaml:
-   simulator_type: robotwin
+   # In env/train/robotwin_place_empyt_cup.yaml:
+   env_type: robotwin
    assets_path: "/path/to/robotwin_assets"
    
    task_config:
@@ -281,24 +267,28 @@ In the environment configuration file, the following key parameters need to be s
 
 **3. Configuration Files**
 
-Supports **OpenVLA-OFT** model with **PPO** algorithm.  
-Corresponding configuration files:
+Using **OpenVLA-OFT** model with **GRPO** algorithm as an example, the corresponding configuration file is:
 
-- **OpenVLA-OFT + PPO**: ``examples/embodiment/config/robotwin_ppo_openvlaoft.yaml``
+- **OpenVLA-OFT + GRPO**: ``examples/embodiment/config/robotwin_place_empyt_cup_grpo_openvlaoft.yaml``
 
 **4. Launch Command**
 
-After selecting the configuration, run the following command to start training:
+After selecting the configuration, you need to configure the following in the ``examples/embodiment/run_embodiment.sh`` script:
+
+- Set the **ROBOT_PLATFORM environment variable**, ``export ROBOT_PLATFORM=ALOHA``
+- Add the RoboTwin repo path to PYTHONPATH, ``export PYTHONPATH=/opt/RoboTwin:$PYTHONPATH``
+
+Then run the following command to start training:
 
 .. code-block:: bash
 
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
-For example, training OpenVLA-OFT model with PPO in the RoboTwin environment:
+For example, training OpenVLA-OFT model with GRPO in the RoboTwin environment:
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh robotwin_ppo_openvlaoft
+   bash examples/embodiment/run_embodiment.sh robotwin_place_empyt_cup_grpo_openvlaoft ALOHA
 
 Visualization and Results
 -------------------------
@@ -331,7 +321,8 @@ Configuration Details
 
 1. **Model Configuration**:
 
-   - ``actor.model.model_name: "openvla_oft"``: Use OpenVLA-OFT model
+   - ``actor.model.model_type: "openvla_oft"``: Use OpenVLA-OFT model
+   - ``actor.model.implement_version: "offical"``: Use OpenVLA-OFT official version
    - ``actor.model.action_dim: 14``: 14-dimensional action space (including proprioception)
    - ``actor.model.use_proprio: True``: Enable proprioception input
    - ``actor.model.proprio_dim: 14``: Proprioception dimension
@@ -355,7 +346,8 @@ Important Notes
 -----------------------
 
 1. **Resource Paths**: Ensure the ``assets_path`` is correct
-2. **Environment Variables**: Ensure the RoboTwin repo path is added to PYTHONPATH, e.g., ``export PYTHONPATH=/opt/robotwin:$PYTHONPATH``
-3. **GPU Memory**: The RoboTwin environment may require significant GPU memory, it is recommended to use ``enable_offload: True``
-4. **Task Configuration**: Modify parameters in ``task_config`` according to specific tasks
+2. **ROBOT_PLATFORM Environment Variable**: Ensure the ``ROBOT_PLATFORM`` variable is set to ``ALOHA``
+3. **RoboTwin Repo**: Ensure the RoboTwin repo path is added to PYTHONPATH, e.g., ``export PYTHONPATH=/opt/robotwin:$PYTHONPATH``
+4. **GPU Memory**: The RoboTwin environment may require significant GPU memory, it is recommended to use ``enable_offload: True``
+5. **Task Configuration**: Modify parameters in ``task_config`` according to specific tasks
 

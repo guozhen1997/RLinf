@@ -1,5 +1,5 @@
 基于RoboTwin模拟器的强化学习训练
-=============================
+=======================================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
    :width: 16px
@@ -16,50 +16,86 @@
 3. **动作生成**：产生精确的机器人动作（位置、旋转、夹爪控制）。  
 4. **强化学习**：结合环境反馈，使用 PPO 优化策略。
 
-RLinf RoboTwinEnv 环境介绍
------------------------
+RoboTwinEnv 环境介绍
+--------------------------
 
-**RLinf RoboTwinEnv 环境**
+**RoboTwinEnv 环境**
 
 - **Environment**：RLinf 框架基于 RoboTwin 2.0 仿真环境提供了用于强化学习训练的 RoboTwinEnv 环境。  
-- **Task**：控制机械臂完成多种操作任务。RLinf RoboTwinEnv 目前支持以下 **20 个任务** （均已实现 dense reward 奖励函数），用户可以根据需要选择任务进行训练。
+- **Task**：控制机械臂完成多种操作任务。RLinf RoboTwinEnv 目前支持以下 **47 个任务** ，用户可以根据需要选择任务进行训练。
 
-  **放置类任务（Place Tasks）**
-  
-  - ``place_empty_cup``：放置空杯到杯垫上
-  - ``place_shoe``：放置单只鞋子
-  - ``place_dual_shoes``：放置两只鞋子
-  - ``place_fan``：放置风扇
-  - ``place_bread_skillet``：将面包放置到平底锅上
-  - ``place_a2b_left``：从左到右放置物体
-  - ``place_a2b_right``：从右到左放置物体
+  **放置类任务（Placement Tasks）**
+
+  - ``adjust_bottle``：使用正确的手臂将桌上的瓶子拾起并保持瓶口朝上
+  - ``place_a2b_left``：使用合适的手臂将物体 A 放置在物体 B 的左侧
+  - ``place_a2b_right``：使用合适的手臂将物体 A 放置在物体 B 的右侧
+  - ``place_bread_basket``：若桌上有一个面包，用单臂抓取并放入篮子；若有两个面包，用双臂同时抓取并放入篮子
+  - ``place_bread_skillet``：用单臂抓取桌上的面包并放入平底锅
+  - ``place_burger_fries``：使用双臂抓取汉堡和薯条并放置到托盘上
+  - ``place_can_basket``：一只手臂将易拉罐放入篮子，另一只手臂提起篮子
+  - ``place_cans_plasticbox``：使用双臂将易拉罐抓取并放入塑料箱
+  - ``place_container_plate``：将容器放置到盘子上
+  - ``place_empty_cup``：使用单臂将空杯放置到杯垫上
+  - ``place_fan``：抓取风扇并放到彩色垫子上，且风扇朝向机器人
+  - ``place_mouse_pad``：抓取鼠标并放置到彩色垫子上
+  - ``place_object_basket``：一只手臂将目标物体放入篮子，另一只手臂抓起篮子并向外移动
+  - ``place_object_stand``：使用合适的手臂将物体放置到支架上
+  - ``place_phone_stand``：抓取手机并放置到手机支架上
+  - ``place_shoe``：使用单臂从桌上抓取鞋子并放到垫子上
+  - ``place_dual_shoes``：使用双臂抓取两只鞋并放入鞋盒，且鞋头朝左
 
   **抓取类任务（Pick Tasks）**
-  
-  - ``pick_dual_bottles``：抓取两个瓶子
-  - ``pick_diverse_bottles``：抓取多样化的瓶子
 
-  **堆叠类任务（Stack Tasks）**
+  - ``pick_dual_bottles``：用双臂分别抓取两个瓶子
+  - ``pick_diverse_bottles``：用双臂分别抓取两个不同的瓶子
+  - ``move_can_pot``：用单臂抓取易拉罐并移动到锅旁
+  - ``move_pillbottle_pad``：用单臂抓取药瓶并放到垫子上
+  - ``move_playingcard_away``：抓取扑克牌并将其朝远离桌面的方向移动
+  - ``move_stapler_pad``：使用合适的手臂将订书机移动到彩色垫子上
+  - ``grab_roller``：使用双臂抓取桌上的滚轴
+  - ``lift_pot``：使用双臂抬起锅
+  - ``put_bottles_dustbin``：抓取瓶子并放入桌子左侧的垃圾桶
+
+  **堆叠类任务（Stacking Tasks）**
   
-  - ``stack_blocks_two``：堆叠两个积木
-  - ``stack_blocks_three``：堆叠三个积木
-  - ``stack_bowls_two``：堆叠两个碗
-  - ``stack_bowls_three``：堆叠三个碗
+  - ``stack_blocks_two``：将绿色积木堆叠在红色积木上
+  - ``stack_blocks_three``：将蓝色积木叠在绿色积木上，再将绿色积木叠在红色积木上
+  - ``stack_bowls_two``：将两个碗上下堆叠
+  - ``stack_bowls_three``：将三个碗上下堆叠
 
   **排序类任务（Ranking Tasks）**
   
-  - ``blocks_ranking_rgb``：按 RGB 颜色排序积木
-  - ``blocks_ranking_size``：按大小排序积木
+  - ``blocks_ranking_rgb``：按红、绿、蓝顺序从左到右排列积木
+  - ``blocks_ranking_size``：将积木从左到右按由大到小排列
 
-  **交互类任务（Interaction Tasks）**
+  **使用工具类任务（Tool Use & Interaction Tasks）**
   
-  - ``click_alarmclock``：点击闹钟
-  - ``click_bell``：点击铃铛
-  - ``beat_block_hammer``：用锤子敲击积木
-  - ``adjust_bottle``：调整瓶子位置
+  - ``click_alarmclock``：按下闹钟顶部中央按钮
+  - ``click_bell``：按下铃铛顶部中央
+  - ``beat_block_hammer``：抓起锤子敲击积木
+  - ``open_microwave``：用单臂打开微波炉
+  - ``press_stapler``：用单臂按压订书机
+  - ``stamp_seal``：抓取印章并盖在指定颜色的垫子上
+  - ``turn_switch``：用机械臂拨动开关
+
+  **交接类任务（Handover Tasks）**
+  - ``handover_block``：左臂抓取红色积木并交接给右臂，随后放置到蓝色垫子上
+  - ``handover_mic``：单臂抓取麦克风并交接给另一只手臂
+
+  **倾倒、投掷与摇晃任务（Pouring, Dumping & Shaking Tasks）**
+
+  - ``shake_bottle``：使用合适的手臂摇晃瓶子
+  - ``shake_bottle_horizontally``：使用合适的手臂水平摇晃瓶子
+  - ``dump_bin_bigbin``：抓取小箱并将其中物体倒入大箱中
+
+  **悬挂与特殊任务（Hanging & Special Tasks）**
+
+  - ``hanging_mug``：左臂抓取杯子并调整姿态，右臂再次抓取并将杯子挂到挂架上
+  - ``scan_object``：一只手臂持扫描器，另一只手臂持物体并完成扫描
+  - ``rotate_qrcode``：抓取二维码板并旋转，使二维码朝向机器人
 
   .. note::
-     更多任务正在持续开发中。RoboTwin 平台计划支持超过 50 个任务，dense reward 奖励函数的实现将逐步扩展到所有任务。
+     目前有三个任务尚未支持，分别是 ``open_laptop``， ``place_object_scale`` 和 ``put_object_cabinet`` 。另外，dense reward 奖励函数还在开发中，后续将逐步扩展到所有任务。
 
 - **Observation**：RLinf RoboTwinEnv 环境返回的观测信息是一个字典（dict），包含以下字段：
 
@@ -106,101 +142,51 @@ RLinf RoboTwinEnv 环境介绍
 依赖安装
 -----------------------
 
-RLinf 提供了两种安装方式：**Docker 镜像** （推荐，最简单）和**手动安装** （使用安装脚本）。
+RLinf 提供了两种安装方式：**Docker 镜像** （推荐，最简单）和 **手动安装** （使用安装脚本）。
 
 方式 1：使用 Docker 镜像（推荐）
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含所有必需的依赖，可以直接使用，**无需进行后续安装步骤**。
 
-.. code-block:: bash
+.. code:: bash
 
-   # 拉取 RoboTwin 环境镜像
-   docker pull rlinf/robotwin:latest
-   
-   # 运行容器（基础用法）
-   docker run -it --gpus all rlinf/robotwin:latest
-   
-   # 运行容器（挂载数据目录，推荐）
-   docker run -it --gpus all \
-     -v /path/to/robotwin_assets:/opt/robotwin_assets \
-     -v /path/to/models:/opt/models \
-     -v /path/to/results:/opt/results \
-     rlinf/robotwin:latest
+   docker run -it --rm --gpus all \
+      --shm-size 20g \
+      --network host \
+      --name rlinf \
+      -v .:/workspace/RLinf \
+      rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
+      # 如果需要国内加速下载镜像，可以使用：
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robocasa
 
 .. note::
    Docker 镜像已包含：
    
-   - RLinf RoboTwinEnv 环境
-   - ``embodied`` 和 ``robotwin`` extra 依赖
-   - RoboTwin 平台相关依赖
+   - RLinf RoboTwin 环境相关依赖
    - 兼容性补丁已应用
-   - 支持 OpenVLA、OpenVLA-OFT、OpenPI 模型
+   - 支持 OpenVLA-OFT、OpenPI 模型
 
    **使用 Docker 镜像后，可以直接跳转到** `模型下载`_ **和** `运行脚本`_ **章节，无需进行后续安装步骤。**
 
 方式 2：手动安装
 ~~~~~~~~~~~~~~~~
 
-如果您需要在本地环境安装，可以使用以下两种方法：
+使用 ``requirements/install.sh`` 脚本，通过 ``--env robotwin`` 参数安装 RoboTwin 环境。根据您要训练的模型，将 ``--model openvla-oft`` 参数替换为对应的模型名称（``openvla``、``openvla-oft`` 或 ``openpi``）：
 
-**方法 2.1：使用安装脚本（推荐）**
+.. code:: bash
 
-使用 ``requirements/install.sh`` 脚本，通过 ``--robotwin`` 参数安装 RoboTwin 环境。根据您要训练的模型，将第一个参数替换为对应的模型名称（``openvla``、``openvla-oft`` 或 ``openpi``）：
+   # 为提高国内依赖安装速度，可以添加`--use-mirror`到下面的install.sh命令
 
-.. code-block:: bash
-
-   # 创建一个虚拟环境
-   uv venv --python=3.11 --name openvla-oft-robotwin
-   source ./venv/openvla-oft-robotwin/bin/activate
-
-   # 以 OpenVLA-OFT 为例（用于 RoboTwin）
-   bash requirements/install.sh openvla-oft --robotwin
+   bash requirements/install.sh embodied --model openvla-oft --env robotwin
+   source .venv/bin/activate
 
 该脚本会自动完成：
 
-- 安装 ``embodied`` 和 ``robotwin`` extra 依赖
-- 安装 RoboTwin 平台相关依赖
+- 安装 RLinf RoboTwin 环境相关依赖
 - 应用 RoboTwin 兼容性补丁（修复 sapien 和 mplib 的兼容性问题）
 - 安装对应 VLA 模型的依赖包
 
-**方法 2.2：完全手动安装**
-
-如果您想完全手动控制安装过程，可以按以下步骤操作：
-
-.. code-block:: bash
-
-   # 步骤 1: 创建一个虚拟环境
-   uv venv --python=3.11 --name openvla-oft-robotwin
-   source ./venv/openvla-oft-robotwin/bin/activate
-
-   # 步骤 2: 安装 RLinf 基础依赖和 RoboTwin extra
-   uv pip install -e ".[embodied,robotwin]"
-   
-   # 步骤 3: 安装 embodied 环境的系统依赖
-   bash requirements/install_embodied_deps.sh
-   
-   # 步骤 4: 应用 RoboTwin 兼容性补丁
-   bash requirements/patch_sapien_mplib_for_robotwin.sh
-   
-   # 步骤 5: 根据使用的模型安装对应依赖（以 OpenVLA-OFT 为例）
-   # OpenVLA-OFT:
-   uv pip install -r requirements/openvla_oft.txt
-
-.. note::
-   **依赖冲突说明**：``mplib==0.2.1`` 是 RoboTwin 必需的，但与 ManiSkill 存在冲突。
-   如果您同时需要 ManiSkill 和 RoboTwin，建议：
-   
-   - 使用不同的虚拟环境分别运行
-   - 或者先安装 ``embodied``，然后根据需要使用 ``robotwin`` extra
-
-.. note::
-   **兼容性补丁说明**：补丁脚本会修复以下问题：
-   
-   - ``sapien/wrapper/urdf_loader.py`` 中的编码问题
-   - ``mplib/planner.py`` 中的碰撞检测逻辑
-   
-   如果使用 ``install.sh`` 脚本安装，补丁会自动应用，无需手动运行。
 
 Assets 下载
 -----------------------
@@ -231,7 +217,7 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
    pip install huggingface-hub
    huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin
 
-下载后，请确保在配置 yaml 文件中正确指定模型路径（``actor.model.model_dir``）。
+下载后，请确保在配置 yaml 文件中正确指定模型路径（``actor.model.model_path``）。
 
 运行脚本
 -------------------
@@ -244,8 +230,9 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
    actor:
      model:
-       model_dir: "/path/to/RLinf-OpenVLAOFT-RoboTwin"  # SFT 模型路径
-       model_name: "openvla_oft"
+       model_path: "/path/to/RLinf-OpenVLAOFT-RoboTwin"  # SFT 模型路径
+       model_type: "openvla_oft"                         # 模型类型设置为openvla_oft
+       implement_version: "offical"                      # openvla_oft实现版本（RLinf OpenVLA-OFT模型的实现接入了oft官方版本和rlinf sft微调版本，RoboTwin环境使用官方版本）
        action_dim: 14                                    # RoboTwin 动作维度（14维）
        use_proprio: True                                 # 是否使用本体感觉信息
        proprio_dim: 14                                   # 本体感觉维度（需与 action_dim 一致）
@@ -261,11 +248,11 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
 .. code-block:: yaml
 
-   env/train: robotwin_single_task
-   env/eval: robotwin_single_task
+   env/train: robotwin_place_empyt_cup
+   env/eval: robotwin_place_empyt_cup
    
-   # 在 env/train/robotwin_single_task.yaml 中：
-   simulator_type: robotwin
+   # 在 env/train/robotwin_place_empyt_cup.yaml 中：
+   env_type: robotwin
    assets_path: "/path/to/robotwin_assets"
    
    task_config:
@@ -280,24 +267,28 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
 **3. 配置文件**
 
-支持 **OpenVLA-OFT** 模型，算法为 **PPO**。  
-对应配置文件：
+以 **OpenVLA-OFT** 模型， **GRPO** 算法为例，对应配置文件为：
 
-- **OpenVLA-OFT + PPO**：``examples/embodiment/config/robotwin_ppo_openvlaoft.yaml``
+- **OpenVLA-OFT + GRPO**：``examples/embodiment/config/robotwin_place_empyt_cup_grpo_openvlaoft.yaml``
 
 **4. 启动命令**
 
-选择配置后，运行以下命令开始训练：
+选择配置后，需要在 ``examples/embodiment/run_embodiment.sh`` 脚本中：
+
+- 设置 **ROBOT_PLATFORM 环境变量**， ``export ROBOT_PLATFORM=ALOHA``
+- 将RoboTwin repo路径加在 PYTHONPATH中， ``export PYTHONPATH=/opt/RoboTwin:$PYTHONPATH``
+
+然后运行以下命令开始训练：
 
 .. code-block:: bash
 
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
-例如，在 RoboTwin 环境中使用 PPO 训练 OpenVLA-OFT 模型：
+例如，在 RoboTwin 环境中使用 GRPO 训练 OpenVLA-OFT 模型：
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh robotwin_ppo_openvlaoft
+   bash examples/embodiment/run_embodiment.sh robotwin_place_empyt_cup_grpo_openvlaoft ALOHA
 
 可视化与结果
 -------------------------
@@ -330,7 +321,8 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
 1. **模型配置**：
 
-   - ``actor.model.model_name: "openvla_oft"``：使用 OpenVLA-OFT 模型
+   - ``actor.model.model_type: "openvla_oft"``：使用 OpenVLA-OFT 模型
+   - ``actor.model.implement_version: "offical"``：使用 OpenVLA-OFT 官方版本
    - ``actor.model.action_dim: 14``：14 维动作空间（包含本体感觉）
    - ``actor.model.use_proprio: True``：启用本体感觉输入
    - ``actor.model.proprio_dim: 14``：本体感觉维度
@@ -354,7 +346,8 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 -----------------------
 
 1. **资源路径**：确保 ``assets_path`` 路径正确
-2. **环境变量**：确保将 RoboTwin repo路径加在 PYTHONPATH 中，如 ``export PYTHONPATH=/opt/robotwin:$PYTHONPATH``
-3. **GPU 内存**：RoboTwin 环境可能需要较多 GPU 内存，建议使用 ``enable_offload: True``
-4. **任务配置**：根据具体任务修改 ``task_config`` 中的参数
+2. **ROBOT_PLATFORM 环境变量**：确保 ``ROBOT_PLATFORM`` 变量设置为 ``ALOHA``
+3. **RoboTwin Repo**：确保将 RoboTwin repo路径加在 PYTHONPATH 中，如 ``export PYTHONPATH=/opt/robotwin:$PYTHONPATH``
+4. **GPU 内存**：RoboTwin 环境可能需要较多 GPU 内存，建议使用 ``enable_offload: True``
+5. **任务配置**：根据具体任务修改 ``task_config`` 中的参数
 
