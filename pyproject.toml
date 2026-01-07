@@ -88,7 +88,7 @@ embodied = [
     "openai",
 ]
 robotwin = [
-    "mplib==0.2.1",  # Required for RoboTwin, conflicts with ManiSkill
+    "mplib==0.2.1",
     "pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git",
     "curobo @ git+https://github.com/NVlabs/curobo.git",
 ]
