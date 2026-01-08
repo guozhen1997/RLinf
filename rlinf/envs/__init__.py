@@ -14,6 +14,7 @@
 
 from enum import Enum
 
+
 class SupportedEnvType(Enum):
     MANISKILL = "maniskill"
     LIBERO = "libero"
@@ -24,6 +25,7 @@ class SupportedEnvType(Enum):
     CALVIN = "calvin"
     ROBOCASA = "robocasa"
     REALWORLD = "realworld"
+
 
 def get_env_cls(env_type: str, env_cfg=None, enable_offload=False):
     """
@@ -43,7 +45,9 @@ def get_env_cls(env_type: str, env_cfg=None, enable_offload=False):
         if not enable_offload:
             from rlinf.envs.maniskill.maniskill_env import ManiskillEnv
         else:
-            from rlinf.envs.maniskill.maniskill_offload_env import ManiskillOffloadEnv as ManiskillEnv
+            from rlinf.envs.maniskill.maniskill_offload_env import (
+                ManiskillOffloadEnv as ManiskillEnv,
+            )
 
         return ManiskillEnv
     elif env_type == SupportedEnvType.LIBERO:

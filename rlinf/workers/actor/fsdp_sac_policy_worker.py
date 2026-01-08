@@ -22,11 +22,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
 
+from rlinf.config import SupportedModel
 from rlinf.data.replay_buffer import SACReplayBuffer
 from rlinf.hybrid_engines.fsdp import (
     FSDP,
     FSDPModule,
 )
+from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.scheduler import Channel
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import (
@@ -39,8 +41,6 @@ from rlinf.utils.nested_dict_process import (
     split_dict_to_chunk,
 )
 from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
-from rlinf.models.embodiment.base_policy import ForwardType
-from rlinf.config import SupportedModel
 
 
 class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
@@ -372,7 +372,9 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         kwargs = {}
         if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
             kwargs["temperature"] = self.cfg.algorithm.sampling_params.temperature_train
-        pi, log_pi, shared_feature = self.model(forward_type=ForwardType.SAC, obs=curr_obs, **kwargs)
+        pi, log_pi, shared_feature = self.model(
+            forward_type=ForwardType.SAC, obs=curr_obs, **kwargs
+        )
         log_pi = log_pi.sum(dim=-1, keepdim=True)  # sum over the chunk dimension
         if not use_crossq:
             all_qf_pi = self.model(
@@ -410,7 +412,9 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 kwargs["temperature"] = (
                     self.cfg.algorithm.sampling_params.temperature_train
                 )
-            _, log_pi, _ = self.model(forward_type=ForwardType.SAC, obs=curr_obs, **kwargs)
+            _, log_pi, _ = self.model(
+                forward_type=ForwardType.SAC, obs=curr_obs, **kwargs
+            )
             log_pi = log_pi.sum(dim=-1, keepdim=True)
 
         alpha = self.compute_alpha()

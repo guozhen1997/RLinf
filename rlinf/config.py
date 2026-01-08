@@ -26,8 +26,8 @@ import yaml
 from omegaconf import OmegaConf, open_dict
 from omegaconf.dictconfig import DictConfig
 
-from rlinf.scheduler.cluster import Cluster
 from rlinf.envs import SupportedEnvType
+from rlinf.scheduler.cluster import Cluster
 from rlinf.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
@@ -794,7 +794,8 @@ def validate_embodied_cfg(cfg):
                 cfg.actor.model.policy_setup
             )
         elif (
-            SupportedEnvType(cfg.env.train.env_type) == SupportedEnvType.BEHAVIOR or SupportedEnvType(cfg.env.eval.env_type) == SupportedEnvType.BEHAVIOR
+            SupportedEnvType(cfg.env.train.env_type) == SupportedEnvType.BEHAVIOR
+            or SupportedEnvType(cfg.env.eval.env_type) == SupportedEnvType.BEHAVIOR
         ):
             import omnigibson as og
 

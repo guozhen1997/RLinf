@@ -16,13 +16,13 @@ import io
 
 import torch
 
+from rlinf.envs.env_manager import EnvOffloadMixin
 from rlinf.envs.maniskill.maniskill_env import ManiskillEnv
 from rlinf.envs.maniskill.utils import (
     get_batch_rng_state,
     recursive_to_device,
     set_batch_rng_state,
 )
-from rlinf.envs.env_manager import EnvOffloadMixin
 
 
 class ManiskillOffloadEnv(ManiskillEnv, EnvOffloadMixin):
