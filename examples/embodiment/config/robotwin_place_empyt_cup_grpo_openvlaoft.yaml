@@ -28,7 +28,7 @@ runner:
   max_epochs: 1000
   max_steps: -1
 
-  only_eval: True
+  only_eval: False
   eval_policy_path: "/mnt/public/peihong/codes/RLinf_new/logs/place_empty_cup_grpo/robotwin_ppo_openvlaoft/checkpoints/global_step_40/model.pt" # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
   val_check_interval: 20
   save_interval: 20
