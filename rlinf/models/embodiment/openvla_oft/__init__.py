@@ -20,7 +20,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
     implement_version = cfg.get("implement_version", "rlinf")
     if implement_version == "rlinf":
         from rlinf.models.embodiment.openvla_oft.rlinf import get_model
-    if implement_version == "offical":
+    elif implement_version == "offical":
         from rlinf.models.embodiment.openvla_oft.offical import get_model
     else:
         raise NotImplementedError(

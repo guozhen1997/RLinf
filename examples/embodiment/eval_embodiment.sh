@@ -20,9 +20,8 @@ export ISAAC_PATH=${ISAAC_PATH:-/path/to/isaac-sim}
 export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
-LIBERO_PATH=/opt/libero
 export ROBOTWIN_PATH="/path/to/RoboTwin"
-export PYTHONPATH=${REPO_PATH}:${LIBERO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
+export PYTHONPATH=${REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
 export CUDA_LAUNCH_BLOCKING=1
 export HYDRA_FULL_ERROR=1
@@ -34,8 +33,7 @@ else
 fi
 
 # NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
-DEFAULT_ROBOT_PLATFORM="LIBERO"
-ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-$DEFAULT_ROBOT_PLATFORM}}
+ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-"LIBERO"}}
 
 export ROBOT_PLATFORM
 echo "Using ROBOT_PLATFORM=$ROBOT_PLATFORM"

@@ -23,9 +23,13 @@ import torch.multiprocessing as mp
 from omegaconf import OmegaConf
 from PIL import Image
 
-from rlinf.envs.utils import center_crop_image, list_of_dict_to_dict_of_list
-
-from .utils import put_info_on_image, save_rollout_video, tile_images
+from rlinf.envs.utils import (
+    center_crop_image,
+    list_of_dict_to_dict_of_list,
+    put_info_on_image,
+    save_rollout_video,
+    tile_images,
+)
 
 __all__ = ["RoboTwinEnv"]
 
@@ -89,7 +93,6 @@ class RoboTwinEnv(gym.Env):
         self.venv = VectorEnv(
             task_config=OmegaConf.to_container(self.cfg.task_config, resolve=True),
             n_envs=self.num_envs,
-            horizon=1,  # Set horizon to 1 since we handle chunk steps externally
             env_seeds=env_seeds,
         )
 

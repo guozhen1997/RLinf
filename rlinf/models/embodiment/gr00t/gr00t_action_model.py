@@ -449,11 +449,6 @@ class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
         output_action_chunks: int = 1,
     ):
         super().__init__(config, local_model_path)
-        # The param loading is after construction in from_pretrained(), so it should be safe to to so.
-        action_head_cfg = FlowmatchingActionHeadConfig(**config.action_head_cfg)
-        self.action_head = FlowMatchingActionHeadForRLActionPrediction(
-            action_head_cfg, rl_head_config, output_action_chunks
-        )
 
         self.padding_value = rl_head_config.padding_value
         self._modality_config = modality_config  # ModalityConfig(delta_indices=[0], modality_keys=['video.ego_view'])
