@@ -15,6 +15,7 @@
 import torch
 from omegaconf import DictConfig
 
+
 def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
     """
     Load and initialize the VLA model from checkpoint.

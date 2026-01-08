@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from abc import ABC, abstractmethod
-
 from enum import Enum
+
 
 class ForwardType(Enum):
     DEFAULT = "default"
@@ -23,6 +23,7 @@ class ForwardType(Enum):
     SAC_Q = "sac_q"
     CROSSQ = "crossq"
     CROSSQ_Q = "crossq_q"
+
 
 class BasePolicy(ABC):
     """

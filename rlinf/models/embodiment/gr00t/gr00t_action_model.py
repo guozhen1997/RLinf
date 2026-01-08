@@ -392,7 +392,7 @@ class FlowMatchingActionHeadForRLActionPrediction(FlowmatchingActionHead):
             dtype=torch.bfloat16,
             device=device,
         )
-    
+
     def get_value(self, vl_embs, state_features):
         # TODO: add value vlm mode param
         bsize = vl_embs.shape[0]
@@ -494,7 +494,7 @@ class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
             if "state" in k and len(v.shape) < 3:  # (B, Time, Dim)
                 return False
         return True
-    
+
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
         if forward_type == ForwardType.DEFAULT:
             return self.default_forward(**kwargs)

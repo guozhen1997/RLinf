@@ -73,8 +73,12 @@ class EnvWorker(Worker):
     def init_worker(self):
         self.enable_offload = self.cfg.env.enable_offload
 
-        train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train, self.enable_offload)
-        eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval, self.enable_offload)
+        train_env_cls = get_env_cls(
+            self.cfg.env.train.env_type, self.cfg.env.train, self.enable_offload
+        )
+        eval_env_cls = get_env_cls(
+            self.cfg.env.eval.env_type, self.cfg.env.eval, self.enable_offload
+        )
 
         # This is a barrier to ensure all envs' initial setup upon import is done
         # Essential for RealWorld env to ensure initial ROS node setup is done

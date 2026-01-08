@@ -14,6 +14,7 @@
 
 import torch
 
+
 def recursive_to_device(obj, device):
     if isinstance(obj, torch.Tensor):
         return obj.to(device)
@@ -36,4 +37,5 @@ def get_batch_rng_state(batched_rng):
 
 def set_batch_rng_state(state: dict):
     from mani_skill.envs.utils.randomization.batched_rng import BatchedRNG
+
     return BatchedRNG.from_rngs(state["rngs"])
