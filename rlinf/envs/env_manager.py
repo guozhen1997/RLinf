@@ -24,6 +24,12 @@ import torch.multiprocessing as mp
 
 from rlinf.scheduler import WorkerInfo
 
+class EnvOffloadMixin:
+    def get_state(self) -> bytes:
+        pass
+
+    def load_state(self, state: bytes):
+        pass
 
 def force_gc_tensor(tensor):
     if not torch.is_tensor(tensor):
@@ -168,7 +174,6 @@ class EnvManager:
         total_num_processes: int,
         env_cls: str,
         worker_info: WorkerInfo,
-        enable_offload: bool = False,
     ):
         self.cfg = cfg
         self.rank = rank
@@ -341,8 +346,6 @@ def _env_worker(
     bind_numa=True,
 ):
     """Worker process for Environment"""
-    from rlinf.envs.offload_wrapper.base import EnvOffloadMixin
-
     # Set NUMA affinity for the process to match the GPU rank
     if bind_numa:
         set_process_numa_affinity(rank)

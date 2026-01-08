@@ -13,8 +13,10 @@ use_fixed_reset_state_ids: False
 max_steps_per_rollout_epoch: 200
 max_episode_steps: 200 # max episode steps for truncation
 
-assets_path: "/mnt/public/peihong/codes/RLinf_RoboTwin_gz"
-seeds_path: "/mnt/project_rlinf/guozhen/test_robotwin/SimpleVLA-RL/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds.json"
+is_eval: False
+
+assets_path: "/path/to/robotwin/assets"
+seeds_path: "/path/to/robotwin/train_seeds.json"
 
 video_cfg:
   save_video: True

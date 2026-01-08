@@ -21,20 +21,24 @@ export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
 LIBERO_PATH=/opt/libero
-export ROBOTWIN_PATH="/mnt/public/guozhen/test_robotwin/RoboTwin"
+export ROBOTWIN_PATH="/path/to/RoboTwin"
 export PYTHONPATH=${REPO_PATH}:${LIBERO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
 export CUDA_LAUNCH_BLOCKING=1
 export HYDRA_FULL_ERROR=1
-
-# NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
-export ROBOT_PLATFORM=ALOHA # $ROBOT_PLATFORM
 
 if [ -z "$1" ]; then
     CONFIG_NAME="maniskill_ppo_openvlaoft"
 else
     CONFIG_NAME=$1
 fi
+
+# NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
+DEFAULT_ROBOT_PLATFORM="LIBERO"
+ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-$DEFAULT_ROBOT_PLATFORM}}
+
+export ROBOT_PLATFORM
+echo "Using ROBOT_PLATFORM=$ROBOT_PLATFORM"
 
 LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')" #/$(date +'%Y%m%d-%H:%M:%S')"
 MEGA_LOG_FILE="${LOG_DIR}/eval_embodiment.log"

@@ -27,6 +27,7 @@ from omegaconf import OmegaConf, open_dict
 from omegaconf.dictconfig import DictConfig
 
 from rlinf.scheduler.cluster import Cluster
+from rlinf.envs import SupportedEnvType
 from rlinf.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
@@ -768,13 +769,10 @@ def validate_embodied_cfg(cfg):
             "env.train.max_steps_per_rollout_epoch must be divisible by actor.model.num_action_chunks"
         )
 
-    # if cfg.runner.only_eval:
-    #     assert cfg.env.eval.num_envs > 0
-
     with open_dict(cfg):
         if (
-            cfg.env.train.env_type == "maniskill"
-            or cfg.env.eval.env_type == "maniskill"
+            SupportedEnvType(cfg.env.train.env_type) == SupportedEnvType.MANISKILL
+            or SupportedEnvType(cfg.env.eval.env_type) == SupportedEnvType.MANISKILL
         ):
 
             def get_robot_control_mode(robot: str):
@@ -796,7 +794,7 @@ def validate_embodied_cfg(cfg):
                 cfg.actor.model.policy_setup
             )
         elif (
-            cfg.env.train.env_type == "behavior" or cfg.env.eval.env_type == "behavior"
+            SupportedEnvType(cfg.env.train.env_type) == SupportedEnvType.BEHAVIOR or SupportedEnvType(cfg.env.eval.env_type) == SupportedEnvType.BEHAVIOR
         ):
             import omnigibson as og
 
