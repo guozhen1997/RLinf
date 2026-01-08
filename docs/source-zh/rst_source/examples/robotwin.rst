@@ -201,9 +201,6 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
    
    # 2. 下载并解压 Assets 文件
    bash script/_download_assets.sh
-   
-   # 3. 更新配置文件路径
-   python script/update_embodiment_config_path.py
 
 
 模型下载
@@ -215,7 +212,7 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
    # 下载 OpenVLA-OFT 模型
    pip install huggingface-hub
-   huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin
+   huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
 
 下载后，请确保在配置 yaml 文件中正确指定模型路径（``actor.model.model_path``）。
 
@@ -230,16 +227,16 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
    actor:
      model:
-       model_path: "/path/to/RLinf-OpenVLAOFT-RoboTwin"  # SFT 模型路径
-       model_type: "openvla_oft"                         # 模型类型设置为openvla_oft
-       implement_version: "offical"                      # openvla_oft实现版本（RLinf OpenVLA-OFT模型的实现接入了oft官方版本和rlinf sft微调版本，RoboTwin环境使用官方版本）
-       action_dim: 14                                    # RoboTwin 动作维度（14维）
-       use_proprio: True                                 # 是否使用本体感觉信息
-       proprio_dim: 14                                   # 本体感觉维度（需与 action_dim 一致）
-       use_film: False                                   # 是否使用 FiLM 层
-       num_images_in_input: 1                            # 输入图像数量
-       num_action_chunks: 25                             # 动作块数量
-       unnorm_key: "place_empty_cup"                     # 动作归一化键（需与SFT训练时使用的unnorm_key一致）
+       model_path: "/path/to/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup"  # SFT 模型路径
+       model_type: "openvla_oft"                                             # 模型类型设置为openvla_oft
+       implement_version: "offical"                                          # openvla_oft实现版本（RLinf OpenVLA-OFT模型的实现接入了oft官方版本和rlinf sft微调版本，RoboTwin环境使用官方版本）
+       action_dim: 14                                                        # RoboTwin 动作维度（14维）
+       use_proprio: True                                                     # 是否使用本体感觉信息
+       proprio_dim: 14                                                       # 本体感觉维度（需与 action_dim 一致）
+       use_film: False                                                       # 是否使用 FiLM 层
+       num_images_in_input: 1                                                # 输入图像数量
+       num_action_chunks: 25                                                 # 动作块数量
+       unnorm_key: "place_empty_cup"                                         # 动作归一化键（需与SFT训练时使用的unnorm_key一致）
 
 
 **2. 环境配置**

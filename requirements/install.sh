@@ -545,6 +545,7 @@ install_franka_env() {
 
 install_robotwin_env() {
     uv pip install mplib==0.2.1
+    uv pip install gymnasium==0.29.1
 
     uv pip install git+${GITHUB_PREFIX}https://github.com/facebookresearch/pytorch3d.git  --no-build-isolation
     uv pip install warp-lang
