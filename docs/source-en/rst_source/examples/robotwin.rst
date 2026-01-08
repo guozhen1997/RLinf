@@ -201,9 +201,6 @@ RoboTwin Assets are asset files required by the RoboTwin environment and need to
    
    # 2. Download and extract Assets files
    bash script/_download_assets.sh
-   
-   # 3. Update configuration file paths
-   python script/update_embodiment_config_path.py
 
 
 Model Download
@@ -215,7 +212,7 @@ Before starting training, you need to download the corresponding SFT model:
 
    # Download OpenVLA-OFT model
    pip install huggingface-hub
-   huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin
+   huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
 
 After downloading, ensure that the model path is correctly specified in the configuration yaml file (``actor.model.model_path``).
 
@@ -230,16 +227,16 @@ Using the OpenVLA-OFT model as an example, the following key parameters need to 
 
    actor:
      model:
-       model_path: "/path/to/RLinf-OpenVLAOFT-RoboTwin"  # SFT model path
-       model_type: "openvla_oft"                         # Model type set to openvla_oft
-       implement_version: "offical"                      # openvla_oft implementation version (RLinf OpenVLA-OFT model implementation integrates the official OFT version and RLinf SFT fine-tuned version, RoboTwin environment uses the official version)
-       action_dim: 14                                    # RoboTwin action dimension (14D)
-       use_proprio: True                                 # Whether to use proprioception information
-       proprio_dim: 14                                   # Proprioception dimension (must match action_dim)
-       use_film: False                                   # Whether to use FiLM layer
-       num_images_in_input: 1                            # Number of input images
-       num_action_chunks: 25                             # Number of action chunks
-       unnorm_key: "place_empty_cup"                     # Action normalization key (must match the unnorm_key used during SFT training)
+       model_path: "/path/to/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup"  # SFT model path
+       model_type: "openvla_oft"                                             # Model type set to openvla_oft
+       implement_version: "offical"                                          # openvla_oft implementation version (RLinf OpenVLA-OFT model implementation integrates the official OFT version and RLinf SFT fine-tuned version, RoboTwin environment uses the official version)
+       action_dim: 14                                                        # RoboTwin action dimension (14D)
+       use_proprio: True                                                     # Whether to use proprioception information
+       proprio_dim: 14                                                       # Proprioception dimension (must match action_dim)
+       use_film: False                                                       # Whether to use FiLM layer
+       num_images_in_input: 1                                                # Number of input images
+       num_action_chunks: 25                                                 # Number of action chunks
+       unnorm_key: "place_empty_cup"                                         # Action normalization key (must match the unnorm_key used during SFT training)
 
 
 **2. Environment Configuration**

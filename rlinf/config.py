@@ -51,7 +51,6 @@ class SupportedModel(Enum):
     # Embodied models
     OPENVLA = ("openvla", "embodied")
     OPENVLA_OFT = ("openvla_oft", "embodied")
-    OPENVLA_OFT_RLINF = ("openvla_oft_rlinf", "embodied")
     OPENPI = ("openpi", "embodied")
     MLP_POLICY = ("mlp_policy", "embodied")
     GR00T = ("gr00t", "embodied")
