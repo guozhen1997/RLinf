@@ -1,6 +1,6 @@
 defaults:
-  - env/robotwin_place_empty_cup@env.train
-  - env/robotwin_place_empty_cup@env.eval
+  - env/robotwin_beat_block_hammer@env.train
+  - env/robotwin_beat_block_hammer@env.eval
   - model/openvla_oft@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
@@ -22,14 +22,14 @@ runner:
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "robotwin_ppo_openvlaoft"
+    experiment_name: "robotwin_grpo_openvlaoft"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1000
   max_steps: -1
 
-  only_eval: True
-  eval_policy_path: "/mnt/public/peihong/codes/RLinf_new/logs/place_empty_cup_grpo/robotwin_ppo_openvlaoft/checkpoints/global_step_40/model.pt" # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
+  only_eval: False
+  eval_policy_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
   val_check_interval: 20
   save_interval: 20
   seq_length: 4096
@@ -41,10 +41,10 @@ algorithm:
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 8
 
-  rollout_epoch: 1
+  rollout_epoch: 8
   eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
 
-  reward_type: action_level
+  reward_type: action_level # chunk_level
   logprob_type: token_level
   entropy_type: token_level
 
@@ -80,7 +80,7 @@ algorithm:
   # max length means max amount of tokens to generate
   length_params:
     max_new_token: null
-    max_length: 512
+    max_length: 1024
     min_length: 1
 
 env:
@@ -130,7 +130,7 @@ actor:
 
   # Override the default values in model/openvla_oft
   model:
-    model_path: "/mnt/public/peihong/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+    model_path: "/mnt/public/peihong/models/robotwin2_beat_block_hammer_seed1k_sft_aloha_25chunks_10k"
 
     model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
@@ -140,10 +140,11 @@ actor:
     use_film: False
 
     num_action_chunks: 25
-    unnorm_key: place_empty_cup_1k
+    unnorm_key: beat_block_hammer_1k
     center_crop: True
 
     is_lora: True
+    lora_path: 
     max_prompt_length: 512
 
   optim:
