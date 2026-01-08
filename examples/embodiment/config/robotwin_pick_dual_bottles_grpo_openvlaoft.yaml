@@ -87,16 +87,14 @@ env:
   group_name: "EnvGroup"
   enable_offload: True
 
-  # Override the default values in env/robotwin_place_empyt_cup
+  # Override the default values in env/robotwin_pick_dual_bottles
   train:
     total_num_envs: 128
-    # auto_reset: True
-    # ignore_terminations: False
     reward_coef: ${algorithm.reward_coef}
     max_episode_steps: 100
     max_steps_per_rollout_epoch: 100
     group_size: ${algorithm.group_size}
-    seeds_path: /mnt/public/peihong/codes/SimpleVLA-RL/verl/utils/envs/robotwin2/seeds/robotwin2_train_seeds(old).json
+    seeds_path: /path/to/robotwin/train_seeds.json
 
   eval:
     total_num_envs: 128
@@ -107,7 +105,8 @@ env:
     max_steps_per_rollout_epoch: 100
     group_size: 1
     use_fixed_reset_state_ids: True
-    seeds_path: "/mnt/public/peihong/codes/SimpleVLA-RL/verl/utils/envs/robotwin2/seeds/robotwin2_eval_seeds(old).json"
+    is_eval: True
+    seeds_path: /path/to/robotwin/eval_seeds.json
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
@@ -132,8 +131,8 @@ actor:
 
   # Override the default values in model/openvla_oft
   model:
-    model_path: "/mnt/public/peihong/models/pick_dual_bottles_seed1k_sft_aloha_25chunks_10k"
-
+    model_path: "/path/to/RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-pick_dual_bottles"
+    implement_version: "offical"
     model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
     action_dim: 14

@@ -106,7 +106,7 @@ rollout:
   pipeline_stage_num: 1
   model:
     model_type: "openvla_oft"
-    model_path: "/path/to/model/Openvla-oft-SFT-libero10-trajall/"
+    model_path: ${actor.model.model_path}
     precision: ${actor.model.precision}
 
 actor:
@@ -119,7 +119,7 @@ actor:
 
   # Override the default values in model/openvla_oft
   model:
-    model_path: "/mnt/public/wph/models/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k/"
+    model_path: "/path/to/RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup"
     implement_version: "offical"
     model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'

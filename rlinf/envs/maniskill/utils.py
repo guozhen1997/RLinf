@@ -13,8 +13,6 @@
 # limitations under the License.
 
 import torch
-from mani_skill.envs.utils.randomization.batched_rng import BatchedRNG
-
 
 def recursive_to_device(obj, device):
     if isinstance(obj, torch.Tensor):
@@ -37,12 +35,5 @@ def get_batch_rng_state(batched_rng):
 
 
 def set_batch_rng_state(state: dict):
+    from mani_skill.envs.utils.randomization.batched_rng import BatchedRNG
     return BatchedRNG.from_rngs(state["rngs"])
-
-
-class EnvOffloadMixin:
-    def get_state(self) -> bytes:
-        pass
-
-    def load_state(self, state: bytes):
-        pass

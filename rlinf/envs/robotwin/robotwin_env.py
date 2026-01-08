@@ -243,7 +243,7 @@ class RoboTwinEnv(gym.Env):
         infos = {}
 
         self._reset_metrics(env_idx)
-        self.update_reset_state_ids(env_idx=env_idx)
+
         extracted_obs = self._extract_obs_image(raw_obs)
 
         return extracted_obs, infos
@@ -394,6 +394,8 @@ class RoboTwinEnv(gym.Env):
         final_obs = extracted_obs.copy()
         env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]
         final_info = infos.copy()
+        if self.cfg.is_eval:
+            self.update_reset_state_ids(env_idx=env_idx)
 
         extracted_obs, infos = self.reset(env_idx=env_idx.tolist())
         # gymnasium calls it final observation but it really is just o_{t+1} or the true next observation
