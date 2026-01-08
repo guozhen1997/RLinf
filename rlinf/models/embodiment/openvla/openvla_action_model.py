@@ -544,7 +544,6 @@ class OpenVLAForRLActionPrediction(OpenVLAForBatchActionPrediction, BasePolicy):
             output_hidden_states = True
 
         outputs = super().forward(
-            self=self,
             input_ids=input_ids,
             attention_mask=attention_mask,
             pixel_values=pixel_values,

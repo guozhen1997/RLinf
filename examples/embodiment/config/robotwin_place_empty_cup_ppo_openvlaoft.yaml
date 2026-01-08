@@ -42,7 +42,7 @@ algorithm:
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
   group_size: 1
 
-  rollout_epoch: 1
+  rollout_epoch: 8
   eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
 
   reward_type: chunk_level
@@ -87,6 +87,8 @@ env:
   # Override the default values in env/robotwin_place_empty_cup
   train:
     total_num_envs: 2
+    assets_path: "/path/to/robotwin_assets"
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/train_seeds.json
   eval:
     total_num_envs: 32
     auto_reset: True
@@ -95,6 +97,8 @@ env:
     max_steps_per_rollout_epoch: 200
     group_size: 1
     use_fixed_reset_state_ids: True
+    assets_path: "/path/to/robotwin_assets"
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval

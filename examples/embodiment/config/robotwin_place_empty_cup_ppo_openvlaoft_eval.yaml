@@ -91,7 +91,8 @@ env:
     group_size: 1
     use_fixed_reset_state_ids: True
     is_eval: True
-    seeds_path: "/path/to/robotwin/eval_seeds.json"
+    assets_path: "/path/to/robotwin_assets"
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval

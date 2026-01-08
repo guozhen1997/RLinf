@@ -77,8 +77,10 @@ class CNNConfig:
         self.encoder_config["ckpt_path"] = ckpt_path
 
 
-class CNNPolicy(BasePolicy):
+class CNNPolicy(nn.Module, BasePolicy):
     def __init__(self, cfg: CNNConfig):
+        super().__init__()
+
         self.cfg = cfg
         self.in_channels = self.cfg.image_size[0]
 

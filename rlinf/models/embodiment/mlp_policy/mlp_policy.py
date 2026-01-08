@@ -23,7 +23,7 @@ from rlinf.models.embodiment.modules.utils import get_act_func, layer_init
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
 
-class MLPPolicy(BasePolicy):
+class MLPPolicy(nn.Module, BasePolicy):
     def __init__(
         self,
         obs_dim,
@@ -33,6 +33,7 @@ class MLPPolicy(BasePolicy):
         add_q_head,
         q_head_type="default",
     ):
+        super().__init__()
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.num_action_chunks = num_action_chunks

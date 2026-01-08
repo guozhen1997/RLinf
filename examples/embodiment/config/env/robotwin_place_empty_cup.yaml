@@ -16,7 +16,7 @@ max_episode_steps: 200 # max episode steps for truncation
 
 is_eval: False
 
-assets_path: "/path/to/robotwin/assets"
+assets_path: "/path/to/robotwin_assets"
 seeds_path: "/path/to/robotwin/train_seeds.json"
 
 video_cfg:

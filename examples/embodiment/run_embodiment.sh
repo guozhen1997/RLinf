@@ -8,7 +8,7 @@ export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
 
 export ROBOTWIN_PATH="/path/to/RoboTwin"
-export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
+export PYTHONPATH=${REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
 # Base path to the BEHAVIOR dataset, which is the BEHAVIOR-1k repo's dataset folder
 # Only required when running the behavior experiment.
