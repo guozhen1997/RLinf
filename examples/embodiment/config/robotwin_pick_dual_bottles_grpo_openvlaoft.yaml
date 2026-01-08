@@ -32,8 +32,6 @@ runner:
   eval_policy_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
   val_check_interval: 20
   save_interval: 20
-  seq_length: 4096
-  max_prompt_length: 512
   resume_dir: null
 
 algorithm:
@@ -154,13 +152,6 @@ actor:
     adam_eps: 1.0e-05
     weight_decay: 0.01
     clip_grad: 1.0
-
-  tokenizer:
-    tokenizer_type: "HuggingFaceTokenizer"
-    tokenizer_model: ${actor.model.model_path}
-    use_fast: False
-    trust_remote_code: True
-    padding_side: "right"
 
   # Override the default values in training_backend/fsdp
   fsdp_config:

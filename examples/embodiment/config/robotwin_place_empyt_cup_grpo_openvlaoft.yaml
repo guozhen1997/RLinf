@@ -32,8 +32,6 @@ runner:
   eval_policy_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
   val_check_interval: 20
   save_interval: 20
-  seq_length: 4096
-  max_prompt_length: 512
   resume_dir: null
 
 algorithm:
@@ -94,7 +92,7 @@ env:
     max_episode_steps: 200
     max_steps_per_rollout_epoch: 200
     group_size: ${algorithm.group_size}
-    seeds_path: /path/to/robotwin/train_seeds.json
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/train_seeds.json
 
   eval:
     total_num_envs: 128
@@ -106,7 +104,7 @@ env:
     group_size: 1
     use_fixed_reset_state_ids: True
     is_eval: True
-    seeds_path: /path/to/robotwin/eval_seeds.json
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
@@ -155,13 +153,6 @@ actor:
     adam_eps: 1.0e-05
     weight_decay: 0.01
     clip_grad: 1.0
-
-  tokenizer:
-    tokenizer_type: "HuggingFaceTokenizer"
-    tokenizer_model: ${actor.model.model_path}
-    use_fast: False
-    trust_remote_code: True
-    padding_side: "right"
 
   # Override the default values in training_backend/fsdp
   fsdp_config:

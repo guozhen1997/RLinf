@@ -140,13 +140,6 @@ actor:
     adam_eps: 1.0e-05
     clip_grad: 10.0
 
-  tokenizer:
-    tokenizer_type: "HuggingFaceTokenizer"
-    tokenizer_model: ${actor.model.model_path}
-    use_fast: False
-    trust_remote_code: True
-    padding_side: "right"
-
   # Override the default values in training_backend/fsdp
   fsdp_config:
     strategy: "fsdp"
