@@ -168,7 +168,7 @@ RLinf provides a pre-configured RoboTwin environment Docker image that includes 
    - Compatibility patches applied
    - Support for OpenVLA-OFT, OpenPI models
 
-   **After using the Docker image, you can directly proceed to the** `Model Download`_ **and** `Running Scripts`_ **sections, skipping all subsequent installation steps.**
+   **After using the Docker image, you can directly proceed to the** `Assets Download`_ **, ** `Model Download`_ **and** `Running Scripts`_ **sections, skipping all subsequent installation steps.**
 
 Method 2: Manual Installation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
