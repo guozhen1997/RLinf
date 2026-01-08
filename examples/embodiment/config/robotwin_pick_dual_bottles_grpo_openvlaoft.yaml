@@ -22,7 +22,7 @@ runner:
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "robotwin_ppo_openvlaoft"
+    experiment_name: "robotwin_grpo_openvlaoft"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
   max_epochs: 1000
@@ -67,11 +67,10 @@ algorithm:
   rewards_lower_bound: 0.5
   rewards_upper_bound: 4.5
 
-  # params for rollout
   sampling_params:
     do_sample: True
     temperature_train: 1.6
-    temperature_eval: 1.6
+    temperature_eval: -1 # -1 means do_sample=False during evaluation
     top_k: -1
     top_p: 1.0
     repetition_penalty: 1.0
