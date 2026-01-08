@@ -83,14 +83,14 @@ env:
   group_name: "EnvGroup"
   enable_offload: True
 
-  # Override the default values in env/robotwin_place_empyt_cup
+  # Override the default values in env/robotwin_place_empty_cup
   train:
     total_num_envs: 8
     reward_coef: ${algorithm.reward_coef}
     max_episode_steps: 200
     max_steps_per_rollout_epoch: 200
     group_size: ${algorithm.group_size}
-    assets_path: "/workspace/dataset/robotwin_assets"
+    assets_path: "/workspace/dataset/RoboTwin"
     seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/train_seeds.json
 
   eval:
@@ -103,7 +103,7 @@ env:
     group_size: 1
     use_fixed_reset_state_ids: True
     is_eval: True
-    assets_path: "/workspace/dataset/robotwin_assets"
+    assets_path: "/workspace/dataset/RoboTwin"
     seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
     video_cfg:
       save_video: True
@@ -130,7 +130,7 @@ actor:
 
   # Override the default values in model/openvla_oft
   model:
-    model_path: "/workspace/dataset/robotwin2_place_empty_cup_seed1k_sft_aloha_25chunks_10k"
+    model_path: "/workspace/dataset/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup"
     implement_version: "offical"
     model_type: "openvla_oft"
     value_type: ${algorithm.reward_type}  # 'action' or 'token'
