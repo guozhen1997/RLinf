@@ -68,7 +68,7 @@ algorithm:
   sampling_params:
     do_sample: True
     temperature_train: 1.6
-    temperature_eval: 1.6
+    temperature_eval: -1 # -1 means do_sample=False during evaluation
     top_k: -1
     top_p: 1.0
     repetition_penalty: 1.0
