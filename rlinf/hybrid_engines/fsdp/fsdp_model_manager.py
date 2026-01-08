@@ -307,6 +307,7 @@ class FSDPModelManager:
             self.optimizer,
             self.lr_scheduler,
             save_path,
+            step,
             self._cfg.model,
             self.model_save_helper_func,
         )

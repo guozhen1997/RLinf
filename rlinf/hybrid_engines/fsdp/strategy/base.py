@@ -162,6 +162,7 @@ class FSDPStrategyBase(ABC):
         optimizer: Optimizer,
         lr_scheduler: LRScheduler,
         save_path: str,
+        step: int,
         model_config: DictConfig,
         save_helper_func: Optional[Callable] = None,
     ) -> None:

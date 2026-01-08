@@ -32,18 +32,25 @@ def get_model_save_helper(model_type: str):
         return None
 
 
-def openvla_oft_save_helper(model_state_dict, model_config, save_path):
+def openvla_oft_save_helper(model_state_dict, model_config, save_path, **kwargs):
+    global_step = kwargs.get("global_step", 0)
     if model_config.get("use_film", False):
         vision_sd = {
             k.replace("vision_backbone.", "", 1): v
             for k, v in model_state_dict.items()
             if k.startswith("vision_backbone.")
         }
-        torch.save(vision_sd, os.path.join(save_path, "vision_backbone.pt"))
+        torch.save(
+            vision_sd,
+            os.path.join(save_path, f"vision_backbone--{global_step}_checkpoint.pt"),
+        )
     if model_config.get("use_proprio", False):
         proprio_sd = {
             k.replace("proprio_projector.", "", 1): v
             for k, v in model_state_dict.items()
             if k.startswith("proprio_projector.")
         }
-        torch.save(proprio_sd, os.path.join(save_path, "proprio_projector.pt"))
+        torch.save(
+            proprio_sd,
+            os.path.join(save_path, f"proprio_projector--{global_step}_checkpoint.pt"),
+        )
