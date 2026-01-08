@@ -29,8 +29,7 @@ else
 fi
 
 # NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
-DEFAULT_ROBOT_PLATFORM="LIBERO"
-ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-$DEFAULT_ROBOT_PLATFORM}}
+ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-"LIBERO"}}
 
 export ROBOT_PLATFORM
 echo "Using ROBOT_PLATFORM=$ROBOT_PLATFORM"
