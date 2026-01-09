@@ -42,6 +42,8 @@ Any YAML file can be used for evaluation with the ``eval_embodiment.sh`` script,
 
   2. ``actor.model.model_path``
 
+  3. ``runner.ckpt_path`` (Optional) – Set this parameter if you want to evaluate a specific checkpoint.
+
 
 2. **Control environment random seed**: You can adjust ``env.seed`` to change the environment's random function for result reproducibility, etc.
 
@@ -180,7 +182,7 @@ Then, execute the following command in the terminal to start the evaluation.
           env.eval.total_num_envs=${TOTAL_NUM_ENVS} \
           env.eval.init_params.id=${env_id} \
           env.eval.init_params.obj_set=${obj_set} \
-          runner.eval_policy_path=${CKPT_PATH}"
+          runner.ckpt_path=${CKPT_PATH}"
 
       echo ${CMD} > ${MEGA_LOG_FILE}
       ${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
@@ -201,7 +203,7 @@ Then, execute the following command in the terminal to start the evaluation.
           env.eval.total_num_envs=${TOTAL_NUM_ENVS} \
           env.eval.init_params.id=${env_id} \
           env.eval.init_params.obj_set=${obj_set} \
-          runner.eval_policy_path=${CKPT_PATH}"
+          runner.ckpt_path=${CKPT_PATH}"
       echo ${CMD}  > ${MEGA_LOG_FILE}
       ${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
   done
