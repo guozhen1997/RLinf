@@ -28,7 +28,7 @@
 
 import functools
 from enum import Enum
-from typing import Optional, Union
+from typing import Iterable, Optional, Union
 
 import torch
 from accelerate import init_empty_weights
