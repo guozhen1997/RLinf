@@ -160,6 +160,11 @@ class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
                 dtype=self.action_out_proj.weight.dtype
             )
 
+        for name, module in self.named_modules():
+            # Set _fsdp_wrap_name to the last part of the path (e.g., "model.action_in_proj" -> "action_in_proj")
+            path_parts = name.split(".")
+            setattr(module, "_fsdp_wrap_name", path_parts[-1] if path_parts else name)
+
     def set_global_step(self, global_step):
         self.global_step = global_step
 

@@ -202,7 +202,10 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, is_openvla_model=Fa
             from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy
 
             def lambda_policy_fn(module):
-                return hasattr(module, "name") and module.name in no_split_names
+                return (
+                    hasattr(module, "_fsdp_wrap_name")
+                    and module._fsdp_wrap_name in no_split_names
+                )
 
             lambda_policy = functools.partial(
                 lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn
