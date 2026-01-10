@@ -16,7 +16,7 @@ import glob
 import os
 from abc import ABC, abstractmethod
 from logging import Logger
-from typing import TYPE_CHECKING, Callable, ContextManager, Optional, Union
+from typing import TYPE_CHECKING, ContextManager, Optional, Union
 
 import torch
 import torch.distributed.checkpoint as dcp
@@ -162,9 +162,6 @@ class FSDPStrategyBase(ABC):
         optimizer: Optimizer,
         lr_scheduler: LRScheduler,
         save_path: str,
-        step: int,
-        model_config: DictConfig,
-        save_helper_func: Optional[Callable] = None,
     ) -> None:
         """
         Save the training state checkpoint.
@@ -180,8 +177,6 @@ class FSDPStrategyBase(ABC):
             optimizer (Optimizer): The optimizer to be saved.
             lr_scheduler (LRScheduler): The learning rate scheduler to be saved.
             save_path (str): The path to save the checkpoint.
-            model_config: DictConfig.
-            save_helper_func: Huggingface model save helper function.
         """
         clear_memory()
         torch.distributed.barrier()
@@ -212,6 +207,8 @@ class FSDPStrategyBase(ABC):
         if torch.distributed.get_rank() == 0:
             os.makedirs(sd_save_path, exist_ok=True)
             torch.save(model_state_dict, os.path.join(sd_save_path, "full_weights.pt"))
+
+        torch.distributed.barrier()
 
     @classmethod
     def load_checkpoint(

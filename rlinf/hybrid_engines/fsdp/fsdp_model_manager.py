@@ -30,7 +30,6 @@ from rlinf.hybrid_engines.fsdp import (
     FSDP,
     FSDPModule,
 )
-from rlinf.hybrid_engines.fsdp.model_save_helpers import get_model_save_helper
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     create_device_mesh,
@@ -307,9 +306,6 @@ class FSDPModelManager:
             self.optimizer,
             self.lr_scheduler,
             save_path,
-            step,
-            self._cfg.model,
-            self.model_save_helper_func,
         )
 
     def offload_param_and_grad(self, offload_grad: bool = False) -> None:
