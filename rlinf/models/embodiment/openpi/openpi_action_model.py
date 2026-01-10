@@ -75,19 +75,22 @@ class OpenPi0ForRLActionPrediction(BasePolicy, PI0Pytorch):
     @property
     def _no_split_modules(self) -> list[str]:
         if self.config.train_expert_only:
-            return [
+            no_split_modules = [
                 "GemmaDecoderLayer",
                 "SiglipVisionEmbeddings",
                 "GemmaRMSNorm",
                 "GemmaRotaryEmbedding",
             ]
         else:
-            return [
+            no_split_modules = [
                 "GemmaMLP",
                 "SiglipVisionEmbeddings",
                 "GemmaRMSNorm",
                 "GemmaRotaryEmbedding",
             ]
+        if self.config.noise_method == "flow_noise":
+            no_split_modules.append("ExploreNoiseNet")
+        return no_split_modules
 
     @property
     def _no_split_names(self) -> list[str]:

@@ -346,7 +346,12 @@ def get_lr_scheduler(
     num_training_steps: int,
     num_cycles: float = 0.5,
     last_epoch: int = -1,
+    min_lr: float = 0.0,
+    min_lr_rate: float | None = None,
 ):
+    # only one of min_lr and min_lr_rate should be set. If min_lr_rate is set, min_lr will be ignored.
+    if min_lr_rate is not None:
+        min_lr = None
     if warmup_style == "constant":
         from torch.optim.lr_scheduler import LambdaLR
 
@@ -357,13 +362,18 @@ def get_lr_scheduler(
 
         return LambdaLR(optimizer, lr_lambda, last_epoch=last_epoch)
     elif warmup_style == "cosine":
-        from transformers.optimization import get_cosine_schedule_with_warmup
+        from transformers.optimization import (
+            get_cosine_with_min_lr_schedule_with_warmup,
+        )
 
-        return get_cosine_schedule_with_warmup(
+        return get_cosine_with_min_lr_schedule_with_warmup(
             optimizer=optimizer,
             num_warmup_steps=num_warmup_steps,
             num_training_steps=num_training_steps,
             num_cycles=num_cycles,
+            last_epoch=last_epoch,
+            min_lr_rate=min_lr_rate,
+            min_lr=min_lr,
         )
     else:
         raise NotImplementedError(f"Scheduler type {warmup_style} is not supported")
