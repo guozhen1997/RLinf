@@ -1,5 +1,5 @@
-How to evaluate? Embodied Agent Scenarios
-============================================
+Evaluation Tutorial 1: Embodied VLA
+====================================
 
 Introduction
 ------------
@@ -40,10 +40,11 @@ Any YAML file can be used for evaluation with the ``eval_embodiment.sh`` script,
 
   1. ``rollout.model.model_path``
 
-  2. ``actor.model.model_path``
+  2. ``runner.ckpt_path`` (Optional) – ``.pt`` format file path, set this parameter if you want to evaluate a specific checkpoint.
 
-  3. ``runner.ckpt_path`` (Optional) – Set this parameter if you want to evaluate a specific checkpoint.
-
+.. Note::
+  
+   If you need to convert checkpoint files from ``.distcp`` format to ``.pt`` format, please refer to the :doc:`Checkpoint Convertor <../tutorials/advance/convertor>` documentation for detailed instructions.
 
 2. **Control environment random seed**: You can adjust ``env.seed`` to change the environment's random function for result reproducibility, etc.
 
