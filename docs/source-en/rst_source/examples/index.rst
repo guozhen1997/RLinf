@@ -161,7 +161,7 @@ as well as reinforcement learning training examples on real robots.
             data-target="animated-image.originalImage">
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
          <a href="https://rlinf.readthedocs.io/en/latest/rst_source/examples/robotwin.html" target="_blank" style="text-decoration: underline; color: blue;">
-          <b>RL with RoboTwin Simulator Benchmark</b>
+          <b>RL with RoboTwin Benchmark</b>
          </a><br>
          RoboTwin + OpenVLA-OFT + PPO achieves SOTA performance
        </p>

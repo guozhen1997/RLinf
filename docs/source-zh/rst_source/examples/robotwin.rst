@@ -1,5 +1,5 @@
-基于RoboTwin模拟器的强化学习训练
-=======================================
+基于RoboTwin评测平台的强化学习训练
+========================================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
    :width: 16px
@@ -142,10 +142,20 @@ RoboTwinEnv 环境介绍
 依赖安装
 -----------------------
 
-RLinf 提供了两种安装方式：**Docker 镜像** （推荐，最简单）和 **手动安装** （使用安装脚本）。
+1. 克隆 RLinf 仓库
+~~~~~~~~~~~~~~~~~~~~~
 
-方式 1：使用 Docker 镜像（推荐）
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code:: bash
+
+   # 如果希望在中国大陆更快地下载，可以使用：
+   # git clone https://ghfast.top/github.com/RLinf/RLinf.git
+   git clone https://github.com/RLinf/RLinf.git
+   cd RLinf
+
+2. 安装依赖
+~~~~~~~~~~~~~~~~~~~~~
+
+**选项 1：Docker 镜像**
 
 RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含所有必需的依赖，可以直接使用，**无需进行后续安装步骤**。
 
@@ -156,9 +166,9 @@ RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含�
       --network host \
       --name rlinf \
       -v .:/workspace/RLinf \
-      rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
+      rlinf/rlinf:agentic-rlinf0.1-robotwin
       # 如果需要国内加速下载镜像，可以使用：
-      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robotwin
 
 .. note::
    Docker 镜像已包含：
@@ -169,10 +179,9 @@ RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含�
 
    **使用 Docker 镜像后，可以直接跳转到** `RoboTwin 代码克隆 和 Assets 下载`_ **，** `模型下载`_ **和** `运行脚本`_ **章节，无需进行后续安装步骤。**
 
-方式 2：手动安装
-~~~~~~~~~~~~~~~~~~~
+**选项 2：自建环境**
 
-使用 ``requirements/install.sh`` 脚本，通过 ``--env robotwin`` 参数安装 RoboTwin 环境。根据您要训练的模型，将 ``--model openvla-oft`` 参数替换为对应的模型名称（``openvla``、``openvla-oft`` 或 ``openpi``）：
+在本地环境直接安装依赖，运行以下命令。根据要训练的模型，将 ``--model openvla-oft`` 参数替换为对应的模型名称（``openvla-oft`` 或 ``openpi``）：
 
 .. code:: bash
 
@@ -196,13 +205,9 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 .. code-block:: bash
 
    # 1. 克隆 RoboTwin 仓库
-   git clone https://github.com/RoboTwin-Platform/RoboTwin.git
-   cd RoboTwin
-
-   # 2. 切换到 RLinf_support 分支
-   git checkout RLinf_support
+   git clone https://github.com/RoboTwin-Platform/RoboTwin.git -b RLinf_support
    
-   # 3. 下载并解压 Assets 文件
+   # 2. 下载并解压 Assets 文件
    bash script/_download_assets.sh
 
 
@@ -213,9 +218,16 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
 .. code-block:: bash
 
-   # 下载 OpenVLA-OFT 模型
+   # 下载模型（选择任一方法）
+   # 方法 1: 使用 git clone
+   git lfs install
+   git clone https://huggingface.co/RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
+
+   # 方法 2: 使用 huggingface-hub
+   # 为提升国内下载速度，可以设置：
+   # export HF_ENDPOINT=https://hf-mirror.com
    pip install huggingface-hub
-   huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
+   hf download RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup --local-dir RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
 
 下载后，请确保在配置 yaml 文件中正确指定模型路径（``actor.model.model_path``）。
 
@@ -273,14 +285,14 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
 **4. 启动命令**
 
-选择配置后，需要在 ``examples/embodiment/run_embodiment.sh`` 脚本中：
-
-- 设置 **ROBOT_PLATFORM 环境变量**， ``export ROBOT_PLATFORM=ALOHA``
-- 将RoboTwin repo路径加在 PYTHONPATH中， ``export PYTHONPATH=/opt/RoboTwin:$PYTHONPATH``
-
-然后运行以下命令开始训练：
+选择配置后，运行以下命令开始训练：
 
 .. code-block:: bash
+
+   # 设置ROBOT_PLATFORM环境变量
+   export ROBOT_PLATFORM=ALOHA
+   # 设置ROBOTWIN_PATH环境变量
+   export ROBOTWIN_PATH=/path/to/RoboTwin
 
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
@@ -288,7 +300,12 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh robotwin_place_empyt_cup_grpo_openvlaoft ALOHA
+   # 设置ROBOT_PLATFORM环境变量
+   export ROBOT_PLATFORM=ALOHA
+   # 设置ROBOTWIN_PATH环境变量
+   export ROBOTWIN_PATH=/path/to/RoboTwin
+
+   bash examples/embodiment/run_embodiment.sh robotwin_place_empyt_cup_grpo_openvlaoft
 
 可视化与结果
 -------------------------
@@ -347,7 +364,7 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 
 1. **资源路径**：确保 ``assets_path`` 路径正确
 2. **ROBOT_PLATFORM 环境变量**：确保 ``ROBOT_PLATFORM`` 变量设置为 ``ALOHA``
-3. **RoboTwin Repo**：确保将 RoboTwin repo路径加在 PYTHONPATH 中，如 ``export PYTHONPATH=/opt/robotwin:$PYTHONPATH``
+3. **RoboTwin Repo**：确保正确设置 ``ROBOTWIN_PATH``，如 ``export ROBOTWIN_PATH=/path/to/RoboTwin``
 4. **GPU 内存**：RoboTwin 环境可能需要较多 GPU 内存，建议使用 ``enable_offload: True``
 5. **任务配置**：根据具体任务修改 ``task_config`` 中的参数
 
