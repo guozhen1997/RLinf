@@ -167,7 +167,7 @@ RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含�
    - 兼容性补丁已应用
    - 支持 OpenVLA-OFT、OpenPI 模型
 
-   **使用 Docker 镜像后，可以直接跳转到** `Assets 下载`_ **，** `模型下载`_ **和** `运行脚本`_ **章节，无需进行后续安装步骤。**
+   **使用 Docker 镜像后，可以直接跳转到** `RoboTwin 代码克隆 和 Assets 下载`_ **，** `模型下载`_ **和** `运行脚本`_ **章节，无需进行后续安装步骤。**
 
 方式 2：手动安装
 ~~~~~~~~~~~~~~~~
@@ -188,8 +188,8 @@ RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含�
 - 安装对应 VLA 模型的依赖包
 
 
-Assets 下载
------------------------
+RoboTwin 代码克隆 和 Assets 下载
+-------------------------------
 
 RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace 下载。
 
@@ -198,8 +198,11 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
    # 1. 克隆 RoboTwin 仓库
    git clone https://github.com/RoboTwin-Platform/RoboTwin.git
    cd RoboTwin
+
+   # 2. 切换到 RLinf_support 分支
+   git checkout RLinf_support
    
-   # 2. 下载并解压 Assets 文件
+   # 3. 下载并解压 Assets 文件
    bash script/_download_assets.sh
 
 

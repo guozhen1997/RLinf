@@ -70,7 +70,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为具身智能和智能�
         <ul style="margin-left: 0; padding-left: 16px;">
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/maniskill.html">ManiSkill</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/libero.html">LIBERO</a> ✅</li>
-          <li>RoboTwin</li>
+          <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/robotwin.html">RoboTwin</a> ✅</li>
           <li>RoboVerse</li>
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/behavior.html">BEHAVIOR</a> ✅</li>
           <li><a href="https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/metaworld.html">MetaWorld</a> ✅</li>
@@ -572,7 +572,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为具身智能和智能�
 - [ ] 支持深度搜索智能体训练
 
 - [ ] 支持多智能体训练
-- [ ] 支持更多具身模拟器的集成 (如 [GENESIS](https://github.com/Genesis-Embodied-AI/Genesis), [RoboTwin](https://github.com/RoboTwin-Platform/RoboTwin))  
+- [ ] 支持更多具身模拟器的集成 (如 [GENESIS](https://github.com/Genesis-Embodied-AI/Genesis))  
 - [ ] 支持更多VLA模型 (如[WALL-OSS](https://huggingface.co/x-square-robot/wall-oss-flow))
 - [ ] 支持世界模型（World Model）
 
