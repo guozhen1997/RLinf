@@ -1,4 +1,4 @@
-RL with RoboTwin Simulator
+RL with RoboTwin Benchmark
 ===========================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
@@ -143,10 +143,20 @@ RoboTwinEnv Environment
 Dependency Installation
 -----------------------
 
-RLinf provides two installation methods: **Docker image** (recommended, simplest) and **manual installation** (using installation scripts).
+1. Clone RLinf Repository
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Method 1: Using Docker Image (Recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code:: bash
+
+   # For mainland China users, you can use the following for better download speed:
+   # git clone https://ghfast.top/github.com/RLinf/RLinf.git
+   git clone https://github.com/RLinf/RLinf.git
+   cd RLinf
+
+2. Install Dependencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Option 1: Docker Image**
 
 RLinf provides a pre-configured RoboTwin environment Docker image that includes all required dependencies and can be used directly, **skipping all subsequent installation steps**.
 
@@ -157,9 +167,9 @@ RLinf provides a pre-configured RoboTwin environment Docker image that includes 
       --network host \
       --name rlinf \
       -v .:/workspace/RLinf \
-      rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
+      rlinf/rlinf:agentic-rlinf0.1-robotwin
       # If you need to download the image faster in China, you can use:
-      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robotwin
 
 .. note::
    The Docker image includes:
@@ -170,10 +180,10 @@ RLinf provides a pre-configured RoboTwin environment Docker image that includes 
 
    **After using the Docker image, you can directly proceed to the** `RoboTwin Repository Clone and Assets Download`_ **, ** `Model Download`_ **and** `Running Scripts`_ **sections, skipping all subsequent installation steps.**
 
-Method 2: Manual Installation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Option 2: Custom Environment**
 
-Use the ``requirements/install.sh`` script with the ``--env robotwin`` parameter to install the RoboTwin environment. Replace the ``--model openvla-oft`` parameter with the corresponding model name (``openvla``, ``openvla-oft``, or ``openpi``) based on the model you want to train:
+Install dependencies directly in your environment by running the following command. 
+Replace the ``--model openvla-oft`` parameter with the corresponding model name (``openvla-oft`` or ``openpi``) based on the model you want to train:
 
 .. code:: bash
 
@@ -196,13 +206,9 @@ RoboTwin Assets are asset files required by the RoboTwin environment and need to
 .. code-block:: bash
 
    # 1. Clone RoboTwin repository
-   git clone https://github.com/RoboTwin-Platform/RoboTwin.git
-   cd RoboTwin
+   git clone https://github.com/RoboTwin-Platform/RoboTwin.git -b RLinf_support
    
-   # 2. Switch to RLinf_support branch
-   git checkout RLinf_support
-   
-   # 3. Download and extract Assets files
+   # 2. Download and extract Assets files
    bash script/_download_assets.sh
 
 
@@ -213,9 +219,16 @@ Before starting training, you need to download the corresponding SFT model:
 
 .. code-block:: bash
 
-   # Download OpenVLA-OFT model
+   # Download the model (choose either method)
+   # Method 1: Using git clone
+   git lfs install
+   git clone https://huggingface.co/RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
+
+   # Method 2: Using huggingface-hub
+   # For mainland China users, you can use the following for better download speed:
+   # export HF_ENDPOINT=https://hf-mirror.com
    pip install huggingface-hub
-   huggingface-cli download RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
+   hf download RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup --local-dir RLinf-OpenVLAOFT-RoboTwin-SFT-place_empty_cup
 
 After downloading, ensure that the model path is correctly specified in the configuration yaml file (``actor.model.model_path``).
 
@@ -273,14 +286,14 @@ Using **OpenVLA-OFT** model with **GRPO** algorithm as an example, the correspon
 
 **4. Launch Command**
 
-After selecting the configuration, you need to configure the following in the ``examples/embodiment/run_embodiment.sh`` script:
-
-- Set the **ROBOT_PLATFORM environment variable**, ``export ROBOT_PLATFORM=ALOHA``
-- Add the RoboTwin repo path to PYTHONPATH, ``export PYTHONPATH=/opt/RoboTwin:$PYTHONPATH``
-
-Then run the following command to start training:
+After selecting the configuration, run the following command to start training:
 
 .. code-block:: bash
+   
+   # Set ROBOT_PLATFORM environment variable
+   export ROBOT_PLATFORM=ALOHA
+   # Set ROBOTWIN_PATH environment variable
+   export ROBOTWIN_PATH=/path/to/RoboTwin
 
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
@@ -288,7 +301,12 @@ For example, training OpenVLA-OFT model with GRPO in the RoboTwin environment:
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh robotwin_place_empyt_cup_grpo_openvlaoft ALOHA
+   # Set ROBOT_PLATFORM environment variable
+   export ROBOT_PLATFORM=ALOHA
+   # Set ROBOTWIN_PATH environment variable
+   export ROBOTWIN_PATH=/path/to/RoboTwin
+
+   bash examples/embodiment/run_embodiment.sh robotwin_place_empyt_cup_grpo_openvlaoft
 
 Visualization and Results
 -------------------------
