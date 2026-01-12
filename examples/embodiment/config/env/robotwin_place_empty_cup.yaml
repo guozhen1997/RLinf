@@ -27,6 +27,7 @@ video_cfg:
 task_config:
   task_name: place_empty_cup
   step_lim: 200
+  planner_backend: mplib # # Choices: ["curobo", "mplib"], defalut is "curobo"
   # if you want to modify the config, please check the following tutorial first:
   # https://robotwin-platform.github.io/doc/usage/configurations.html
   render_freq: 0
