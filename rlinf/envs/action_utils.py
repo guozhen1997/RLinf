@@ -160,12 +160,13 @@ def prepare_actions(
     action_scale: float = 1.0,
     policy: str = "widowx_bridge",
 ) -> torch.Tensor | np.ndarray:
-    if SupportedEnvType(env_type) == SupportedEnvType.LIBERO:
+    env_type = SupportedEnvType(env_type)
+    if env_type == SupportedEnvType.LIBERO:
         chunk_actions = prepare_actions_for_libero(
             raw_chunk_actions=raw_chunk_actions,
             model_type=model_type,
         )
-    elif SupportedEnvType(env_type) == SupportedEnvType.MANISKILL:
+    elif env_type == SupportedEnvType.MANISKILL:
         chunk_actions = prepare_actions_for_maniskill(
             raw_chunk_actions=raw_chunk_actions,
             num_action_chunks=num_action_chunks,
@@ -173,30 +174,30 @@ def prepare_actions(
             action_scale=action_scale,
             policy=policy,
         )
-    elif SupportedEnvType(env_type) == SupportedEnvType.ROBOTWIN:
+    elif env_type == SupportedEnvType.ROBOTWIN:
         chunk_actions = raw_chunk_actions
-    elif SupportedEnvType(env_type) == SupportedEnvType.METAWORLD:
+    elif env_type == SupportedEnvType.METAWORLD:
         chunk_actions = raw_chunk_actions
-    elif SupportedEnvType(env_type) == SupportedEnvType.CALVIN:
+    elif env_type == SupportedEnvType.CALVIN:
         chunk_actions = prepare_actions_for_calvin(
             raw_chunk_actions=raw_chunk_actions,
         )
-    elif SupportedEnvType(env_type) == SupportedEnvType.BEHAVIOR:
+    elif env_type == SupportedEnvType.BEHAVIOR:
         chunk_actions = raw_chunk_actions
-    elif SupportedEnvType(env_type) == SupportedEnvType.ISAACLAB:
+    elif env_type == SupportedEnvType.ISAACLAB:
         chunk_actions = prepare_actions_for_isaaclab(
             raw_chunk_actions=raw_chunk_actions,
             model_type=model_type,
         )
-    elif SupportedEnvType(env_type) == SupportedEnvType.ROBOCASA:
+    elif env_type == SupportedEnvType.ROBOCASA:
         chunk_actions = prepare_actions_for_robocasa(
             raw_chunk_actions=raw_chunk_actions,
             action_dim=action_dim,
             model_type=model_type,
         )
-    elif SupportedEnvType(env_type) == SupportedEnvType.REALWORLD:
+    elif env_type == SupportedEnvType.REALWORLD:
         chunk_actions = raw_chunk_actions
-    elif env_type == "frankasim":
+    elif env_type == SupportedEnvType.FRANKASIM:
         chunk_actions = prepare_actions_for_mujoco(
             raw_chunk_actions=raw_chunk_actions,
             model_type=model_type,

@@ -158,7 +158,7 @@ RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含�
       -v .:/workspace/RLinf \
       rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
       # 如果需要国内加速下载镜像，可以使用：
-      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robocasa
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
 
 .. note::
    Docker 镜像已包含：
@@ -170,7 +170,7 @@ RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含�
    **使用 Docker 镜像后，可以直接跳转到** `RoboTwin 代码克隆 和 Assets 下载`_ **，** `模型下载`_ **和** `运行脚本`_ **章节，无需进行后续安装步骤。**
 
 方式 2：手动安装
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 使用 ``requirements/install.sh`` 脚本，通过 ``--env robotwin`` 参数安装 RoboTwin 环境。根据您要训练的模型，将 ``--model openvla-oft`` 参数替换为对应的模型名称（``openvla``、``openvla-oft`` 或 ``openpi``）：
 
@@ -189,7 +189,7 @@ RLinf 提供了预配置的 RoboTwin 环境 Docker 镜像，镜像中已包含�
 
 
 RoboTwin 代码克隆 和 Assets 下载
--------------------------------
+-----------------------------------------
 
 RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace 下载。
 

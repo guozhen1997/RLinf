@@ -415,7 +415,7 @@ class FlowMatchingActionHeadForRLActionPrediction(FlowmatchingActionHead):
         return values_vlm
 
 
-class GR00T_N1_5_ForRLActionPrediction(BasePolicy, GR00T_N1_5):
+class GR00T_N1_5_ForRLActionPrediction(GR00T_N1_5, BasePolicy):
     """
     GR00T_N1_5 model for reinforcement learning action prediction.
     It's a combination of the Gr00tPolicy and GR00T_N1_5 model.

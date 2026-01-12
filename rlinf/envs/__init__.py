@@ -25,6 +25,7 @@ class SupportedEnvType(Enum):
     CALVIN = "calvin"
     ROBOCASA = "robocasa"
     REALWORLD = "realworld"
+    FRANKASIM = "frankasim"
 
 
 def get_env_cls(env_type: str, env_cfg=None, enable_offload=False):
@@ -93,7 +94,7 @@ def get_env_cls(env_type: str, env_cfg=None, enable_offload=False):
         from rlinf.envs.realworld.realworld_env import RealWorldEnv
 
         return RealWorldEnv
-    elif env_type == "frankasim":
+    elif env_type == SupportedEnvType.FRANKASIM:
         from rlinf.envs.frankasim.frankasim_env import FrankaSimEnv
 
         return FrankaSimEnv

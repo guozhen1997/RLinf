@@ -159,7 +159,7 @@ RLinf provides a pre-configured RoboTwin environment Docker image that includes 
       -v .:/workspace/RLinf \
       rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
       # If you need to download the image faster in China, you can use:
-      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robocasa
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-robotwin-openvlaoft-openpi
 
 .. note::
    The Docker image includes:
