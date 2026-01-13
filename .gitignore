@@ -18,4 +18,3 @@ outputs/*
 .docs-venv
 uv.lock
 rlinf/envs/maniskill/assets
-*.mp4

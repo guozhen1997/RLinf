@@ -234,6 +234,9 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
 运行脚本
 -------------------
 
+请确保您在运行下面的命令前已激活正确的 Python 虚拟环境（venv）。
+如果您使用的是官方 Docker 镜像，您需要通过`source switch_env openvla-oft`命令切换到`openvla-oft`环境。
+
 **1. 关键参数配置**
 
 以 OpenVLA-OFT 模型为例，在 ``actor.model`` 中需要配置以下关键参数：
@@ -247,7 +250,7 @@ RoboTwin Assets 是 RoboTwin 环境所需的资产文件，需要从 HuggingFace
        implement_version: "offical"                                          # openvla_oft实现版本（RLinf OpenVLA-OFT模型的实现接入了oft官方版本和rlinf sft微调版本，RoboTwin环境使用官方版本）
        action_dim: 14                                                        # RoboTwin 动作维度（14维）
        use_proprio: True                                                     # 是否使用本体感觉信息
-       proprio_dim: 14                                                       # 本体感觉维度（需与 action_dim 一致）
+       proprio_dim: 14                                                       # 本体感觉维度
        use_film: False                                                       # 是否使用 FiLM 层
        num_images_in_input: 1                                                # 输入图像数量
        num_action_chunks: 25                                                 # 动作块数量

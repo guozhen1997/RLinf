@@ -235,6 +235,9 @@ After downloading, ensure that the model path is correctly specified in the conf
 Running Scripts
 -------------------
 
+Please ensure that you have activated the correct Python virtual environment (venv) before running the commands below.
+If you are using the official Docker image, you need to switch to the ``openvla-oft`` environment by running ``source switch_env openvla-oft``.
+
 **1. Key Parameter Configuration**
 
 Using the OpenVLA-OFT model as an example, the following key parameters need to be configured in ``actor.model``:
@@ -248,7 +251,7 @@ Using the OpenVLA-OFT model as an example, the following key parameters need to 
        implement_version: "offical"                                          # openvla_oft implementation version (RLinf OpenVLA-OFT model implementation integrates the official OFT version and RLinf SFT fine-tuned version, RoboTwin environment uses the official version)
        action_dim: 14                                                        # RoboTwin action dimension (14D)
        use_proprio: True                                                     # Whether to use proprioception information
-       proprio_dim: 14                                                       # Proprioception dimension (must match action_dim)
+       proprio_dim: 14                                                       # Proprioception dimension
        use_film: False                                                       # Whether to use FiLM layer
        num_images_in_input: 1                                                # Number of input images
        num_action_chunks: 25                                                 # Number of action chunks
