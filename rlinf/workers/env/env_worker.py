@@ -68,8 +68,6 @@ class EnvWorker(Worker):
             )
 
     def init_worker(self):
-        self.enable_offload = self.cfg.env.enable_offload
-
         train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train)
         eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
 
@@ -80,6 +78,10 @@ class EnvWorker(Worker):
             groups=[(self._group_name, list(range(self._world_size)))],
         )
 
+        # Data collection wrapper setup
+        dc_cfg = getattr(self.cfg.env, "data_collection", None)
+        dc_enabled = dc_cfg and getattr(dc_cfg, "enabled", False)
+
         if not self.only_eval:
             for stage_id in range(self.stage_num):
                 env = train_env_cls(
@@ -89,6 +91,14 @@ class EnvWorker(Worker):
                     total_num_processes=self._world_size * self.stage_num,
                     worker_info=self.worker_info,
                 )
+                if dc_enabled:
+                    from rlinf.envs.wrappers import DataCollectorWrapper
+                    env = DataCollectorWrapper(
+                        env, save_dir=dc_cfg.save_dir, rank=self._rank,
+                        mode=getattr(dc_cfg, "mode", "train"), num_envs=self.train_num_envs_per_stage,
+                        sample_rate_success=getattr(dc_cfg, "sample_rate_success", 1.0),
+                        sample_rate_fail=getattr(dc_cfg, "sample_rate_fail", 0.1),
+                    )
                 if self.cfg.env.train.video_cfg.save_video:
                     env = RecordVideo(env, self.cfg.env.train.video_cfg)
                 self.env_list.append(env)
@@ -101,6 +111,14 @@ class EnvWorker(Worker):
                     total_num_processes=self._world_size * self.stage_num,
                     worker_info=self.worker_info,
                 )
+                if dc_enabled:
+                    from rlinf.envs.wrappers import DataCollectorWrapper
+                    env = DataCollectorWrapper(
+                        env, save_dir=dc_cfg.save_dir, rank=self._rank,
+                        mode=getattr(dc_cfg, "mode", "eval"), num_envs=self.eval_num_envs_per_stage,
+                        sample_rate_success=getattr(dc_cfg, "sample_rate_success", 1.0),
+                        sample_rate_fail=getattr(dc_cfg, "sample_rate_fail", 0.1),
+                    )
                 if self.cfg.env.eval.video_cfg.save_video:
                     env = RecordVideo(env, self.cfg.env.eval.video_cfg)
                 self.eval_env_list.append(env)
@@ -114,9 +132,6 @@ class EnvWorker(Worker):
                 extracted_obs, _ = self.env_list[i].reset()
                 self.last_obs_list.append(extracted_obs)
                 self.last_intervened_info_list.append((None, None))
-
-                if self.enable_offload and hasattr(self.env_list[i], "offload"):
-                    self.env_list[i].offload()
 
     @Worker.timer("env_interact_step")
     def env_interact_step(
@@ -385,10 +400,6 @@ class EnvWorker(Worker):
             ]
             self.finish_rollout()
 
-        for env in self.env_list:
-            if self.enable_offload and hasattr(env, "offload"):
-                env.offload()
-
         for key, value in env_metrics.items():
             env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
 
@@ -431,9 +442,6 @@ class EnvWorker(Worker):
                     )
 
             self.finish_rollout(mode="eval")
-        for stage_id in range(self.stage_num):
-            if self.enable_offload and hasattr(self.eval_env_list[stage_id], "offload"):
-                self.eval_env_list[stage_id].offload()
 
         for key, value in eval_metrics.items():
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
