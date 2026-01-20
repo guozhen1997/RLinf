@@ -66,8 +66,8 @@ class EmbodiedRunner:
         self.env_channel = Channel.create("Env")
         self.rollout_channel = Channel.create("Rollout")
         self.actor_channel = Channel.create("Actor")
-        if self.demo_buffer is not None:
-            self.demo_data_channel = Channel.create("DemoBufferChannel")
+        # if self.demo_buffer is not None:
+        #     self.demo_data_channel = Channel.create("DemoBufferChannel")
 
         # this timer checks if we should stop training
         self.run_timer = run_timer
@@ -100,13 +100,13 @@ class EmbodiedRunner:
         self.actor.load_checkpoint(actor_checkpoint_path).wait()
         self.global_step = int(resume_dir.split("global_step_")[-1])
 
-    def send_demo_buffer(self):
-        if self.demo_buffer is not None:
-            sub_demo_buffer_ls = self.demo_buffer.split_to_dict(self.actor._world_size)
+    # def send_demo_buffer(self):
+    #     if self.demo_buffer is not None:
+    #         sub_demo_buffer_ls = self.demo_buffer.split_to_dict(self.actor._world_size)
 
-            for sub_demo_buffer in sub_demo_buffer_ls:
-                self.demo_data_channel.put(sub_demo_buffer, async_op=True)
-            self.actor.recv_demo_data(self.demo_data_channel).wait()
+    #         for sub_demo_buffer in sub_demo_buffer_ls:
+    #             self.demo_data_channel.put(sub_demo_buffer, async_op=True)
+    #         self.actor.recv_demo_data(self.demo_data_channel).wait()
 
     def update_rollout_weights(self):
         rollout_handle: Handle = self.rollout.sync_model_from_actor()
@@ -137,7 +137,7 @@ class EmbodiedRunner:
             desc="Global Step",
             ncols=800,
         )
-        self.send_demo_buffer()
+        # self.send_demo_buffer()
         for _step in range(start_step, self.max_steps):
             # set global step
             self.actor.set_global_step(self.global_step)
@@ -156,7 +156,7 @@ class EmbodiedRunner:
                         output_channel=self.rollout_channel,
                         actor_channel=self.actor_channel,
                     )
-                    self.actor.recv_rollout_batch(
+                    self.actor.recv_rollout_episodes(
                         input_channel=self.actor_channel
                     ).wait()
                     rollout_handle.wait()

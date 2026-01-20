@@ -547,6 +547,10 @@ class FlowStatePolicy(nn.Module, BasePolicy):
 
     # 10. add unified forward()
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
+        obs = kwargs.get("obs")
+        if obs is not None:
+            obs = self.preprocess_env_obs(obs)
+            kwargs.update({"obs": obs})
         if forward_type == ForwardType.SAC:
             return self.sac_forward(**kwargs)  # originally exists
         elif forward_type == ForwardType.SAC_Q:
@@ -584,6 +588,8 @@ class FlowStatePolicy(nn.Module, BasePolicy):
         Predict actions in batch.
         Called by MultiStepRolloutWorker for rollout
         """
+        env_obs = self.preprocess_env_obs(env_obs)
+
         feat = self.backbone(env_obs["states"])  # encode obs using the 3 layer MLP
 
         # Use flow actor

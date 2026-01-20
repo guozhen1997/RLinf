@@ -339,7 +339,18 @@ class EnvWorker(Worker):
             else:
                 self.num_done_envs = 0
                 self.num_succ_envs = 0
+                dones = (
+                    torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
+                    .unsqueeze(1)
+                    .repeat(1, self.cfg.actor.model.num_action_chunks)
+                )
+                terminations = dones.clone()
+                truncations = dones.clone()
+
                 for stage_id in range(self.stage_num):
+                    self.last_dones_list[stage_id] = dones
+                    self.last_terminations_list[stage_id] = terminations
+                    self.last_truncations_list[stage_id] = truncations
                     env_output = EnvOutput(
                         obs=self.last_obs_list[stage_id],
                         rewards=None,

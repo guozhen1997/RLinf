@@ -23,7 +23,6 @@ import torch.nn.functional as F
 from omegaconf import DictConfig
 
 from rlinf.config import SupportedModel
-from rlinf.data.replay_buffer import SACReplayBuffer
 from rlinf.hybrid_engines.fsdp import (
     FSDP,
     FSDPModule,
@@ -41,6 +40,9 @@ from rlinf.utils.nested_dict_process import (
     split_dict_to_chunk,
 )
 from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+from rlinf.utils.metric_utils import compute_split_num
+from rlinf.data.embodied_io_struct import Episode
+from rlinf.data.replay_buffer import EpisodeReplayBuffer
 
 
 class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
@@ -208,11 +210,32 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         """Initialize SAC-specific components"""
         # Initialize replay buffer
         seed = self.cfg.actor.get("seed", 1234)
-        self.replay_buffer = SACReplayBuffer(
-            capacity=self.cfg.algorithm.replay_buffer_capacity,
+        self.replay_buffer = EpisodeReplayBuffer(
             device=self.device,
             seed=seed,
+            storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"replay_buffer_{self._rank}"),
+            storage_format="pt",
+            enable_cache=True,
+            cache_size=100,
+            sample_window_size=100,
         )
+
+        if self.cfg.algorithm.get("demo_buffer_load_path", None) is not None:
+            self.demo_buffer = EpisodeReplayBuffer(
+                device=self.device,
+                seed=seed,
+                storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"demo_buffer_{self._rank}"),
+                storage_format="pt",
+                enable_cache=True,
+                cache_size=100,
+                sample_window_size=100,
+            )
+            self.demo_buffer.load(
+                self.cfg.algorithm.demo_buffer_load_path,
+                partial_load=True,
+                load_rank=self._rank,
+                load_split_num=self._world_size,
+            )
 
         self.critic_actor_ratio = self.cfg.algorithm.get("critic_actor_ratio", 1)
         self.critic_subsample_size = self.cfg.algorithm.get("critic_subsample_size", -1)
@@ -241,15 +264,24 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                     target_param.data.mul_(1.0 - tau)
                     target_param.data.add_(online_param.data * tau)
 
-    def recv_rollout_batch(self, input_channel: Channel):
-        super().recv_rollout_batch(input_channel)
-        self.replay_buffer.add_rollout_batch(self.rollout_batch)
+    async def recv_rollout_episodes(self, input_channel: Channel) -> None:
+        """
+        Receive rollout episode from rollout workers.
 
-    async def recv_demo_data(self, input_channel: Channel):
-        demo_data = await input_channel.get(async_op=True).async_wait()
-        self.demo_buffer = SACReplayBuffer.create_from_buffer(
-            demo_data, seed=self.cfg.actor.seed
-        )
+        Args:
+            input_channel: The input channel to read from.
+        """
+        send_num = self._component_placement.get_world_size("rollout") * self.stage_num
+        recv_num = self._component_placement.get_world_size("actor")
+        split_num = compute_split_num(send_num, recv_num)
+
+        recv_list = []
+        
+        for _ in range(split_num):
+            episode: Episode = await input_channel.get(async_op=True).async_wait()
+            recv_list.append(episode)
+
+        self.replay_buffer.add_episodes(recv_list)
 
     def forward_critic(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
@@ -258,8 +290,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         rewards = batch["rewards"].to(self.torch_dtype)
         terminations = batch["terminations"].to(self.torch_dtype)
 
-        curr_obs = batch["transitions"]["obs"]
-        next_obs = batch["transitions"]["next_obs"]
+        curr_obs = batch["obs"]
+        next_obs = batch["next_obs"]
         with torch.no_grad():
             kwargs = {}
             if SupportedModel(self.cfg.actor.model.model_type) in [
@@ -368,7 +400,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
     def forward_actor(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
         agg_q = self.cfg.algorithm.get("agg_q", "min")
-        curr_obs = batch["transitions"]["obs"]
+        curr_obs = batch["obs"]
         kwargs = {}
         if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
             kwargs["temperature"] = self.cfg.algorithm.sampling_params.temperature_train
@@ -405,7 +437,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         return actor_loss, entropy
 
     def forward_alpha(self, batch):
-        curr_obs = batch["transitions"]["obs"]
+        curr_obs = batch["obs"]
         with torch.no_grad():
             kwargs = {}
             if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
@@ -427,12 +459,21 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         )
 
         if self.demo_buffer is not None:
-            replay_batch = self.replay_buffer.sample(global_batch_size_per_rank // 2)
-            demo_batch = self.demo_buffer.sample(global_batch_size_per_rank // 2)
+            replay_batch = self.replay_buffer.sample(
+                mode="chunk",
+                num_chunks=global_batch_size_per_rank // 2
+            )
+            demo_batch = self.demo_buffer.sample(
+                mode="chunk",
+                num_chunks=global_batch_size_per_rank // 2
+            )
             global_batch = concat_batch(replay_batch, demo_batch)
         else:
             # Sample batch from replay buffer
-            global_batch = self.replay_buffer.sample(global_batch_size_per_rank)
+            global_batch = self.replay_buffer.sample(
+                mode="chunk",
+                num_chunks=global_batch_size_per_rank
+            )
 
         train_micro_batch_list = split_dict_to_chunk(
             global_batch,
@@ -601,13 +642,28 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         SAC doesn't compute advantages/returns like PPO.
         This method is kept for compatibility but returns empty metrics.
         """
-        # Just compute basic rollout metrics without advantages/returns
-        rollout_metrics = compute_rollout_metrics(self.rollout_batch)
-        return rollout_metrics
+        return {}
 
     def save_checkpoint(self, save_base_path, step):
         super().save_checkpoint(save_base_path, step)
-        buffer_path = os.path.join(
-            self.cfg.runner.logger.log_path, f"replay_buffer_{self._rank}.pkl"
+        buffer_save_path = os.path.join(
+            save_base_path, f"buffers/replay_buffer_{self._rank}"
         )
-        self.replay_buffer.save(buffer_path)
+        self.replay_buffer.save(buffer_save_path)
+        if self.demo_buffer is not None:
+            demo_save_path = os.path.join(
+                save_base_path, f"buffers/demo_buffer_{self._rank}"
+            )
+            self.demo_buffer.save(demo_save_path)
+
+    def load_checkpoint(self, load_base_path):
+        super().load_checkpoint(load_base_path)
+        buffer_load_path = os.path.join(
+            load_base_path, f"buffers/replay_buffer_{self._rank}"
+        )
+        self.replay_buffer.load(buffer_load_path)
+        if self.demo_buffer is not None:
+            demo_load_path = os.path.join(
+                load_base_path, f"buffers/demo_buffer_{self._rank}"
+            )
+            self.demo_buffer.load(demo_load_path)

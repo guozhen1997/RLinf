@@ -201,6 +201,10 @@ class CNNPolicy(nn.Module, BasePolicy):
         return x, visual_feature
 
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
+        obs = kwargs.get("obs")
+        if obs is not None:
+            obs = self.preprocess_env_obs(obs)
+            kwargs.update({"obs": obs})
         if forward_type == ForwardType.SAC:
             return self.sac_forward(**kwargs)
         elif forward_type == ForwardType.SAC_Q:
@@ -294,6 +298,7 @@ class CNNPolicy(nn.Module, BasePolicy):
         mode="train",
         **kwargs,
     ):
+        env_obs = self.preprocess_env_obs(env_obs)
         full_feature, visual_feature = self.get_feature(env_obs)
         mix_feature = self.mix_proj(full_feature)
         action_mean = self.actor_mean(mix_feature)

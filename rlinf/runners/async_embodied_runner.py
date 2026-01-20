@@ -82,7 +82,10 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
             output_channel=self.rollout_channel,
             replay_channel=self.replay_channel,
         )
-        self.actor.start_replay_buffer(self.replay_channel)
+        # self.actor.start_replay_buffer(self.replay_channel)
+        self.actor.recv_rollout_episode(
+            input_channel=self.replay_channel
+        )
 
         train_step = start_step
         while train_step < self.max_steps:
