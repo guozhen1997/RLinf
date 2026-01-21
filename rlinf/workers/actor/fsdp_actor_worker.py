@@ -1105,13 +1105,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         )
                         entropy_loss = masked_mean(entropy, mask=loss_mask)
                         loss -= self.cfg.algorithm.entropy_bonus * entropy_loss
-                    metrics_data["entropy_loss"] = entropy_loss.detach().item()
+                    metrics_data["actor/entropy_loss"] = entropy_loss.detach().item()
 
                     loss /= self.gradient_accumulation
                     with backward_ctx:
                         self.grad_scaler.scale(loss).backward()
 
-                    metrics_data["loss"] = loss.detach().item()
+                    metrics_data["actor/total_loss"] = loss.detach().item()
                     append_to_dict(metrics, metrics_data)
 
                 torch.cuda.empty_cache()

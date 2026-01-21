@@ -237,11 +237,7 @@ class MultiStepRolloutWorker(Worker):
             // self.cfg.actor.model.num_action_chunks
         )
 
-        for _ in tqdm(
-            range(self.cfg.algorithm.rollout_epoch),
-            desc="Generating Rollout Epochs",
-            disable=(self._rank != 0),
-        ):
+        for _ in range(self.cfg.algorithm.rollout_epoch):
             
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
@@ -309,7 +305,7 @@ class MultiStepRolloutWorker(Worker):
                     final_obs=env_output["final_obs"],
                 )
 
-                rollout_results[stage_id].append_step_result(chunk_step_result)
+                rollout_results[stage_id].append_step_result(chunk_step_result, is_last_step=True)
 
         for stage_id in range(self.num_pipeline_stages):
             await self.send_rollout_trajectories(rollout_results[stage_id], actor_channel)

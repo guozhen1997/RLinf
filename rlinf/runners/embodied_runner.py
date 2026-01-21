@@ -13,6 +13,9 @@
 # limitations under the License.
 
 import os
+import time
+import threading
+import queue
 from typing import TYPE_CHECKING, Optional, Union
 
 from omegaconf.dictconfig import DictConfig
@@ -23,7 +26,7 @@ from rlinf.scheduler import Channel
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.metric_utils import compute_evaluate_metrics
+from rlinf.utils.metric_utils import compute_evaluate_metrics, print_metrics_table
 from rlinf.utils.runner_utils import check_progress
 
 if TYPE_CHECKING:
@@ -83,6 +86,30 @@ class EmbodiedRunner:
 
         self.metric_logger = MetricLogger(cfg)
 
+        # Async logging setup
+        self.stop_logging = False
+        self.log_queue = queue.Queue()
+        self.log_thread = threading.Thread(target=self._log_worker, daemon=True)
+        self.log_thread.start()
+
+    def _log_worker(self):
+        """Background thread for processing log messages."""
+        while not self.stop_logging:
+            try:
+                # Wait for log message with timeout
+                log_func, args = self.log_queue.get(timeout=0.1)
+                log_func(*args)
+                self.log_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Logging error: {e}")
+                continue
+
+    def print_metrics_table_async(self, step: int, total_steps: int, start_time: float, metrics: dict, start_step: int = 0):
+        """Async version that puts table printing in queue."""
+        self.log_queue.put((print_metrics_table, (step, total_steps, start_time, metrics, start_step)))
+
     def init_workers(self):
         # create worker in order to decrease the maximum memory usage
         self.actor.init_worker().wait()
@@ -99,14 +126,6 @@ class EmbodiedRunner:
         )
         self.actor.load_checkpoint(actor_checkpoint_path).wait()
         self.global_step = int(resume_dir.split("global_step_")[-1])
-
-    # def send_demo_buffer(self):
-    #     if self.demo_buffer is not None:
-    #         sub_demo_buffer_ls = self.demo_buffer.split_to_dict(self.actor._world_size)
-
-    #         for sub_demo_buffer in sub_demo_buffer_ls:
-    #             self.demo_data_channel.put(sub_demo_buffer, async_op=True)
-    #         self.actor.recv_demo_data(self.demo_data_channel).wait()
 
     def update_rollout_weights(self):
         rollout_handle: Handle = self.rollout.sync_model_from_actor()
@@ -131,13 +150,7 @@ class EmbodiedRunner:
 
     def run(self):
         start_step = self.global_step
-        global_pbar = tqdm(
-            initial=start_step,
-            total=self.max_steps,
-            desc="Global Step",
-            ncols=800,
-        )
-        # self.send_demo_buffer()
+        start_time = time.time()
         for _step in range(start_step, self.max_steps):
             # set global step
             self.actor.set_global_step(self.global_step)
@@ -221,10 +234,14 @@ class EmbodiedRunner:
             logging_metrics.update(rollout_metrics)
             logging_metrics.update(training_metrics)
 
-            global_pbar.set_postfix(logging_metrics, refresh=False)
-            global_pbar.update(1)
+            self.print_metrics_table_async(_step, self.max_steps, start_time, logging_metrics, start_step)
 
         self.metric_logger.finish()
+
+        # Stop logging thread
+        self.stop_logging = True
+        self.log_queue.join()  # Wait for all queued logs to be processed
+        self.log_thread.join(timeout=1.0)
 
     def _save_checkpoint(self):
         base_output_dir = os.path.join(

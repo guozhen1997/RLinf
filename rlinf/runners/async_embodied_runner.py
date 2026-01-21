@@ -25,7 +25,6 @@ from rlinf.utils.metric_utils import compute_evaluate_metrics
 from rlinf.utils.runner_utils import check_progress
 
 if TYPE_CHECKING:
-    from rlinf.data.replay_buffer import SACReplayBuffer
     from rlinf.workers.actor.async_fsdp_sac_policy_worker import (
         AsyncEmbodiedSACFSDPPolicy,
     )
@@ -42,13 +41,12 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         actor: "AsyncEmbodiedSACFSDPPolicy",
         rollout: "AsyncMultiStepRolloutWorker",
         env: "AsyncEnvWorker",
-        demo_buffer: Optional["SACReplayBuffer"] = None,
         critic=None,
         reward=None,
         run_timer=None,
     ):
         super().__init__(
-            cfg, actor, rollout, env, demo_buffer, critic, reward, run_timer
+            cfg, actor, rollout, env, critic, reward, run_timer
         )
 
         # Data channels
@@ -69,8 +67,8 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
 
     def run(self):
         start_step = self.global_step
+        start_time = time.time()
         self.update_rollout_weights()
-        self.send_demo_buffer()
 
         env_handle: Handle = self.env.interact(
             input_channel=self.rollout_channel,
@@ -82,13 +80,13 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
             output_channel=self.rollout_channel,
             replay_channel=self.replay_channel,
         )
-        # self.actor.start_replay_buffer(self.replay_channel)
-        self.actor.recv_rollout_episode(
+        actor_handle: Handle = self.actor.recv_rollout_episodes(
             input_channel=self.replay_channel
         )
 
         train_step = start_step
         while train_step < self.max_steps:
+            eval_metrics = None
             if (
                 self.cfg.runner.val_check_interval > 0
                 and train_step % self.cfg.runner.val_check_interval == 0
@@ -112,6 +110,22 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
             if env_metrics is not None:
                 rollout_metrics = {f"env/{k}": v for k, v in env_metrics.items()}
                 self.metric_logger.log(rollout_metrics, train_step)
+            else:
+                rollout_metrics = {}
+
+            logging_metrics = {}
+            if eval_metrics is not None:
+                logging_metrics.update(eval_metrics)
+            logging_metrics.update(rollout_metrics)
+            logging_metrics.update(training_metrics)
+
+            self.print_metrics_table_async(
+                train_step - 1,
+                self.max_steps,
+                start_time,
+                logging_metrics,
+                start_step,
+            )
 
             _, save_model, _ = check_progress(
                 self.global_step,
@@ -126,7 +140,9 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
 
         self.env.stop().wait()
         self.rollout.stop().wait()
+        self.actor.stop().wait()
         env_handle.wait()
         rollout_handle.wait()
+        actor_handle.wait()
 
         self._save_checkpoint()

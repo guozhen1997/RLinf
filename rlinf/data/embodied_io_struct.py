@@ -150,27 +150,10 @@ class ChunkStepResult:
             self.rewards = self.rewards.cpu().contiguous()
         if self.forward_inputs:
             self.forward_inputs = put_tensor_device(self.forward_inputs, "cpu")
-        if len(self.obs) > 0:
+        if self.obs is not None and len(self.obs) > 0:
             self.obs = put_tensor_device(self.obs, "cpu")
-        if len(self.final_obs) > 0:
+        if self.final_obs is not None and len(self.final_obs) > 0:
             self.final_obs = put_tensor_device(self.final_obs, "cpu")
-
-# @dataclass
-# class Episode:
-#     """
-#     episode contains one episode.
-#     """
-
-#     obs: dict[str, Any] = field(default_factory=dict) # episode_length + 1
-#     actions: torch.Tensor = None # episode_length
-#     intervene_flags: torch.Tensor = None # episode_length
-#     rewards: torch.Tensor = None # episode_length
-#     terminations: torch.Tensor = None # episode_length
-#     truncations: torch.Tensor = None # episode_length
-#     dones: torch.Tensor = None # episode_length
-#     prev_logprobs: torch.Tensor = None # episode_length
-#     prev_values: torch.Tensor = None # episode_length
-#     forward_inputs: dict[str, Any] = field(default_factory=dict) # episode_length
 
 @dataclass
 class Trajectory:
@@ -216,14 +199,27 @@ class EmbodiedRolloutResult:
     prev_values: list[torch.Tensor] = field(default_factory=list) # trajectory_length + rollout_epoch
     forward_inputs: list[dict[str, Any]] = field(default_factory=list) # trajectory_length
 
-    def append_step_result(self, result: ChunkStepResult):
+    def append_step_result(self, result: ChunkStepResult, is_last_step: bool = False):
         if self.obs_pointer is None:
             self.obs_pointer = torch.zeros(result.dones.shape[0], dtype=torch.int32)
+            self.obs_pointer = self.obs_pointer - 1
+
         if self.collect_obs and result.obs is not None:
-            self.obs.append(result.obs)
-            self.curr_obs_idx.append(self.obs_pointer)
-            self.next_obs_idx.append(self.obs_pointer + 1)
-            self.obs_pointer = self.obs_pointer + 1
+            if (result.dones.any() or is_last_step):
+                assert result.final_obs is not None, "final_obs is None when dones.any() or is_last_step, please check the environment implementation."
+
+                self.obs.append(result.final_obs)
+                self.obs.append(result.obs)
+                
+                self.curr_obs_idx.append(self.obs_pointer + 1)
+                self.next_obs_idx.append(self.obs_pointer + 2)
+                self.obs_pointer = self.obs_pointer + 2
+            else:
+                self.obs.append(result.obs)
+                self.curr_obs_idx.append(self.obs_pointer)
+                self.next_obs_idx.append(self.obs_pointer + 1)
+                self.obs_pointer = self.obs_pointer + 1
+                    
         if result.actions is not None:
             self.actions.append(result.actions)
             self.intervene_flags.append(torch.zeros(1, dtype=torch.bool))
@@ -235,9 +231,6 @@ class EmbodiedRolloutResult:
             self.truncations.append(result.truncations)
         if result.dones is not None:
             self.dones.append(result.dones)
-            if result.dones.any() and result.final_obs is not None:
-                self.obs.append(result.final_obs)
-                self.obs_pointer = self.obs_pointer + 2 # skip the final obs
         if result.prev_logprobs is not None:
             self.prev_logprobs.append(result.prev_logprobs)
         if result.prev_values is not None:
@@ -292,11 +285,6 @@ class EmbodiedRolloutResult:
             for i in range(split_size):
                 splited_trajectories[i].obs = splited_obs[i]
 
-        if len(all_trajectory.final_obs) > 0:
-            splited_final_obs = split_dict_to_chunk(all_trajectory.final_obs, split_size, dim=1)
-            for i in range(split_size):
-                splited_trajectories[i].final_obs = splited_final_obs[i]
-
         if all_trajectory.forward_inputs is not None and len(all_trajectory.forward_inputs) > 0:
             splited_forward_inputs = split_dict_to_chunk(
                 all_trajectory.forward_inputs, split_size, dim=1
@@ -305,7 +293,7 @@ class EmbodiedRolloutResult:
                 splited_trajectories[i].forward_inputs = splited_forward_inputs[i]
 
         for field in all_trajectory.__dataclass_fields__.keys():
-            if field in ["obs", "final_obs", "forward_inputs"]:
+            if field in ["obs", "final_obs", "forward_inputs", "max_episode_length"]:
                 continue
             value = getattr(all_trajectory, field)
             if value is None:
@@ -476,7 +464,7 @@ def convert_trajectories_to_batch(
 
     # -------- tensor fields --------
     for field_name in trajectories[0].__dataclass_fields__.keys():
-        if field_name in ["obs", "curr_obs_idx", "next_obs_idx", "forward_inputs"]:
+        if field_name in ["obs", "curr_obs_idx", "next_obs_idx", "forward_inputs", "max_episode_length"]:
             continue
         field_list = [
             getattr(traj, field_name)

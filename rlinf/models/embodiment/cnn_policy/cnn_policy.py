@@ -201,10 +201,14 @@ class CNNPolicy(nn.Module, BasePolicy):
         return x, visual_feature
 
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
-        obs = kwargs.get("obs")
+        obs = kwargs.get("obs", None)
         if obs is not None:
             obs = self.preprocess_env_obs(obs)
             kwargs.update({"obs": obs})
+        next_obs = kwargs.get("next_obs", None)
+        if next_obs is not None:
+            next_obs = self.preprocess_env_obs(next_obs)
+            kwargs.update({"next_obs": next_obs})
         if forward_type == ForwardType.SAC:
             return self.sac_forward(**kwargs)
         elif forward_type == ForwardType.SAC_Q:
@@ -220,21 +224,14 @@ class CNNPolicy(nn.Module, BasePolicy):
 
     def default_forward(
         self,
-        data,
+        obs,
         compute_logprobs=True,
         compute_entropy=True,
         compute_values=True,
         sample_action=False,
         **kwargs,
     ):
-        obs = {
-            "main_images": data["main_images"],
-            "states": data["states"],
-        }
-        if "extra_view_images" in data:
-            obs["extra_view_images"] = data["extra_view_images"]
-
-        action = data["action"]
+        action = kwargs["forward_inputs"]["action"]
 
         full_feature, visual_feature = self.get_feature(obs)
         mix_feature = self.mix_proj(full_feature)
@@ -345,11 +342,11 @@ class CNNPolicy(nn.Module, BasePolicy):
         else:
             chunk_values = torch.zeros_like(chunk_logprobs[..., :1])
         forward_inputs = {"action": action}
-        if return_obs:
-            forward_inputs["main_images"] = env_obs["main_images"]
-            forward_inputs["states"] = env_obs["states"]
-            if "extra_view_images" in env_obs:
-                forward_inputs["extra_view_images"] = env_obs["extra_view_images"]
+        # if return_obs:
+        #     forward_inputs["main_images"] = env_obs["main_images"]
+        #     forward_inputs["states"] = env_obs["states"]
+        #     if "extra_view_images" in env_obs:
+        #         forward_inputs["extra_view_images"] = env_obs["extra_view_images"]
 
         result = {
             "prev_logprobs": chunk_logprobs,

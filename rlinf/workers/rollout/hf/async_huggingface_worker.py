@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from rlinf.scheduler import Channel
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
-from rlinf.data.embodied_io_struct import BatchEmbodiedRolloutResult, ChunkStepResult, EmbodiedRolloutResult
+from rlinf.data.embodied_io_struct import ChunkStepResult, EmbodiedRolloutResult
 
 
 class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
@@ -31,16 +31,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             // self.cfg.actor.model.num_action_chunks
         )
 
-        progress_bar = tqdm(
-            total=None,
-            desc="Generating Rollout Epochs",
-            disable=(self._rank != 0),
-        )
-
         while not self.should_stop:
             # rollout_results[stage_id]
             rollout_results: list[EmbodiedRolloutResult] = [
-                EmbodiedRolloutResult(max_episode_length=self.cfg.env.train.max_episode_steps, collect_obs=self.cfg.rollout.get("collect_obs", False)) 
+                EmbodiedRolloutResult(max_episode_length=self.cfg.env.train.max_episode_steps, collect_obs=self.cfg.rollout.get("collect_obs", True)) 
                 for _ in range(self.num_pipeline_stages)
             ]
 
@@ -95,26 +89,21 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     _, result = self.predict(env_output["obs"])
                 
                 chunk_step_result = ChunkStepResult(
-                    obs=env_output["obs"],
+                    obs=None,
                     final_obs=env_output["final_obs"],
                     dones=dones,
                     rewards=rewards,
                     truncations=env_output["truncations"],
                     terminations=env_output["terminations"],
-                    prev_logprobs=result["prev_logprobs"],
+                    prev_logprobs=None,
                     prev_values=result["prev_values"],
-                    forward_inputs=result["forward_inputs"],
+                    forward_inputs=None,
                 )
 
-                rollout_results[stage_id].append_step_result(chunk_step_result)
+                rollout_results[stage_id].append_step_result(chunk_step_result, is_last_step=True)
 
             for stage_id in range(self.num_pipeline_stages):
                 await self.send_rollout_trajectories(rollout_results[stage_id], replay_channel)
 
-            progress_bar.update(1)
-
     async def stop(self):
         self.should_stop = True
-        for buffer in self.buffer_list:
-            await buffer.stop()
-        await asyncio.gather(*self.buffer_tasks)

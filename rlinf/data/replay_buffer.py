@@ -831,6 +831,8 @@ class TrajectoryReplayBuffer:
         # Convert global sample indices to (trajectory_idx, local_sample_idx) pairs
         chunks = []
         for sample_id in sample_ids:
+            sample_id = int(sample_id)
+
             # Find which trajectory this sample belongs to
             trajectory_start = 0
             trajectory_uuid = None
@@ -862,10 +864,14 @@ class TrajectoryReplayBuffer:
 
             # Convert local sample index to (t, b) coordinates
             trajectory_info = self._trajectory_index[trajectory_uuid]
-            _, B = trajectory_info["shape"][:2]
-            t_idx = local_sample_idx // B
-            b_idx = local_sample_idx % B
+            T, B = trajectory_info["shape"][:2]
+            t_idx = int(local_sample_idx // B)
+            b_idx = int(local_sample_idx % B)
 
+            # Ensure indices are within bounds
+            if t_idx >= T or b_idx >= B:
+                continue  # Skip invalid samples
+            
             # Extract the chunk at (t_idx, b_idx)
             chunk = self._extract_chunk_from_trajectory(trajectory, t_idx, b_idx)
             if chunk:
@@ -892,7 +898,7 @@ class TrajectoryReplayBuffer:
         # Extract tensor fields
         tensor_fields = trajectory.__dataclass_fields__.keys()
         for field in tensor_fields:
-            if field in ["obs", "curr_obs_idx", "next_obs_idx", "forward_inputs"]:
+            if field in ["obs", "curr_obs_idx", "next_obs_idx", "forward_inputs", "max_episode_length"]:
                 continue
             tensor = getattr(trajectory, field)
             if tensor is not None:

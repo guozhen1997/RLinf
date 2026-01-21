@@ -213,7 +213,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         self.replay_buffer = TrajectoryReplayBuffer(
             device=self.device,
             seed=seed,
-            storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"replay_buffer_{self._rank}"),
+            storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"replay_buffer/rank_{self._rank}"),
             storage_format="pt",
             enable_cache=True,
             cache_size=100,
@@ -223,7 +223,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             self.demo_buffer = TrajectoryReplayBuffer(
                 device=self.device,
                 seed=seed,
-                storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"demo_buffer_{self._rank}"),
+                storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"demo_buffer/rank_{self._rank}"),
                 storage_format="pt",
                 enable_cache=True,
                 cache_size=100,
@@ -351,16 +351,16 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             all_data_q_values = self.model(
                 forward_type=ForwardType.SAC_Q,
                 obs=curr_obs,
-                actions=batch["action"]
-                if "action" in batch
+                actions=batch["forward_inputs"]["action"]
+                if "action" in batch["forward_inputs"]
                 else batch["action_tokens"],
             )
         else:
             all_data_q_values, all_qf_next = self.model(
                 forward_type=ForwardType.CROSSQ_Q,
                 obs=curr_obs,
-                actions=batch["action"]
-                if "action" in batch
+                actions=batch["forward_inputs"]["action"]
+                if "action" in batch["forward_inputs"]
                 else batch["action_tokens"],
                 next_obs=next_obs,
                 next_actions=next_state_actions,
@@ -458,18 +458,15 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         if self.demo_buffer is not None:
             replay_batch = self.replay_buffer.sample(
-                mode="chunk",
                 num_chunks=global_batch_size_per_rank // 2
             )
             demo_batch = self.demo_buffer.sample(
-                mode="chunk",
                 num_chunks=global_batch_size_per_rank // 2
             )
             global_batch = concat_batch(replay_batch, demo_batch)
         else:
             # Sample batch from replay buffer
             global_batch = self.replay_buffer.sample(
-                mode="chunk",
                 num_chunks=global_batch_size_per_rank
             )
 

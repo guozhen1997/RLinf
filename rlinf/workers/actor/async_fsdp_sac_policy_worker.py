@@ -22,6 +22,11 @@ from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
 
 class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
+    should_stop = False
+
+    async def recv_rollout_episodes(self, input_channel):
+        while not self.should_stop:
+            await super().recv_rollout_episodes(input_channel)
 
     async def run_training(self):
         """SAC training using replay buffer"""
@@ -73,3 +78,6 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
         torch.distributed.barrier()
         torch.cuda.empty_cache()
         return mean_metric_dict
+
+    async def stop(self):
+        self.should_stop = True
