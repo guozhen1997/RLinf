@@ -538,22 +538,13 @@ class TrajectoryReplayBuffer:
 
     def get_stats(self) -> dict[str, float]:
         """Get buffer statistics."""
-        # Calculate samples per episode (all episodes have the same number)
-        samples_per_trajectory = (
-            self._trajectory_index[self._trajectory_uuid_list[0]]["num_samples"]
-            if self._trajectory_uuid_list
-            else 0
-        )
-
         stats = {
             "num_trajectories": self.size,
             "total_samples": self._total_samples,
-            "samples_per_trajectory": samples_per_trajectory,
             "cache_size": len(self._trajectory_cache.cache)
             if self._trajectory_cache
             else 0,
         }
-
         return stats
 
     def save(self, save_path: str):

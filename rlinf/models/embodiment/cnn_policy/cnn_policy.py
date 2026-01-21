@@ -209,6 +209,17 @@ class CNNPolicy(nn.Module, BasePolicy):
         if next_obs is not None:
             next_obs = self.preprocess_env_obs(next_obs)
             kwargs.update({"next_obs": next_obs})
+        forward_inputs = kwargs.get("forward_inputs", None)
+        if forward_inputs is not None:
+            obs = {
+                "main_images": forward_inputs["main_images"],
+                "states": forward_inputs["states"],
+            }
+            if "extra_view_images" in forward_inputs:
+                obs["extra_view_images"] = forward_inputs["extra_view_images"]
+            obs = self.preprocess_env_obs(obs)
+            kwargs.update({"obs": obs})
+
         if forward_type == ForwardType.SAC:
             return self.sac_forward(**kwargs)
         elif forward_type == ForwardType.SAC_Q:
@@ -231,7 +242,7 @@ class CNNPolicy(nn.Module, BasePolicy):
         sample_action=False,
         **kwargs,
     ):
-        action = kwargs["forward_inputs"]["action"]
+        action = kwargs["action"]
 
         full_feature, visual_feature = self.get_feature(obs)
         mix_feature = self.mix_proj(full_feature)
@@ -342,11 +353,11 @@ class CNNPolicy(nn.Module, BasePolicy):
         else:
             chunk_values = torch.zeros_like(chunk_logprobs[..., :1])
         forward_inputs = {"action": action}
-        # if return_obs:
-        #     forward_inputs["main_images"] = env_obs["main_images"]
-        #     forward_inputs["states"] = env_obs["states"]
-        #     if "extra_view_images" in env_obs:
-        #         forward_inputs["extra_view_images"] = env_obs["extra_view_images"]
+        if return_obs:
+            forward_inputs["main_images"] = env_obs["main_images"]
+            forward_inputs["states"] = env_obs["states"]
+            if "extra_view_images" in env_obs:
+                forward_inputs["extra_view_images"] = env_obs["extra_view_images"]
 
         result = {
             "prev_logprobs": chunk_logprobs,

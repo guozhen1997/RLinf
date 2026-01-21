@@ -147,14 +147,14 @@ class MLPPolicy(nn.Module, BasePolicy):
 
     def default_forward(
         self,
-        data,
+        forward_inputs,
         compute_logprobs=True,
         compute_entropy=True,
         compute_values=True,
         **kwargs,
     ):
-        states = data["forward_inputs"]["states"]
-        action = data["forward_inputs"]["action"]
+        states = forward_inputs["states"]
+        action = forward_inputs["action"]
 
         feat = self.backbone(states)
         action_mean = self.actor_mean(feat)

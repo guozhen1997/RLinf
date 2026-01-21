@@ -188,40 +188,6 @@ class MultiStepRolloutWorker(Worker):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def update_intervene_actions(self, env_output, forward_inputs):
-        intervene_actions = env_output["intervene_actions"]
-        intervene_flags = env_output["intervene_flags"]
-        if intervene_actions is not None:
-            if "action" in forward_inputs:
-                policy_action = forward_inputs["action"].to(intervene_actions.device)
-                policy_action = policy_action.reshape(
-                    policy_action.shape[0], self.hf_model.num_action_chunks, -1
-                )
-                intervene_actions = intervene_actions.reshape(
-                    intervene_actions.shape[0], self.hf_model.num_action_chunks, -1
-                )
-                action = intervene_actions * intervene_flags[
-                    ..., None
-                ] + policy_action * (~intervene_flags[..., None])
-                action = action.reshape(action.shape[0], -1)
-                forward_inputs["action"] = action
-            else:
-                raise NotImplementedError(f"{forward_inputs.keys()=}")
-        return forward_inputs
-
-    def update_actions_with_intervention(self, env_output, raw_actions):
-        intervene_actions = env_output["intervene_actions"]
-        intervene_flags = env_output["intervene_flags"]
-        if intervene_actions is not None:
-            raw_actions = raw_actions.reshape(
-                raw_actions.shape[0], self.hf_model.num_action_chunks, -1
-            )
-            actions = intervene_actions * intervene_flags[..., None] + raw_actions * (
-                ~intervene_flags[..., None]
-            )
-            actions = actions.reshape(actions.shape[0], -1)
-        return actions
-
     async def send_rollout_trajectories(
         self, rollout_result: EmbodiedRolloutResult, channel: Channel
     ):
@@ -331,15 +297,10 @@ class MultiStepRolloutWorker(Worker):
                     )
                     rollout_results[stage_id].append_transitions(curr_obs, next_obs)
 
-        import time
-
-        t1 = time.time()
         for stage_id in range(self.num_pipeline_stages):
             await self.send_rollout_trajectories(
                 rollout_results[stage_id], actor_channel
             )
-        t2 = time.time()
-        print(f"gztest send cost: {t2 - t1}", flush=True)
 
         if self.enable_offload:
             self.offload_model()
@@ -385,13 +346,6 @@ class MultiStepRolloutWorker(Worker):
         output_channel.put(
             item=chunk_actions, key=f"{self._rank}_{mode}", async_op=True
         )
-
-    def send_rollout_batch(self, actor_channel: Channel, stage_id: int):
-        # send rollout_batch to actor
-        split_num = self.get_actor_split_num()
-        splitted_rollout_result = self.buffer_list[stage_id].to_splitted_dict(split_num)
-        for i in range(split_num):
-            actor_channel.put(item=splitted_rollout_result[i], async_op=True)
 
     def get_actor_split_num(self):
         send_num = self.placement.get_world_size("rollout") * self.num_pipeline_stages

@@ -267,7 +267,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
     async def recv_rollout_trajectories(self, input_channel: Channel) -> None:
         """
-        Receive rollout episode from rollout workers.
+        Receive rollout trajectories from rollout workers.
 
         Args:
             input_channel: The input channel to read from.

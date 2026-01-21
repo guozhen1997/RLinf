@@ -105,30 +105,6 @@ def process_nested_dict_for_train(nested_dict, shuffle_id):
     return ret_dict
 
 
-def get_nested_k_split_for_specific_keys(nested_dict, num_splits, key_list):
-    """
-    Get k-split iterator for some keys in nested_dict.
-    """
-    extra_dict = {}
-    for key in key_list:
-        if key not in nested_dict.keys():
-            continue
-        value = nested_dict[key]
-        if isinstance(value, dict):
-            extra_dict[key] = split_dict_to_chunk(value, num_splits)
-        elif isinstance(value, torch.Tensor):
-            continue
-        else:
-            raise NotImplementedError(
-                f"Only support dict and tensor type, but got {type(value)}"
-            )
-    # {key1: [d1, d2, ...], key2: [d1, d2, ...]} -> [{key1: d1, key2: d1}, {key1: d2, key2: d2}, ...]
-    extra_list = [
-        {k: extra_dict[k][i] for k in extra_dict.keys()} for i in range(num_splits)
-    ]
-    return extra_list
-
-
 class FSDPActor(FSDPModelManager, Worker):
     def __init__(
         self, cfg: DictConfig, placement: ModelParallelComponentPlacement
@@ -1024,29 +1000,37 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 )
 
                 self.optimizer.zero_grad()
-                for idx, data in enumerate(train_micro_batch):
-                    data = put_tensor_device(
-                        data, f"cuda:{int(os.environ['LOCAL_RANK'])}"
+                for idx, batch in enumerate(train_micro_batch):
+                    batch = put_tensor_device(
+                        batch, f"cuda:{int(os.environ['LOCAL_RANK'])}"
                     )
                     backward_ctx = self.before_micro_batch(
                         self.model,
                         is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
                     )
-                    advantages = data["advantages"]
-                    prev_logprobs = data["prev_logprobs"]
-                    returns = data.get("returns", None)
-                    prev_values = data.get("prev_values", None)
-                    loss_mask = data.get("loss_mask", None)
-                    loss_mask_sum = data.get("loss_mask_sum", None)
+                    advantages = batch["advantages"]
+                    prev_logprobs = batch["prev_logprobs"]
+                    returns = batch.get("returns", None)
+                    prev_values = batch.get("prev_values", None)
+                    loss_mask = batch.get("loss_mask", None)
+                    loss_mask_sum = batch.get("loss_mask_sum", None)
 
+                    forward_inputs = batch.get("forward_inputs", None)
+
+                    kwargs = {}
                     if SupportedModel(self.cfg.actor.model.model_type) in [
                         SupportedModel.OPENVLA,
                         SupportedModel.OPENVLA_OFT,
                     ]:
-                        data["temperature"] = (
+                        kwargs["temperature"] = (
                             self.cfg.algorithm.sampling_params.temperature_train
                         )
-                        data["top_k"] = self.cfg.algorithm.sampling_params.top_k
+                        kwargs["top_k"] = self.cfg.algorithm.sampling_params.top_k
+                    elif (
+                        SupportedModel(self.cfg.actor.model.model_type)
+                        == SupportedModel.GR00T
+                    ):
+                        kwargs["prev_logprobs"] = prev_logprobs
 
                     compute_values = (
                         True if self.cfg.algorithm.adv_type == "gae" else False
@@ -1054,16 +1038,18 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
                     with self.amp_context:
                         output_dict = self.model(
-                            data=data,
+                            forward_inputs=forward_inputs,
                             compute_logprobs=True,
                             compute_entropy=self.cfg.algorithm.entropy_bonus > 0,
                             compute_values=compute_values,
                             use_cache=False,
+                            **kwargs,
                         )
 
-                    if SupportedModel(self.cfg.actor.model.model_type) in [
-                        SupportedModel.GR00T
-                    ]:
+                    if (
+                        SupportedModel(self.cfg.actor.model.model_type)
+                        == SupportedModel.GR00T
+                    ):
                         prev_logprobs = output_dict["prev_logprobs"]
 
                     kwargs = {
