@@ -12,21 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 import copy
 import gc
 from typing import Any
 
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
-from tqdm import tqdm
 
 from rlinf.config import SupportedModel
-from rlinf.data.embodied_io_struct import EmbodiedRolloutResult, ChunkStepResult, Trajectory
+from rlinf.data.embodied_io_struct import (
+    ChunkStepResult,
+    EmbodiedRolloutResult,
+    Trajectory,
+)
 from rlinf.models import get_model
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.metric_utils import compute_split_num
-from rlinf.utils.nested_dict_process import put_tensor_device
 from rlinf.utils.placement import HybridComponentPlacement
 
 
@@ -47,6 +48,8 @@ class MultiStepRolloutWorker(Worker):
 
         actor_world_size = self.placement.get_world_size("actor")
         self.actor_weight_src_rank = self._rank % actor_world_size
+
+        self.collect_transitions = self.cfg.rollout.get("collect_transitions", False)
 
         # Sync weight comm options
         max_ctas = cfg.rollout.get("sync_weight_nccl_max_ctas", None)
@@ -128,7 +131,8 @@ class MultiStepRolloutWorker(Worker):
         return actions, result
 
     def get_dones_and_rewards(
-        self, env_output: dict[str, torch.Tensor],
+        self,
+        env_output: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, dict[str, Any] | None]:
         """
         Get dones and rewards from environment batch, handling auto_reset if needed.
@@ -204,17 +208,23 @@ class MultiStepRolloutWorker(Worker):
             else:
                 raise NotImplementedError(f"{forward_inputs.keys()=}")
         return forward_inputs
-    
+
     def update_actions_with_intervention(self, env_output, raw_actions):
         intervene_actions = env_output["intervene_actions"]
         intervene_flags = env_output["intervene_flags"]
         if intervene_actions is not None:
-            raw_actions = raw_actions.reshape(raw_actions.shape[0], self.hf_model.num_action_chunks, -1)
-            actions = intervene_actions * intervene_flags[..., None] + raw_actions * (~intervene_flags[..., None])
+            raw_actions = raw_actions.reshape(
+                raw_actions.shape[0], self.hf_model.num_action_chunks, -1
+            )
+            actions = intervene_actions * intervene_flags[..., None] + raw_actions * (
+                ~intervene_flags[..., None]
+            )
             actions = actions.reshape(actions.shape[0], -1)
         return actions
 
-    async def send_rollout_trajectories(self, rollout_result: EmbodiedRolloutResult, channel: Channel):
+    async def send_rollout_trajectories(
+        self, rollout_result: EmbodiedRolloutResult, channel: Channel
+    ):
         split_num = self.get_actor_split_num()
         trajectories: Trajectory = rollout_result.to_splited_trajectories(split_num)
         for trajectory in trajectories:
@@ -228,36 +238,37 @@ class MultiStepRolloutWorker(Worker):
 
         # rollout_results[stage_id]
         rollout_results: list[EmbodiedRolloutResult] = [
-            EmbodiedRolloutResult(max_episode_length=self.cfg.env.train.max_episode_steps, collect_obs=self.cfg.rollout.get("collect_obs", False)) 
+            EmbodiedRolloutResult(
+                max_episode_length=self.cfg.env.train.max_episode_steps
+            )
             for _ in range(self.num_pipeline_stages)
         ]
-        
+
         n_chunk_steps = (
             self.cfg.env.train.max_steps_per_rollout_epoch
             // self.cfg.actor.model.num_action_chunks
         )
 
         for _ in range(self.cfg.algorithm.rollout_epoch):
-            
+            last_obs = [None for i in range(self.num_pipeline_stages)]
             for _ in range(n_chunk_steps):
                 for stage_id in range(self.num_pipeline_stages):
                     env_output = await self.recv_env_output(input_channel)
 
                     if env_output["intervene_actions"] is not None:
                         rollout_results[stage_id].update_last_actions(
-                            env_output["intervene_actions"], env_output["intervene_flags"]
+                            env_output["intervene_actions"],
+                            env_output["intervene_flags"],
                         )
 
-                    dones, rewards = self.get_dones_and_rewards(
-                        env_output
-                    )
+                    dones, rewards = self.get_dones_and_rewards(env_output)
                     actions, result = self.predict(env_output["obs"])
 
                     env_output["obs"].pop("task_descriptions", None)
                     if env_output["final_obs"] is not None:
                         env_output["final_obs"].pop("task_descriptions", None)
+
                     chunk_step_result = ChunkStepResult(
-                        obs=env_output["obs"],
                         actions=result.get("action", None),
                         dones=dones,
                         rewards=rewards,
@@ -266,10 +277,19 @@ class MultiStepRolloutWorker(Worker):
                         prev_logprobs=result["prev_logprobs"],
                         prev_values=result["prev_values"],
                         forward_inputs=result["forward_inputs"],
-                        final_obs=env_output["final_obs"],
                     )
 
                     rollout_results[stage_id].append_step_result(chunk_step_result)
+                    if self.collect_transitions and last_obs[stage_id] is not None:
+                        curr_obs = last_obs[stage_id]
+                        next_obs = (
+                            env_output["final_obs"]
+                            if dones.any() and self.cfg.env.train.auto_reset
+                            else env_output["obs"]
+                        )
+                        rollout_results[stage_id].append_transitions(curr_obs, next_obs)
+
+                    last_obs[stage_id] = env_output["obs"]
 
                     self.send_chunk_actions(output_channel, actions)
 
@@ -282,19 +302,16 @@ class MultiStepRolloutWorker(Worker):
                     )
 
                 # Get dones and rewards from environment batch (final step of epoch)
-                dones, rewards = self.get_dones_and_rewards(
-                    env_output
-                )
+                dones, rewards = self.get_dones_and_rewards(env_output)
 
                 with self.worker_timer():
                     _, result = self.predict(env_output["obs"])
-                
+
                 env_output["obs"].pop("task_descriptions", None)
                 if env_output["final_obs"] is not None:
                     env_output["final_obs"].pop("task_descriptions", None)
-                
+
                 chunk_step_result = ChunkStepResult(
-                    obs=None,
                     dones=dones,
                     rewards=rewards,
                     truncations=env_output["truncations"],
@@ -302,13 +319,27 @@ class MultiStepRolloutWorker(Worker):
                     prev_logprobs=None,
                     prev_values=result["prev_values"],
                     forward_inputs=None,
-                    final_obs=env_output["final_obs"],
                 )
 
-                rollout_results[stage_id].append_step_result(chunk_step_result, is_last_step=True)
+                rollout_results[stage_id].append_step_result(chunk_step_result)
+                if self.collect_transitions and last_obs[stage_id] is not None:
+                    curr_obs = last_obs[stage_id]
+                    next_obs = (
+                        env_output["final_obs"]
+                        if dones.any() and self.cfg.env.train.auto_reset
+                        else env_output["obs"]
+                    )
+                    rollout_results[stage_id].append_transitions(curr_obs, next_obs)
 
+        import time
+
+        t1 = time.time()
         for stage_id in range(self.num_pipeline_stages):
-            await self.send_rollout_trajectories(rollout_results[stage_id], actor_channel)
+            await self.send_rollout_trajectories(
+                rollout_results[stage_id], actor_channel
+            )
+        t2 = time.time()
+        print(f"gztest send cost: {t2 - t1}", flush=True)
 
         if self.enable_offload:
             self.offload_model()
@@ -321,11 +352,7 @@ class MultiStepRolloutWorker(Worker):
             self.cfg.env.eval.max_steps_per_rollout_epoch
             // self.cfg.actor.model.num_action_chunks
         )
-        for _ in tqdm(
-            range(self.cfg.algorithm.eval_rollout_epoch),
-            desc="Evaluating Rollout Epochs",
-            disable=(self._rank != 0),
-        ):
+        for _ in range(self.cfg.algorithm.eval_rollout_epoch):
             for _ in range(n_chunk_steps):
                 for _ in range(self.num_pipeline_stages):
                     env_output = await self.recv_env_output(input_channel, mode="eval")

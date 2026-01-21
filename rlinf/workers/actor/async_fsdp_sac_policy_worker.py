@@ -16,7 +16,6 @@ import asyncio
 
 import torch
 
-from rlinf.scheduler import Channel
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
@@ -24,9 +23,9 @@ from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
     should_stop = False
 
-    async def recv_rollout_episodes(self, input_channel):
+    async def recv_rollout_trajectories(self, input_channel):
         while not self.should_stop:
-            await super().recv_rollout_episodes(input_channel)
+            await super().recv_rollout_trajectories(input_channel)
 
     async def run_training(self):
         """SAC training using replay buffer"""
@@ -36,7 +35,8 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
 
         # Check if replay buffer has enough samples
         min_buffer_size = (
-            self.cfg.algorithm.get("min_buffer_size", 100) // self._world_size
+            self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
+            // self._world_size
         )
         train_actor_steps = (
             self.cfg.algorithm.get("train_actor_steps", 0) // self._world_size

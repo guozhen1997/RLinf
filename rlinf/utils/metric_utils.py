@@ -175,13 +175,17 @@ def compute_loss_mask(dones):
     return loss_mask, loss_mask_sum
 
 
-def print_metrics_table(step: int, total_steps: int, start_time: float, metrics: dict, start_step: int = 0):
+def print_metrics_table(
+    step: int, total_steps: int, start_time: float, metrics: dict, start_step: int = 0
+):
     """Print training metrics in a simple, fast formatted table."""
     # Calculate progress info
     progress = (step + 1) / total_steps * 100
     elapsed_time = time.time() - start_time
     steps_done = step + 1 - start_step
-    eta_seconds = elapsed_time / steps_done * (total_steps - step - 1) if steps_done > 0 else 0
+    eta_seconds = (
+        elapsed_time / steps_done * (total_steps - step - 1) if steps_done > 0 else 0
+    )
 
     def format_time(seconds):
         hours, remainder = divmod(int(seconds), 3600)
@@ -224,7 +228,7 @@ def print_metrics_table(step: int, total_steps: int, start_time: float, metrics:
     _print_section_title("Metric Table")
 
     # First line: Global Step and Progress
-    step_str = f"Global Step: {step+1:4d}/{total_steps}"
+    step_str = f"Global Step: {step + 1:4d}/{total_steps}"
     progress_str = f"Progress: {bar} │ {progress:5.1f}%"
     line1 = f"│ {step_str} │ {progress_str}"
     line1 = _fit_line(line1, total_width - 2)
@@ -233,7 +237,7 @@ def print_metrics_table(step: int, total_steps: int, start_time: float, metrics:
     # Second line: Time information
     elapsed_str_formatted = f"Elapsed: {elapsed_str}"
     eta_str_formatted = f"ETA: {eta_str}"
-    step_time_str = f"Step Time: {elapsed_time/steps_done:.3f}s"
+    step_time_str = f"Step Time: {elapsed_time / steps_done:.3f}s"
     line2 = f"│ {elapsed_str_formatted} │ {eta_str_formatted} │ {step_time_str}"
     line2 = _fit_line(line2, total_width - 2)
     print(f"{line2} │")
@@ -243,8 +247,11 @@ def print_metrics_table(step: int, total_steps: int, start_time: float, metrics:
         "Time": {},
         "Environment": {},
         "Rollout": {},
+        "Evaluation": {},
+        "Replay Buffer": {},
         "Training/Actor": {},
         "Training/Critic": {},
+        "Training/Other": {},
     }
 
     for key, value in metrics.items():
@@ -254,6 +261,8 @@ def print_metrics_table(step: int, total_steps: int, start_time: float, metrics:
                 "time": "Time",
                 "env": "Environment",
                 "rollout": "Rollout",
+                "eval": "Evaluation",
+                "replay_buffer": "Replay Buffer",
             }
             if category in category_map:
                 categories[category_map[category]][metric_name] = value
@@ -262,7 +271,12 @@ def print_metrics_table(step: int, total_steps: int, start_time: float, metrics:
                     categories["Training/Actor"][metric_name] = value
                 elif metric_name.startswith("critic/"):
                     categories["Training/Critic"][metric_name] = value
-                # Ignore non-actor/critic metrics under train.
+                elif metric_name.startswith("replay_buffer/"):
+                    categories["Replay Buffer"][
+                        metric_name.replace("replay_buffer/", "")
+                    ] = value
+                else:
+                    categories["Training/Other"][metric_name] = value
 
     # Print metrics by category - 3 metrics per row
     table_width = total_width  # Match header width

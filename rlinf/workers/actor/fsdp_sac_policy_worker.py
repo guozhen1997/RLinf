@@ -23,6 +23,8 @@ import torch.nn.functional as F
 from omegaconf import DictConfig
 
 from rlinf.config import SupportedModel
+from rlinf.data.embodied_io_struct import Trajectory
+from rlinf.data.replay_buffer import TrajectoryReplayBuffer
 from rlinf.hybrid_engines.fsdp import (
     FSDP,
     FSDPModule,
@@ -32,7 +34,7 @@ from rlinf.scheduler import Channel
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import (
     append_to_dict,
-    compute_rollout_metrics,
+    compute_split_num,
 )
 from rlinf.utils.nested_dict_process import (
     concat_batch,
@@ -40,9 +42,6 @@ from rlinf.utils.nested_dict_process import (
     split_dict_to_chunk,
 )
 from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
-from rlinf.utils.metric_utils import compute_split_num
-from rlinf.data.embodied_io_struct import Trajectory
-from rlinf.data.replay_buffer import TrajectoryReplayBuffer
 
 
 class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
@@ -211,26 +210,30 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         # Initialize replay buffer
         seed = self.cfg.actor.get("seed", 1234)
         self.replay_buffer = TrajectoryReplayBuffer(
-            device=self.device,
             seed=seed,
-            storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"replay_buffer/rank_{self._rank}"),
+            storage_dir=os.path.join(
+                self.cfg.runner.logger.log_path, f"replay_buffer/rank_{self._rank}"
+            ),
             storage_format="pt",
-            enable_cache=True,
-            cache_size=100,
+            enable_cache=self.cfg.algorithm.replay_buffer.enable_cache,
+            cache_size=self.cfg.algorithm.replay_buffer.cache_size,
+            sample_window_size=self.cfg.algorithm.replay_buffer.sample_window_size,
         )
 
-        if self.cfg.algorithm.get("demo_buffer_load_path", None) is not None:
+        if self.cfg.algorithm.get("demo_buffer", {}).get("load_path", None) is not None:
             self.demo_buffer = TrajectoryReplayBuffer(
-                device=self.device,
                 seed=seed,
-                storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"demo_buffer/rank_{self._rank}"),
+                storage_dir=os.path.join(
+                    self.cfg.runner.logger.log_path, f"demo_buffer/rank_{self._rank}"
+                ),
                 storage_format="pt",
-                enable_cache=True,
-                cache_size=100,
+                enable_cache=self.cfg.algorithm.demo_buffer.enable_cache,
+                cache_size=self.cfg.algorithm.demo_buffer.cache_size,
+                sample_window_size=self.cfg.algorithm.demo_buffer.sample_window_size,
             )
             self.demo_buffer.load(
-                self.cfg.algorithm.demo_buffer_load_path,
-                partial_load=True,
+                self.cfg.algorithm.demo_buffer.load_path,
+                is_distributed=True,
                 load_rank=self._rank,
                 load_split_num=self._world_size,
             )
@@ -262,7 +265,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                     target_param.data.mul_(1.0 - tau)
                     target_param.data.add_(online_param.data * tau)
 
-    async def recv_rollout_episodes(self, input_channel: Channel) -> None:
+    async def recv_rollout_trajectories(self, input_channel: Channel) -> None:
         """
         Receive rollout episode from rollout workers.
 
@@ -274,7 +277,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         split_num = compute_split_num(send_num, recv_num)
 
         recv_list = []
-        
+
         for _ in range(split_num):
             trajectory: Trajectory = await input_channel.get(async_op=True).async_wait()
             recv_list.append(trajectory)
@@ -591,7 +594,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         # Check if replay buffer has enough samples
         min_buffer_size = (
-            self.cfg.algorithm.get("min_buffer_size", 100) // self._world_size
+            self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
+            // self._world_size
         )
         train_actor_steps = (
             self.cfg.algorithm.get("train_actor_steps", 0) // self._world_size

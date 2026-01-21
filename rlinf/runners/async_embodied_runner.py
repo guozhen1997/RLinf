@@ -14,7 +14,7 @@
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from omegaconf.dictconfig import DictConfig
 
@@ -45,9 +45,7 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         reward=None,
         run_timer=None,
     ):
-        super().__init__(
-            cfg, actor, rollout, env, critic, reward, run_timer
-        )
+        super().__init__(cfg, actor, rollout, env, critic, reward, run_timer)
 
         # Data channels
         self.env_metric_channel = Channel.create("EnvMetric")
@@ -80,7 +78,7 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
             output_channel=self.rollout_channel,
             replay_channel=self.replay_channel,
         )
-        actor_handle: Handle = self.actor.recv_rollout_episodes(
+        actor_handle: Handle = self.actor.recv_rollout_trajectories(
             input_channel=self.replay_channel
         )
 

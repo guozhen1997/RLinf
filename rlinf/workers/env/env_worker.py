@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.io_struct import EnvOutput
+from rlinf.data.embodied_io_struct import EnvOutput
 from rlinf.envs import get_env_cls
 from rlinf.envs.action_utils import prepare_actions
 from rlinf.envs.env_manager import EnvManager
@@ -40,9 +40,6 @@ class EnvWorker(Worker):
         self.eval_env_list: list[EnvManager] = []
 
         self.last_obs_list = []
-        self.last_dones_list = []
-        self.last_terminations_list = []
-        self.last_truncations_list = []
         self.last_intervened_info_list = []
 
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
@@ -119,15 +116,7 @@ class EnvWorker(Worker):
             for i in range(self.stage_num):
                 self.env_list[i].start_env()
                 extracted_obs, _ = self.env_list[i].reset()
-                dones = (
-                    torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
-                    .unsqueeze(1)
-                    .repeat(1, self.cfg.actor.model.num_action_chunks)
-                )
                 self.last_obs_list.append(extracted_obs)
-                self.last_dones_list.append(dones)
-                self.last_terminations_list.append(dones.clone())
-                self.last_truncations_list.append(dones.clone())
                 self.last_intervened_info_list.append((None, None))
                 self.env_list[i].stop_env()
 
@@ -348,15 +337,12 @@ class EnvWorker(Worker):
                 truncations = dones.clone()
 
                 for stage_id in range(self.stage_num):
-                    self.last_dones_list[stage_id] = dones
-                    self.last_terminations_list[stage_id] = terminations
-                    self.last_truncations_list[stage_id] = truncations
                     env_output = EnvOutput(
                         obs=self.last_obs_list[stage_id],
                         rewards=None,
-                        dones=self.last_dones_list[stage_id],
-                        terminations=self.last_terminations_list[stage_id],
-                        truncations=self.last_truncations_list[stage_id],
+                        dones=dones,
+                        terminations=terminations,
+                        truncations=truncations,
                         intervene_actions=self.last_intervened_info_list[stage_id][0],
                         intervene_flags=self.last_intervened_info_list[stage_id][1],
                     )
@@ -387,13 +373,6 @@ class EnvWorker(Worker):
                             env_metrics[key].append(value)
 
             self.last_obs_list = [env_output.obs for env_output in env_output_list]
-            self.last_dones_list = [env_output.dones for env_output in env_output_list]
-            self.last_truncations_list = [
-                env_output.truncations for env_output in env_output_list
-            ]
-            self.last_terminations_list = [
-                env_output.terminations for env_output in env_output_list
-            ]
             self.last_intervened_info_list = [
                 (env_output.intervene_actions, env_output.intervene_flags)
                 for env_output in env_output_list

@@ -13,15 +13,13 @@
 # limitations under the License.
 
 import os
-import time
-import threading
 import queue
-from typing import TYPE_CHECKING, Optional, Union
+import threading
+import time
+from typing import TYPE_CHECKING, Union
 
 from omegaconf.dictconfig import DictConfig
-from tqdm import tqdm
 
-from rlinf.data.replay_buffer import SACReplayBuffer
 from rlinf.scheduler import Channel
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.distributed import ScopedTimer
@@ -52,7 +50,6 @@ class EmbodiedRunner:
         ],
         rollout: Union["MultiStepRolloutWorker", "AsyncMultiStepRolloutWorker"],
         env: Union["EnvWorker", "AsyncEnvWorker"],
-        demo_buffer: Optional[SACReplayBuffer] = None,
         critic=None,
         reward=None,
         run_timer=None,
@@ -61,7 +58,6 @@ class EmbodiedRunner:
         self.actor = actor
         self.rollout = rollout
         self.env = env
-        self.demo_buffer = demo_buffer
         self.critic = critic
         self.reward = reward
 
@@ -69,8 +65,6 @@ class EmbodiedRunner:
         self.env_channel = Channel.create("Env")
         self.rollout_channel = Channel.create("Rollout")
         self.actor_channel = Channel.create("Actor")
-        # if self.demo_buffer is not None:
-        #     self.demo_data_channel = Channel.create("DemoBufferChannel")
 
         # this timer checks if we should stop training
         self.run_timer = run_timer
@@ -106,9 +100,18 @@ class EmbodiedRunner:
                 print(f"Logging error: {e}")
                 continue
 
-    def print_metrics_table_async(self, step: int, total_steps: int, start_time: float, metrics: dict, start_step: int = 0):
+    def print_metrics_table_async(
+        self,
+        step: int,
+        total_steps: int,
+        start_time: float,
+        metrics: dict,
+        start_step: int = 0,
+    ):
         """Async version that puts table printing in queue."""
-        self.log_queue.put((print_metrics_table, (step, total_steps, start_time, metrics, start_step)))
+        self.log_queue.put(
+            (print_metrics_table, (step, total_steps, start_time, metrics, start_step))
+        )
 
     def init_workers(self):
         # create worker in order to decrease the maximum memory usage
@@ -169,7 +172,7 @@ class EmbodiedRunner:
                         output_channel=self.rollout_channel,
                         actor_channel=self.actor_channel,
                     )
-                    self.actor.recv_rollout_episodes(
+                    self.actor.recv_rollout_trajectories(
                         input_channel=self.actor_channel
                     ).wait()
                     rollout_handle.wait()
@@ -234,7 +237,9 @@ class EmbodiedRunner:
             logging_metrics.update(rollout_metrics)
             logging_metrics.update(training_metrics)
 
-            self.print_metrics_table_async(_step, self.max_steps, start_time, logging_metrics, start_step)
+            self.print_metrics_table_async(
+                _step, self.max_steps, start_time, logging_metrics, start_step
+            )
 
         self.metric_logger.finish()
 

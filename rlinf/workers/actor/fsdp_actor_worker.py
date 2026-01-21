@@ -28,6 +28,7 @@ from rlinf.algorithms.utils import (
     kl_penalty,
 )
 from rlinf.config import SupportedModel
+from rlinf.data.embodied_io_struct import Trajectory, convert_trajectories_to_batch
 from rlinf.data.io_struct import BatchResizingIterator, RolloutResult
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import (
     FSDPModelManager,
@@ -65,7 +66,6 @@ from rlinf.utils.utils import (
     retrieve_model_state_dict_in_cpu,
 )
 from rlinf.workers.rollout.utils import RankMapper
-from rlinf.data.embodied_io_struct import Trajectory, convert_trajectories_to_batch
 
 
 def process_nested_dict_for_adv(nested_dict, rollout_epoch):
@@ -831,10 +831,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
         self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
-
-    async def recv_rollout_episodes(self, input_channel: Channel) -> None:
+    async def recv_rollout_trajectories(self, input_channel: Channel) -> None:
         """
-        Receive rollout episode from rollout workers.
+        Receive rollout trajectories from rollout workers.
 
         Args:
             input_channel: The input channel to read from.
