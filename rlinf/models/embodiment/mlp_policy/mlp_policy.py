@@ -153,8 +153,8 @@ class MLPPolicy(nn.Module, BasePolicy):
         compute_values=True,
         **kwargs,
     ):
-        states = data["forward_inputs/states"]
-        action = data["forward_inputs/action"]
+        states = data["forward_inputs"]["states"]
+        action = data["forward_inputs"]["action"]
 
         feat = self.backbone(states)
         action_mean = self.actor_mean(feat)

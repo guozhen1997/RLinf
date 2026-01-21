@@ -65,7 +65,7 @@ from rlinf.utils.utils import (
     retrieve_model_state_dict_in_cpu,
 )
 from rlinf.workers.rollout.utils import RankMapper
-from rlinf.data.embodied_io_struct import Episode, pad_and_stack_episodes
+from rlinf.data.embodied_io_struct import Trajectory, convert_trajectories_to_batch
 
 
 def process_nested_dict_for_adv(nested_dict, rollout_epoch):
@@ -844,41 +844,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         split_num = compute_split_num(send_num, recv_num)
 
         recv_list = []
-        for _ in range(self.cfg.algorithm.rollout_epoch):
-            episode_num = await input_channel.get(async_op=True).async_wait()
-            for _ in range(episode_num):
-                for _ in range(split_num):
-                    episode: Episode = await input_channel.get(async_op=True).async_wait()
-                    recv_list.append(episode)
-        
-        # Pad and stack episodes to create a batch
-        self.rollout_batch = pad_and_stack_episodes(recv_list)
-        
-        # Ensure T * B is divisible by batch_size_per_rank
-        # If not, truncate along B dimension to minimize data loss
-        batch_size_per_rank = self.cfg.actor.global_batch_size // self._world_size
-        
-        if "prev_logprobs" in self.rollout_batch:
-            T, B = self.rollout_batch["prev_logprobs"].shape[:2]
-        else:
-            first_key = next(iter(self.rollout_batch.keys()))
-            T, B = self.rollout_batch[first_key].shape[:2]
-        
-        total_samples = T * B
-        
-        # If not divisible, find the largest B' <= B such that T * B' is divisible
-        if total_samples % batch_size_per_rank != 0:
-            max_new_B = (total_samples // batch_size_per_rank) * batch_size_per_rank // T
-            # Ensure max_new_B <= B
-            new_B = min(max_new_B, B)
-            while new_B > 0 and (T * new_B) % batch_size_per_rank != 0:
-                new_B -= 1
+        for _ in range(split_num):
+            trajectory: Trajectory = await input_channel.get(async_op=True).async_wait()
+            recv_list.append(trajectory)
 
-            if new_B < B and new_B > 0:
-                for key, value in self.rollout_batch.items():
-                    if isinstance(value, torch.Tensor) and value.dim() >= 2:
-                        self.rollout_batch[key] = value[:, :new_B, ...]
-        
+        self.rollout_batch = convert_trajectories_to_batch(recv_list)
+
+        self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
     def _process_received_rollout_batch(
         self, rollout_batch: dict[str, torch.Tensor]
@@ -1031,7 +1003,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
-            rollout_dataloader_iter = get_iterator_k_split(
+            rollout_dataloader_iter = split_dict_to_chunk(
                 self.rollout_batch,
                 rollout_size // batch_size_per_rank,
             )
@@ -1047,7 +1019,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     f"{train_global_batch_size=}, {self.cfg.actor.micro_batch_size}"
                 )
 
-                train_micro_batch = get_iterator_k_split(
+                train_micro_batch = split_dict_to_chunk(
                     train_global_batch,
                     train_global_batch_size // self.cfg.actor.micro_batch_size,
                 )

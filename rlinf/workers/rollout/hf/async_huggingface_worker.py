@@ -16,36 +16,15 @@ import asyncio
 
 from tqdm import tqdm
 
-from rlinf.data.io_struct import AsyncEmbodiedRolloutBuffer
 from rlinf.scheduler import Channel
-from rlinf.utils.nested_dict_process import put_tensor_device
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
-from rlinf.data.embodied_io_struct import BatchEmbodiedRolloutResult, ChunkStepResult, EpisodeResult, EmbodiedRolloutEpisodeResultHandler
-from rlinf.utils.nested_dict_process import (
-    cat_list_of_dict_tensor,
-    put_tensor_device,
-    split_dict_to_chunk,
-    stack_list_of_dict_tensor,
-)
+from rlinf.data.embodied_io_struct import BatchEmbodiedRolloutResult, ChunkStepResult, EmbodiedRolloutResult
+
 
 class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
     async def generate(
         self, input_channel: Channel, output_channel: Channel, replay_channel: Channel
     ):
-        # Determine compute_mask based on cfg
-        auto_reset = self.cfg.env.train.get("auto_reset", True)
-        ignore_terminations = self.cfg.env.train.get("ignore_terminations", False)
-        compute_mask = not auto_reset and not ignore_terminations
-        reward_type = self.cfg.algorithm.get("reward_type", "chunk_level")
-        
-        self.rollout_result_handlers: list[EmbodiedRolloutEpisodeResultHandler] = [
-            EmbodiedRolloutEpisodeResultHandler(
-                actor_split_num=self.get_actor_split_num(), 
-                channel=replay_channel,
-                compute_mask=compute_mask,
-                reward_type=reward_type
-            ) for _ in range(self.num_pipeline_stages)
-        ]
 
         n_chunk_steps = (
             self.cfg.env.train.max_steps_per_rollout_epoch
@@ -59,13 +38,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         )
 
         while not self.should_stop:
-
-            # episode_results[stage_id]
-            batch_episode_results: list[BatchEmbodiedRolloutResult] = [
-                BatchEmbodiedRolloutResult(
-                    max_episode_length=self.cfg.env.train.max_episode_steps,
-                    collect_obs=self.cfg.rollout.get("collect_obs", True)
-                ) for _ in range(self.num_pipeline_stages)
+            # rollout_results[stage_id]
+            rollout_results: list[EmbodiedRolloutResult] = [
+                EmbodiedRolloutResult(max_episode_length=self.cfg.env.train.max_episode_steps, collect_obs=self.cfg.rollout.get("collect_obs", False)) 
+                for _ in range(self.num_pipeline_stages)
             ]
 
             for _ in range(n_chunk_steps):
@@ -73,14 +49,9 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     env_output = await self.recv_env_output(input_channel)
 
                     if env_output["intervene_actions"] is not None:
-                        batch_episode_results[stage_id].update_last_actions(
+                        rollout_results[stage_id].update_last_actions(
                             env_output["intervene_actions"], env_output["intervene_flags"]
                         )
-
-                    if self.cfg.env.train.get("auto_reset", False):
-                        # append completed episodes to buffer
-                        completed_episodes = batch_episode_results[stage_id].get_completed_episodes()
-                        self.rollout_result_handlers[stage_id].append_and_send_eposide_results(completed_episodes)
 
                     dones, rewards = self.get_dones_and_rewards(
                         env_output
@@ -104,7 +75,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                         final_obs=env_output["final_obs"],
                     )
 
-                    batch_episode_results[stage_id].append_batch_result(chunk_step_result)
+                    rollout_results[stage_id].append_step_result(chunk_step_result)
 
                     self.send_chunk_actions(output_channel, actions)
 
@@ -112,14 +83,9 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 env_output = await self.recv_env_output(input_channel)
 
                 if env_output["intervene_actions"] is not None:
-                    batch_episode_results[stage_id].update_last_actions(
+                    rollout_results[stage_id].update_last_actions(
                         env_output["intervene_actions"], env_output["intervene_flags"]
                     )
-
-                if self.cfg.env.train.get("auto_reset", False):
-                    # append completed episodes to buffer
-                    completed_episodes = batch_episode_results[stage_id].get_completed_episodes()
-                    self.rollout_result_handlers[stage_id].append_and_send_eposide_results(completed_episodes)
 
                 dones, rewards = self.get_dones_and_rewards(
                     env_output
@@ -140,9 +106,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     forward_inputs=result["forward_inputs"],
                 )
 
-                batch_episode_results[stage_id].append_batch_result(chunk_step_result)
-                completed_episodes = batch_episode_results[stage_id].get_completed_episodes()
-                self.rollout_result_handlers[stage_id].append_and_send_eposide_results(completed_episodes)
+                rollout_results[stage_id].append_step_result(chunk_step_result)
+
+            for stage_id in range(self.num_pipeline_stages):
+                await self.send_rollout_trajectories(rollout_results[stage_id], replay_channel)
 
             progress_bar.update(1)
 

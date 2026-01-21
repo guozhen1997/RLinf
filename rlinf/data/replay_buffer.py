@@ -25,8 +25,186 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from rlinf.data.embodied_io_struct import Trajectory
 from rlinf.scheduler import Channel
 from rlinf.utils.nested_dict_process import cat_list_of_dict_tensor
+
+
+def split_episode_by_dones(episode: Trajectory) -> list[Trajectory]:
+    """
+    根据 dones 将一个包含多个 episode 的 Trajectory 对象拆分成多个独立的 Episode。
+
+    在 auto_reset=True 的情况下，dones 的长度是 episode_length + num_rollout_epoch，
+    dones 中为 True 的位置表示 epoch 结束时的完整 episode。
+
+    Args:
+        episode: 输入的 Trajectory 对象，形状为 [T, B, ...]，其中 T 可能包含多个 episode
+
+    Returns:
+        拆分后的独立 Trajectory 列表，每个 Trajectory 形状为 [t_i, B, ...]
+
+    示例：
+    dones: [F, F, F, T, F, F, T, F, T, F, F, F]
+    episode 1: indices [0,1,2,3] (dones[3]=T)
+    episode 2: indices [4,5,6] (dones[6]=T)
+    episode 3: indices [7,8] (dones[9]=T，最后一个未完成的episode被丢弃)
+
+    final obs append是发生在done=True的时候，所以final obs的T实际等于done=True的个数
+    每次取episode数据时，需要在obs的T维度上再加上final obs，让obs 长度变成T + 1
+    """
+    if episode.dones is None:
+        return [episode]
+
+    # dones 形状: [T + n, B, ...]，其中 T = episode_length, n = num_rollout_epoch
+    dones = episode.dones
+    B = dones.shape[1] if len(dones.shape) > 1 else 1
+
+    split_episodes = []
+
+    # 对每个 batch 分别处理
+    for b in range(B):
+        # 获取当前 batch 的 dones: [T+1]
+        batch_dones = dones[:, b] if len(dones.shape) > 1 else dones
+
+        # 找到 dones 为 True 的位置（episode 结束位置）
+        done_indices = torch.where(batch_dones)[0]
+
+        if len(done_indices) == 0:
+            # 如果没有 done，整个序列作为一个 episode（没有 final_obs）
+            single_episode = Trajectory()
+            _copy_episode_slice(episode, single_episode, 0, None, b, B, final_obs_idx=None)
+            split_episodes.append(single_episode)
+            continue
+
+        # 处理每个完成的 episode
+        start_idx = 0
+        for i, done_idx in enumerate(done_indices):
+            # done_idx 是 dones 中为 True 的索引
+            # episode 包含从 start_idx 到 done_idx（包括 done_idx）的所有数据
+            # actions 等字段的长度是 done_idx - start_idx + 1（从 start_idx 到 done_idx）
+            episode_length = done_idx.item() - start_idx + 1
+
+            if episode_length > 0:  # 确保有实际的数据
+                single_episode = Trajectory()
+                # 对于 actions 等字段（长度 T），我们取 [start_idx:start_idx + episode_length]
+                # 对于 dones 等字段（长度 T+1），我们取 [start_idx:start_idx + episode_length + 1]
+                # final_obs_idx = i，表示这是第 i 个完成的 episode，对应的 final_obs 索引是 i
+                _copy_episode_slice(episode, single_episode, start_idx, episode_length, b, B, final_obs_idx=i)
+                split_episodes.append(single_episode)
+
+            # 更新起始位置到下一个 episode 开始
+            start_idx = done_idx.item() + 1
+
+        # 注意：最后一个未完成（没有对应 done=True）的部分会被丢弃，不作为episode
+
+    return split_episodes
+
+
+def _copy_episode_slice(
+    source_episode: Trajectory,
+    target_episode: Trajectory,
+    start_idx: int,
+    episode_length: Optional[int],  # episode 的实际长度（actions 等字段的长度）
+    batch_idx: int,
+    total_batches: int,
+    final_obs_idx: Optional[int] = None,  # 该 episode 对应的 final_obs 索引（第几个完成的 episode）
+):
+    """
+    从源 episode 中复制指定时间范围和 batch 的数据到目标 episode。
+
+    Args:
+        source_episode: 源 Trajectory 对象
+        target_episode: 目标 Trajectory 对象
+        start_idx: 时间维度的开始索引
+        episode_length: episode 的长度（对于 actions 等字段），None 表示到结尾
+        batch_idx: batch 维度的索引
+        total_batches: 总 batch 数量，用于判断是否需要 squeeze
+    """
+    fields_T = ["actions", "intervene_flags", "rewards", "prev_logprobs", "forward_inputs"]  # 长度 T
+    fields_T1 = ["dones", "terminations", "truncations", "prev_values"]  # 长度 T+1
+
+    end_idx = episode_length if episode_length is not None else None
+    end_idx_T1 = episode_length + 1 if episode_length is not None else None
+
+    # 处理 obs：需要结合普通 obs 和 final_obs
+    # final obs append 是发生在 done=True 的时候，所以 final obs 的 T 实际等于 done=True 的个数
+    # 每次取 episode 数据时，需要在 obs 的 T 维度上再加上 final obs，让 obs 长度变成 T + 1
+    if source_episode.obs or (hasattr(source_episode, 'final_obs') and source_episode.final_obs):
+        target_episode.obs = {}
+
+        # 首先处理普通 obs（时间步 0 到 T）
+        if source_episode.obs:
+            for key, tensor in source_episode.obs.items():
+                if tensor is not None and len(tensor.shape) > 1:
+                    # 取 episode 期间的 obs: [start_idx : start_idx + episode_length]
+                    obs_slice = tensor[start_idx:start_idx + episode_length, batch_idx:batch_idx+1]
+                    if total_batches == 1:
+                        obs_slice = obs_slice.squeeze(1)
+                    target_episode.obs[key] = obs_slice
+                elif tensor is not None:
+                    target_episode.obs[key] = tensor[start_idx:start_idx + episode_length]
+
+        # 然后添加对应的 final_obs（episode 结束时的状态）
+        if hasattr(source_episode, 'final_obs') and source_episode.final_obs and final_obs_idx is not None:
+            for key, tensor in source_episode.final_obs.items():
+                if tensor is not None and len(tensor.shape) > 1:
+                    # final_obs 形状通常是 [num_done_true, B, ...]，我们取第 final_obs_idx 个
+                    final_obs_slice = tensor[final_obs_idx:final_obs_idx+1, batch_idx:batch_idx+1]
+                    if total_batches == 1:
+                        final_obs_slice = final_obs_slice.squeeze(1)
+
+                    # 将 final_obs 添加到 obs 的末尾，使 obs 长度变成 T + 1
+                    if key in target_episode.obs:
+                        target_episode.obs[key] = torch.cat([target_episode.obs[key], final_obs_slice], dim=0)
+                    else:
+                        target_episode.obs[key] = final_obs_slice
+                elif tensor is not None:
+                    final_obs_val = tensor[final_obs_idx]
+                    if key in target_episode.obs:
+                        # 如果 obs 是一维的，需要扩展维度后拼接
+                        target_obs = target_episode.obs[key]
+                        if len(target_obs.shape) == 1 and len(final_obs_val.shape) == 0:
+                            # 都转换为 1D tensor 后拼接
+                            target_episode.obs[key] = torch.cat([target_obs, final_obs_val.unsqueeze(0)])
+                        else:
+                            target_episode.obs[key] = torch.cat([target_obs.unsqueeze(0), final_obs_val.unsqueeze(0)], dim=0)
+                    else:
+                        target_episode.obs[key] = final_obs_val
+
+    # 处理 forward_inputs（长度 T）
+    if source_episode.forward_inputs:
+        target_episode.forward_inputs = {}
+        for key, tensor in source_episode.forward_inputs.items():
+            if tensor is not None and len(tensor.shape) > 1:
+                sliced = tensor[start_idx:end_idx, batch_idx:batch_idx+1]
+                if total_batches == 1:
+                    sliced = sliced.squeeze(1)
+                target_episode.forward_inputs[key] = sliced
+            elif tensor is not None:
+                target_episode.forward_inputs[key] = tensor[start_idx:end_idx]
+
+    # 处理普通张量字段
+    for field_name in fields_T:
+        source_tensor = getattr(source_episode, field_name)
+        if source_tensor is not None:
+            if len(source_tensor.shape) > 1:
+                sliced = source_tensor[start_idx:end_idx, batch_idx:batch_idx+1]
+                if total_batches == 1:
+                    sliced = sliced.squeeze(1)
+                setattr(target_episode, field_name, sliced)
+            else:
+                setattr(target_episode, field_name, source_tensor[start_idx:end_idx])
+
+    for field_name in fields_T1:
+        source_tensor = getattr(source_episode, field_name)
+        if source_tensor is not None:
+            if len(source_tensor.shape) > 1:
+                sliced = source_tensor[start_idx:end_idx_T1, batch_idx:batch_idx+1]
+                if total_batches == 1:
+                    sliced = sliced.squeeze(1)
+                setattr(target_episode, field_name, sliced)
+            else:
+                setattr(target_episode, field_name, source_tensor[start_idx:end_idx_T1])
 
 
 def process_nested_dict_for_replay_buffer(nested_dict, rm_extra_done=True):
@@ -361,35 +539,36 @@ class SACReplayBuffer:
             pkl.dump(self.buffer, f)
 
 
-from rlinf.data.embodied_io_struct import Episode, pad_and_stack_episodes
+from rlinf.data.embodied_io_struct import Trajectory
 
-class EpisodeCache:
-    """FIFO cache for storing loaded episodes."""
+class TrajectoryCache:
+    """FIFO cache for storing loaded trajectories."""
 
     def __init__(self, max_size: int = 5):
-        self.cache: OrderedDict[str, Episode] = OrderedDict()
+        self.cache: OrderedDict[str, Trajectory] = OrderedDict()
         self.max_size = max_size
 
-    def get(self, episode_uuid: str) -> Optional[Episode]:
-        return self.cache.get(episode_uuid)
+    def get(self, trajectory_uuid: str) -> Optional[Trajectory]:
+        return self.cache.get(trajectory_uuid)
 
-    def put(self, episode_uuid: str, episode: Episode):
-        if episode_uuid not in self.cache:
-            self.cache[episode_uuid] = episode
+    def put(self, trajectory_uuid: str, trajectory: Trajectory):
+        if trajectory_uuid not in self.cache:
+            self.cache[trajectory_uuid] = trajectory
             # Evict oldest if cache is full
             if len(self.cache) > self.max_size:
                 self.cache.popitem(last=False)
         else:
             # Update existing without changing position
-            self.cache[episode_uuid] = episode
+            self.cache[trajectory_uuid] = trajectory
 
     def clear(self):
         self.cache.clear()
 
-class EpisodeReplayBuffer:
+class TrajectoryReplayBuffer:
     """
-    Episode-based replay buffer for SAC algorithm.
-    Supports episode-level and chunk-level sampling.
+    Simplified trajectory-based replay buffer.
+    Directly stores batched trajectories (shape: [T, B, ...]) without splitting.
+    Supports chunk-level sampling with caching.
     """
 
     def __init__(
@@ -400,58 +579,53 @@ class EpisodeReplayBuffer:
         enable_cache: bool = True,
         cache_size: int = 5,
         storage_format: str = "pt",
-        sample_window_size: Optional[int] = None,
     ):
         """
-        Initialize episode-based replay buffer.
+        Initialize trajectory-based replay buffer.
 
         Args:
             device: Device to output samples on
             seed: Random seed for reproducibility
-            storage_dir: Directory to store episodes (None uses temp directory)
-            enable_cache: Whether to enable episode caching
-            cache_size: Maximum number of episodes to cache
+            storage_dir: Directory to store trajectories (None uses temp directory)
+            enable_cache: Whether to enable trajectory caching
+            cache_size: Maximum number of trajectories to cache in memory
             storage_format: Storage format ("pt", "pkl")
-            sample_window_size: Number of most recent episodes to sample from.
-                If None or <= 0, sample from all stored episodes.
         """
-        # Capacity is intentionally not stored/used anymore.
         self.device = device
         self.storage_format = storage_format
-        self.sample_window_size = sample_window_size
-        self.start = False
+        self.enable_cache = enable_cache
 
         # Storage directory
         if storage_dir is None:
-            storage_dir = tempfile.mkdtemp(prefix="episode_replay_buffer_")
+            storage_dir = tempfile.mkdtemp(prefix="trajectory_replay_buffer_")
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
 
-        # Episode index: dict mapping episode_uuid to episode metadata
+        # Trajectory index: dict mapping trajectory_uuid to trajectory metadata
         # Each entry: {
         #   "uuid": str,
-        #   "length": int,  # number of transitions
+        #   "num_samples": int,  # T * B (total samples in this trajectory)
         #   "path": str,  # file path
-        #   "episode_id": int  # sequential ID
+        #   "trajectory_id": int,  # sequential ID
+        #   "max_episode_length": int,  # max episode length
+        #   "shape": tuple,  # (T, B, ...)
         # }
-        self._episode_index: dict[str, dict] = {}
-        self._episode_uuid_list: list[str] = []  # Ordered list of episode UUIDs
-        self._episode_counter = 0  # Next episode ID to use
+        self._trajectory_index: dict[str, dict] = {}
+        self._trajectory_uuid_list: list[str] = []  # Ordered list of trajectory UUIDs
+        self._trajectory_counter = 0  # Next trajectory ID to use
 
-        # Episode cache for storing loaded episodes
-        self.enable_cache = enable_cache
-        self._episode_cache = EpisodeCache(cache_size) if enable_cache else None
+        # Trajectory cache for storing loaded trajectories in memory
+        self._trajectory_cache = TrajectoryCache(cache_size) if enable_cache else None
 
         # Buffer state
-        self.size = 0  # Current number of episodes
-        self._total_transitions = 0  # Total number of transitions across all episodes
+        self.size = 0  # Current number of trajectories
+        self._total_samples = 0  # Total number of samples across all trajectories
 
-        # Random seed (may be overridden by metadata)
+        # Random seed
         self.seed = seed
         self.random_generator: Optional[torch.Generator] = None
 
         self._load_metadata()
-
         self._init_random_generator(self.seed)
 
     def _init_random_generator(self, seed):
@@ -460,28 +634,27 @@ class EpisodeReplayBuffer:
         self.random_generator = torch.Generator()
         self.random_generator.manual_seed(seed)
 
-    def _get_episode_path(self, episode_uuid: str) -> str:
-        """Get file path for an episode."""
+    def _get_trajectory_path(self, trajectory_uuid: str) -> str:
+        """Get file path for a trajectory."""
         ext = ".pt" if self.storage_format == "pt" else ".pkl"
-        return os.path.join(self.storage_dir, f"episode_{episode_uuid}{ext}")
+        return os.path.join(self.storage_dir, f"trajectory_{self._trajectory_counter}_{trajectory_uuid}{ext}")
 
     def _get_metadata_path(self) -> str:
         """Get path to metadata file."""
         return os.path.join(self.storage_dir, "metadata.json")
 
-    def _get_episode_index_path(self) -> str:
-        """Get path to episode index file."""
-        return os.path.join(self.storage_dir, "episode_index.json")
+    def _get_trajectory_index_path(self) -> str:
+        """Get path to trajectory index file."""
+        return os.path.join(self.storage_dir, "trajectory_index.json")
 
     def _save_metadata(self):
         """Save metadata to disk."""
         metadata = {
             "storage_format": self.storage_format,
             "size": self.size,
-            "total_transitions": self._total_transitions,
-            "episode_counter": self._episode_counter,
+            "total_samples": self._total_samples,
+            "trajectory_counter": self._trajectory_counter,
             "seed": self.seed,
-            "sample_window_size": self.sample_window_size,
         }
         with open(self._get_metadata_path(), "w") as f:
             json.dump(metadata, f)
@@ -494,396 +667,307 @@ class EpisodeReplayBuffer:
                 metadata = json.load(f)
             self.storage_format = metadata.get("storage_format", self.storage_format)
             self.size = metadata.get("size", 0)
-            self._total_transitions = metadata.get("total_transitions", 0)
-            self._episode_counter = metadata.get("episode_counter", 0)
+            self._total_samples = metadata.get("total_samples", 0)
+            self._trajectory_counter = metadata.get("trajectory_counter", 0)
             self.seed = metadata.get("seed", self.seed)
-            self.sample_window_size = metadata.get(
-                "sample_window_size", self.sample_window_size
-            )
 
-            # Load episode index if exists
-            index_path = self._get_episode_index_path()
+            # Load trajectory index if exists
+            index_path = self._get_trajectory_index_path()
             if os.path.exists(index_path):
                 with open(index_path, "r") as f:
                     index_data = json.load(f)
-                self._episode_index = index_data.get("episode_index", {})
-                self._episode_uuid_list = index_data.get("episode_uuid_list", [])
+                self._trajectory_index = index_data.get("trajectory_index", {})
+                self._trajectory_uuid_list = index_data.get("trajectory_uuid_list", [])
 
-    def _save_episode_index(self):
-        """Save episode index to disk."""
+    def _save_trajectory_index(self):
+        """Save trajectory index to disk."""
         index_data = {
-            "episode_index": self._episode_index,
-            "episode_uuid_list": self._episode_uuid_list,
+            "trajectory_index": self._trajectory_index,
+            "trajectory_uuid_list": self._trajectory_uuid_list,
         }
-        with open(self._get_episode_index_path(), "w") as f:
+        with open(self._get_trajectory_index_path(), "w") as f:
             json.dump(index_data, f)
 
-    def _count_episode_length(self, episode: Episode) -> int:
-        """Count the number of steps in an episode."""
-        # Episode.dones has shape [T+1, ...] where T is the number of transitions/steps
-        if episode.dones is not None:
-            return episode.dones.shape[0] - 1
-        elif episode.rewards is not None:
-            return episode.rewards.shape[0]
-        else:
-            raise ValueError("Episode has no dones or rewards")
+    def _save_trajectory(self, trajectory: Trajectory, trajectory_uuid: str):
+        """Save a single episode to disk as a dictionary."""
+        trajectory_path = self._get_trajectory_path(trajectory_uuid)
 
-    def _save_episode(self, episode: Episode, episode_uuid: str):
-        """Save a single episode to disk."""
-        episode_path = self._get_episode_path(episode_uuid)
+        # Convert Trajectory to dictionary for more stable storage
+        trajectory_dict = {}
+        for field_name in trajectory.__dataclass_fields__.keys():
+            value = getattr(trajectory, field_name, None)
+            if value is not None:
+                trajectory_dict[field_name] = value
+
         if self.storage_format == "pt":
-            torch.save(episode, episode_path)
+            torch.save(trajectory_dict, trajectory_path)
         else:
-            with open(episode_path, "wb") as f:
-                pkl.dump(episode, f)
+            with open(trajectory_path, "wb") as f:
+                pkl.dump(trajectory_dict, f)
 
-    def _load_episode(self, episode_uuid: str) -> Episode:
-        """Load an episode from disk (with caching)."""
+    def _load_trajectory(self, trajectory_uuid: str) -> Trajectory:
+        """Load a trajectory from disk and reconstruct Trajectory object (with caching)."""
         # Check cache first
-        if self._episode_cache is not None:
-            cached = self._episode_cache.get(episode_uuid)
+        if self._trajectory_cache is not None:
+            cached = self._trajectory_cache.get(trajectory_uuid)
             if cached is not None:
                 return cached
 
-        # Get episode info from index
-        if episode_uuid not in self._episode_index:
-            raise ValueError(f"Episode {episode_uuid} not found in index")
-        
-        episode_info = self._episode_index[episode_uuid]
-        episode_path = episode_info["path"]
+        # Get trajectory info from index
+        if trajectory_uuid not in self._trajectory_index:
+            raise ValueError(f"Trajectory {trajectory_uuid} not found in index")
 
-        if not os.path.exists(episode_path):
-            raise FileNotFoundError(f"Episode file not found at {episode_path}")
+        trajectory_info = self._trajectory_index[trajectory_uuid]
+        trajectory_path = trajectory_info["path"]
 
-        # Load episode
+        if not os.path.exists(trajectory_path):
+            raise FileNotFoundError(f"Trajectory file not found at {trajectory_path}")
+
+        # Load trajectory dictionary
         if self.storage_format == "pt":
-            episode = torch.load(episode_path, map_location="cpu")
+            trajectory_dict = torch.load(trajectory_path, map_location="cpu")
         else:
-            with open(episode_path, "rb") as f:
-                episode = pkl.load(f)
+            with open(trajectory_path, "rb") as f:
+                trajectory_dict = pkl.load(f)
 
-        # Cache it
-        if self._episode_cache is not None:
-            self._episode_cache.put(episode_uuid, episode)
+        # Reconstruct Trajectory object from dictionary
+        trajectory = Trajectory(max_episode_length=trajectory_info["max_episode_length"])
+        for field_name, value in trajectory_dict.items():
+            setattr(trajectory, field_name, value)
 
-        return episode
+        return trajectory
 
-    def _get_sample_index_range(self) -> tuple[int, int]:
+    def add_trajectories(self, trajectories: list[Trajectory]):
         """
-        Get the [start, end) index range to use for sampling.
+        Add trajectories to the buffer.
+        Each trajectory is directly stored as-is (shape: [T, B, ...]).
 
-        If sample_window_size is set, only the most recent `sample_window_size`
-        episodes are considered; otherwise, all episodes are used.
-        """
-        if self.size == 0:
-            return 0, 0
-
-        if self.sample_window_size is None or self.sample_window_size <= 0:
-            return 0, self.size
-
-        window = min(self.sample_window_size, self.size)
-        start = self.size - window
-        end = self.size
-        return start, end
-
-    def add_episodes(self, episodes: list[Episode]):
-        """
-        Add episodes to the buffer.
-        Each episode is assigned a UUID and stored with its metadata.
-        """
-        if not episodes:
-            return
-        
-        for episode in episodes:
-            # Generate UUID for this episode
-            episode_uuid = str(uuid.uuid4())
-            episode_length = self._count_episode_length(episode)
-            
-            if episode_length == 0:
-                continue  # Skip empty episodes
-            
-            # Save episode to disk
-            episode_path = self._get_episode_path(episode_uuid)
-            self._save_episode(episode, episode_uuid)
-            
-            # Add to index
-            episode_info = {
-                "uuid": episode_uuid,
-                "length": episode_length,
-                "path": episode_path,
-                "episode_id": self._episode_counter,
-            }
-            self._episode_index[episode_uuid] = episode_info
-            self._episode_uuid_list.append(episode_uuid)
-            
-            # Update counters
-            self._episode_counter += 1
-            self.size += 1
-            self._total_transitions += episode_length
-            
-            # Cache the episode if enabled
-            if self._episode_cache is not None:
-                self._episode_cache.put(episode_uuid, episode)
-        # Capacity-based truncation is disabled; we only update metadata.
-        self._save_metadata()
-        self._save_episode_index()
-
-    def _extract_chunks_from_episode(
-        self, episode: Episode, start_idx: int, num_chunks: int
-    ) -> list[dict]:
-        """
-        Extract chunks from an episode starting at start_idx.
-        
         Args:
-            episode: Episode object
-            start_idx: Starting index in the episode
-            num_chunks: Number of chunks to extract
-            
-        Returns:
-            List of chunk dictionaries (each chunk is a transition)
+            trajectories: List of Trajectory objects, each with shape [T, B, ...]
+                     where T*B is the total number of samples in the trajectory.
         """
-        chunks = []
-        episode_length = self._count_episode_length(episode)
-        
-        for i in range(start_idx, min(start_idx + num_chunks, episode_length)):
-            chunk = {}
-            
-            # Extract obs (obs is dict[str, Tensor] with shape [T+1, ...])
-            if episode.obs:
-                obs_dict = {}
-                next_obs_dict = {}
-                for key, tensor in episode.obs.items():
-                    if i < tensor.shape[0] - 1:
-                        obs_dict[key] = tensor[i]
-                        next_obs_dict[key] = tensor[i + 1]
-                if obs_dict:
-                    chunk["obs"] = obs_dict
-                    chunk["next_obs"] = next_obs_dict
-            
-            # Extract rewards (shape [T, ...])
-            if episode.rewards is not None and i < episode.rewards.shape[0]:
-                chunk["rewards"] = episode.rewards[i]
-            
-            # Extract terminations, truncations, dones (shape [T+1, ...])
-            if episode.terminations is not None and i < episode.terminations.shape[0]:
-                chunk["terminations"] = episode.terminations[i]
-            if episode.truncations is not None and i < episode.truncations.shape[0]:
-                chunk["truncations"] = episode.truncations[i]
-            if episode.dones is not None and i < episode.dones.shape[0]:
-                chunk["dones"] = episode.dones[i]
-            
-            # Extract prev_logprobs (shape [T, ...])
-            if episode.prev_logprobs is not None and i < episode.prev_logprobs.shape[0]:
-                chunk["prev_logprobs"] = episode.prev_logprobs[i]
-            
-            # Extract prev_values (shape [T+1, ...])
-            if episode.prev_values is not None and i < episode.prev_values.shape[0]:
-                chunk["prev_values"] = episode.prev_values[i]
-            
-            # Extract forward_inputs (dict[str, Tensor] with shape [T, ...])
-            if episode.forward_inputs:
-                forward_dict = {}
-                for key, tensor in episode.forward_inputs.items():
-                    if i < tensor.shape[0]:
-                        forward_dict[key] = tensor[i]
-                if forward_dict:
-                    chunk.update(forward_dict)
-            
-            chunks.append(chunk)
-        
-        return chunks
+        if not trajectories:
+            return
+
+        for trajectory in trajectories:
+            # Generate UUID for this trajectory
+            trajectory_uuid = str(uuid.uuid4())
+
+            # Calculate total samples: T * B
+            if trajectory.prev_logprobs is not None:
+                T, B = trajectory.prev_logprobs.shape[:2]
+                num_samples = T * B
+                trajectory_shape = trajectory.prev_logprobs.shape
+            else:
+                continue  # Skip empty trajectories
+
+            # Save trajectory to disk
+            trajectory_path = self._get_trajectory_path(trajectory_uuid)
+            self._save_trajectory(trajectory, trajectory_uuid)
+
+            # Add to index
+            trajectory_info = {
+                "uuid": trajectory_uuid,
+                "num_samples": num_samples,
+                "path": trajectory_path,
+                "trajectory_id": self._trajectory_counter,
+                "max_episode_length": trajectory.max_episode_length,
+                "shape": tuple(trajectory_shape),
+            }
+            self._trajectory_index[trajectory_uuid] = trajectory_info
+            self._trajectory_uuid_list.append(trajectory_uuid)
+
+            # Update counters
+            self._trajectory_counter += 1
+            self.size += 1
+            self._total_samples += num_samples
+
+            # Cache the trajectory if enabled
+            if self._trajectory_cache is not None:
+                self._trajectory_cache.put(trajectory_uuid, trajectory)
+
+        # Save metadata
+        self._save_metadata()
+        self._save_trajectory_index()
 
     def sample(
         self,
-        mode: str = "episode",
-        num_episodes: int = None,
         num_chunks: int = None,
     ) -> dict[str, torch.Tensor]:
         """
-        Sample episodes or chunks from the buffer.
+        Sample chunks (transitions) from the buffer.
 
         Args:
-            num_episodes: Number of episodes to sample
             num_chunks: Minimum number of chunks (transitions) to return
-            mode: Sampling mode ("episode" or "chunk")
 
         Returns:
-            Dictionary with rollout batch format [T, B, ...]
+            Dictionary with rollout batch format [B, ...]
         """
-        if mode == "episode":
-            assert num_episodes is not None
-            # If min_chunks is not provided, default to 0 (no minimum).
-            min_chunks = 0 if num_chunks is None else num_chunks
-            return self.sample_episodes(num_episodes, min_chunks)
-        elif mode == "chunk":
-            assert num_chunks is not None
-            return self.sample_chunks(num_chunks)
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-
-    def sample_episodes(self, num_episodes: int, min_chunks: int) -> dict[str, torch.Tensor]:
-        """
-        Sample complete episodes from the buffer.
-        Guarantees at least min_chunks transitions in total.
-        
-        Args:
-            num_episodes: Number of episodes to sample
-            min_chunks: Minimum number of chunks (transitions) to return
-            
-        Returns:
-            Dictionary with rollout batch format [T, B, ...]
-        """
-        if self.size == 0:
-            raise RuntimeError("Cannot sample from an empty buffer.")
-
-        # Determine sampling window [start, end)
-        start_idx, end_idx = self._get_sample_index_range()
-        window_size = end_idx - start_idx
-        if window_size == 0:
-            raise RuntimeError("Cannot sample from an empty buffer.")
-
-        if num_episodes > window_size:
-            num_episodes = window_size
-
-        # Randomly sample episode indices within the window
-        relative_indices = torch.randperm(
-            window_size, generator=self.random_generator
-        )[:num_episodes]
-        episode_indices = (relative_indices + start_idx).tolist()
-        
-        sampled_episodes = []
-        total_chunks = 0
-        
-        for idx in episode_indices:
-            episode_uuid = self._episode_uuid_list[idx]
-            episode = self._load_episode(episode_uuid)
-            sampled_episodes.append(episode)
-            total_chunks += self._count_episode_length(episode)
-        
-        # If we don't have enough chunks, sample more episodes inside the window
-        while total_chunks < min_chunks and len(sampled_episodes) < window_size:
-            # Candidate indices within the window that haven't been used yet
-            all_window_indices = list(range(start_idx, end_idx))
-            used_set = set(episode_indices)
-            remaining_indices = [i for i in all_window_indices if i not in used_set]
-            if not remaining_indices:
-                break
-            
-            additional_idx = remaining_indices[
-                torch.randint(0, len(remaining_indices), (1,), generator=self.random_generator).item()
-            ]
-            episode_uuid = self._episode_uuid_list[additional_idx]
-            episode = self._load_episode(episode_uuid)
-            sampled_episodes.append(episode)
-            total_chunks += self._count_episode_length(episode)
-            episode_indices.append(additional_idx)
-        
-        # Convert episodes to rollout batch format
-        rollout_batch = pad_and_stack_episodes(sampled_episodes)
-        
-        return rollout_batch
+        assert num_chunks is not None
+        return self.sample_chunks(num_chunks)
 
     def sample_chunks(self, num_chunks: int) -> dict[str, torch.Tensor]:
         """
         Sample chunks (transitions) from the buffer.
-        Chunks may come from different episodes and don't need to be complete episodes.
-        
+        Each chunk is a single transition from any trajectory.
+
         Args:
             num_chunks: Number of chunks (transitions) to sample
-            
+
         Returns:
-            Dictionary with batch format [B, ...] (flattened)
+            Dictionary with batch format [B, ...] where B = num_chunks
         """
-        if self._total_transitions == 0:
+        if self._total_samples == 0:
             raise RuntimeError("Cannot sample from an empty buffer.")
 
-        if num_chunks > self._total_transitions:
-            num_chunks = self._total_transitions
+        if num_chunks > self._total_samples:
+            num_chunks = self._total_samples
 
-        # Determine sampling window [start, end)
-        start_idx, end_idx = self._get_sample_index_range()
-        window_size = end_idx - start_idx
-        if window_size == 0:
-            raise RuntimeError("Cannot sample from an empty buffer.")
+        # Sample chunk indices directly from total samples
+        sample_ids = torch.randint(
+            low=0, high=self._total_samples, size=(num_chunks,), generator=self.random_generator
+        )
 
-        # Sample chunks randomly across episodes in the window
+        # Convert global sample indices to (trajectory_idx, local_sample_idx) pairs
         chunks = []
-        chunks_sampled = 0
+        for sample_id in sample_ids:
+            # Find which trajectory this sample belongs to
+            trajectory_start = 0
+            trajectory_uuid = None
+            local_sample_idx = None
 
-        # Create a list of (episode_idx, episode_length) for weighted sampling
-        window_indices = list(range(start_idx, end_idx))
-        episode_weights = [
-            self._episode_index[self._episode_uuid_list[i]]["length"]
-            for i in window_indices
-        ]
-        total_weight = sum(episode_weights)
-        
-        while chunks_sampled < num_chunks:
-            # Sample an episode (weighted by length)
-            rand_val = torch.rand(1, generator=self.random_generator).item() * total_weight
-            cumsum = 0
-            selected_window_pos = 0
-            for i, weight in enumerate(episode_weights):
-                cumsum += weight
-                if rand_val <= cumsum:
-                    selected_window_pos = i
+            for uuid in self._trajectory_uuid_list:
+                trajectory_info = self._trajectory_index[uuid]
+                trajectory_samples = trajectory_info["num_samples"]
+                trajectory_end = trajectory_start + trajectory_samples
+
+                if trajectory_start <= sample_id < trajectory_end:
+                    trajectory_uuid = uuid
+                    local_sample_idx = sample_id - trajectory_start
                     break
-            
-            # Map window position back to global episode index
-            episode_global_idx = window_indices[selected_window_pos]
-            episode_uuid = self._episode_uuid_list[episode_global_idx]
-            episode = self._load_episode(episode_uuid)
-            episode_length = self._count_episode_length(episode)
-            
-            # Sample a random chunk from this episode
-            chunk_idx = torch.randint(0, episode_length, (1,), generator=self.random_generator).item()
-            episode_chunks = self._extract_chunks_from_episode(episode, chunk_idx, 1)
-            
-            if episode_chunks:
-                chunks.append(episode_chunks[0])
-                chunks_sampled += 1
-        
-        # Merge chunks into batch
-        # For chunk sampling, we stack chunks along batch dimension [B, ...]
-        # This is different from episode sampling which returns [T, B, ...]
-        batch = {}
+
+                trajectory_start = trajectory_end
+
+            if trajectory_uuid is None:
+                continue
+
+            # Try to get from cache first
+            trajectory = None
+            if self._trajectory_cache is not None:
+                trajectory = self._trajectory_cache.get(trajectory_uuid)
+
+            # If not in cache, load from disk
+            if trajectory is None:
+                trajectory = self._load_trajectory(trajectory_uuid)
+
+            # Convert local sample index to (t, b) coordinates
+            trajectory_info = self._trajectory_index[trajectory_uuid]
+            _, B = trajectory_info["shape"][:2]
+            t_idx = local_sample_idx // B
+            b_idx = local_sample_idx % B
+
+            # Extract the chunk at (t_idx, b_idx)
+            chunk = self._extract_chunk_from_trajectory(trajectory, t_idx, b_idx)
+            if chunk:
+                chunks.append(chunk)
+
+        # Merge chunks into batch [B, ...]
+        batch = self._merge_chunks_to_batch(chunks)
+        return batch
+
+    def _extract_chunk_from_trajectory(self, trajectory: Trajectory, t_idx: int, b_idx: int) -> dict:
+        """
+        Extract a single chunk (time step) from a trajectory at position (t_idx, b_idx).
+
+        Args:
+            trajectory: Trajectory object with shape [T, B, ...]
+            t_idx: Time index
+            b_idx: Batch index within the trajectory
+
+        Returns:
+            Dictionary containing the chunk data
+        """
+        chunk = {}
+
+        # Extract tensor fields
+        tensor_fields = trajectory.__dataclass_fields__.keys()
+        for field in tensor_fields:
+            if field in ["obs", "curr_obs_idx", "next_obs_idx", "forward_inputs"]:
+                continue
+            tensor = getattr(trajectory, field)
+            if tensor is not None:
+                chunk[field] = tensor[t_idx, b_idx]
+
+        # Extract obs (dict of tensors)
+        if trajectory.obs and trajectory.curr_obs_idx is not None and trajectory.next_obs_idx is not None:
+            chunk["curr_obs"] = {}
+            chunk["next_obs"] = {}
+            for key, tensor in trajectory.obs.items():
+                if tensor is not None:
+                    curr_obs_idx = trajectory.curr_obs_idx[t_idx, b_idx]
+                    next_obs_idx = trajectory.next_obs_idx[t_idx, b_idx]
+                    chunk["curr_obs"][key] = tensor[curr_obs_idx, b_idx]
+                    chunk["next_obs"][key] = tensor[next_obs_idx, b_idx]
+
+        # Extract forward_inputs (dict of tensors)
+        if trajectory.forward_inputs:
+            chunk["forward_inputs"] = {}
+            for key, tensor in trajectory.forward_inputs.items():
+                if tensor is not None:
+                    chunk["forward_inputs"][key] = tensor[t_idx, b_idx]
+
+        return chunk
+
+    def _merge_chunks_to_batch(self, chunks: list[dict]) -> dict[str, torch.Tensor]:
+        """
+        Merge a list of chunks into a batch dictionary.
+
+        Args:
+            chunks: List of chunk dictionaries
+
+        Returns:
+            Batch dictionary with shape [B, ...] where B = len(chunks)
+        """
         if not chunks:
-            return batch
-        
+            return {}
+
+        batch = {}
         first_chunk = chunks[0]
-        
+
         for key, value in first_chunk.items():
             if isinstance(value, torch.Tensor):
                 tensors = [chunk[key] for chunk in chunks if key in chunk]
                 if tensors:
                     batch[key] = torch.stack(tensors, dim=0)  # [B, ...]
             elif isinstance(value, dict):
-                # Handle nested dicts (like obs, forward_inputs)
+                # Handle nested dicts (obs, forward_inputs)
                 nested_dicts = [chunk[key] for chunk in chunks if key in chunk]
                 if nested_dicts:
-                    # Collect all keys from all dicts
                     all_keys = set()
                     for d in nested_dicts:
                         all_keys.update(d.keys())
-                    
+
                     nested_batch = {}
                     for nested_key in all_keys:
                         nested_tensors = [
-                            d[nested_key] for d in nested_dicts 
+                            d[nested_key] for d in nested_dicts
                             if nested_key in d and isinstance(d[nested_key], torch.Tensor)
                         ]
                         if nested_tensors:
                             nested_batch[nested_key] = torch.stack(nested_tensors, dim=0)  # [B, ...]
                     if nested_batch:
                         batch[key] = nested_batch
-            else:
-                batch[key] = [chunk[key] for chunk in chunks if key in chunk]
-        
+
         return batch
 
     def __len__(self) -> int:
-        """Return current buffer size."""
+        """Return current buffer size (number of trajectories)."""
         return self.size
+
+    @property
+    def total_samples(self) -> int:
+        """Return total number of samples across all trajectories."""
+        return self._total_samples
 
     def is_ready(self, min_size: int) -> bool:
         """Check if buffer has enough samples for training."""
@@ -895,38 +979,32 @@ class EpisodeReplayBuffer:
 
     def clear(self):
         # Clear index
-        self._episode_index.clear()
-        self._episode_uuid_list.clear()
+        self._trajectory_index.clear()
+        self._trajectory_uuid_list.clear()
 
         # Clear cache
-        if self._episode_cache is not None:
-            self._episode_cache.clear()
+        if self._trajectory_cache is not None:
+            self._trajectory_cache.clear()
 
         # Reset state
         self.size = 0
-        self._total_transitions = 0
-        self._episode_counter = 0
+        self._total_samples = 0
+        self._trajectory_counter = 0
 
     def get_stats(self) -> dict[str, float]:
         """Get buffer statistics."""
-        stats = {
-            "num_episodes": self.size,
-            "total_transitions": self._total_transitions,
-            "avg_episode_length": (
-                self._total_transitions / self.size if self.size > 0 else 0.0
-            ),
-            "cache_size": len(self._episode_cache.cache) if self._episode_cache else 0,
-        }
+        # Calculate samples per episode (all episodes have the same number)
+        samples_per_trajectory = (
+            self._trajectory_index[self._trajectory_uuid_list[0]]["num_samples"]
+            if self._trajectory_uuid_list else 0
+        )
 
-        # Calculate disk usage
-        total_size = 0
-        for episode_uuid in self._episode_uuid_list:
-            episode_info = self._episode_index.get(episode_uuid)
-            if episode_info:
-                episode_path = episode_info["path"]
-                if os.path.exists(episode_path):
-                    total_size += os.path.getsize(episode_path)
-        stats["disk_size_mb"] = total_size / (1024 * 1024)
+        stats = {
+            "num_trajectories": self.size,
+            "total_samples": self._total_samples,
+            "samples_per_trajectory": samples_per_trajectory,
+            "cache_size": len(self._trajectory_cache.cache) if self._trajectory_cache else 0,
+        }
 
         return stats
 
@@ -945,19 +1023,18 @@ class EpisodeReplayBuffer:
                     "storage_dir": self.storage_dir,
                     "storage_format": self.storage_format,
                     "size": self.size,
-                    "total_transitions": self._total_transitions,
-                    "episode_counter": self._episode_counter,
-                    "sample_window_size": self.sample_window_size,
+                    "total_samples": self._total_samples,
+                    "trajectory_counter": self._trajectory_counter,
                     "seed": self.seed,
                 },
                 f,
             )
         
-        # Save episode index and uuid list
-        index_path = os.path.join(save_path, "episode_index.json")
+        # Save trajectory index and uuid list
+        index_path = os.path.join(save_path, "trajectory_index.json")
         index_data = {
-            "episode_index": self._episode_index,
-            "episode_uuid_list": self._episode_uuid_list,
+            "trajectory_index": self._trajectory_index,
+            "trajectory_uuid_list": self._trajectory_uuid_list,
         }
         with open(index_path, "w") as f:
             json.dump(index_data, f)
@@ -973,10 +1050,10 @@ class EpisodeReplayBuffer:
         Load buffer state from saved metadata.
         
         Args:
-            load_path: Path to the directory containing metadata.json and episode_index.json
-            partial_load: If True, only load a portion of episodes based on load_rank and load_split_num
+            load_path: Path to the directory containing metadata.json and trajectory_index.json
+            partial_load: If True, only load a portion of trajectories based on load_rank and load_split_num
             load_rank: Rank index (0-based) for partial loading. Only used when partial_load=True
-            load_split_num: Number of splits to divide episodes into. Only used when partial_load=True
+            load_split_num: Number of splits to divide trajectories into. Only used when partial_load=True
         """
         metadata_path = os.path.join(load_path, "metadata.json")
         if not os.path.exists(metadata_path):
@@ -988,21 +1065,20 @@ class EpisodeReplayBuffer:
         # Update instance attributes from metadata
         self.storage_dir = metadata["storage_dir"]
         self.storage_format = metadata.get("storage_format", "pt")
-        self.sample_window_size = metadata.get("sample_window_size")
         if "seed" in metadata:
             self.seed = metadata["seed"]
             self._init_random_generator(self.seed)
 
-        # Load episode index and uuid list from save_path
-        index_path = os.path.join(load_path, "episode_index.json")
+        # Load trajectory index and uuid list from save_path
+        index_path = os.path.join(load_path, "trajectory_index.json")
         if not os.path.exists(index_path):
-            raise FileNotFoundError(f"Episode index not found at {index_path}")
+            raise FileNotFoundError(f"Trajectory index not found at {index_path}")
         
         with open(index_path, "r") as f:
             index_data = json.load(f)
         
-        full_episode_index = index_data.get("episode_index", {})
-        full_episode_uuid_list = index_data.get("episode_uuid_list", [])
+        full_trajectory_index = index_data.get("trajectory_index", {})
+        full_trajectory_uuid_list = index_data.get("trajectory_uuid_list", [])
         
         # Handle partial loading
         if partial_load:
@@ -1013,49 +1089,49 @@ class EpisodeReplayBuffer:
             if load_split_num <= 0:
                 raise ValueError(f"load_split_num ({load_split_num}) must be > 0")
             
-            # Split episode_uuid_list into load_split_num parts
-            total_episodes = len(full_episode_uuid_list)
-            episodes_per_split = total_episodes // load_split_num
-            remainder = total_episodes % load_split_num
+            # Split trajectory_uuid_list into load_split_num parts
+            total_trajectories = len(full_trajectory_uuid_list)
+            trajectories_per_split = total_trajectories // load_split_num
+            remainder = total_trajectories % load_split_num
             
             # Calculate start and end indices for this rank
-            start_idx = load_rank * episodes_per_split + min(load_rank, remainder)
-            end_idx = start_idx + episodes_per_split + (1 if load_rank < remainder else 0)
+            start_idx = load_rank * trajectories_per_split + min(load_rank, remainder)
+            end_idx = start_idx + trajectories_per_split + (1 if load_rank < remainder else 0)
             
             # Extract the portion for this rank
-            self._episode_uuid_list = full_episode_uuid_list[start_idx:end_idx]
+            self._trajectory_uuid_list = full_trajectory_uuid_list[start_idx:end_idx]
             
-            # Filter episode_index to only include episodes in this rank's portion
-            self._episode_index = {
-                uuid: full_episode_index[uuid] 
-                for uuid in self._episode_uuid_list 
-                if uuid in full_episode_index
+            # Filter trajectory_index to only include trajectories in this rank's portion
+            self._trajectory_index = {
+                uuid: full_trajectory_index[uuid] 
+                for uuid in self._trajectory_uuid_list 
+                if uuid in full_trajectory_index
             }
-            
-            # Update size, total_transitions, and episode_counter based on loaded portion
-            self.size = len(self._episode_uuid_list)
-            self._total_transitions = sum(
-                episode_info.get("length", 0) 
-                for episode_info in self._episode_index.values()
+                
+            # Update size, total_samples, and trajectory_counter based on loaded portion
+            self.size = len(self._trajectory_uuid_list)
+            self._total_samples = sum(
+                trajectory_info.get("num_samples", 0)
+                for trajectory_info in self._trajectory_index.values()
             )
-            # episode_counter should be set to the max episode_id in the loaded portion + 1
-            if self._episode_index:
-                max_episode_id = max(
-                    episode_info.get("episode_id", 0) 
-                    for episode_info in self._episode_index.values()
+            # trajectory_counter should be set to the max trajectory_id in the loaded portion + 1
+            if self._trajectory_index:
+                max_trajectory_id = max(
+                    trajectory_info.get("trajectory_id", 0) 
+                    for trajectory_info in self._trajectory_index.values()
                 )
-                self._episode_counter = max_episode_id + 1
+                self._trajectory_counter = max_trajectory_id + 1
             else:
-                self._episode_counter = 0
+                self._trajectory_counter = 0
         else:
             # Full load
-            self._episode_index = full_episode_index
-            self._episode_uuid_list = full_episode_uuid_list
+            self._trajectory_index = full_trajectory_index
+            self._trajectory_uuid_list = full_trajectory_uuid_list
             self.size = metadata.get("size", 0)
-            self._total_transitions = metadata.get("total_transitions", 0)
-            self._episode_counter = metadata.get("episode_counter", 0)
+            self._total_samples = metadata.get("total_samples", 0)
+            self._trajectory_counter = metadata.get("trajectory_counter", 0)
 
     def clear_cache(self):
-        """Clear episode cache."""
-        if self._episode_cache is not None:
-            self._episode_cache.clear()
+        """Clear trajectory cache."""
+        if self._trajectory_cache is not None:
+            self._trajectory_cache.clear()

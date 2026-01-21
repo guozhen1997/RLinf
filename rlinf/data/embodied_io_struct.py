@@ -40,17 +40,6 @@ from rlinf.utils.nested_dict_process import (
     stack_list_of_dict_tensor,
 )
 
-def put_tensor_cpu(data_dict):
-    if data_dict is None:
-        return None
-
-    for key, value in data_dict.items():
-        if isinstance(value, dict):
-            data_dict[key] = put_tensor_cpu(value)
-        if isinstance(value, torch.Tensor):
-            data_dict[key] = value.cpu().contiguous()
-    return data_dict
-
 @dataclass(kw_only=True)
 class EnvOutput:
     obs: dict[str, Any]
@@ -135,8 +124,8 @@ class EnvOutput:
 
 @dataclass(kw_only=True)
 class ChunkStepResult:
-    # required
     obs: dict[str, Any] = field(default_factory=dict)
+    final_obs: dict[str, Any] = field(default_factory=dict)
     actions: torch.Tensor = None  # [B, action_dim]
     prev_logprobs: torch.Tensor = None  # [B, action_dim]
     prev_values: torch.Tensor = None  # [B, 1]
@@ -145,9 +134,6 @@ class ChunkStepResult:
     terminations: torch.Tensor = None  # [B, 1]
     rewards: torch.Tensor = None  # [B, 1]
     forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
-
-
-    final_obs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.prev_logprobs is not None:
@@ -164,130 +150,39 @@ class ChunkStepResult:
             self.rewards = self.rewards.cpu().contiguous()
         if self.forward_inputs:
             self.forward_inputs = put_tensor_device(self.forward_inputs, "cpu")
-        if self.obs:
+        if len(self.obs) > 0:
             self.obs = put_tensor_device(self.obs, "cpu")
-        if self.final_obs:
+        if len(self.final_obs) > 0:
             self.final_obs = put_tensor_device(self.final_obs, "cpu")
 
+# @dataclass
+# class Episode:
+#     """
+#     episode contains one episode.
+#     """
 
-@dataclass(kw_only=True)
-class EmbodiedRolloutResult_old:
-    # required
-    rollout_epoch: int = None
-    prev_logprobs: list[torch.Tensor] = field(
-        default_factory=list
-    )  # lens of results is rollout_epoch * n_chunk_steps
-    prev_values: list[torch.Tensor] = field(
-        default_factory=list
-    )  # lens is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
-    dones: list[torch.Tensor] = field(
-        default_factory=list
-    )  # lens of results is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
-    terminations: list[torch.Tensor] = field(
-        default_factory=list
-    )  # lens of results is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
-    truncations: list[torch.Tensor] = field(
-        default_factory=list
-    )  # lens of results is rollout_epoch * (n_chunk_steps + 1) because of the bootstrap value
-    rewards: list[torch.Tensor] = field(
-        default_factory=list
-    )  # lens of results is rollout_epoch * n_chunk_steps
-    forward_inputs: list[dict[str, list[torch.Tensor]]] = field(
-        default_factory=list
-    )  # lens of results is rollout_epoch * n_chunk_steps
-    transitions: list[tuple[dict[str, Any], dict[str, Any]]] = field(
-        default_factory=list
-    )
+#     obs: dict[str, Any] = field(default_factory=dict) # episode_length + 1
+#     actions: torch.Tensor = None # episode_length
+#     intervene_flags: torch.Tensor = None # episode_length
+#     rewards: torch.Tensor = None # episode_length
+#     terminations: torch.Tensor = None # episode_length
+#     truncations: torch.Tensor = None # episode_length
+#     dones: torch.Tensor = None # episode_length
+#     prev_logprobs: torch.Tensor = None # episode_length
+#     prev_values: torch.Tensor = None # episode_length
+#     forward_inputs: dict[str, Any] = field(default_factory=dict) # episode_length
 
-    def append_result(self, result: ChunkStepResult):
-        if result.prev_logprobs is not None:
-            self.prev_logprobs.append(result.prev_logprobs)
-        if result.prev_values is not None:
-            self.prev_values.append(result.prev_values)
-        if result.dones is not None:
-            self.dones.append(result.dones)
-        if result.truncations is not None:
-            self.truncations.append(result.truncations)
-        if result.terminations is not None:
-            self.terminations.append(result.terminations)
-        if result.rewards is not None:
-            self.rewards.append(result.rewards)
-        if result.forward_inputs:
-            self.forward_inputs.append(result.forward_inputs)
+@dataclass
+class Trajectory:
+    """
+    trajectory contains multiple episodes.
+    """
+    max_episode_length: int = 0 # max episode length
 
-    def add_transition(self, obs, next_obs):
-        self.transitions.append(
-            {
-                "obs": put_tensor_device(obs, "cpu"),
-                "next_obs": put_tensor_device(next_obs, "cpu"),
-            }
-        )
-
-    def to_dict(self):
-        rollout_result_dict = {}
-        rollout_result_dict["prev_logprobs"] = (
-            torch.stack(self.prev_logprobs, dim=0).cpu().contiguous()
-            if len(self.prev_logprobs) > 0
-            else None
-        )
-        rollout_result_dict["prev_values"] = (
-            torch.stack(self.prev_values, dim=0).cpu().contiguous()
-            if len(self.prev_values) > 0
-            else None
-        )
-        rollout_result_dict["dones"] = (
-            torch.stack(self.dones, dim=0).cpu().contiguous()
-            if len(self.dones) > 0
-            else None
-        )
-        rollout_result_dict["terminations"] = (
-            torch.stack(self.terminations, dim=0).cpu().contiguous()
-            if len(self.terminations) > 0
-            else None
-        )
-        rollout_result_dict["truncations"] = (
-            torch.stack(self.truncations, dim=0).cpu().contiguous()
-            if len(self.truncations) > 0
-            else None
-        )
-        rollout_result_dict["rewards"] = (
-            torch.stack(self.rewards, dim=0).cpu().contiguous()
-            if len(self.rewards) > 0
-            else None
-        )
-
-        merged_forward_inputs = stack_list_of_dict_tensor(self.forward_inputs)
-        for k in merged_forward_inputs.keys():
-            assert k not in [
-                "dones",
-                "terminations",
-                "truncations",
-                "rewards",
-                "prev_logprobs",
-                "prev_values",
-            ]
-            rollout_result_dict[k] = merged_forward_inputs[k]
-
-        transition_dict = stack_list_of_dict_tensor(self.transitions)
-        if len(transition_dict) > 0:
-            rollout_result_dict["transitions"] = transition_dict
-
-        assert len(rollout_result_dict["dones"]) == len(
-            rollout_result_dict["prev_values"]
-        ), "dones and prev_values must have the same length"
-        assert (
-            len(rollout_result_dict["dones"])
-            == len(rollout_result_dict["rewards"]) + self.rollout_epoch
-        ), "dones length must be the length of rewards plus rollout_epoch"
-
-        return rollout_result_dict
-
-    def to_splitted_dict(self, split_size) -> list[dict[str, Any]]:
-        return split_dict_to_chunk(self.to_dict(), split_size, dim=1)
-
-class Episode:
-    obs: dict[str, Any] = {}
-    actions: torch.Tensor = None
+    obs: dict[str, Any] = field(default_factory=dict)
+    curr_obs_idx: torch.Tensor = None
+    next_obs_idx: torch.Tensor = None
+    actions: torch.Tensor = None 
     intervene_flags: torch.Tensor = None
     rewards: torch.Tensor = None
     terminations: torch.Tensor = None
@@ -295,36 +190,40 @@ class Episode:
     dones: torch.Tensor = None
     prev_logprobs: torch.Tensor = None
     prev_values: torch.Tensor = None
-    forward_inputs: dict[str, Any] = {}
-    loss_mask: torch.Tensor = None
-    loss_mask_sum: torch.Tensor = None
+    forward_inputs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(kw_only=True)
-class SingleEmbodiedRolloutResult:
+class EmbodiedRolloutResult:
     """
-    collect rollout results for a single episode.
+    collect trajectories for rollout.
     """
 
     collect_obs: bool = True
-    is_completed: bool = False
-    max_episode_length: int = -1
+    max_episode_length: int = 0
+    obs_pointer: torch.Tensor = None
     
-    obs: list[dict[str, Any]] = field(default_factory=list) # episode_length + 1
-    actions: list[torch.Tensor] = field(default_factory=list) # episode_length
-    intervene_flags: list[torch.Tensor] = field(default_factory=list) # episode_length
-    rewards: list[torch.Tensor] = field(default_factory=list) # episode_length
-    terminations: list[torch.Tensor] = field(default_factory=list) # episode_length + 1
-    truncations: list[torch.Tensor] = field(default_factory=list) # episode_length + 1
-    dones: list[torch.Tensor] = field(default_factory=list) # episode_length + 1
-    prev_logprobs: list[torch.Tensor] = field(default_factory=list) # episode_length
-    prev_values: list[torch.Tensor] = field(default_factory=list) # episode_length + 1
-    forward_inputs: list[dict[str, Any]] = field(default_factory=list) # episode_length
+    obs: list[dict[str, Any]] = field(default_factory=list) # trajectory_length + (number of dones == true)
+    curr_obs_idx: list[torch.Tensor] = field(default_factory=list) # trajectory_length
+    next_obs_idx: list[torch.Tensor] = field(default_factory=list) # trajectory_length
+    actions: list[torch.Tensor] = field(default_factory=list) # trajectory_length
+    intervene_flags: list[torch.Tensor] = field(default_factory=list) # trajectory_length
+    rewards: list[torch.Tensor] = field(default_factory=list) # trajectory_length
+    terminations: list[torch.Tensor] = field(default_factory=list) # trajectory_length + rollout_epoch
+    truncations: list[torch.Tensor] = field(default_factory=list) # trajectory_length + rollout_epoch
+    dones: list[torch.Tensor] = field(default_factory=list) # trajectory_length + rollout_epoch
+    prev_logprobs: list[torch.Tensor] = field(default_factory=list) # trajectory_length
+    prev_values: list[torch.Tensor] = field(default_factory=list) # trajectory_length + rollout_epoch
+    forward_inputs: list[dict[str, Any]] = field(default_factory=list) # trajectory_length
 
-    def append_single_result(self, result: ChunkStepResult):
-
+    def append_step_result(self, result: ChunkStepResult):
+        if self.obs_pointer is None:
+            self.obs_pointer = torch.zeros(result.dones.shape[0], dtype=torch.int32)
         if self.collect_obs and result.obs is not None:
             self.obs.append(result.obs)
+            self.curr_obs_idx.append(self.obs_pointer)
+            self.next_obs_idx.append(self.obs_pointer + 1)
+            self.obs_pointer = self.obs_pointer + 1
         if result.actions is not None:
             self.actions.append(result.actions)
             self.intervene_flags.append(torch.zeros(1, dtype=torch.bool))
@@ -336,10 +235,9 @@ class SingleEmbodiedRolloutResult:
             self.truncations.append(result.truncations)
         if result.dones is not None:
             self.dones.append(result.dones)
-            if result.dones.any() or len(self.dones) - 1 >= self.max_episode_length:
-                if self.collect_obs and result.final_obs is not None:
-                    self.obs[-1] = result.final_obs
-                self.is_completed = True
+            if result.dones.any() and result.final_obs is not None:
+                self.obs.append(result.final_obs)
+                self.obs_pointer = self.obs_pointer + 2 # skip the final obs
         if result.prev_logprobs is not None:
             self.prev_logprobs.append(result.prev_logprobs)
         if result.prev_values is not None:
@@ -352,143 +250,86 @@ class SingleEmbodiedRolloutResult:
             self.actions[-1] = intervene_actions * intervene_flags[..., None] + self.actions[-1] * (~intervene_flags[..., None])
             self.intervene_flags[-1] = intervene_flags
 
-    def to_episode(self) -> Episode:
-        episode = Episode()
+    def to_trajectory(self) -> Trajectory:
+        # return [trajectory_length, B, ...]
+        trajectory = Trajectory(max_episode_length=self.max_episode_length)
         if self.collect_obs and len(self.obs) > 0:
-            episode.obs = stack_list_of_dict_tensor(self.obs)
-            for key in episode.obs.keys():
-                episode.obs[key] = episode.obs[key].cpu().contiguous()
+            trajectory.obs = stack_list_of_dict_tensor(self.obs)
+            for key in trajectory.obs.keys():
+                trajectory.obs[key] = trajectory.obs[key].cpu().contiguous()
+        if len(self.curr_obs_idx) > 0:
+            trajectory.curr_obs_idx = torch.stack(self.curr_obs_idx, dim=0).cpu().contiguous()
+        if len(self.next_obs_idx) > 0:
+            trajectory.next_obs_idx = torch.stack(self.next_obs_idx, dim=0).cpu().contiguous()
         if len(self.actions) > 0:
-            episode.actions = torch.stack(self.actions, dim=0).cpu().contiguous()
+            trajectory.actions = torch.stack(self.actions, dim=0).cpu().contiguous()
         if len(self.intervene_flags) > 0:
-            episode.intervene_flags = torch.stack(self.intervene_flags, dim=0).cpu().contiguous()
+            trajectory.intervene_flags = torch.stack(self.intervene_flags, dim=0).cpu().contiguous()
         if len(self.rewards) > 0:
-            episode.rewards = torch.stack(self.rewards, dim=0).cpu().contiguous()
+            trajectory.rewards = torch.stack(self.rewards, dim=0).cpu().contiguous()
         if len(self.terminations) > 0:
-            episode.terminations = torch.stack(self.terminations, dim=0).cpu().contiguous()
+            trajectory.terminations = torch.stack(self.terminations, dim=0).cpu().contiguous()
         if len(self.truncations) > 0:
-            episode.truncations = torch.stack(self.truncations, dim=0).cpu().contiguous()
+            trajectory.truncations = torch.stack(self.truncations, dim=0).cpu().contiguous()
         if len(self.dones) > 0:
-            episode.dones = torch.stack(self.dones, dim=0).cpu().contiguous()
+            trajectory.dones = torch.stack(self.dones, dim=0).cpu().contiguous()
         if len(self.prev_logprobs) > 0:
-            episode.prev_logprobs = torch.stack(self.prev_logprobs, dim=0).cpu().contiguous()
+            trajectory.prev_logprobs = torch.stack(self.prev_logprobs, dim=0).cpu().contiguous()
         if len(self.prev_values) > 0:
-            episode.prev_values = torch.stack(self.prev_values, dim=0).cpu().contiguous()
+            trajectory.prev_values = torch.stack(self.prev_values, dim=0).cpu().contiguous()
         if len(self.forward_inputs) > 0:
-            episode.forward_inputs = stack_list_of_dict_tensor(self.forward_inputs)
-            for key in episode.forward_inputs.keys():
-                episode.forward_inputs[key] = episode.forward_inputs[key].cpu().contiguous()
-        return episode
+            trajectory.forward_inputs = stack_list_of_dict_tensor(self.forward_inputs)
+            for key in trajectory.forward_inputs.keys():
+                trajectory.forward_inputs[key] = trajectory.forward_inputs[key].cpu().contiguous()
+        return trajectory
 
-@dataclass(kw_only=True)
-class BatchEmbodiedRolloutResult:
-    """
-    collect rollout results for a batch of episodes, each episode is a list of chunk step results, 
-    the first dimension is batch_size, the second dimension is episode_length.
-    episode_length is the length of the episode, which may be different in each batch.
-    """
-    batch_size: int = 0
-    max_episode_length: int = -1
-    collect_obs: bool = True
+    def to_splited_trajectories(self, split_size: int) -> list[Trajectory]:
+        all_trajectory: Trajectory = self.to_trajectory()
+        splited_trajectories: list[Trajectory] = [Trajectory() for _ in range(split_size)]
 
-    batch_episode_results: list[SingleEmbodiedRolloutResult] = field(default_factory=list) # batch_size
+        if len(all_trajectory.obs) > 0:
+            splited_obs = split_dict_to_chunk(all_trajectory.obs, split_size, dim=1)
+            for i in range(split_size):
+                splited_trajectories[i].obs = splited_obs[i]
 
-    def update_last_actions(self, intervene_actions: torch.Tensor, intervene_flags: torch.Tensor):
-        """
-        update the last actions and intervene flags if intervention is triggered.
-        """
-        for batch_size_idx in range(self.batch_size):
-            self.batch_episode_results[batch_size_idx].update_last_actions(intervene_actions[batch_size_idx], intervene_flags[batch_size_idx])
+        if len(all_trajectory.final_obs) > 0:
+            splited_final_obs = split_dict_to_chunk(all_trajectory.final_obs, split_size, dim=1)
+            for i in range(split_size):
+                splited_trajectories[i].final_obs = splited_final_obs[i]
 
-    async def append_batch_result(self, batch_result: ChunkStepResult):
-        batch_size = batch_result.dones.shape[0]
-        # Initialize batch_size and batch_episode_results on first call
-        if self.batch_size == 0:
-            self.batch_size = batch_size
-            self.batch_episode_results = [
-                SingleEmbodiedRolloutResult(collect_obs=self.collect_obs, max_episode_length=self.max_episode_length) 
-                for _ in range(self.batch_size)
-            ]
-        assert batch_size == self.batch_size, "batch_size of the result must be the same as the batch_size of the batch episode result"
-        if self.collect_obs and batch_result.obs is not None:
-            obs_list_of_dict = split_dict_to_chunk(batch_result.obs, batch_size, dim=0)
-        else:
-            obs_list_of_dict = None
-        if self.collect_obs and batch_result.final_obs is not None:
-            final_obs_list_of_dict = split_dict_to_chunk(batch_result.final_obs, batch_size, dim=0)
-        else:
-            final_obs_list_of_dict = None
-
-        if batch_result.forward_inputs is not None:
-            forward_inputs_list_of_dict = split_dict_to_chunk(batch_result.forward_inputs, batch_size, dim=0)
-        else:
-            forward_inputs_list_of_dict = None
-
-        for batch_size_idx in range(batch_size):
-            single_result = ChunkStepResult(
-                obs=obs_list_of_dict[batch_size_idx] if obs_list_of_dict is not None else None,
-                final_obs=final_obs_list_of_dict[batch_size_idx] if final_obs_list_of_dict is not None else None,
-                rewards=batch_result.rewards[batch_size_idx] if batch_result.rewards is not None else None,
-                terminations=batch_result.terminations[batch_size_idx],
-                truncations=batch_result.truncations[batch_size_idx],
-                dones=batch_result.dones[batch_size_idx],
-                prev_logprobs=batch_result.prev_logprobs[batch_size_idx] if batch_result.prev_logprobs is not None else None,
-                prev_values=batch_result.prev_values[batch_size_idx] if batch_result.prev_values is not None else None,
-                forward_inputs=forward_inputs_list_of_dict[batch_size_idx] if forward_inputs_list_of_dict is not None else None,
+        if all_trajectory.forward_inputs is not None and len(all_trajectory.forward_inputs) > 0:
+            splited_forward_inputs = split_dict_to_chunk(
+                all_trajectory.forward_inputs, split_size, dim=1
             )
-            self.batch_episode_results[batch_size_idx].append_single_result(single_result)
+            for i in range(split_size):
+                splited_trajectories[i].forward_inputs = splited_forward_inputs[i]
 
-    def reset_specific_episode(self, idx, collect_obs):
-        # Reset the episode with same configuration
-        self.batch_episode_results[idx] = None
-        self.batch_episode_results[idx] = SingleEmbodiedRolloutResult(
-            collect_obs=collect_obs,
-            max_episode_length=self.max_episode_length
-        )
-        self.batch_episode_results[idx].is_completed = False
+        for field in all_trajectory.__dataclass_fields__.keys():
+            if field in ["obs", "final_obs", "forward_inputs"]:
+                continue
+            value = getattr(all_trajectory, field)
+            if value is None:
+                continue
 
-    def get_completed_episodes(self) -> list[SingleEmbodiedRolloutResult]:
-        completed_episodes = []
-        for batch_size_idx in range(self.batch_size):
-            if self.batch_episode_results[batch_size_idx].is_completed:
-                completed_episodes.append(self.batch_episode_results[batch_size_idx])
-                # reset
-                collect_obs = self.batch_episode_results[batch_size_idx].collect_obs
-                self.reset_specific_episode(batch_size_idx, collect_obs)
-        return completed_episodes
+            chunks = torch.chunk(value, split_size, dim=1)
+            for i in range(split_size):
+                setattr(splited_trajectories[i], field, chunks[i])
 
-    def force_complete_all_episodes(self) -> list[SingleEmbodiedRolloutResult]:
-        """Force complete all remaining episodes (used when epoch ends and episodes cannot span epochs)."""
-        completed_episodes = []
-        for batch_size_idx in range(self.batch_size):
-            # Only process non-empty episodes that are not yet completed
-            if len(self.batch_episode_results[batch_size_idx].dones) > 0:
-                if not self.batch_episode_results[batch_size_idx].is_completed:
-                    # Force mark as completed
-                    self.batch_episode_results[batch_size_idx].is_completed = True
-                # Save collect_obs before resetting
-                completed_episodes.append(self.batch_episode_results[batch_size_idx])
-
-            collect_obs = self.batch_episode_results[batch_size_idx].collect_obs
-            self.reset_specific_episode(batch_size_idx, collect_obs)
-
-        return completed_episodes
-
-from collections import deque
+        return splited_trajectories
 
 
-def pad_and_stack_episodes(episodes: list[Episode]) -> dict[str, torch.Tensor]:
+def pad_and_stack_trajectories(trajectories: list[Trajectory]) -> dict[str, torch.Tensor]:
     """
-    Pad and stack a list of episodes with different lengths.
+    Pad and stack a list of trajectories with different lengths.
     
     Args:
-        episodes: List of Episode objects with potentially different lengths
+        trajectories: List of Trajectory objects with potentially different lengths
         
     Returns:
         Dictionary with stacked tensors, all padded to the maximum length.
-        Shape: [T, B, ...] where T is max episode length, B is batch size.
+        Shape: [T, B, ...] where T is max trajectory length, B is batch size.
     """
-    if not episodes:
+    if not trajectories:
         return {}
     
     batch = {}
@@ -545,34 +386,28 @@ def pad_and_stack_episodes(episodes: list[Episode]) -> dict[str, torch.Tensor]:
         return result
     
     # Process obs (dict[str, Tensor])
-    if episodes[0].obs:
-        obs_batch = pad_dict_tensor_list([ep.obs for ep in episodes])
+    if trajectories[0].obs:
+        obs_batch = pad_dict_tensor_list([traj.obs for traj in trajectories])
         for key, value in obs_batch.items():
             value = value.squeeze(2)
             batch["obs/" + key] = value
     
     # Process simple tensor fields
-    # Fields with length T (episode_length)
+    # Fields with length T (trajectory_length)
     for field_name in ["actions", "intervene_flags", "rewards", "prev_logprobs"]:
-        field_list = [getattr(ep, field_name) for ep in episodes if getattr(ep, field_name) is not None]
+        field_list = [getattr(traj, field_name) for traj in trajectories if getattr(traj, field_name) is not None]
         if field_list:
             batch[field_name] = pad_tensor_list(field_list)
     
-    # Fields with length T+1 (episode_length + 1)
-    for field_name in ["dones", "terminations", "truncations", "prev_values", "loss_mask"]:
-        field_list = [getattr(ep, field_name) for ep in episodes if getattr(ep, field_name) is not None]
+    # Fields with length T+rollout_epoch (trajectory_length + rollout_epoch)
+    for field_name in ["dones", "terminations", "truncations", "prev_values"]:
+        field_list = [getattr(traj, field_name) for traj in trajectories if getattr(traj, field_name) is not None]
         if field_list:
             batch[field_name] = pad_tensor_list(field_list)
-    
-    # Process loss_mask_sum (usually [1] or scalar)
-    loss_mask_sum_list = [ep.loss_mask_sum for ep in episodes if ep.loss_mask_sum is not None]
-    if loss_mask_sum_list:
-        # loss_mask_sum might have different shapes, pad to max
-        batch["loss_mask_sum"] = pad_tensor_list(loss_mask_sum_list)
     
     # Process forward_inputs (dict[str, Tensor])
-    if episodes[0].forward_inputs:
-        forward_inputs_batch = pad_dict_tensor_list([ep.forward_inputs for ep in episodes])
+    if trajectories[0].forward_inputs:
+        forward_inputs_batch = pad_dict_tensor_list([traj.forward_inputs for traj in trajectories])
         for key, value in forward_inputs_batch.items():
             value = value.squeeze(2)
             batch["forward_inputs/" + key] = value
@@ -580,91 +415,75 @@ def pad_and_stack_episodes(episodes: list[Episode]) -> dict[str, torch.Tensor]:
     return batch
 
 
-class EmbodiedRolloutEpisodeResultHandler:
+def convert_trajectories_to_batch(
+    trajectories: list[Trajectory],
+) -> dict[str, torch.Tensor]:
     """
-     for storing episode results before sending to actor workers.
-    
-    This class maintains a buffer of completed episode results and automatically sends
-    them to the replay channel when the buffer size reaches the specified threshold.
-    When the buffer contains at least actor_split_num results, it sends them one by one,
-    sending exactly actor_split_num episodes in total.
-    
-    Also computes loss_mask and loss_mask_sum for each episode when compute_mask=True.
+    convert a list of trajectories to a batch dict, the shape of the batch is [T, B_total, ...].
+    donot handle obs and final_obs
     """
-    def __init__(
-        self, 
-        actor_split_num: int,
-        actor_world_size: int,
-        channel: Channel,
-        compute_mask: bool = False,
-        reward_type: str = "chunk_level"
-    ):
-        """
-        Args:
-            actor_split_num: Number of episodes to send at once
-            channel: Channel to send episodes to
-            compute_mask: Whether to compute loss_mask and loss_mask_sum for episodes
-            reward_type: Reward type, used to determine mask processing ("chunk_level" or other)
-        """
-        self.actor_split_num = actor_split_num
-        self.actor_world_size = actor_world_size
-        self.buffer: deque[Episode] = deque()
-        self.channel = channel
-        self.compute_mask = compute_mask
-        self.reward_type = reward_type
+    if not trajectories:
+        return {}
 
-    def _compute_loss_mask_for_episode(self, dones: torch.Tensor) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-        """
-        Compute loss_mask and loss_mask_sum for a single episode.
-        
-        Args:
-            dones: [episode_length + 1, 1]
-            
-        Returns:
-            Tuple of (loss_mask, loss_mask_sum)
-        """                
-        from rlinf.utils.metric_utils import compute_loss_mask
-        dones = dones.unsqueeze(1)
-        loss_mask, loss_mask_sum = compute_loss_mask(dones)
-        
-        # Handle chunk_level reward_type (same as original logic)
-        if self.reward_type == "chunk_level":
-            loss_mask = loss_mask.any(dim=-1, keepdim=True)
-            loss_mask_sum = loss_mask_sum[..., -1:]
+    batch: dict[str, torch.Tensor] = {}
 
-        loss_mask = loss_mask.squeeze(1)
-        loss_mask_sum = loss_mask_sum.squeeze(1)
-        return loss_mask, loss_mask_sum
+    # -------- obs / forward_inputs: dict[str, Tensor] --------
+    if trajectories[0].obs and trajectories[0].curr_obs_idx is not None and trajectories[0].next_obs_idx is not None:
+        all_keys: set[str] = set()
+        for traj in trajectories:
+            all_keys.update(traj.obs.keys())
 
-    def append_episode_results(self, episode_results: list[SingleEmbodiedRolloutResult]) -> None:
-        if not episode_results:
-            return
-        episodes = [episode_result.to_episode() for episode_result in episode_results]
-        # Compute loss_mask and loss_mask_sum for each episode only if compute_mask=True
-        if self.compute_mask:
-            for episode in episodes:
-                loss_mask, loss_mask_sum = self._compute_loss_mask_for_episode(episode.dones)
-                episode.loss_mask = loss_mask.cpu().contiguous()
-                episode.loss_mask_sum = loss_mask_sum.cpu().contiguous()
+        curr_obs_data = {key: [] for key in all_keys}
+        next_obs_data = {key: [] for key in all_keys}
 
-        self.buffer.extend(episodes)
+        for traj in trajectories:
+            if not traj.obs or traj.curr_obs_idx is None or traj.next_obs_idx is None:
+                continue
 
-    async def append_and_send_eposide_results(self, rollout_results: list[SingleEmbodiedRolloutResult]) -> None:
-        if not rollout_results:
-            return
-        episodes = [rollout_result.to_episode() for rollout_result in rollout_results]
-        # Compute loss_mask and loss_mask_sum for each episode only if compute_mask=True
-        if self.compute_mask:
-            for episode in episodes:
-                loss_mask, loss_mask_sum = self._compute_loss_mask_for_episode(episode.dones)
-                episode.loss_mask = loss_mask.cpu().contiguous()
-                episode.loss_mask_sum = loss_mask_sum.cpu().contiguous()
-        
-        self.buffer.extend(episodes)
+            for key in all_keys:
+                if key not in traj.obs:
+                    continue
 
-    async def send(self) -> None:
-        episode_num = len(self.buffer) // self.actor_split_num
-        await self.channel.put(episode_num, async_op=True).async_wait()
-        while len(self.buffer) >= self.actor_split_num:
-            for _ in range(self.actor_split_num):
-                await self.channel.put(self.buffer.popleft(), async_op=True).async_wait()
+                obs_tensor = traj.obs[key]  # [obs_length, B, ...]
+
+                # Select cur_obs and next_obs using indices
+                curr_obs_selected = obs_tensor[traj.curr_obs_idx]  # [T, B, ...]
+                next_obs_selected = obs_tensor[traj.next_obs_idx]  # [T, B, ...]
+
+                curr_obs_data[key].append(curr_obs_selected)
+                next_obs_data[key].append(next_obs_selected)
+
+        # Concatenate along batch dimension (dim=1)
+        batch["curr_obs"] = {}
+        batch["next_obs"] = {}
+        for key, tensors in curr_obs_data.items():
+            if tensors:
+                batch["curr_obs"][key] = torch.cat(tensors, dim=1)
+
+        for key, tensors in next_obs_data.items():
+            if tensors:
+                batch["next_obs"][key] = torch.cat(tensors, dim=1)
+
+    if trajectories[0].forward_inputs:
+        all_keys: set[str] = set()
+        for traj in trajectories:
+            all_keys.update(traj.forward_inputs.keys())
+        batch["forward_inputs"] = {}
+        for key in all_keys:
+            tensors = [traj.forward_inputs[key] for traj in trajectories if key in traj.forward_inputs]
+            if tensors:
+                batch["forward_inputs"][key] = torch.cat(tensors, dim=1)
+
+    # -------- tensor fields --------
+    for field_name in trajectories[0].__dataclass_fields__.keys():
+        if field_name in ["obs", "curr_obs_idx", "next_obs_idx", "forward_inputs"]:
+            continue
+        field_list = [
+            getattr(traj, field_name)
+            for traj in trajectories
+            if getattr(traj, field_name) is not None
+        ]
+        if field_list:
+            batch[field_name] = torch.cat(field_list, dim=1)
+
+    return batch

@@ -41,8 +41,8 @@ from rlinf.utils.nested_dict_process import (
 )
 from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
 from rlinf.utils.metric_utils import compute_split_num
-from rlinf.data.embodied_io_struct import Episode
-from rlinf.data.replay_buffer import EpisodeReplayBuffer
+from rlinf.data.embodied_io_struct import Trajectory
+from rlinf.data.replay_buffer import TrajectoryReplayBuffer
 
 
 class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
@@ -210,25 +210,23 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         """Initialize SAC-specific components"""
         # Initialize replay buffer
         seed = self.cfg.actor.get("seed", 1234)
-        self.replay_buffer = EpisodeReplayBuffer(
+        self.replay_buffer = TrajectoryReplayBuffer(
             device=self.device,
             seed=seed,
             storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"replay_buffer_{self._rank}"),
             storage_format="pt",
             enable_cache=True,
             cache_size=100,
-            sample_window_size=100,
         )
 
         if self.cfg.algorithm.get("demo_buffer_load_path", None) is not None:
-            self.demo_buffer = EpisodeReplayBuffer(
+            self.demo_buffer = TrajectoryReplayBuffer(
                 device=self.device,
                 seed=seed,
                 storage_dir=os.path.join(self.cfg.runner.logger.log_path, f"demo_buffer_{self._rank}"),
                 storage_format="pt",
                 enable_cache=True,
                 cache_size=100,
-                sample_window_size=100,
             )
             self.demo_buffer.load(
                 self.cfg.algorithm.demo_buffer_load_path,
@@ -278,10 +276,10 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         recv_list = []
         
         for _ in range(split_num):
-            episode: Episode = await input_channel.get(async_op=True).async_wait()
-            recv_list.append(episode)
+            trajectory: Trajectory = await input_channel.get(async_op=True).async_wait()
+            recv_list.append(trajectory)
 
-        self.replay_buffer.add_episodes(recv_list)
+        self.replay_buffer.add_trajectories(recv_list)
 
     def forward_critic(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
@@ -290,7 +288,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         rewards = batch["rewards"].to(self.torch_dtype)
         terminations = batch["terminations"].to(self.torch_dtype)
 
-        curr_obs = batch["obs"]
+        curr_obs = batch["curr_obs"]
         next_obs = batch["next_obs"]
         with torch.no_grad():
             kwargs = {}
@@ -400,7 +398,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
     def forward_actor(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
         agg_q = self.cfg.algorithm.get("agg_q", "min")
-        curr_obs = batch["obs"]
+        curr_obs = batch["curr_obs"]
         kwargs = {}
         if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
             kwargs["temperature"] = self.cfg.algorithm.sampling_params.temperature_train
@@ -437,7 +435,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         return actor_loss, entropy
 
     def forward_alpha(self, batch):
-        curr_obs = batch["obs"]
+        curr_obs = batch["curr_obs"]
         with torch.no_grad():
             kwargs = {}
             if self.cfg.actor.model.model_type in ["openvla", "openvla_oft"]:
@@ -647,23 +645,23 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
     def save_checkpoint(self, save_base_path, step):
         super().save_checkpoint(save_base_path, step)
         buffer_save_path = os.path.join(
-            save_base_path, f"buffers/replay_buffer_{self._rank}"
+            save_base_path, f"buffers/replay_buffer/rank_{self._rank}"
         )
         self.replay_buffer.save(buffer_save_path)
         if self.demo_buffer is not None:
             demo_save_path = os.path.join(
-                save_base_path, f"buffers/demo_buffer_{self._rank}"
+                save_base_path, f"buffers/demo_buffer/rank_{self._rank}"
             )
             self.demo_buffer.save(demo_save_path)
 
     def load_checkpoint(self, load_base_path):
         super().load_checkpoint(load_base_path)
         buffer_load_path = os.path.join(
-            load_base_path, f"buffers/replay_buffer_{self._rank}"
+            load_base_path, f"buffers/replay_buffer/rank_{self._rank}"
         )
         self.replay_buffer.load(buffer_load_path)
         if self.demo_buffer is not None:
             demo_load_path = os.path.join(
-                load_base_path, f"buffers/demo_buffer_{self._rank}"
+                load_base_path, f"buffers/demo_buffer/rank_{self._rank}"
             )
             self.demo_buffer.load(demo_load_path)
