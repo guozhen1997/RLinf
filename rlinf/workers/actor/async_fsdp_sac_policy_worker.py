@@ -18,7 +18,7 @@ import torch
 
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
-
+from rlinf.scheduler import Worker
 
 class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
     should_stop = False
@@ -27,6 +27,7 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
         while not self.should_stop:
             await super().recv_rollout_trajectories(input_channel)
 
+    @Worker.timer("run_training")
     async def run_training(self):
         """SAC training using replay buffer"""
         if self.cfg.actor.get("enable_offload", False):

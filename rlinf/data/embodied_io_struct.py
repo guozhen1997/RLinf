@@ -322,8 +322,7 @@ def convert_trajectories_to_batch(
     trajectories: list[Trajectory],
 ) -> dict[str, torch.Tensor]:
     """
-    convert a list of trajectories to a batch dict, the shape of the batch is [T, B_total, ...].
-    donot handle obs and final_obs
+    convert a list of trajectories to a batch dict, the shape of the batch is [T, B, ...].
     """
     if not trajectories:
         return {}

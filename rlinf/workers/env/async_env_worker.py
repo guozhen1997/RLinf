@@ -27,7 +27,7 @@ class AsyncEnvWorker(EnvWorker):
         self,
         input_channel: Channel,
         output_channel: Channel,
-        env_metric_channel: Channel,
+        metric_channel: Channel,
     ):
         for env in self.env_list:
             env.start_env()
@@ -114,7 +114,11 @@ class AsyncEnvWorker(EnvWorker):
 
             for key, value in env_metrics.items():
                 env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
-            env_metric_channel.put(env_metrics)
+
+            env_metrics = {f"env/{k}": v for k, v in env_metrics.items()}
+            env_interact_time_metrics = self.pop_execution_times()
+            env_metrics.update({f"time/env/{k}": v for k, v in env_interact_time_metrics.items()})
+            metric_channel.put(env_metrics)
 
             self.last_obs_list = [env_output.obs for env_output in env_output_list]
             self.last_intervened_info_list = [

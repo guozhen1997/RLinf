@@ -105,6 +105,7 @@ class MultiStepRolloutWorker(Worker):
             "max_new_tokens": self._length_params["max_new_token"],
         }
 
+    @Worker.timer("predict")
     def predict(self, env_obs, mode="train"):
         kwargs = (
             self._train_sampling_params
@@ -194,7 +195,100 @@ class MultiStepRolloutWorker(Worker):
         split_num = self.get_actor_split_num()
         trajectories: Trajectory = rollout_result.to_splited_trajectories(split_num)
         for trajectory in trajectories:
-            await channel.put(trajectory, async_op=True).async_wait()
+            channel.put(trajectory, async_op=True)
+
+    @Worker.timer("generate_epoch")
+    async def generate_epoch(self, input_channel: Channel, output_channel: Channel):
+        
+        n_chunk_steps = (
+            self.cfg.env.train.max_steps_per_rollout_epoch
+            // self.cfg.actor.model.num_action_chunks
+        )
+        
+        last_obs = [None for i in range(self.num_pipeline_stages)]
+        for _ in range(n_chunk_steps):
+            for stage_id in range(self.num_pipeline_stages):
+                env_output = await self.recv_env_output(input_channel)
+
+                if env_output["intervene_actions"] is not None:
+                    self.rollout_results[stage_id].update_last_actions(
+                        env_output["intervene_actions"],
+                        env_output["intervene_flags"],
+                    )
+
+                dones, rewards = self.get_dones_and_rewards(env_output)
+
+                actions, result = self.predict(env_output["obs"])
+
+                env_output["obs"].pop("task_descriptions", None)
+                if env_output["final_obs"] is not None:
+                    env_output["final_obs"].pop("task_descriptions", None)
+                chunk_step_result = ChunkStepResult(
+                    actions=result.get("action", None),
+                    dones=dones,
+                    rewards=rewards,
+                    truncations=env_output["truncations"],
+                    terminations=env_output["terminations"],
+                    prev_logprobs=result["prev_logprobs"]
+                    if self.cfg.rollout.get("collect_prev_infos", True)
+                    else None,
+                    prev_values=result["prev_values"]
+                    if self.cfg.rollout.get("collect_prev_infos", True)
+                    else None,
+                    forward_inputs=result["forward_inputs"],
+                )
+
+                self.rollout_results[stage_id].append_step_result(chunk_step_result)
+                if self.collect_transitions and last_obs[stage_id] is not None:
+                    curr_obs = last_obs[stage_id]
+                    next_obs = (
+                        env_output["final_obs"]
+                        if dones.any() and self.cfg.env.train.auto_reset
+                        else env_output["obs"]
+                    )
+                    self.rollout_results[stage_id].append_transitions(curr_obs, next_obs)
+
+                last_obs[stage_id] = env_output["obs"]
+
+                self.send_chunk_actions(output_channel, actions)
+
+        for stage_id in range(self.num_pipeline_stages):
+            env_output = await self.recv_env_output(input_channel)
+
+            if env_output["intervene_actions"] is not None:
+                self.rollout_results[stage_id].update_last_actions(
+                    env_output["intervene_actions"], env_output["intervene_flags"]
+                )
+
+            dones, rewards = self.get_dones_and_rewards(env_output)
+
+            _, result = self.predict(env_output["obs"])
+
+            env_output["obs"].pop("task_descriptions", None)
+            if env_output["final_obs"] is not None:
+                env_output["final_obs"].pop("task_descriptions", None)
+
+            chunk_step_result = ChunkStepResult(
+                dones=dones,
+                rewards=rewards,
+                truncations=env_output["truncations"],
+                terminations=env_output["terminations"],
+                prev_logprobs=None,
+                prev_values=result["prev_values"]
+                if self.cfg.rollout.get("collect_prev_infos", True)
+                else None,
+                forward_inputs=None,
+            )
+
+            self.rollout_results[stage_id].append_step_result(chunk_step_result)
+            if self.collect_transitions and last_obs[stage_id] is not None:
+                curr_obs = last_obs[stage_id]
+                next_obs = (
+                    env_output["final_obs"]
+                    if dones.any() and self.cfg.env.train.auto_reset
+                    else env_output["obs"]
+                )
+                self.rollout_results[stage_id].append_transitions(curr_obs, next_obs)
 
     async def generate(
         self, input_channel: Channel, output_channel: Channel, actor_channel: Channel
@@ -203,109 +297,19 @@ class MultiStepRolloutWorker(Worker):
             self.reload_model()
 
         # rollout_results[stage_id]
-        rollout_results: list[EmbodiedRolloutResult] = [
+        self.rollout_results: list[EmbodiedRolloutResult] = [
             EmbodiedRolloutResult(
                 max_episode_length=self.cfg.env.train.max_episode_steps
             )
             for _ in range(self.num_pipeline_stages)
         ]
 
-        n_chunk_steps = (
-            self.cfg.env.train.max_steps_per_rollout_epoch
-            // self.cfg.actor.model.num_action_chunks
-        )
-
         for _ in range(self.cfg.algorithm.rollout_epoch):
-            last_obs = [None for i in range(self.num_pipeline_stages)]
-            for _ in range(n_chunk_steps):
-                for stage_id in range(self.num_pipeline_stages):
-                    env_output = await self.recv_env_output(input_channel)
-
-                    if env_output["intervene_actions"] is not None:
-                        rollout_results[stage_id].update_last_actions(
-                            env_output["intervene_actions"],
-                            env_output["intervene_flags"],
-                        )
-
-                    dones, rewards = self.get_dones_and_rewards(env_output)
-                    actions, result = self.predict(env_output["obs"])
-
-                    env_output["obs"].pop("task_descriptions", None)
-                    if env_output["final_obs"] is not None:
-                        env_output["final_obs"].pop("task_descriptions", None)
-
-                    chunk_step_result = ChunkStepResult(
-                        actions=result.get("action", None),
-                        dones=dones,
-                        rewards=rewards,
-                        truncations=env_output["truncations"],
-                        terminations=env_output["terminations"],
-                        prev_logprobs=result["prev_logprobs"]
-                        if self.cfg.rollout.get("collect_prev_infos", True)
-                        else None,
-                        prev_values=result["prev_values"]
-                        if self.cfg.rollout.get("collect_prev_infos", True)
-                        else None,
-                        forward_inputs=result["forward_inputs"],
-                    )
-
-                    rollout_results[stage_id].append_step_result(chunk_step_result)
-                    if self.collect_transitions and last_obs[stage_id] is not None:
-                        curr_obs = last_obs[stage_id]
-                        next_obs = (
-                            env_output["final_obs"]
-                            if dones.any() and self.cfg.env.train.auto_reset
-                            else env_output["obs"]
-                        )
-                        rollout_results[stage_id].append_transitions(curr_obs, next_obs)
-
-                    last_obs[stage_id] = env_output["obs"]
-
-                    self.send_chunk_actions(output_channel, actions)
-
-            for stage_id in range(self.num_pipeline_stages):
-                env_output = await self.recv_env_output(input_channel)
-
-                if env_output["intervene_actions"] is not None:
-                    rollout_results[stage_id].update_last_actions(
-                        env_output["intervene_actions"], env_output["intervene_flags"]
-                    )
-
-                # Get dones and rewards from environment batch (final step of epoch)
-                dones, rewards = self.get_dones_and_rewards(env_output)
-
-                with self.worker_timer():
-                    _, result = self.predict(env_output["obs"])
-
-                env_output["obs"].pop("task_descriptions", None)
-                if env_output["final_obs"] is not None:
-                    env_output["final_obs"].pop("task_descriptions", None)
-
-                chunk_step_result = ChunkStepResult(
-                    dones=dones,
-                    rewards=rewards,
-                    truncations=env_output["truncations"],
-                    terminations=env_output["terminations"],
-                    prev_logprobs=None,
-                    prev_values=result["prev_values"]
-                    if self.cfg.rollout.get("collect_prev_infos", True)
-                    else None,
-                    forward_inputs=None,
-                )
-
-                rollout_results[stage_id].append_step_result(chunk_step_result)
-                if self.collect_transitions and last_obs[stage_id] is not None:
-                    curr_obs = last_obs[stage_id]
-                    next_obs = (
-                        env_output["final_obs"]
-                        if dones.any() and self.cfg.env.train.auto_reset
-                        else env_output["obs"]
-                    )
-                    rollout_results[stage_id].append_transitions(curr_obs, next_obs)
+            await self.generate_epoch(input_channel, output_channel)
 
         for stage_id in range(self.num_pipeline_stages):
             await self.send_rollout_trajectories(
-                rollout_results[stage_id], actor_channel
+                self.rollout_results[stage_id], actor_channel
             )
 
         if self.enable_offload:

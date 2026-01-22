@@ -42,6 +42,7 @@ from rlinf.utils.nested_dict_process import (
     split_dict_to_chunk,
 )
 from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+from rlinf.scheduler import Worker
 
 
 class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
@@ -290,6 +291,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         self.replay_buffer.add_trajectories(recv_list)
 
+    @Worker.timer("forward_critic")
     def forward_critic(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
         bootstrap_type = self.cfg.algorithm.get("bootstrap_type", "standard")
@@ -404,6 +406,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         )
         return critic_loss
 
+    @Worker.timer("forward_actor")
     def forward_actor(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
         agg_q = self.cfg.algorithm.get("agg_q", "min")
@@ -443,6 +446,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         entropy = -log_pi.mean()
         return actor_loss, entropy
 
+    @Worker.timer("forward_alpha")
     def forward_alpha(self, batch):
         curr_obs = batch["curr_obs"]
         with torch.no_grad():
@@ -460,6 +464,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         alpha_loss = -alpha * (log_pi.mean() + self.target_entropy)
         return alpha_loss
 
+    @Worker.timer("update_one_epoch")
     def update_one_epoch(self, train_actor):
         global_batch_size_per_rank = (
             self.cfg.actor.global_batch_size // self._world_size
@@ -592,6 +597,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         )
         return mean_metric_dict
 
+    @Worker.timer("run_training")
     def run_training(self):
         """SAC training using replay buffer"""
         if self.cfg.actor.get("enable_offload", False):
@@ -652,23 +658,23 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
     def save_checkpoint(self, save_base_path, step):
         super().save_checkpoint(save_base_path, step)
         buffer_save_path = os.path.join(
-            save_base_path, f"buffers/replay_buffer/rank_{self._rank}"
+            save_base_path, f"replay_buffer/rank_{self._rank}"
         )
         self.replay_buffer.save_checkpoint(buffer_save_path)
         if self.demo_buffer is not None:
             demo_save_path = os.path.join(
-                save_base_path, f"buffers/demo_buffer/rank_{self._rank}"
+                save_base_path, f"demo_buffer/rank_{self._rank}"
             )
             self.demo_buffer.save_checkpoint(demo_save_path)
 
     def load_checkpoint(self, load_base_path):
         super().load_checkpoint(load_base_path)
         buffer_load_path = os.path.join(
-            load_base_path, f"buffers/replay_buffer/rank_{self._rank}"
+            load_base_path, f"replay_buffer/rank_{self._rank}"
         )
         self.replay_buffer.load_checkpoint(buffer_load_path)
         if self.demo_buffer is not None:
             demo_load_path = os.path.join(
-                load_base_path, f"buffers/demo_buffer/rank_{self._rank}"
+                load_base_path, f"demo_buffer/rank_{self._rank}"
             )
             self.demo_buffer.load_checkpoint(demo_load_path)
