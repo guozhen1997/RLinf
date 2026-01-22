@@ -240,8 +240,12 @@ class MultiStepRolloutWorker(Worker):
                         rewards=rewards,
                         truncations=env_output["truncations"],
                         terminations=env_output["terminations"],
-                        prev_logprobs=result["prev_logprobs"],
-                        prev_values=result["prev_values"],
+                        prev_logprobs=result["prev_logprobs"]
+                        if self.cfg.rollout.get("collect_prev_infos", True)
+                        else None,
+                        prev_values=result["prev_values"]
+                        if self.cfg.rollout.get("collect_prev_infos", True)
+                        else None,
                         forward_inputs=result["forward_inputs"],
                     )
 
@@ -283,7 +287,9 @@ class MultiStepRolloutWorker(Worker):
                     truncations=env_output["truncations"],
                     terminations=env_output["terminations"],
                     prev_logprobs=None,
-                    prev_values=result["prev_values"],
+                    prev_values=result["prev_values"]
+                    if self.cfg.rollout.get("collect_prev_infos", True)
+                    else None,
                     forward_inputs=None,
                 )
 

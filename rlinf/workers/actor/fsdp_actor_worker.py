@@ -47,7 +47,6 @@ from rlinf.utils.metric_utils import (
     compute_split_num,
 )
 from rlinf.utils.nested_dict_process import (
-    cat_list_of_dict_tensor,
     put_tensor_device,
     split_dict_to_chunk,
 )
@@ -785,27 +784,6 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             )
         if self.enable_offload and not self.is_weight_offloaded:
             self.offload_param_and_grad()
-
-    def recv_rollout_batch(self, input_channel: Channel) -> None:
-        """
-        Receive rollout batch from rollout workers.
-
-        Args:
-            input_channel: The input channel to read from.
-        """
-        send_num = self._component_placement.get_world_size("rollout") * self.stage_num
-        recv_num = self._component_placement.get_world_size("actor")
-        split_num = compute_split_num(send_num, recv_num)
-
-        self.rollout_batch = {}
-        recv_list = []
-        for _ in range(split_num):
-            recv_list.append(input_channel.get())
-
-        # shape [num_chunk, bsz, chunk_size], cat dim 1
-        self.rollout_batch = cat_list_of_dict_tensor(recv_list, dim=1)
-
-        self.rollout_batch = self._process_received_rollout_batch(self.rollout_batch)
 
     async def recv_rollout_trajectories(self, input_channel: Channel) -> None:
         """

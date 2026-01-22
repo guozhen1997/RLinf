@@ -13,13 +13,15 @@
 # limitations under the License.
 
 
-import bisect
+import copy
 import json
 import os
 import pickle as pkl
 import tempfile
+import threading
 import uuid
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import numpy as np
@@ -29,16 +31,16 @@ from rlinf.data.embodied_io_struct import Trajectory
 
 
 class TrajectoryCache:
-    """FIFO cache for storing loaded trajectories."""
+    """FIFO cache for storing flattened trajectories."""
 
     def __init__(self, max_size: int = 5):
-        self.cache: OrderedDict[str, Trajectory] = OrderedDict()
+        self.cache: OrderedDict[str, dict] = OrderedDict()
         self.max_size = max_size
 
-    def get(self, trajectory_uuid: str) -> Optional[Trajectory]:
+    def get(self, trajectory_uuid: str) -> Optional[dict]:
         return self.cache.get(trajectory_uuid)
 
-    def put(self, trajectory_uuid: str, trajectory: Trajectory):
+    def put(self, trajectory_uuid: str, trajectory: dict):
         if trajectory_uuid not in self.cache:
             self.cache[trajectory_uuid] = trajectory
             # Evict oldest if cache is full
@@ -67,6 +69,7 @@ class TrajectoryReplayBuffer:
         cache_size: int = 5,
         storage_format: str = "pt",
         sample_window_size: int = 100,
+        save_trajectories: bool = True,
     ):
         """
         Initialize trajectory-based replay buffer.
@@ -81,6 +84,15 @@ class TrajectoryReplayBuffer:
         self.storage_format = storage_format
         self.enable_cache = enable_cache
         self.sample_window_size = sample_window_size
+        self.save_trajectories = save_trajectories
+
+        if not self.save_trajectories and not self.enable_cache:
+            raise ValueError("save_trajectories=False requires enable_cache=True")
+        if not self.save_trajectories:
+            print(
+                "[TrajectoryReplayBuffer] save_trajectories=False: "
+                "checkpoint save/load is not supported."
+            )
 
         # Storage directory
         if storage_dir is None:
@@ -100,9 +112,24 @@ class TrajectoryReplayBuffer:
         self._trajectory_index: dict[str, dict] = {}
         self._trajectory_uuid_list: list[str] = []  # Ordered list of trajectory UUIDs
         self._trajectory_counter = 0  # Next trajectory ID to use
+        self._index_version = 0
 
-        # Trajectory cache for storing loaded trajectories in memory
-        self._trajectory_cache = TrajectoryCache(cache_size) if enable_cache else None
+        # Flattened trajectory cache for fast sampling
+        self._flat_trajectory_cache = (
+            TrajectoryCache(cache_size) if enable_cache else None
+        )
+
+        # Async save executor
+        self._save_executor = ThreadPoolExecutor(max_workers=1)
+        self._index_lock = threading.Lock()
+
+        # Cached window metadata for faster sampling
+        self._window_cache_size = None
+        self._window_cache_version = None
+        self._window_cache_uuids: list[str] = []
+        self._window_cache_cumulative_ends: list[int] = []
+        self._window_cache_cumulative_ends_tensor: Optional[torch.Tensor] = None
+        self._window_cache_total_samples = 0
 
         # Buffer state
         self.size = 0  # Current number of trajectories
@@ -144,15 +171,16 @@ class TrajectoryReplayBuffer:
 
     def _save_metadata(self, save_path: Optional[str] = None):
         """Save metadata to disk."""
-        metadata = {
-            "storage_format": self.storage_format,
-            "size": self.size,
-            "total_samples": self._total_samples,
-            "trajectory_counter": self._trajectory_counter,
-            "seed": self.seed,
-        }
-        with open(self._get_metadata_path(save_path), "w") as f:
-            json.dump(metadata, f)
+        with self._index_lock:
+            metadata = {
+                "storage_format": self.storage_format,
+                "size": self.size,
+                "total_samples": self._total_samples,
+                "trajectory_counter": self._trajectory_counter,
+                "seed": self.seed,
+            }
+            with open(self._get_metadata_path(save_path), "w") as f:
+                json.dump(metadata, f)
 
     def _load_metadata(self):
         """Load metadata from disk."""
@@ -176,16 +204,19 @@ class TrajectoryReplayBuffer:
 
     def _save_trajectory_index(self, save_path: Optional[str] = None):
         """Save trajectory index to disk."""
-        index_data = {
-            "trajectory_index": self._trajectory_index,
-            "trajectory_uuid_list": self._trajectory_uuid_list,
-        }
-        with open(self._get_trajectory_index_path(save_path), "w") as f:
-            json.dump(index_data, f)
+        with self._index_lock:
+            index_data = {
+                "trajectory_index": copy.deepcopy(self._trajectory_index),
+                "trajectory_uuid_list": list(self._trajectory_uuid_list),
+            }
+            with open(self._get_trajectory_index_path(save_path), "w") as f:
+                json.dump(index_data, f)
 
-    def _save_trajectory(self, trajectory: Trajectory, trajectory_uuid: str):
+    def _save_trajectory(
+        self, trajectory: Trajectory, trajectory_uuid: str, trajectory_id: int
+    ):
         """Save a single episode to disk as a dictionary."""
-        trajectory_path = self._get_trajectory_path(trajectory_uuid)
+        trajectory_path = self._get_trajectory_path(trajectory_uuid, trajectory_id)
 
         # Convert Trajectory to dictionary for more stable storage
         trajectory_dict = {}
@@ -201,12 +232,7 @@ class TrajectoryReplayBuffer:
                 pkl.dump(trajectory_dict, f)
 
     def _load_trajectory(self, trajectory_uuid: str) -> Trajectory:
-        """Load a trajectory from disk and reconstruct Trajectory object (with caching)."""
-        # Check cache first
-        if self._trajectory_cache is not None:
-            cached = self._trajectory_cache.get(trajectory_uuid)
-            if cached is not None:
-                return cached
+        """Load a trajectory from disk and reconstruct Trajectory object."""
 
         # Get trajectory info from index
         if trajectory_uuid not in self._trajectory_index:
@@ -232,10 +258,6 @@ class TrajectoryReplayBuffer:
         for field_name, value in trajectory_dict.items():
             setattr(trajectory, field_name, value)
 
-        # Put into cache for future reuse
-        if self._trajectory_cache is not None:
-            self._trajectory_cache.put(trajectory_uuid, trajectory)
-
         return trajectory
 
     def add_trajectories(self, trajectories: list[Trajectory]):
@@ -250,9 +272,11 @@ class TrajectoryReplayBuffer:
         if not trajectories:
             return
 
+        save_futures = []
         for trajectory in trajectories:
-            # Generate UUID for this trajectory
+            # Generate UUID and fixed ID for this trajectory
             trajectory_uuid = str(uuid.uuid4())
+            trajectory_id = self._trajectory_counter
 
             # Calculate total samples: T * B
             if trajectory.prev_logprobs is not None:
@@ -266,34 +290,61 @@ class TrajectoryReplayBuffer:
             else:
                 continue  # Skip empty trajectories
 
-            # Save trajectory to disk
-            trajectory_path = self._get_trajectory_path(trajectory_uuid)
-            self._save_trajectory(trajectory, trajectory_uuid)
+            # Save trajectory to disk if enabled
+            trajectory_path = ""
+            if self.save_trajectories:
+                trajectory_path = self._get_trajectory_path(
+                    trajectory_uuid, trajectory_id
+                )
+                # Save asynchronously to reduce I/O stalls
+                save_futures.append(
+                    self._save_executor.submit(
+                        self._save_trajectory,
+                        trajectory,
+                        trajectory_uuid,
+                        trajectory_id,
+                    )
+                )
 
             # Add to index
-            trajectory_info = {
-                "uuid": trajectory_uuid,
-                "num_samples": num_samples,
-                "path": trajectory_path,
-                "trajectory_id": self._trajectory_counter,
-                "max_episode_length": trajectory.max_episode_length,
-                "shape": tuple(trajectory_shape),
-            }
-            self._trajectory_index[trajectory_uuid] = trajectory_info
-            self._trajectory_uuid_list.append(trajectory_uuid)
+            with self._index_lock:
+                trajectory_info = {
+                    "uuid": trajectory_uuid,
+                    "num_samples": num_samples,
+                    "path": trajectory_path,
+                    "trajectory_id": trajectory_id,
+                    "max_episode_length": trajectory.max_episode_length,
+                    "shape": tuple(trajectory_shape),
+                }
+                self._trajectory_index[trajectory_uuid] = trajectory_info
+                self._trajectory_uuid_list.append(trajectory_uuid)
 
-            # Update counters
-            self._trajectory_counter += 1
-            self.size += 1
-            self._total_samples += num_samples
+                # Update counters
+                self._trajectory_counter += 1
+                self.size += 1
+                self._total_samples += num_samples
+                self._index_version += 1
 
-            # Cache the trajectory if enabled
-            if self._trajectory_cache is not None:
-                self._trajectory_cache.put(trajectory_uuid, trajectory)
+            if self._flat_trajectory_cache is not None:
+                self._flat_trajectory_cache.put(
+                    trajectory_uuid, self._flatten_trajectory(trajectory)
+                )
 
-        # Save metadata
-        self._save_metadata()
-        self._save_trajectory_index()
+        # Save metadata/index after all trajectory saves finish
+        if self.save_trajectories:
+
+            def _flush_metadata():
+                for fut in save_futures:
+                    fut.result()
+                self._save_metadata()
+                self._save_trajectory_index()
+
+            self._save_executor.submit(_flush_metadata)
+
+    def close(self, wait: bool = True):
+        """Flush and shutdown async save executor."""
+        if self._save_executor is not None:
+            self._save_executor.shutdown(wait=wait)
 
     def sample(
         self,
@@ -327,17 +378,41 @@ class TrajectoryReplayBuffer:
 
         # Sample from the most recent trajectories (windowed)
         window_size = max(0, int(self.sample_window_size))
-        if window_size > 0:
-            window_uuids = self._trajectory_uuid_list[-window_size:]
-        else:
-            window_uuids = self._trajectory_uuid_list
+        with self._index_lock:
+            if (
+                self._window_cache_size == window_size
+                and self._window_cache_version == self._index_version
+            ):
+                window_uuids = self._window_cache_uuids
+                cumulative_ends = self._window_cache_cumulative_ends
+                window_total_samples = self._window_cache_total_samples
+            else:
+                if window_size > 0:
+                    window_uuids = list(self._trajectory_uuid_list[-window_size:])
+                else:
+                    window_uuids = list(self._trajectory_uuid_list)
+
+                cumulative_ends = []
+                running = 0
+                for single_uuid in window_uuids:
+                    running += self._trajectory_index[single_uuid]["num_samples"]
+                    cumulative_ends.append(running)
+                window_total_samples = running
+
+                self._window_cache_size = window_size
+                self._window_cache_version = self._index_version
+                self._window_cache_uuids = window_uuids
+                self._window_cache_cumulative_ends = cumulative_ends
+                self._window_cache_cumulative_ends_tensor = (
+                    torch.as_tensor(cumulative_ends, dtype=torch.long)
+                    if cumulative_ends
+                    else None
+                )
+                self._window_cache_total_samples = window_total_samples
 
         if not window_uuids:
             return {}
 
-        window_total_samples = sum(
-            self._trajectory_index[uuid]["num_samples"] for uuid in window_uuids
-        )
         if window_total_samples == 0:
             return {}
 
@@ -353,78 +428,70 @@ class TrajectoryReplayBuffer:
         )
 
         # Convert global sample indices to per-trajectory local indices
-        chunks = []
         if not window_uuids:
             return {}
 
-        # Build cumulative end offsets for fast lookup
-        cumulative_ends = []
-
-        running = 0
-        for single_uuid in window_uuids:
-            running += self._trajectory_index[single_uuid]["num_samples"]
-            cumulative_ends.append(running)
-
         grouped_indices: dict[str, list[tuple[int, int]]] = {}
-        for idx_in_batch, sample_id in enumerate(sample_ids):
-            sample_id = int(sample_id)
-            idx = bisect.bisect_right(cumulative_ends, sample_id)
+        cumulative_ends_tensor = self._window_cache_cumulative_ends_tensor
+        if cumulative_ends_tensor is None or cumulative_ends_tensor.numel() == 0:
+            return {}
+
+        # Vectorized bucketize to map sample_ids -> trajectory indices
+        sample_ids_tensor = sample_ids.to(dtype=torch.long)
+        bucket_indices = torch.bucketize(
+            sample_ids_tensor, cumulative_ends_tensor, right=True
+        )
+        starts = torch.cat(
+            [torch.zeros(1, dtype=torch.long), cumulative_ends_tensor[:-1]]
+        )
+        local_sample_indices = sample_ids_tensor - starts[bucket_indices]
+
+        for idx_in_batch in range(sample_ids_tensor.numel()):
+            idx = int(bucket_indices[idx_in_batch])
             if idx >= len(window_uuids):
                 continue
             trajectory_uuid = window_uuids[idx]
-            start = 0 if idx == 0 else cumulative_ends[idx - 1]
-            local_sample_idx = sample_id - start
+            local_sample_idx = int(local_sample_indices[idx_in_batch])
             grouped_indices.setdefault(trajectory_uuid, []).append(
                 (idx_in_batch, local_sample_idx)
             )
 
-        # Load each trajectory once and extract multiple chunks
-        ordered_chunks: list[dict | None] = [None] * len(sample_ids)
+        # Load each trajectory once and extract multiple chunks (batched indexing)
+        batch = None
         for trajectory_uuid, local_indices in grouped_indices.items():
-            # Try to get from cache first
-            trajectory = None
-            if self._trajectory_cache is not None:
-                trajectory = self._trajectory_cache.get(trajectory_uuid)
-
-            # If not in cache, load from disk
-            if trajectory is None:
+            flat_trajectory = None
+            if self._flat_trajectory_cache is not None:
+                flat_trajectory = self._flat_trajectory_cache.get(trajectory_uuid)
+            if flat_trajectory is None:
                 trajectory = self._load_trajectory(trajectory_uuid)
+                flat_trajectory = self._flatten_trajectory(trajectory)
+                if self._flat_trajectory_cache is not None:
+                    self._flat_trajectory_cache.put(trajectory_uuid, flat_trajectory)
 
-            trajectory_info = self._trajectory_index[trajectory_uuid]
-            _, B = trajectory_info["shape"][:2]
+            if batch is None:
+                batch = self._init_batch_from_flat(flat_trajectory, num_chunks)
 
-            for idx_in_batch, local_sample_idx in local_indices:
-                t_idx = int(local_sample_idx // B)
-                b_idx = int(local_sample_idx % B)
+            batch_indices = torch.as_tensor(
+                [idx for idx, _ in local_indices], dtype=torch.long
+            )
+            local_indices_tensor = torch.as_tensor(
+                [local_idx for _, local_idx in local_indices], dtype=torch.long
+            )
 
-                chunk = self._extract_chunk_from_trajectory(trajectory, t_idx, b_idx)
-                ordered_chunks[idx_in_batch] = chunk
+            for key, value in flat_trajectory.items():
+                if isinstance(value, torch.Tensor):
+                    batch[key][batch_indices] = value[local_indices_tensor]
+                elif isinstance(value, dict):
+                    for nested_key, nested_value in value.items():
+                        if isinstance(nested_value, torch.Tensor):
+                            batch[key][nested_key][batch_indices] = nested_value[
+                                local_indices_tensor
+                            ]
 
-        for chunk in ordered_chunks:
-            if chunk:
-                chunks.append(chunk)
+        return batch if batch is not None else {}
 
-        # Merge chunks into batch [B, ...]
-        batch = self._merge_chunks_to_batch(chunks)
-        return batch
-
-    def _extract_chunk_from_trajectory(
-        self, trajectory: Trajectory, t_idx: int, b_idx: int
-    ) -> dict:
-        """
-        Extract a single chunk (time step) from a trajectory at position (t_idx, b_idx).
-
-        Args:
-            trajectory: Trajectory object with shape [T, B, ...]
-            t_idx: Time index
-            b_idx: Batch index within the trajectory
-
-        Returns:
-            Dictionary containing the chunk data
-        """
-        chunk = {}
-
-        # Extract tensor fields
+    def _flatten_trajectory(self, trajectory: Trajectory) -> dict:
+        flat: dict[str, object] = {}
         tensor_fields = trajectory.__dataclass_fields__.keys()
         for field in tensor_fields:
             if field in [
@@ -435,29 +502,64 @@ class TrajectoryReplayBuffer:
             ]:
                 continue
             tensor = getattr(trajectory, field)
-            if tensor is not None:
-                chunk[field] = tensor[t_idx, b_idx]
+            if isinstance(tensor, torch.Tensor) and tensor.dim() >= 2:
+                flat[field] = tensor.reshape(-1, *tensor.shape[2:])
 
-        # Extract curr_obs / next_obs (dict of tensors)
         if trajectory.curr_obs:
-            chunk["curr_obs"] = {}
+            flat["curr_obs"] = {}
             for key, tensor in trajectory.curr_obs.items():
-                if tensor is not None:
-                    chunk["curr_obs"][key] = tensor[t_idx, b_idx]
+                if isinstance(tensor, torch.Tensor) and tensor.dim() >= 2:
+                    flat["curr_obs"][key] = tensor.reshape(-1, *tensor.shape[2:])
+
         if trajectory.next_obs:
-            chunk["next_obs"] = {}
+            flat["next_obs"] = {}
             for key, tensor in trajectory.next_obs.items():
-                if tensor is not None:
-                    chunk["next_obs"][key] = tensor[t_idx, b_idx]
+                if isinstance(tensor, torch.Tensor) and tensor.dim() >= 2:
+                    flat["next_obs"][key] = tensor.reshape(-1, *tensor.shape[2:])
 
-        # Extract forward_inputs (dict of tensors)
         if trajectory.forward_inputs:
-            chunk["forward_inputs"] = {}
+            flat["forward_inputs"] = {}
             for key, tensor in trajectory.forward_inputs.items():
-                if tensor is not None:
-                    chunk["forward_inputs"][key] = tensor[t_idx, b_idx]
+                if isinstance(tensor, torch.Tensor) and tensor.dim() >= 2:
+                    flat["forward_inputs"][key] = tensor.reshape(-1, *tensor.shape[2:])
 
+        return flat
+
+    def _extract_chunk_from_flat_trajectory(
+        self, flat_trajectory: dict, idx: int
+    ) -> dict:
+        chunk: dict = {}
+        for key, value in flat_trajectory.items():
+            if isinstance(value, torch.Tensor):
+                chunk[key] = value[idx]
+            elif isinstance(value, dict):
+                nested = {}
+                for nested_key, tensor in value.items():
+                    if isinstance(tensor, torch.Tensor):
+                        nested[nested_key] = tensor[idx]
+                if nested:
+                    chunk[key] = nested
         return chunk
+
+    def _init_batch_from_flat(self, flat_trajectory: dict, batch_size: int) -> dict:
+        batch: dict[str, object] = {}
+        for key, value in flat_trajectory.items():
+            if isinstance(value, torch.Tensor):
+                shape = (batch_size, *value.shape[1:])
+                batch[key] = torch.empty(shape, dtype=value.dtype, device=value.device)
+            elif isinstance(value, dict):
+                nested_batch = {}
+                for nested_key, nested_value in value.items():
+                    if isinstance(nested_value, torch.Tensor):
+                        shape = (batch_size, *nested_value.shape[1:])
+                        nested_batch[nested_key] = torch.empty(
+                            shape,
+                            dtype=nested_value.dtype,
+                            device=nested_value.device,
+                        )
+                if nested_batch:
+                    batch[key] = nested_batch
+        return batch
 
     def _merge_chunks_to_batch(self, chunks: list[dict]) -> dict[str, torch.Tensor]:
         """
@@ -528,8 +630,8 @@ class TrajectoryReplayBuffer:
         self._trajectory_uuid_list.clear()
 
         # Clear cache
-        if self._trajectory_cache is not None:
-            self._trajectory_cache.clear()
+        if self._flat_trajectory_cache is not None:
+            self._flat_trajectory_cache.clear()
 
         # Reset state
         self.size = 0
@@ -541,16 +643,20 @@ class TrajectoryReplayBuffer:
         stats = {
             "num_trajectories": self.size,
             "total_samples": self._total_samples,
-            "cache_size": len(self._trajectory_cache.cache)
-            if self._trajectory_cache
+            "cache_size": len(self._flat_trajectory_cache.cache)
+            if self._flat_trajectory_cache
             else 0,
         }
         return stats
 
-    def save(self, save_path: str):
+    def save_checkpoint(self, save_path: str):
         """
         Save buffer state (metadata and indices) to save_path.
         """
+        if not self.save_trajectories:
+            raise RuntimeError(
+                "save_trajectories=False: checkpoint save is not supported."
+            )
         # Create save directory
         os.makedirs(save_path, exist_ok=True)
 
@@ -558,7 +664,7 @@ class TrajectoryReplayBuffer:
         self._save_metadata(save_path)
         self._save_trajectory_index(save_path)
 
-    def load(
+    def load_checkpoint(
         self,
         load_path: str,
         is_distributed: bool = False,
@@ -653,5 +759,6 @@ class TrajectoryReplayBuffer:
 
     def clear_cache(self):
         """Clear trajectory cache."""
-        if self._trajectory_cache is not None:
-            self._trajectory_cache.clear()
+        self.close()
+        if self._flat_trajectory_cache is not None:
+            self._flat_trajectory_cache.clear()

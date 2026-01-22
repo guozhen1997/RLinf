@@ -218,6 +218,9 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             enable_cache=self.cfg.algorithm.replay_buffer.enable_cache,
             cache_size=self.cfg.algorithm.replay_buffer.cache_size,
             sample_window_size=self.cfg.algorithm.replay_buffer.sample_window_size,
+            save_trajectories=self.cfg.algorithm.replay_buffer.get(
+                "save_trajectories", True
+            ),
         )
 
         if self.cfg.algorithm.get("demo_buffer", {}).get("load_path", None) is not None:
@@ -230,8 +233,11 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 enable_cache=self.cfg.algorithm.demo_buffer.enable_cache,
                 cache_size=self.cfg.algorithm.demo_buffer.cache_size,
                 sample_window_size=self.cfg.algorithm.demo_buffer.sample_window_size,
+                save_trajectories=self.cfg.algorithm.demo_buffer.get(
+                    "save_trajectories", True
+                ),
             )
-            self.demo_buffer.load(
+            self.demo_buffer.load_checkpoint(
                 self.cfg.algorithm.demo_buffer.load_path,
                 is_distributed=True,
                 load_rank=self._rank,
@@ -648,21 +654,21 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         buffer_save_path = os.path.join(
             save_base_path, f"buffers/replay_buffer/rank_{self._rank}"
         )
-        self.replay_buffer.save(buffer_save_path)
+        self.replay_buffer.save_checkpoint(buffer_save_path)
         if self.demo_buffer is not None:
             demo_save_path = os.path.join(
                 save_base_path, f"buffers/demo_buffer/rank_{self._rank}"
             )
-            self.demo_buffer.save(demo_save_path)
+            self.demo_buffer.save_checkpoint(demo_save_path)
 
     def load_checkpoint(self, load_base_path):
         super().load_checkpoint(load_base_path)
         buffer_load_path = os.path.join(
             load_base_path, f"buffers/replay_buffer/rank_{self._rank}"
         )
-        self.replay_buffer.load(buffer_load_path)
+        self.replay_buffer.load_checkpoint(buffer_load_path)
         if self.demo_buffer is not None:
             demo_load_path = os.path.join(
                 load_base_path, f"buffers/demo_buffer/rank_{self._rank}"
             )
-            self.demo_buffer.load(demo_load_path)
+            self.demo_buffer.load_checkpoint(demo_load_path)

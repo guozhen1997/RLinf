@@ -125,6 +125,7 @@ rollout:
   pipeline_stage_num: 1
 
   collect_transitions: True
+  collect_prev_infos: False
 
   model:
     model_path: "/path/to/model"
