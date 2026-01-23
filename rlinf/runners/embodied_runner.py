@@ -185,7 +185,7 @@ class EmbodiedRunner:
 
                 # actor training.
                 actor_training_handle: Handle = self.actor.run_training()
-                
+
                 actor_training_metrics = actor_training_handle.wait()
 
                 self.global_step += 1
@@ -211,10 +211,13 @@ class EmbodiedRunner:
                     self._save_checkpoint()
 
             time_metrics = self.timer.consume_durations()
-            actor_training_time_metircs = actor_training_handle.consume_durations()
+            actor_training_time_metircs = {
+                f"time/actor/{k}": v
+                for k, v in actor_training_handle.consume_durations().items()
+            }
 
             time_metrics = {f"time/{k}": v for k, v in time_metrics.items()}
-            time_metrics.update({f"time/actor/{k}": v for k, v in actor_training_time_metircs.items()})
+            time_metrics.update(actor_training_time_metircs)
 
             env_results_list = [
                 results for results in env_handle.wait() if results is not None

@@ -117,7 +117,9 @@ class AsyncEnvWorker(EnvWorker):
 
             env_metrics = {f"env/{k}": v for k, v in env_metrics.items()}
             env_interact_time_metrics = self.pop_execution_times()
-            env_metrics.update({f"time/env/{k}": v for k, v in env_interact_time_metrics.items()})
+            env_metrics.update(
+                {f"time/env/{k}": v for k, v in env_interact_time_metrics.items()}
+            )
             metric_channel.put(env_metrics)
 
             self.last_obs_list = [env_output.obs for env_output in env_output_list]

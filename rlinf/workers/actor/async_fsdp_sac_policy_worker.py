@@ -16,9 +16,10 @@ import asyncio
 
 import torch
 
+from rlinf.scheduler import Worker
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
-from rlinf.scheduler import Worker
+
 
 class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
     should_stop = False

@@ -104,7 +104,6 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
         while train_step < self.max_steps:
             skip_step = False
             with self.timer("step"):
-
                 actor_training_handle: Handle = self.actor.run_training()
                 actor_result = actor_training_handle.wait()
                 if not actor_result[0]:
@@ -114,8 +113,9 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
                     train_step += 1
                     self.update_rollout_weights()
 
-                    training_metrics = {f"train/{k}": v for k, v in actor_result[0].items()}
-                    self.metric_logger.log(training_metrics, train_step)
+                    training_metrics = {
+                        f"train/{k}": v for k, v in actor_result[0].items()
+                    }
 
                     run_val, save_model, _ = check_progress(
                         self.global_step,
@@ -131,10 +131,10 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
                     if run_val:
                         with self.timer("eval"):
                             eval_metrics = self.evaluate()
-                            eval_metrics = {f"eval/{k}": v for k, v in eval_metrics.items()}
-                            self.metric_logger.log(data=eval_metrics, step=train_step)
+                            eval_metrics = {
+                                f"eval/{k}": v for k, v in eval_metrics.items()
+                            }
 
-            
             if skip_step:
                 self.timer.consume_durations()
                 time.sleep(1.0)
@@ -142,19 +142,21 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
 
             time_metrics = self.timer.consume_durations()
             time_metrics = {f"time/{k}": v for k, v in time_metrics.items()}
-            self.metric_logger.log(time_metrics, train_step)
+            actor_training_time_metrics = {
+                f"time/actor/{k}": v
+                for k, v in actor_training_handle.consume_durations().items()
+            }
+            time_metrics.update(actor_training_time_metrics)
             env_metrics = self.get_env_metrics()
             rollout_metrics = self.get_rollout_metrics()
-            if len(env_metrics) > 0:
-                self.metric_logger.log(env_metrics, train_step)
-            if len(rollout_metrics) > 0:
-                self.metric_logger.log(rollout_metrics, train_step)
+
+            self.metric_logger.log(time_metrics, train_step)
+            self.metric_logger.log(env_metrics, train_step)
+            self.metric_logger.log(rollout_metrics, train_step)
+            self.metric_logger.log(training_metrics, train_step)
 
             logging_metrics = time_metrics
-            actor_training_time_metrics = actor_training_handle.consume_durations()
-            logging_metrics.update({f"time/actor/{k}": v for k, v in actor_training_time_metrics.items()})
-            if eval_metrics is not None:
-                logging_metrics.update(eval_metrics)
+            logging_metrics.update(eval_metrics)
             logging_metrics.update(env_metrics)
             logging_metrics.update(rollout_metrics)
             logging_metrics.update(training_metrics)

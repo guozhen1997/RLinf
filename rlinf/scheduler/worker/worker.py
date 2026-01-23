@@ -16,7 +16,6 @@ import ctypes
 import functools
 import importlib
 import inspect
-import functools
 import logging
 import os
 import signal
@@ -864,18 +863,24 @@ class Worker(metaclass=WorkerMeta):
     @staticmethod
     def timer(tag: Optional[str] = None):
         """Decorator to time a worker function."""
+
         def decorator(func):
             if inspect.iscoroutinefunction(func):
+
                 @functools.wraps(func)
                 async def wrapper(self, *args, **kwargs):
                     with self.worker_timer(tag or func.__name__):
                         return await func(self, *args, **kwargs)
+
                 return wrapper
+
             @functools.wraps(func)
             def wrapper(self, *args, **kwargs):
                 with self.worker_timer(tag or func.__name__):
                     return func(self, *args, **kwargs)
+
             return wrapper
+
         return decorator
 
     @staticmethod

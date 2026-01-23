@@ -13,17 +13,19 @@
 # limitations under the License.
 
 
-from rlinf.data.embodied_io_struct import ChunkStepResult, EmbodiedRolloutResult
+from rlinf.data.embodied_io_struct import EmbodiedRolloutResult
 from rlinf.scheduler import Channel
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
-from rlinf.scheduler import Worker
+
 
 class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
-
     async def generate(
-        self, input_channel: Channel, output_channel: Channel, replay_channel: Channel, metric_channel: Channel
+        self,
+        input_channel: Channel,
+        output_channel: Channel,
+        replay_channel: Channel,
+        metric_channel: Channel,
     ):
-
         while not self.should_stop:
             # rollout_results[stage_id]
             self.rollout_results: list[EmbodiedRolloutResult] = [
@@ -35,12 +37,14 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
 
             await self.generate_epoch(input_channel, output_channel)
             for stage_id in range(self.num_pipeline_stages):
-                self.send_rollout_trajectories(
+                await self.send_rollout_trajectories(
                     self.rollout_results[stage_id], replay_channel
                 )
 
             rollout_metrics = self.pop_execution_times()
-            rollout_metrics = {f"time/rollout/{k}": v for k, v in rollout_metrics.items()}
+            rollout_metrics = {
+                f"time/rollout/{k}": v for k, v in rollout_metrics.items()
+            }
             metric_channel.put(rollout_metrics, async_op=True)
 
     async def stop(self):

@@ -30,7 +30,7 @@ from rlinf.hybrid_engines.fsdp import (
     FSDPModule,
 )
 from rlinf.models.embodiment.base_policy import ForwardType
-from rlinf.scheduler import Channel
+from rlinf.scheduler import Channel, Worker
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import (
     append_to_dict,
@@ -42,7 +42,6 @@ from rlinf.utils.nested_dict_process import (
     split_dict_to_chunk,
 )
 from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
-from rlinf.scheduler import Worker
 
 
 class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
@@ -470,19 +469,20 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             self.cfg.actor.global_batch_size // self._world_size
         )
 
-        if self.demo_buffer is not None:
-            replay_batch = self.replay_buffer.sample(
-                num_chunks=global_batch_size_per_rank // 2
-            )
-            demo_batch = self.demo_buffer.sample(
-                num_chunks=global_batch_size_per_rank // 2
-            )
-            global_batch = concat_batch(replay_batch, demo_batch)
-        else:
-            # Sample batch from replay buffer
-            global_batch = self.replay_buffer.sample(
-                num_chunks=global_batch_size_per_rank
-            )
+        with self.worker_timer("sample"):
+            if self.demo_buffer is not None:
+                replay_batch = self.replay_buffer.sample(
+                    num_chunks=global_batch_size_per_rank // 2
+                )
+                demo_batch = self.demo_buffer.sample(
+                    num_chunks=global_batch_size_per_rank // 2
+                )
+                global_batch = concat_batch(replay_batch, demo_batch)
+            else:
+                # Sample batch from replay buffer
+                global_batch = self.replay_buffer.sample(
+                    num_chunks=global_batch_size_per_rank
+                )
 
         train_micro_batch_list = split_dict_to_chunk(
             global_batch,

@@ -199,12 +199,11 @@ class MultiStepRolloutWorker(Worker):
 
     @Worker.timer("generate_epoch")
     async def generate_epoch(self, input_channel: Channel, output_channel: Channel):
-        
         n_chunk_steps = (
             self.cfg.env.train.max_steps_per_rollout_epoch
             // self.cfg.actor.model.num_action_chunks
         )
-        
+
         last_obs = [None for i in range(self.num_pipeline_stages)]
         for _ in range(n_chunk_steps):
             for stage_id in range(self.num_pipeline_stages):
@@ -246,7 +245,9 @@ class MultiStepRolloutWorker(Worker):
                         if dones.any() and self.cfg.env.train.auto_reset
                         else env_output["obs"]
                     )
-                    self.rollout_results[stage_id].append_transitions(curr_obs, next_obs)
+                    self.rollout_results[stage_id].append_transitions(
+                        curr_obs, next_obs
+                    )
 
                 last_obs[stage_id] = env_output["obs"]
 
