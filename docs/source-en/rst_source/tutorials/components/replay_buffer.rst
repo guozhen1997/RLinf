@@ -23,7 +23,7 @@ Quick Start
    )
 
 Common Parameters
-----------------
+-----------------
 
 - `storage_dir`: trajectory storage directory; defaults to a temp directory.
 - `storage_format`: `pt` (default) or `pkl`.

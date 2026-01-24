@@ -209,16 +209,6 @@ class CNNPolicy(nn.Module, BasePolicy):
         if next_obs is not None:
             next_obs = self.preprocess_env_obs(next_obs)
             kwargs.update({"next_obs": next_obs})
-        forward_inputs = kwargs.get("forward_inputs", None)
-        if forward_inputs is not None:
-            obs = {
-                "main_images": forward_inputs["main_images"],
-                "states": forward_inputs["states"],
-            }
-            if "extra_view_images" in forward_inputs:
-                obs["extra_view_images"] = forward_inputs["extra_view_images"]
-            obs = self.preprocess_env_obs(obs)
-            kwargs.update({"obs": obs})
 
         if forward_type == ForwardType.SAC:
             return self.sac_forward(**kwargs)
@@ -235,14 +225,21 @@ class CNNPolicy(nn.Module, BasePolicy):
 
     def default_forward(
         self,
-        obs,
+        forward_inputs,
         compute_logprobs=True,
         compute_entropy=True,
         compute_values=True,
         sample_action=False,
         **kwargs,
     ):
-        action = kwargs["action"]
+        obs = {
+            "main_images": forward_inputs["main_images"],
+            "states": forward_inputs["states"],
+        }
+        if "extra_view_images" in forward_inputs:
+            obs["extra_view_images"] = forward_inputs["extra_view_images"]
+        obs = self.preprocess_env_obs(obs)
+        action = forward_inputs["action"]
 
         full_feature, visual_feature = self.get_feature(obs)
         mix_feature = self.mix_proj(full_feature)
@@ -306,8 +303,8 @@ class CNNPolicy(nn.Module, BasePolicy):
         mode="train",
         **kwargs,
     ):
-        env_obs = self.preprocess_env_obs(env_obs)
-        full_feature, visual_feature = self.get_feature(env_obs)
+        obs = self.preprocess_env_obs(env_obs)
+        full_feature, visual_feature = self.get_feature(obs)
         mix_feature = self.mix_proj(full_feature)
         action_mean = self.actor_mean(mix_feature)
         if self.cfg.independent_std:

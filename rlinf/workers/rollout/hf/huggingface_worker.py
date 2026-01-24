@@ -121,7 +121,12 @@ class MultiStepRolloutWorker(Worker):
         ]:
             kwargs = {"mode": mode}
 
-        kwargs["return_obs"] = not hasattr(self.hf_model, "q_head")
+        if SupportedModel(self.cfg.actor.model.model_type) in [
+            SupportedModel.CNN_POLICY,
+            SupportedModel.FLOW_POLICY,
+            SupportedModel.MLP_POLICY,
+        ]:
+            kwargs["return_obs"] = not hasattr(self.hf_model, "q_head")
 
         with torch.no_grad():
             actions, result = self.hf_model.predict_action_batch(

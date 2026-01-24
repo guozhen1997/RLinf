@@ -29,7 +29,7 @@ and made contiguous.
    :member-order: bysource
 
 ChunkStepResult
---------------
+---------------
 
 `ChunkStepResult` represents per-step inference results and training signals,
 including actions, log-probabilities, value estimates, and extra forward inputs.

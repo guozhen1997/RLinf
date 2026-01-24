@@ -654,9 +654,12 @@ class TrajectoryReplayBuffer:
         Save buffer state (metadata and indices) to save_path.
         """
         if not self.save_trajectories:
-            raise RuntimeError(
+            from rlinf.utils.logging import get_logger
+
+            get_logger().warning(
                 "save_trajectories=False: checkpoint save is not supported."
             )
+            return
         # Create save directory
         os.makedirs(save_path, exist_ok=True)
 

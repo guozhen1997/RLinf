@@ -211,13 +211,22 @@ class EmbodiedRunner:
                     self._save_checkpoint()
 
             time_metrics = self.timer.consume_durations()
-            actor_training_time_metircs = {
-                f"time/actor/{k}": v
-                for k, v in actor_training_handle.consume_durations().items()
-            }
-
             time_metrics = {f"time/{k}": v for k, v in time_metrics.items()}
-            time_metrics.update(actor_training_time_metircs)
+            time_metrics.update(
+                {f"time/env/{k}": v for k, v in env_handle.consume_durations().items()}
+            )
+            time_metrics.update(
+                {
+                    f"time/rollout/{k}": v
+                    for k, v in rollout_handle.consume_durations().items()
+                }
+            )
+            time_metrics.update(
+                {
+                    f"time/actor/{k}": v
+                    for k, v in actor_training_handle.consume_durations().items()
+                }
+            )
 
             env_results_list = [
                 results for results in env_handle.wait() if results is not None

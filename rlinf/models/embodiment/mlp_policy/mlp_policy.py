@@ -108,6 +108,10 @@ class MLPPolicy(nn.Module, BasePolicy):
         if obs is not None:
             obs = self.preprocess_env_obs(obs)
             kwargs.update({"obs": obs})
+        next_obs = kwargs.get("next_obs")
+        if next_obs is not None:
+            next_obs = self.preprocess_env_obs(next_obs)
+            kwargs.update({"next_obs": next_obs})
 
         if forward_type == ForwardType.SAC:
             return self.sac_forward(**kwargs)

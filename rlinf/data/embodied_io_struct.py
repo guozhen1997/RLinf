@@ -29,6 +29,8 @@ from rlinf.utils.nested_dict_process import (
 
 @dataclass(kw_only=True)
 class EnvOutput:
+    """Environment output for a single chunk step."""
+
     obs: dict[str, Any]
     final_obs: Optional[dict[str, Any]] = None
     dones: Optional[torch.Tensor] = None  # [B]
@@ -111,6 +113,8 @@ class EnvOutput:
 
 @dataclass(kw_only=True)
 class ChunkStepResult:
+    """Model outputs, env outputs (without observations), and training forward inputs for a chunk step."""
+
     actions: torch.Tensor = None  # [B, action_dim]
     prev_logprobs: torch.Tensor = None  # [B, action_dim]
     prev_values: torch.Tensor = None  # [B, 1]
@@ -161,7 +165,8 @@ class Trajectory:
 @dataclass(kw_only=True)
 class EmbodiedRolloutResult:
     """
-    collect trajectories for rollout.
+    Collect chunk-step results and transitions during rollout,
+    and convert them into trajectory tensors.
     """
 
     max_episode_length: int = 0
