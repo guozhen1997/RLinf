@@ -148,7 +148,9 @@ class Trajectory:
     """
 
     max_episode_length: int = 0  # max episode length
-    model_weights_id: int = 0
+    model_weights_id: str = (
+        ""  # str(model_weigths_uuid) + "_" + str(model_update_count)
+    )
     actions: torch.Tensor = None
     intervene_flags: torch.Tensor = None
     rewards: torch.Tensor = None
@@ -171,7 +173,7 @@ class EmbodiedRolloutResult:
     """
 
     max_episode_length: int = 0
-    model_weights_id: str = 0
+    model_weights_id: str = ""
 
     actions: list[torch.Tensor] = field(default_factory=list)  # trajectory_length
     intervene_flags: list[torch.Tensor] = field(

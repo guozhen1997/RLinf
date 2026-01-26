@@ -35,18 +35,18 @@ class TrajectoryCache:
         self.cache: OrderedDict[str, dict] = OrderedDict()
         self.max_size = max_size
 
-    def get(self, trajectory_uuid: str) -> Optional[dict]:
-        return self.cache.get(trajectory_uuid)
+    def get(self, trajectory_id: str) -> Optional[dict]:
+        return self.cache.get(trajectory_id)
 
-    def put(self, trajectory_uuid: str, trajectory: dict):
-        if trajectory_uuid not in self.cache:
-            self.cache[trajectory_uuid] = trajectory
+    def put(self, trajectory_id: str, trajectory: dict):
+        if trajectory_id not in self.cache:
+            self.cache[trajectory_id] = trajectory
             # Evict oldest if cache is full
             if len(self.cache) > self.max_size:
                 self.cache.popitem(last=False)
         else:
             # Update existing without changing position
-            self.cache[trajectory_uuid] = trajectory
+            self.cache[trajectory_id] = trajectory
 
     def clear(self):
         self.cache.clear()
@@ -98,15 +98,16 @@ class TrajectoryReplayBuffer:
         if self.save_trajectories:
             os.makedirs(self.storage_dir, exist_ok=True)
 
-        # Trajectory index: dict mapping trajectory_uuid to trajectory metadata
+        # Trajectory index: dict mapping trajectory_id to trajectory metadata
         # Each entry: {
         #   "num_samples": int,  # T * B (total samples in this trajectory)
-        #   "trajectory_id": int,  # sequential ID
+        #   "trajectory_id": int,  # trajectory ID
         #   "max_episode_length": int,  # max episode length
         #   "shape": tuple,  # (T, B, ...)
+        #   "model_weights_id": str,  # model weights ID
         # }
-        self._trajectory_index: dict[str, dict] = {}
-        self._trajectory_uuid_list: list[str] = []  # Ordered list of trajectory UUIDs
+        self._trajectory_index: dict[int, dict] = {}
+        self._trajectory_id_list: list[int] = []  # Ordered list of trajectory IDs
         self._trajectory_counter = 0  # Next trajectory ID to use
         self._index_version = 0
 
@@ -122,7 +123,7 @@ class TrajectoryReplayBuffer:
         # Cached window metadata for faster sampling
         self._window_cache_size = None
         self._window_cache_version = None
-        self._window_cache_uuids: list[str] = []
+        self._window_cache_ids: list[int] = []
         self._window_cache_cumulative_ends: list[int] = []
         self._window_cache_cumulative_ends_tensor: Optional[torch.Tensor] = None
         self._window_cache_total_samples = 0
@@ -146,17 +147,15 @@ class TrajectoryReplayBuffer:
 
     def _get_trajectory_path(
         self,
-        trajectory_uuid: str,
-        trajectory_id: Optional[int] = None,
+        trajectory_id: int,
+        model_weights_id: str,
         base_dir: Optional[str] = None,
     ) -> str:
         """Get file path for a trajectory."""
-        if trajectory_id is None:
-            trajectory_id = self._trajectory_counter
         ext = ".pt" if self.storage_format == "pt" else ".pkl"
         base_dir = base_dir or self.storage_dir
         return os.path.join(
-            base_dir, f"trajectory_{trajectory_id}_{trajectory_uuid}{ext}"
+            base_dir, f"trajectory_{trajectory_id}_{model_weights_id}{ext}"
         )
 
     def _get_metadata_path(self, base_dir: Optional[str] = None) -> str:
@@ -201,23 +200,23 @@ class TrajectoryReplayBuffer:
                 with open(index_path, "r") as f:
                     index_data = json.load(f)
                 self._trajectory_index = index_data.get("trajectory_index", {})
-                self._trajectory_uuid_list = index_data.get("trajectory_uuid_list", [])
+                self._trajectory_id_list = index_data.get("trajectory_id_list", [])
 
     def _save_trajectory_index(self, save_path: Optional[str] = None):
         """Save trajectory index to disk."""
         with self._index_lock:
             index_data = {
                 "trajectory_index": copy.deepcopy(self._trajectory_index),
-                "trajectory_uuid_list": list(self._trajectory_uuid_list),
+                "trajectory_id_list": list(self._trajectory_id_list),
             }
             with open(self._get_trajectory_index_path(save_path), "w") as f:
                 json.dump(index_data, f)
 
     def _save_trajectory(
-        self, trajectory: Trajectory, trajectory_uuid: str, trajectory_id: int
+        self, trajectory: Trajectory, trajectory_id: int, model_weights_id: str
     ):
         """Save a single episode to disk as a dictionary."""
-        trajectory_path = self._get_trajectory_path(trajectory_uuid, trajectory_id)
+        trajectory_path = self._get_trajectory_path(trajectory_id, model_weights_id)
 
         # Convert Trajectory to dictionary for more stable storage
         trajectory_dict = {}
@@ -232,18 +231,18 @@ class TrajectoryReplayBuffer:
             with open(trajectory_path, "wb") as f:
                 pkl.dump(trajectory_dict, f)
 
-    def _load_trajectory(self, trajectory_uuid: str) -> Trajectory:
+    def _load_trajectory(self, trajectory_id: int, model_weights_id: str) -> Trajectory:
         """Load a trajectory from disk and reconstruct Trajectory object."""
 
         # Get trajectory info from index
-        if trajectory_uuid not in self._trajectory_index:
-            raise ValueError(f"Trajectory {trajectory_uuid} not found in index")
+        if trajectory_id not in self._trajectory_index:
+            raise ValueError(f"Trajectory {trajectory_id} not found in index")
 
-        trajectory_info = self._trajectory_index[trajectory_uuid]
+        trajectory_info = self._trajectory_index[trajectory_id]
 
         trajectory_path = self._get_trajectory_path(
-            trajectory_uuid,
-            trajectory_info.get("trajectory_id"),
+            trajectory_id,
+            model_weights_id,
             base_dir=self.storage_dir,
         )
 
@@ -280,8 +279,7 @@ class TrajectoryReplayBuffer:
 
         save_futures = []
         for trajectory in trajectories:
-            # Use model_weights_id as trajectory UUID
-            trajectory_uuid = trajectory.model_weights_id
+            model_weights_id = trajectory.model_weights_id
             trajectory_id = self._trajectory_counter
 
             # Calculate total samples: T * B
@@ -303,8 +301,8 @@ class TrajectoryReplayBuffer:
                     self._save_executor.submit(
                         self._save_trajectory,
                         trajectory,
-                        trajectory_uuid,
                         trajectory_id,
+                        model_weights_id,
                     )
                 )
 
@@ -315,9 +313,10 @@ class TrajectoryReplayBuffer:
                     "trajectory_id": trajectory_id,
                     "max_episode_length": trajectory.max_episode_length,
                     "shape": tuple(trajectory_shape),
+                    "model_weights_id": model_weights_id,
                 }
-                self._trajectory_index[trajectory_uuid] = trajectory_info
-                self._trajectory_uuid_list.append(trajectory_uuid)
+                self._trajectory_index[trajectory_id] = trajectory_info
+                self._trajectory_id_list.append(trajectory_id)
 
                 # Update counters
                 self._trajectory_counter += 1
@@ -327,7 +326,7 @@ class TrajectoryReplayBuffer:
 
             if self._flat_trajectory_cache is not None:
                 self._flat_trajectory_cache.put(
-                    trajectory_uuid, self._flatten_trajectory(trajectory)
+                    trajectory_id, self._flatten_trajectory(trajectory)
                 )
 
         # Save metadata/index after all trajectory saves finish
@@ -383,25 +382,25 @@ class TrajectoryReplayBuffer:
                 self._window_cache_size == window_size
                 and self._window_cache_version == self._index_version
             ):
-                window_uuids = self._window_cache_uuids
+                window_ids = self._window_cache_ids
                 cumulative_ends = self._window_cache_cumulative_ends
                 window_total_samples = self._window_cache_total_samples
             else:
                 if window_size > 0:
-                    window_uuids = list(self._trajectory_uuid_list[-window_size:])
+                    window_ids = list(self._trajectory_id_list[-window_size:])
                 else:
-                    window_uuids = list(self._trajectory_uuid_list)
+                    window_ids = list(self._trajectory_id_list)
 
                 cumulative_ends = []
                 running = 0
-                for single_uuid in window_uuids:
-                    running += self._trajectory_index[single_uuid]["num_samples"]
+                for single_id in window_ids:
+                    running += self._trajectory_index[single_id]["num_samples"]
                     cumulative_ends.append(running)
                 window_total_samples = running
 
                 self._window_cache_size = window_size
                 self._window_cache_version = self._index_version
-                self._window_cache_uuids = window_uuids
+                self._window_cache_ids = window_ids
                 self._window_cache_cumulative_ends = cumulative_ends
                 self._window_cache_cumulative_ends_tensor = (
                     torch.as_tensor(cumulative_ends, dtype=torch.long)
@@ -410,7 +409,7 @@ class TrajectoryReplayBuffer:
                 )
                 self._window_cache_total_samples = window_total_samples
 
-        if not window_uuids:
+        if not window_ids:
             return {}
 
         if window_total_samples == 0:
@@ -428,7 +427,7 @@ class TrajectoryReplayBuffer:
         )
 
         # Convert global sample indices to per-trajectory local indices
-        if not window_uuids:
+        if not window_ids:
             return {}
 
         grouped_indices: dict[str, list[tuple[int, int]]] = {}
@@ -448,25 +447,28 @@ class TrajectoryReplayBuffer:
 
         for idx_in_batch in range(sample_ids_tensor.numel()):
             idx = int(bucket_indices[idx_in_batch])
-            if idx >= len(window_uuids):
+            if idx >= len(window_ids):
                 continue
-            trajectory_uuid = window_uuids[idx]
+            trajectory_id = window_ids[idx]
             local_sample_idx = int(local_sample_indices[idx_in_batch])
-            grouped_indices.setdefault(trajectory_uuid, []).append(
+            grouped_indices.setdefault(trajectory_id, []).append(
                 (idx_in_batch, local_sample_idx)
             )
 
         # Load each trajectory once and extract multiple chunks (batched indexing)
         batch = None
-        for trajectory_uuid, local_indices in grouped_indices.items():
+        for trajectory_id, local_indices in grouped_indices.items():
             flat_trajectory = None
             if self._flat_trajectory_cache is not None:
-                flat_trajectory = self._flat_trajectory_cache.get(trajectory_uuid)
+                flat_trajectory = self._flat_trajectory_cache.get(trajectory_id)
             if flat_trajectory is None:
-                trajectory = self._load_trajectory(trajectory_uuid)
+                model_weights_id = self._trajectory_index[trajectory_id][
+                    "model_weights_id"
+                ]
+                trajectory = self._load_trajectory(trajectory_id, model_weights_id)
                 flat_trajectory = self._flatten_trajectory(trajectory)
                 if self._flat_trajectory_cache is not None:
-                    self._flat_trajectory_cache.put(trajectory_uuid, flat_trajectory)
+                    self._flat_trajectory_cache.put(trajectory_id, flat_trajectory)
 
             if batch is None:
                 batch = self._init_batch_from_flat(flat_trajectory, num_chunks)
@@ -620,7 +622,7 @@ class TrajectoryReplayBuffer:
     def clear(self):
         # Clear index
         self._trajectory_index.clear()
-        self._trajectory_uuid_list.clear()
+        self._trajectory_id_list.clear()
 
         # Clear cache
         if self._flat_trajectory_cache is not None:
@@ -699,7 +701,7 @@ class TrajectoryReplayBuffer:
             index_data = json.load(f)
 
         full_trajectory_index = index_data.get("trajectory_index", {})
-        full_trajectory_uuid_list = index_data.get("trajectory_uuid_list", [])
+        full_trajectory_id_list = index_data.get("trajectory_id_list", [])
 
         # Handle distributed loading
         if is_distributed:
@@ -711,7 +713,7 @@ class TrajectoryReplayBuffer:
                 raise ValueError(f"world_size ({world_size}) must be > 0")
 
             # Split trajectory_uuid_list into world_size parts
-            total_trajectories = len(full_trajectory_uuid_list)
+            total_trajectories = len(full_trajectory_id_list)
             trajectories_per_split = total_trajectories // world_size
             remainder = total_trajectories % world_size
 
@@ -724,17 +726,17 @@ class TrajectoryReplayBuffer:
             )
 
             # Extract the portion for this rank
-            self._trajectory_uuid_list = full_trajectory_uuid_list[start_idx:end_idx]
+            self._trajectory_id_list = full_trajectory_id_list[start_idx:end_idx]
 
             # Filter trajectory_index to only include trajectories in this rank's portion
             self._trajectory_index = {
-                uuid: full_trajectory_index[uuid]
-                for uuid in self._trajectory_uuid_list
-                if uuid in full_trajectory_index
+                id: full_trajectory_index[id]
+                for id in self._trajectory_id_list
+                if id in full_trajectory_index
             }
 
             # Update size, total_samples, and trajectory_counter based on loaded portion
-            self.size = len(self._trajectory_uuid_list)
+            self.size = len(self._trajectory_id_list)
             self._total_samples = sum(
                 trajectory_info.get("num_samples", 0)
                 for trajectory_info in self._trajectory_index.values()
@@ -751,7 +753,7 @@ class TrajectoryReplayBuffer:
         else:
             # Full load
             self._trajectory_index = full_trajectory_index
-            self._trajectory_uuid_list = full_trajectory_uuid_list
+            self._trajectory_id_list = full_trajectory_id_list
             self.size = metadata.get("size", 0)
             self._total_samples = metadata.get("total_samples", 0)
             self._trajectory_counter = metadata.get("trajectory_counter", 0)
