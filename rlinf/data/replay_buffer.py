@@ -17,9 +17,7 @@ import copy
 import json
 import os
 import pickle as pkl
-import tempfile
 import threading
-import uuid
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -64,9 +62,9 @@ class TrajectoryReplayBuffer:
     def __init__(
         self,
         seed: Optional[int] = 1234,
-        storage_dir: Optional[str] = None,
         enable_cache: bool = True,
         cache_size: int = 5,
+        storage_dir: str = "",
         storage_format: str = "pt",
         sample_window_size: int = 100,
         save_trajectories: bool = True,
@@ -95,16 +93,14 @@ class TrajectoryReplayBuffer:
             )
 
         # Storage directory
-        if storage_dir is None:
-            storage_dir = tempfile.mkdtemp(prefix="trajectory_replay_buffer_")
+        assert storage_dir != "", "storage_dir is required"
         self.storage_dir = storage_dir
-        os.makedirs(self.storage_dir, exist_ok=True)
+        if self.save_trajectories:
+            os.makedirs(self.storage_dir, exist_ok=True)
 
         # Trajectory index: dict mapping trajectory_uuid to trajectory metadata
         # Each entry: {
-        #   "uuid": str,
         #   "num_samples": int,  # T * B (total samples in this trajectory)
-        #   "path": str,  # file path
         #   "trajectory_id": int,  # sequential ID
         #   "max_episode_length": int,  # max episode length
         #   "shape": tuple,  # (T, B, ...)
@@ -149,14 +145,18 @@ class TrajectoryReplayBuffer:
         self.random_generator.manual_seed(seed)
 
     def _get_trajectory_path(
-        self, trajectory_uuid: str, trajectory_id: Optional[int] = None
+        self,
+        trajectory_uuid: str,
+        trajectory_id: Optional[int] = None,
+        base_dir: Optional[str] = None,
     ) -> str:
         """Get file path for a trajectory."""
         if trajectory_id is None:
             trajectory_id = self._trajectory_counter
         ext = ".pt" if self.storage_format == "pt" else ".pkl"
+        base_dir = base_dir or self.storage_dir
         return os.path.join(
-            self.storage_dir, f"trajectory_{trajectory_id}_{trajectory_uuid}{ext}"
+            base_dir, f"trajectory_{trajectory_id}_{trajectory_uuid}{ext}"
         )
 
     def _get_metadata_path(self, base_dir: Optional[str] = None) -> str:
@@ -173,6 +173,7 @@ class TrajectoryReplayBuffer:
         """Save metadata to disk."""
         with self._index_lock:
             metadata = {
+                "storage_dir": self.storage_dir,
                 "storage_format": self.storage_format,
                 "size": self.size,
                 "total_samples": self._total_samples,
@@ -239,7 +240,12 @@ class TrajectoryReplayBuffer:
             raise ValueError(f"Trajectory {trajectory_uuid} not found in index")
 
         trajectory_info = self._trajectory_index[trajectory_uuid]
-        trajectory_path = trajectory_info["path"]
+
+        trajectory_path = self._get_trajectory_path(
+            trajectory_uuid,
+            trajectory_info.get("trajectory_id"),
+            base_dir=self.storage_dir,
+        )
 
         if not os.path.exists(trajectory_path):
             raise FileNotFoundError(f"Trajectory file not found at {trajectory_path}")
@@ -274,8 +280,8 @@ class TrajectoryReplayBuffer:
 
         save_futures = []
         for trajectory in trajectories:
-            # Generate UUID and fixed ID for this trajectory
-            trajectory_uuid = str(uuid.uuid4())
+            # Use model_weights_id as trajectory UUID
+            trajectory_uuid = trajectory.model_weights_id
             trajectory_id = self._trajectory_counter
 
             # Calculate total samples: T * B
@@ -291,11 +297,7 @@ class TrajectoryReplayBuffer:
                 continue  # Skip empty trajectories
 
             # Save trajectory to disk if enabled
-            trajectory_path = ""
             if self.save_trajectories:
-                trajectory_path = self._get_trajectory_path(
-                    trajectory_uuid, trajectory_id
-                )
                 # Save asynchronously to reduce I/O stalls
                 save_futures.append(
                     self._save_executor.submit(
@@ -309,9 +311,7 @@ class TrajectoryReplayBuffer:
             # Add to index
             with self._index_lock:
                 trajectory_info = {
-                    "uuid": trajectory_uuid,
                     "num_samples": num_samples,
-                    "path": trajectory_path,
                     "trajectory_id": trajectory_id,
                     "max_episode_length": trajectory.max_episode_length,
                     "shape": tuple(trajectory_shape),
@@ -494,13 +494,6 @@ class TrajectoryReplayBuffer:
         flat: dict[str, object] = {}
         tensor_fields = trajectory.__dataclass_fields__.keys()
         for field in tensor_fields:
-            if field in [
-                "curr_obs",
-                "next_obs",
-                "forward_inputs",
-                "max_episode_length",
-            ]:
-                continue
             tensor = getattr(trajectory, field)
             if isinstance(tensor, torch.Tensor) and tensor.dim() >= 2:
                 flat[field] = tensor.reshape(-1, *tensor.shape[2:])
@@ -671,17 +664,17 @@ class TrajectoryReplayBuffer:
         self,
         load_path: str,
         is_distributed: bool = False,
-        load_rank: int = 0,
-        load_split_num: int = 1,
+        local_rank: int = 0,
+        world_size: int = 1,
     ):
         """
         Load buffer state from saved metadata.
 
         Args:
             load_path: Path to the directory containing metadata.json and trajectory_index.json
-            is_distributed: If True, only load a portion of trajectories based on load_rank and load_split_num
-            load_rank: Rank index (0-based) for partial loading. Only used when is_distributed=True
-            load_split_num: Number of splits to divide trajectories into. Only used when is_distributed=True
+            is_distributed: If True, only load a portion of trajectories based on local_rank and world_size
+            local_rank: Rank index (0-based) for partial loading. Only used when is_distributed=True
+            world_size: Total number of ranks. Only used when is_distributed=True
         """
         metadata_path = os.path.join(load_path, "metadata.json")
         if not os.path.exists(metadata_path):
@@ -691,6 +684,7 @@ class TrajectoryReplayBuffer:
             metadata = json.load(f)
 
         # Update instance attributes from metadata
+        self.storage_dir = metadata["storage_dir"]
         self.storage_format = metadata.get("storage_format", "pt")
         if "seed" in metadata:
             self.seed = metadata["seed"]
@@ -709,22 +703,24 @@ class TrajectoryReplayBuffer:
 
         # Handle distributed loading
         if is_distributed:
-            if load_rank < 0 or load_rank >= load_split_num:
+            if local_rank < 0 or local_rank >= world_size:
                 raise ValueError(
-                    f"load_rank ({load_rank}) must be in range [0, {load_split_num})"
+                    f"local_rank ({local_rank}) must be in range [0, {world_size})"
                 )
-            if load_split_num <= 0:
-                raise ValueError(f"load_split_num ({load_split_num}) must be > 0")
+            if world_size <= 0:
+                raise ValueError(f"world_size ({world_size}) must be > 0")
 
-            # Split trajectory_uuid_list into load_split_num parts
+            # Split trajectory_uuid_list into world_size parts
             total_trajectories = len(full_trajectory_uuid_list)
-            trajectories_per_split = total_trajectories // load_split_num
-            remainder = total_trajectories % load_split_num
+            trajectories_per_split = total_trajectories // world_size
+            remainder = total_trajectories % world_size
 
             # Calculate start and end indices for this rank
-            start_idx = load_rank * trajectories_per_split + min(load_rank, remainder)
+            start_idx = local_rank * trajectories_per_split + min(local_rank, remainder)
             end_idx = (
-                start_idx + trajectories_per_split + (1 if load_rank < remainder else 0)
+                start_idx
+                + trajectories_per_split
+                + (1 if local_rank < remainder else 0)
             )
 
             # Extract the portion for this rank

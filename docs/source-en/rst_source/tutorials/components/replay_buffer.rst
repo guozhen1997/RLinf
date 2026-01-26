@@ -25,7 +25,7 @@ Quick Start
 Common Parameters
 -----------------
 
-- `storage_dir`: trajectory storage directory; defaults to a temp directory.
+- `storage_dir`: trajectory storage directory; defaults to the log directory if not specified.
 - `storage_format`: `pt` (default) or `pkl`.
 - `enable_cache` / `cache_size`: enable cache and set its size for throughput.
 - `sample_window_size`: sample from the most recent N trajectories; 0 means all.
@@ -66,11 +66,13 @@ Save and Load
    buffer.load_checkpoint(
        "/path/to/ckpt",
        is_distributed=True,
-       load_rank=0,
-       load_split_num=4,
+       local_rank=0,
+       world_size=4,
    )
 
 Checkpoint saving is unavailable when `save_trajectories=False`.
+On load, `storage_dir` is restored from metadata in the checkpoint.
+The trajectory data is saved in format of `trajectory_{trajectory_id}_{model_weights_uuid}_{model_update_count}.{storage_format}`.
 
 Cleanup and Reset
 -----------------

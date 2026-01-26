@@ -24,7 +24,7 @@ Replay Buffer 使用教程
 常用参数
 --------
 
-- `storage_dir`：轨迹存储目录；不传则使用临时目录。
+- `storage_dir`：轨迹存储目录；不传则使用日志目录。
 - `storage_format`：`pt`（默认）或 `pkl`。
 - `enable_cache` / `cache_size`：启用并控制缓存数量，用于提升采样吞吐。
 - `sample_window_size`：仅在最近 N 条轨迹内采样；0 表示全量。
@@ -64,11 +64,13 @@ Replay Buffer 使用教程
    buffer.load_checkpoint(
        "/path/to/ckpt",
        is_distributed=True,
-       load_rank=0,
-       load_split_num=4,
+       local_rank=0,
+       world_size=4,
    )
 
 `save_trajectories=False` 时不支持 checkpoint 保存。
+加载时会从 checkpoint 的 metadata 中恢复 `storage_dir`。
+轨迹数据保存格式为 `trajectory_{trajectory_id}_{model_weights_uuid}_{model_update_count}.{storage_format}`。
 
 资源释放与重置
 --------------

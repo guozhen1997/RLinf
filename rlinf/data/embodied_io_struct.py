@@ -148,6 +148,7 @@ class Trajectory:
     """
 
     max_episode_length: int = 0  # max episode length
+    model_weights_id: int = 0
     actions: torch.Tensor = None
     intervene_flags: torch.Tensor = None
     rewards: torch.Tensor = None
@@ -170,6 +171,7 @@ class EmbodiedRolloutResult:
     """
 
     max_episode_length: int = 0
+    model_weights_id: str = 0
 
     actions: list[torch.Tensor] = field(default_factory=list)  # trajectory_length
     intervene_flags: list[torch.Tensor] = field(
@@ -231,7 +233,10 @@ class EmbodiedRolloutResult:
 
     def to_trajectory(self) -> Trajectory:
         # return [trajectory_length, B, ...]
-        trajectory = Trajectory(max_episode_length=self.max_episode_length)
+        trajectory = Trajectory(
+            max_episode_length=self.max_episode_length,
+            model_weights_id=self.model_weights_id,
+        )
         if len(self.actions) > 0:
             trajectory.actions = torch.stack(self.actions, dim=0).cpu().contiguous()
         if len(self.intervene_flags) > 0:
@@ -305,20 +310,23 @@ class EmbodiedRolloutResult:
                 splited_trajectories[i].forward_inputs = splited_forward_inputs[i]
 
         for field_name in all_trajectory.__dataclass_fields__.keys():
-            if field_name in [
-                "curr_obs",
-                "next_obs",
-                "forward_inputs",
-                "max_episode_length",
-            ]:
-                continue
             value = getattr(all_trajectory, field_name)
-            if value is None:
+
+            if value is None or isinstance(value, dict):
                 continue
 
-            chunks = torch.chunk(value, split_size, dim=1)
-            for i in range(split_size):
-                setattr(splited_trajectories[i], field_name, chunks[i])
+            if isinstance(value, int) or isinstance(value, str):
+                for i in range(split_size):
+                    setattr(splited_trajectories[i], field_name, value)
+                continue
+            elif isinstance(value, torch.Tensor):
+                chunks = torch.chunk(value, split_size, dim=1)
+                for i in range(split_size):
+                    setattr(splited_trajectories[i], field_name, chunks[i])
+            else:
+                raise ValueError(
+                    f"Unsupported value type: {type(value)} for field_name: {field_name}"
+                )
 
         return splited_trajectories
 

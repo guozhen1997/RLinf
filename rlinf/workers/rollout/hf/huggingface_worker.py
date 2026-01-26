@@ -29,6 +29,7 @@ from rlinf.models import get_model
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.utils.utils import get_model_weights_id
 
 
 class MultiStepRolloutWorker(Worker):
@@ -50,6 +51,8 @@ class MultiStepRolloutWorker(Worker):
         self.actor_weight_src_rank = self._rank % actor_world_size
 
         self.collect_transitions = self.cfg.rollout.get("collect_transitions", False)
+        self.model_weights_id = ""
+        self.count_update = 0
 
         # Sync weight comm options
         max_ctas = cfg.rollout.get("sync_weight_nccl_max_ctas", None)
@@ -190,6 +193,11 @@ class MultiStepRolloutWorker(Worker):
         ).async_wait()
 
         self.hf_model.load_state_dict(param_state_dict)
+        self.model_weights_id = (
+            str(get_model_weights_id(self.hf_model)) + f"_{self.count_update}"
+        )
+        self.count_update += 1
+
         del param_state_dict
         gc.collect()
         torch.cuda.empty_cache()
@@ -305,7 +313,8 @@ class MultiStepRolloutWorker(Worker):
         # rollout_results[stage_id]
         self.rollout_results: list[EmbodiedRolloutResult] = [
             EmbodiedRolloutResult(
-                max_episode_length=self.cfg.env.train.max_episode_steps
+                max_episode_length=self.cfg.env.train.max_episode_steps,
+                model_weights_id=self.model_weights_id,
             )
             for _ in range(self.num_pipeline_stages)
         ]

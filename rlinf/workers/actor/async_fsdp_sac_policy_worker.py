@@ -36,22 +36,12 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
             self.load_optimizer(self.device)
 
         # Check if replay buffer has enough samples
-        min_buffer_size = (
-            self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
-            // self._world_size
-        )
-        train_actor_steps = (
-            self.cfg.algorithm.get("train_actor_steps", 0) // self._world_size
-        )
-        train_actor_steps = max(min_buffer_size, train_actor_steps)
-
+        min_buffer_size = self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
         if not (await self.replay_buffer.is_ready_async(min_buffer_size)):
             self.log_on_first_rank(
                 f"Replay buffer size {len(self.replay_buffer)} < {min_buffer_size}, skipping training"
             )
-            return False
-
-        train_actor = await self.replay_buffer.is_ready_async(train_actor_steps)
+            return {}
 
         assert (
             self.cfg.actor.global_batch_size
@@ -70,7 +60,7 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
             await asyncio.sleep(0)
-            metrics_data = self.update_one_epoch(train_actor)
+            metrics_data = self.update_one_epoch()
             append_to_dict(metrics, metrics_data)
             self.update_step += 1
 

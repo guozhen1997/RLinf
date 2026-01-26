@@ -30,7 +30,8 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             # rollout_results[stage_id]
             self.rollout_results: list[EmbodiedRolloutResult] = [
                 EmbodiedRolloutResult(
-                    max_episode_length=self.cfg.env.train.max_episode_steps
+                    max_episode_length=self.cfg.env.train.max_episode_steps,
+                    model_weights_id=self.model_weights_id,
                 )
                 for _ in range(self.num_pipeline_stages)
             ]

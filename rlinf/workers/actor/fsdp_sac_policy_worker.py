@@ -209,11 +209,16 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         """Initialize SAC-specific components"""
         # Initialize replay buffer
         seed = self.cfg.actor.get("seed", 1234)
+        storage_dir = self.cfg.algorithm.replay_buffer.get("storage_dir", None)
+        if storage_dir is None:
+            storage_dir = os.path.join(
+                self.cfg.runner.logger.log_path, f"replay_buffer/rank_{self._rank}"
+            )
+        else:
+            storage_dir = os.path.join(storage_dir, f"rank_{self._rank}")
         self.replay_buffer = TrajectoryReplayBuffer(
             seed=seed,
-            storage_dir=os.path.join(
-                self.cfg.runner.logger.log_path, f"replay_buffer/rank_{self._rank}"
-            ),
+            storage_dir=storage_dir,
             storage_format="pt",
             enable_cache=self.cfg.algorithm.replay_buffer.enable_cache,
             cache_size=self.cfg.algorithm.replay_buffer.cache_size,
@@ -224,11 +229,16 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         )
 
         if self.cfg.algorithm.get("demo_buffer", {}).get("load_path", None) is not None:
+            storage_dir = self.cfg.algorithm.demo_buffer.get("storage_dir", None)
+            if storage_dir is None:
+                storage_dir = os.path.join(
+                    self.cfg.runner.logger.log_path, f"demo_buffer/rank_{self._rank}"
+                )
+            else:
+                storage_dir = os.path.join(storage_dir, f"rank_{self._rank}")
             self.demo_buffer = TrajectoryReplayBuffer(
                 seed=seed,
-                storage_dir=os.path.join(
-                    self.cfg.runner.logger.log_path, f"demo_buffer/rank_{self._rank}"
-                ),
+                storage_dir=storage_dir,
                 storage_format="pt",
                 enable_cache=self.cfg.algorithm.demo_buffer.enable_cache,
                 cache_size=self.cfg.algorithm.demo_buffer.cache_size,
@@ -240,8 +250,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             self.demo_buffer.load_checkpoint(
                 self.cfg.algorithm.demo_buffer.load_path,
                 is_distributed=True,
-                load_rank=self._rank,
-                load_split_num=self._world_size,
+                local_rank=self._rank,
+                world_size=self._world_size,
             )
 
         self.critic_actor_ratio = self.cfg.algorithm.get("critic_actor_ratio", 1)
@@ -464,7 +474,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         return alpha_loss
 
     @Worker.timer("update_one_epoch")
-    def update_one_epoch(self, train_actor):
+    def update_one_epoch(self):
         global_batch_size_per_rank = (
             self.cfg.actor.global_batch_size // self._world_size
         )
@@ -509,7 +519,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             "critic/grad_norm": qf_grad_norm,
         }
 
-        if self.update_step % self.critic_actor_ratio == 0 and train_actor:
+        if self.update_step % self.critic_actor_ratio == 0:
             self.optimizer.zero_grad()
             gbs_actor_loss = []
             gbs_entropy = []
@@ -605,21 +615,12 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             self.load_optimizer(self.device)
 
         # Check if replay buffer has enough samples
-        min_buffer_size = (
-            self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
-            // self._world_size
-        )
-        train_actor_steps = (
-            self.cfg.algorithm.get("train_actor_steps", 0) // self._world_size
-        )
-        train_actor_steps = max(min_buffer_size, train_actor_steps)
-
+        min_buffer_size = self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
         if not self.replay_buffer.is_ready(min_buffer_size):
             self.log_on_first_rank(
                 f"Replay buffer size {len(self.replay_buffer)} < {min_buffer_size}, skipping training"
             )
             return {}
-        train_actor = self.replay_buffer.is_ready(train_actor_steps)
 
         assert (
             self.cfg.actor.global_batch_size
@@ -637,7 +638,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
-            metrics_data = self.update_one_epoch(train_actor)
+            metrics_data = self.update_one_epoch()
             append_to_dict(metrics, metrics_data)
             self.update_step += 1
 
