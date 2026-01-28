@@ -385,12 +385,7 @@ def convert_trajectories_to_batch(
 
     # -------- tensor fields --------
     for field_name in trajectories[0].__dataclass_fields__.keys():
-        if field_name in [
-            "curr_obs",
-            "next_obs",
-            "forward_inputs",
-            "max_episode_length",
-        ]:
+        if not isinstance(getattr(traj, field_name), torch.Tensor):
             continue
         field_list = [
             getattr(traj, field_name)

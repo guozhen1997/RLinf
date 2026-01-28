@@ -495,7 +495,7 @@ def get_model_weights_id(model, k=128):
     def tensor_fingerprint(p):
         flat = p.detach().view(-1)
         sample = flat[:k] if flat.numel() >= k else flat
-        return sample.cpu().numpy().tobytes()
+        return sample.to(dtype=torch.float32).cpu().numpy().tobytes()
 
     name_bytes = tensor_fingerprint(first_p) + tensor_fingerprint(last_p)
     name_str = name_bytes.hex()

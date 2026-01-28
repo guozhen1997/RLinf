@@ -25,7 +25,7 @@ By inheriting from :class:`Worker`, a worker or processor class gains the abilit
 These features enable the seamless creation of process groups and simplify distributed training setup.  
 A Worker encapsulates the logic for an individual execution unit, making it easy to scale tasks across multiple GPUs and nodes.
 
-Worker Timer
+WorkerTimer
 ~~~~~~~~~~~~~
 
 RLinf provides a lightweight timer utility to profile worker functions.
