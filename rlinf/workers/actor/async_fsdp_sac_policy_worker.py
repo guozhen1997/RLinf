@@ -28,6 +28,17 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
         while not self.should_stop:
             await super().recv_rollout_trajectories(input_channel)
 
+    async def _is_replay_buffer_ready_all_ranks(self, min_buffer_size: int) -> bool:
+        local_ready = await self.replay_buffer.is_ready_async(min_buffer_size)
+        if not torch.distributed.is_initialized():
+            return local_ready
+        ready_tensor = torch.tensor(
+            1 if local_ready else 0, device=self.device, dtype=torch.int32
+        )
+        torch.distributed.all_reduce(ready_tensor, op=torch.distributed.ReduceOp.SUM)
+        dist_ready = ready_tensor.item() == torch.distributed.get_world_size()
+        return dist_ready
+
     @Worker.timer("run_training")
     async def run_training(self):
         """SAC training using replay buffer"""
@@ -37,7 +48,7 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
 
         # Check if replay buffer has enough samples
         min_buffer_size = self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
-        if not (await self.replay_buffer.is_ready_async(min_buffer_size)):
+        if not (await self._is_replay_buffer_ready_all_ranks(min_buffer_size)):
             self.log_on_first_rank(
                 f"Replay buffer size {len(self.replay_buffer)} < {min_buffer_size}, skipping training"
             )

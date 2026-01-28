@@ -36,7 +36,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 for _ in range(self.num_pipeline_stages)
             ]
 
-            await self.generate_epoch(input_channel, output_channel)
+            await self.generate_one_epoch(input_channel, output_channel)
             for stage_id in range(self.num_pipeline_stages):
                 await self.send_rollout_trajectories(
                     self.rollout_results[stage_id], replay_channel

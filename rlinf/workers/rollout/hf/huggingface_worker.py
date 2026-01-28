@@ -18,6 +18,7 @@ from typing import Any
 
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
+from tqdm import tqdm
 
 from rlinf.config import SupportedModel
 from rlinf.data.embodied_io_struct import (
@@ -210,8 +211,8 @@ class MultiStepRolloutWorker(Worker):
         for trajectory in trajectories:
             channel.put(trajectory, async_op=True)
 
-    @Worker.timer("generate_epoch")
-    async def generate_epoch(self, input_channel: Channel, output_channel: Channel):
+    @Worker.timer("generate_one_epoch")
+    async def generate_one_epoch(self, input_channel: Channel, output_channel: Channel):
         n_chunk_steps = (
             self.cfg.env.train.max_steps_per_rollout_epoch
             // self.cfg.actor.model.num_action_chunks
@@ -319,8 +320,12 @@ class MultiStepRolloutWorker(Worker):
             for _ in range(self.num_pipeline_stages)
         ]
 
-        for _ in range(self.cfg.algorithm.rollout_epoch):
-            await self.generate_epoch(input_channel, output_channel)
+        for _ in tqdm(
+            range(self.cfg.algorithm.rollout_epoch),
+            desc="Generating Rollout Epochs",
+            disable=(self._rank != 0),
+        ):
+            await self.generate_one_epoch(input_channel, output_channel)
 
         for stage_id in range(self.num_pipeline_stages):
             await self.send_rollout_trajectories(
@@ -338,7 +343,11 @@ class MultiStepRolloutWorker(Worker):
             self.cfg.env.eval.max_steps_per_rollout_epoch
             // self.cfg.actor.model.num_action_chunks
         )
-        for _ in range(self.cfg.algorithm.eval_rollout_epoch):
+        for _ in tqdm(
+            range(self.cfg.algorithm.eval_rollout_epoch),
+            desc="Evaluating Rollout Epochs",
+            disable=(self._rank != 0),
+        ):
             for _ in range(n_chunk_steps):
                 for _ in range(self.num_pipeline_stages):
                     env_output = await self.recv_env_output(input_channel, mode="eval")
