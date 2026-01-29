@@ -13,11 +13,16 @@
 # limitations under the License.
 
 import asyncio
+import queue
+import threading
 
 import torch
 
 from rlinf.scheduler import Worker
-from rlinf.utils.metric_utils import append_to_dict
+from rlinf.utils.metric_utils import (
+    append_to_dict,
+    compute_split_num,
+)
 from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
 
@@ -25,19 +30,54 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
     should_stop = False
 
     async def recv_rollout_trajectories(self, input_channel):
-        while not self.should_stop:
-            await super().recv_rollout_trajectories(input_channel)
+        if getattr(self, "_recv_queue", None) is None:
+            self._recv_queue = queue.Queue()
+        if (
+            getattr(self, "_recv_rollout_thread", None) is None
+            or not self._recv_rollout_thread.is_alive()
+        ):
+            self._recv_rollout_thread = threading.Thread(
+                target=self._recv_rollout_thread_main,
+                args=(input_channel,),
+                daemon=True,
+            )
+            self._recv_rollout_thread.start()
 
-    async def _is_replay_buffer_ready_all_ranks(self, min_buffer_size: int) -> bool:
-        local_ready = await self.replay_buffer.is_ready_async(min_buffer_size)
-        if not torch.distributed.is_initialized():
-            return local_ready
-        ready_tensor = torch.tensor(
-            1 if local_ready else 0, device=self.device, dtype=torch.int32
-        )
-        torch.distributed.all_reduce(ready_tensor, op=torch.distributed.ReduceOp.SUM)
-        dist_ready = ready_tensor.item() == torch.distributed.get_world_size()
-        return dist_ready
+    def _recv_rollout_thread_main(self, input_channel):
+        send_num = self._component_placement.get_world_size("rollout") * self.stage_num
+        recv_num = self._component_placement.get_world_size("actor")
+        split_num = compute_split_num(send_num, recv_num)
+        while not self.should_stop:
+            for _ in range(split_num):
+                trajectory = input_channel.get()
+                self._recv_queue.put(trajectory)
+
+    def _drain_received_trajectories(self, max_trajectories: int | None = None):
+        if getattr(self, "_recv_queue", None) is None:
+            return
+        recv_list = []
+        processed = 0
+        while True:
+            try:
+                recv_list.append(self._recv_queue.get_nowait())
+                processed += 1
+                if max_trajectories is not None and processed >= max_trajectories:
+                    break
+            except queue.Empty:
+                break
+        if not recv_list:
+            return
+
+        self.replay_buffer.add_trajectories(recv_list)
+
+    async def _wait_for_replay_buffer_ready(self, min_buffer_size: int):
+        while True:
+            self._drain_received_trajectories(
+                max_trajectories=self.cfg.actor.get("recv_drain_max_trajectories", 256)
+            )
+            if await self.replay_buffer.is_ready_async(min_buffer_size):
+                return
+            await asyncio.sleep(1)
 
     @Worker.timer("run_training")
     async def run_training(self):
@@ -48,11 +88,9 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
 
         # Check if replay buffer has enough samples
         min_buffer_size = self.cfg.algorithm.replay_buffer.get("min_buffer_size", 100)
-        if not (await self._is_replay_buffer_ready_all_ranks(min_buffer_size)):
-            self.log_on_first_rank(
-                f"Replay buffer size {len(self.replay_buffer)} < {min_buffer_size}, skipping training"
-            )
-            return {}
+        await self._wait_for_replay_buffer_ready(min_buffer_size)
+
+        torch.distributed.barrier()
 
         assert (
             self.cfg.actor.global_batch_size
@@ -84,3 +122,6 @@ class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):
 
     async def stop(self):
         self.should_stop = True
+        recv_thread = getattr(self, "_recv_rollout_thread", None)
+        if recv_thread is not None and recv_thread.is_alive():
+            await asyncio.to_thread(recv_thread.join, 5)

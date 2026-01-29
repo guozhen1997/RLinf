@@ -763,7 +763,7 @@ class TrajectoryReplayBuffer:
             self.size = metadata.get("size", 0)
             self._total_samples = metadata.get("total_samples", 0)
             self._trajectory_counter = metadata.get("trajectory_counter", 0)
-        
+
         if self._flat_trajectory_cache is not None:
             self._flat_trajectory_cache.clear()
             if self._trajectory_id_list:
@@ -783,7 +783,9 @@ class TrajectoryReplayBuffer:
         if self._flat_trajectory_cache is not None:
             self._flat_trajectory_cache.clear()
 
+
 # python rlinf/data/replay_buffer.py --load-path /path/to/buffer --num-chunks 1024 --cache-size 10 --enable-cache
+
 
 if __name__ == "__main__":
     import argparse

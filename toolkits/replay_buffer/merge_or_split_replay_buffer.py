@@ -17,7 +17,6 @@ import glob
 import json
 import os
 import shutil
-from typing import Dict, List, Tuple
 
 
 def _load_json(path: str) -> dict:
@@ -37,7 +36,7 @@ def _find_index_path(rank_dir: str) -> str:
     )
 
 
-def _normalize_index_data(index_data: dict) -> Tuple[Dict[int, dict], List[int]]:
+def _normalize_index_data(index_data: dict) -> tuple[dict[int, dict], list[int]]:
     trajectory_index = {
         int(k): v for k, v in index_data.get("trajectory_index", {}).items()
     }
@@ -86,8 +85,8 @@ def merge_replay_buffers(source_path: str, save_path: str, move_files: bool) -> 
     if not rank_dirs:
         raise FileNotFoundError(f"No rank_* directories found in {source_path}")
 
-    merged_index: Dict[int, dict] = {}
-    merged_id_list: List[int] = []
+    merged_index: dict[int, dict] = {}
+    merged_id_list: list[int] = []
     total_samples = 0
     next_id = 0
     storage_format = None
@@ -195,8 +194,8 @@ def split_replay_buffer(
             f"cannot split {split_count}"
         )
 
-    merged_index: Dict[int, dict] = {}
-    merged_id_list: List[int] = []
+    merged_index: dict[int, dict] = {}
+    merged_id_list: list[int] = []
     total_samples = 0
     next_id = 0
 
@@ -289,12 +288,12 @@ def main() -> None:
             move_files=not args.copy,
         )
     else:
-        merge_replay_buffers(
-            args.source_path, args.save_path, move_files=not args.copy
-        )
+        merge_replay_buffers(args.source_path, args.save_path, move_files=not args.copy)
+
 
 # python merge_or_split_replay_buffer.py --source-path /path/to/buffer --save-path /path/to/merge --copy
 # python merge_or_split_replay_buffer.py --source-path /path/to/buffer --save-path /path/to/split --split-count 10 --copy
+
 
 if __name__ == "__main__":
     main()
