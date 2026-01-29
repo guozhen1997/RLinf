@@ -199,8 +199,12 @@ class TrajectoryReplayBuffer:
             if os.path.exists(index_path):
                 with open(index_path, "r") as f:
                     index_data = json.load(f)
-                self._trajectory_index = index_data.get("trajectory_index", {})
-                self._trajectory_id_list = index_data.get("trajectory_id_list", [])
+                self._trajectory_index = {
+                    int(k): v for k, v in index_data.get("trajectory_index", {}).items()
+                }
+                self._trajectory_id_list = [
+                    int(k) for k in index_data.get("trajectory_id_list", [])
+                ]
 
     def _save_trajectory_index(self, save_path: Optional[str] = None):
         """Save trajectory index to disk."""
@@ -467,8 +471,6 @@ class TrajectoryReplayBuffer:
                 ]
                 trajectory = self._load_trajectory(trajectory_id, model_weights_id)
                 flat_trajectory = self._flatten_trajectory(trajectory)
-                if self._flat_trajectory_cache is not None:
-                    self._flat_trajectory_cache.put(trajectory_id, flat_trajectory)
 
             if batch is None:
                 batch = self._init_batch_from_flat(flat_trajectory, num_chunks)
@@ -700,8 +702,12 @@ class TrajectoryReplayBuffer:
         with open(index_path, "r") as f:
             index_data = json.load(f)
 
-        full_trajectory_index = index_data.get("trajectory_index", {})
-        full_trajectory_id_list = index_data.get("trajectory_id_list", [])
+        full_trajectory_index = {
+            int(k): v for k, v in index_data.get("trajectory_index", {}).items()
+        }
+        full_trajectory_id_list = [
+            int(k) for k in index_data.get("trajectory_id_list", [])
+        ]
 
         # Handle distributed loading
         if is_distributed:
@@ -757,9 +763,65 @@ class TrajectoryReplayBuffer:
             self.size = metadata.get("size", 0)
             self._total_samples = metadata.get("total_samples", 0)
             self._trajectory_counter = metadata.get("trajectory_counter", 0)
+        
+        if self._flat_trajectory_cache is not None:
+            self._flat_trajectory_cache.clear()
+            if self._trajectory_id_list:
+                max_cache = self._flat_trajectory_cache.max_size
+                recent_ids = self._trajectory_id_list[-max_cache:]
+                for trajectory_id in recent_ids:
+                    model_weights_id = self._trajectory_index[trajectory_id][
+                        "model_weights_id"
+                    ]
+                    trajectory = self._load_trajectory(trajectory_id, model_weights_id)
+                    flat_trajectory = self._flatten_trajectory(trajectory)
+                    self._flat_trajectory_cache.put(trajectory_id, flat_trajectory)
 
     def clear_cache(self):
         """Clear trajectory cache."""
         self.close()
         if self._flat_trajectory_cache is not None:
             self._flat_trajectory_cache.clear()
+
+# python rlinf/data/replay_buffer.py --load-path /path/to/buffer --num-chunks 1024 --cache-size 10 --enable-cache
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Simple demo buffer load + sample test"
+    )
+    parser.add_argument(
+        "--load-path",
+        type=str,
+        required=True,
+        help="Checkpoint directory containing metadata.json and trajectory_index.json",
+    )
+    parser.add_argument("--num-chunks", type=int, default=4)
+    parser.add_argument("--sample-window-size", type=int, default=10)
+    parser.add_argument("--cache-size", type=int, default=5)
+    parser.add_argument("--enable-cache", action="store_true")
+    args = parser.parse_args()
+
+    buffer = TrajectoryReplayBuffer(
+        seed=1234,
+        storage_dir=args.load_path,
+        storage_format="pt",
+        enable_cache=args.enable_cache,
+        cache_size=args.cache_size,
+        sample_window_size=args.sample_window_size,
+        save_trajectories=True,
+    )
+
+    buffer.load_checkpoint(
+        args.load_path,
+        is_distributed=False,
+    )
+
+    try:
+        batch = buffer.sample(num_chunks=args.num_chunks)
+    except RuntimeError as exc:
+        print(f"[sample] failed: {exc}")
+        raise SystemExit(1)
+
+    print("[sample] keys:", list(batch.keys()))

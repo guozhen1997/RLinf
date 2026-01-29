@@ -72,6 +72,41 @@ Replay Buffer 使用教程
 加载时会从 checkpoint 的 metadata 中恢复 `storage_dir`。
 轨迹数据保存格式为 `trajectory_{trajectory_id}_{model_weights_uuid}_{model_update_count}.{storage_format}`。
 
+命令行测试
+--------------
+
+.. code-block:: bash
+
+   python rlinf/data/replay_buffer.py \
+     --load-path /path/to/buffer \
+     --num-chunks 1024 \
+     --cache-size 10 \
+     --enable-cache
+
+该命令会加载 buffer checkpoint 并进行一次采样，输出 batch 的 key 与 shape。
+
+合并 / 拆分工具
+-----------------
+
+脚本位置：`toolkits/replay_buffer/merge_or_split_replay_buffer.py`
+
+.. code-block:: bash
+
+   # 合并多个 rank（按原 trajectory_id 交错）
+   python toolkits/replay_buffer/merge_or_split_replay_buffer.py \
+     --source-path /path/to/buffer \
+     --save-path /path/to/merged \
+     --copy
+
+.. code-block:: bash
+
+   # 拆分单个 buffer，取前 N 条轨迹
+   python toolkits/replay_buffer/merge_or_split_replay_buffer.py \
+     --source-path /path/to/buffer \
+     --save-path /path/to/split \
+     --split-count 30 \
+     --copy
+
 资源释放与重置
 --------------
 

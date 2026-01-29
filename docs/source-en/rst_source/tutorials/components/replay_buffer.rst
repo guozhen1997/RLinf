@@ -74,6 +74,41 @@ Checkpoint saving is unavailable when `save_trajectories=False`.
 On load, `storage_dir` is restored from metadata in the checkpoint.
 The trajectory data is saved in format of `trajectory_{trajectory_id}_{model_weights_uuid}_{model_update_count}.{storage_format}`.
 
+CLI Test
+--------
+
+.. code-block:: bash
+
+   python rlinf/data/replay_buffer.py \
+     --load-path /path/to/buffer \
+     --num-chunks 1024 \
+     --cache-size 10 \
+     --enable-cache
+
+This command loads a buffer checkpoint and samples once, printing batch keys and shapes.
+
+Merge / Split Tool
+------------------
+
+Script path: `toolkits/replay_buffer/merge_or_split_replay_buffer.py`
+
+.. code-block:: bash
+
+   # Merge multiple ranks (interleaved by original trajectory_id)
+   python toolkits/replay_buffer/merge_or_split_replay_buffer.py \
+     --source-path /path/to/buffer \
+     --save-path /path/to/merged \
+     --copy
+
+.. code-block:: bash
+
+   # Split a single buffer by first N trajectories
+   python toolkits/replay_buffer/merge_or_split_replay_buffer.py \
+     --source-path /path/to/buffer \
+     --save-path /path/to/split \
+     --split-count 30 \
+     --copy
+
 Cleanup and Reset
 -----------------
 
