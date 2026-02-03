@@ -19,40 +19,12 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.io_struct import EnvOutput
+from rlinf.data.embodied_io_struct import EnvOutput
 from rlinf.envs import get_env_cls
 from rlinf.envs.action_utils import prepare_actions
-from rlinf.envs.env_manager import EnvManager
+from rlinf.envs.wrappers import RecordVideo
 from rlinf.scheduler import Channel, Cluster, Worker
 from rlinf.utils.placement import HybridComponentPlacement
-
-
-class SimpleEnvWrapper:
-    """Simple wrapper to replace EnvManager when not using multi-process"""
-
-    def __init__(self, env):
-        self.env = env
-        self.is_start = True
-
-    def start_env(self):
-        pass
-
-    def stop_env(self):
-        pass
-
-    def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
-
-    def chunk_step(self, *args, **kwargs):
-        return self.env.chunk_step(*args, **kwargs)
-
-    def flush_video(self):
-        if hasattr(self.env, "flush_video"):
-            self.env.flush_video()
-
-    def update_reset_state_ids(self):
-        if hasattr(self.env, "update_reset_state_ids"):
-            self.env.update_reset_state_ids()
 
 
 class EnvWorker(Worker):
@@ -64,13 +36,10 @@ class EnvWorker(Worker):
         self.eval_video_cnt = 0
         self.should_stop = False
 
-        self.env_list: list[EnvManager] = []
-        self.eval_env_list: list[EnvManager] = []
+        self.env_list = []
+        self.eval_env_list = []
 
         self.last_obs_list = []
-        self.last_dones_list = []
-        self.last_terminations_list = []
-        self.last_truncations_list = []
         self.last_intervened_info_list = []
 
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
@@ -99,33 +68,31 @@ class EnvWorker(Worker):
             )
 
     def init_worker(self):
-        enable_offload = self.cfg.env.enable_offload
-
         train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train)
         eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
 
         # This is a barrier to ensure all envs' initial setup upon import is done
         # Essential for RealWorld env to ensure initial ROS node setup is done
-        self.broadcast(True, list(range(self._world_size)))
-
-        dc_cfg = getattr(self.cfg.env, "data_collection", None)
-        dc_enabled = (
-            dc_cfg and getattr(dc_cfg, "enabled", False) and not self.enable_offload
+        self.broadcast(
+            True,
+            groups=[(self._group_name, list(range(self._world_size)))],
         )
+
+        # Data collection wrapper setup
+        dc_cfg = getattr(self.cfg.env, "data_collection", None)
+        dc_enabled = dc_cfg and getattr(dc_cfg, "enabled", False)
         use_full_state = getattr(self.cfg.env, "use_full_state", False)
 
         if not self.only_eval:
             for stage_id in range(self.stage_num):
-                # Create environment directly without EnvManager
                 env = train_env_cls(
-                    self.cfg.env.train,
-                    self.train_num_envs_per_stage,
-                    self._rank * self.stage_num + stage_id,
-                    self._world_size * self.stage_num,
-                    self.worker_info,
+                    cfg=self.cfg.env.train,
+                    num_envs=self.train_num_envs_per_stage,
+                    seed_offset=self._rank * self.stage_num + stage_id,
+                    total_num_processes=self._world_size * self.stage_num,
+                    worker_info=self.worker_info,
                 )
-
-                # Apply wrappers directly
+                # Apply FullStateWrapper for MLP policy with RGB image collection
                 if use_full_state and self.cfg.env.train.env_type == "maniskill":
                     from rlinf.envs.maniskill import ManiskillFullStateWrapper
 
@@ -144,21 +111,19 @@ class EnvWorker(Worker):
                         sample_rate_success=getattr(dc_cfg, "sample_rate_success", 1.0),
                         sample_rate_fail=getattr(dc_cfg, "sample_rate_fail", 0.1),
                     )
-
-                # Wrap in SimpleEnvWrapper for compatibility
-                self.env_list.append(SimpleEnvWrapper(env))
+                if self.cfg.env.train.video_cfg.save_video:
+                    env = RecordVideo(env, self.cfg.env.train.video_cfg)
+                self.env_list.append(env)
         if self.enable_eval:
             for stage_id in range(self.stage_num):
-                # Create environment directly without EnvManager
                 env = eval_env_cls(
-                    self.cfg.env.eval,
-                    self.eval_num_envs_per_stage,
-                    self._rank * self.stage_num + stage_id,
-                    self._world_size * self.stage_num,
-                    self.worker_info,
+                    cfg=self.cfg.env.eval,
+                    num_envs=self.eval_num_envs_per_stage,
+                    seed_offset=self._rank * self.stage_num + stage_id,
+                    total_num_processes=self._world_size * self.stage_num,
+                    worker_info=self.worker_info,
                 )
-
-                # Apply wrappers directly
+                # Apply FullStateWrapper for MLP policy with RGB image collection
                 if use_full_state and self.cfg.env.eval.env_type == "maniskill":
                     from rlinf.envs.maniskill import ManiskillFullStateWrapper
 
@@ -177,9 +142,9 @@ class EnvWorker(Worker):
                         sample_rate_success=getattr(dc_cfg, "sample_rate_success", 1.0),
                         sample_rate_fail=getattr(dc_cfg, "sample_rate_fail", 0.1),
                     )
-
-                # Wrap in SimpleEnvWrapper for compatibility
-                self.eval_env_list.append(SimpleEnvWrapper(env))
+                if self.cfg.env.eval.video_cfg.save_video:
+                    env = RecordVideo(env, self.cfg.env.eval.video_cfg)
+                self.eval_env_list.append(env)
 
         if not self.only_eval:
             self._init_env()
@@ -187,20 +152,11 @@ class EnvWorker(Worker):
     def _init_env(self):
         if self.cfg.env.train.auto_reset:
             for i in range(self.stage_num):
-                self.env_list[i].start_env()
                 extracted_obs, _ = self.env_list[i].reset()
-                dones = (
-                    torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
-                    .unsqueeze(1)
-                    .repeat(1, self.cfg.actor.model.num_action_chunks)
-                )
                 self.last_obs_list.append(extracted_obs)
-                self.last_dones_list.append(dones)
-                self.last_terminations_list.append(dones.clone())
-                self.last_truncations_list.append(dones.clone())
                 self.last_intervened_info_list.append((None, None))
-                self.env_list[i].stop_env()
 
+    @Worker.timer("env_interact_step")
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any]]:
@@ -214,12 +170,17 @@ class EnvWorker(Worker):
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
             action_dim=self.cfg.actor.model.action_dim,
             policy=self.cfg.actor.model.get("policy_setup", None),
+            wm_env_type=self.cfg.env.train.get("wm_env_type", None),
         )
         env_info = {}
 
-        extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = (
+        obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = (
             self.env_list[stage_id].chunk_step(chunk_actions)
         )
+        if isinstance(obs_list, (list, tuple)):
+            extracted_obs = obs_list[-1] if obs_list else None
+        if isinstance(infos_list, (list, tuple)):
+            infos = infos_list[-1] if infos_list else None
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         if not self.cfg.env.train.auto_reset:
             if self.cfg.env.train.ignore_terminations:
@@ -274,12 +235,17 @@ class EnvWorker(Worker):
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
             action_dim=self.cfg.actor.model.action_dim,
             policy=self.cfg.actor.model.get("policy_setup", None),
+            wm_env_type=self.cfg.env.eval.get("wm_env_type", None),
         )
         env_info = {}
 
-        extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = (
+        obs_list, _, chunk_terminations, chunk_truncations, infos_list = (
             self.eval_env_list[stage_id].chunk_step(chunk_actions)
         )
+        if isinstance(obs_list, (list, tuple)):
+            extracted_obs = obs_list[-1] if obs_list else None
+        if isinstance(infos_list, (list, tuple)):
+            infos = infos_list[-1] if infos_list else None
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
 
         if chunk_dones.any():
@@ -314,17 +280,19 @@ class EnvWorker(Worker):
     def finish_rollout(self, mode="train"):
         # reset
         if mode == "train":
-            if self.cfg.env.train.video_cfg.save_video:
-                for i in range(self.stage_num):
-                    self.env_list[i].flush_video()
             for i in range(self.stage_num):
+                if self.cfg.env.train.video_cfg.save_video and isinstance(
+                    self.env_list[i], RecordVideo
+                ):
+                    self.env_list[i].flush_video()
                 self.env_list[i].update_reset_state_ids()
         elif mode == "eval":
-            if self.cfg.env.eval.video_cfg.save_video:
-                for i in range(self.stage_num):
+            for i in range(self.stage_num):
+                if self.cfg.env.eval.video_cfg.save_video and isinstance(
+                    self.eval_env_list[i], RecordVideo
+                ):
                     self.eval_env_list[i].flush_video()
-            if not self.cfg.env.eval.auto_reset:
-                for i in range(self.stage_num):
+                if not self.cfg.env.eval.auto_reset:
                     self.eval_env_list[i].update_reset_state_ids()
 
     def split_env_batch(self, env_batch, gather_id, mode):
@@ -367,10 +335,8 @@ class EnvWorker(Worker):
                 key=f"{gather_id + self._rank * self.gather_num}_{mode}",
             )
 
+    @Worker.timer("interact")
     def interact(self, input_channel: Channel, output_channel: Channel):
-        for env in self.env_list:
-            env.start_env()
-
         n_chunk_steps = (
             self.cfg.env.train.max_steps_per_rollout_epoch
             // self.cfg.actor.model.num_action_chunks
@@ -406,13 +372,21 @@ class EnvWorker(Worker):
             else:
                 self.num_done_envs = 0
                 self.num_succ_envs = 0
+                dones = (
+                    torch.zeros((self.train_num_envs_per_stage,), dtype=bool)
+                    .unsqueeze(1)
+                    .repeat(1, self.cfg.actor.model.num_action_chunks)
+                )
+                terminations = dones.clone()
+                truncations = dones.clone()
+
                 for stage_id in range(self.stage_num):
                     env_output = EnvOutput(
                         obs=self.last_obs_list[stage_id],
                         rewards=None,
-                        dones=self.last_dones_list[stage_id],
-                        terminations=self.last_terminations_list[stage_id],
-                        truncations=self.last_truncations_list[stage_id],
+                        dones=dones,
+                        terminations=terminations,
+                        truncations=truncations,
                         intervene_actions=self.last_intervened_info_list[stage_id][0],
                         intervene_flags=self.last_intervened_info_list[stage_id][1],
                     )
@@ -443,21 +417,11 @@ class EnvWorker(Worker):
                             env_metrics[key].append(value)
 
             self.last_obs_list = [env_output.obs for env_output in env_output_list]
-            self.last_dones_list = [env_output.dones for env_output in env_output_list]
-            self.last_truncations_list = [
-                env_output.truncations for env_output in env_output_list
-            ]
-            self.last_terminations_list = [
-                env_output.terminations for env_output in env_output_list
-            ]
             self.last_intervened_info_list = [
                 (env_output.intervene_actions, env_output.intervene_flags)
                 for env_output in env_output_list
             ]
             self.finish_rollout()
-
-        for env in self.env_list:
-            env.stop_env()
 
         for key, value in env_metrics.items():
             env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
@@ -466,9 +430,6 @@ class EnvWorker(Worker):
 
     def evaluate(self, input_channel: Channel, output_channel: Channel):
         eval_metrics = defaultdict(list)
-
-        for stage_id in range(self.stage_num):
-            self.eval_env_list[stage_id].start_env()
 
         n_chunk_steps = (
             self.cfg.env.eval.max_steps_per_rollout_epoch
@@ -504,8 +465,6 @@ class EnvWorker(Worker):
                     )
 
             self.finish_rollout(mode="eval")
-        for stage_id in range(self.stage_num):
-            self.eval_env_list[stage_id].stop_env()
 
         for key, value in eval_metrics.items():
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()

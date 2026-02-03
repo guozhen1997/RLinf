@@ -85,13 +85,24 @@ class ManiskillFullStateWrapper(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
     def chunk_step(self, chunk_actions):
-        obs, rewards, terminations, truncations, infos = self.env.chunk_step(
+        obs_list, rewards, terminations, truncations, infos_list = self.env.chunk_step(
             chunk_actions
         )
-        obs = self._replace_states(obs)
-        # Handle final_observation in infos (from auto_reset)
-        if isinstance(infos, dict) and "final_observation" in infos:
-            infos["final_observation"] = self._replace_states(
-                infos["final_observation"]
+        # Process obs_list - replace states in each observation
+        if isinstance(obs_list, (list, tuple)):
+            obs_list = [self._replace_states(obs) for obs in obs_list]
+        else:
+            obs_list = self._replace_states(obs_list)
+
+        # Handle final_observation in the last infos (from auto_reset)
+        if isinstance(infos_list, (list, tuple)) and len(infos_list) > 0:
+            last_infos = infos_list[-1]
+            if isinstance(last_infos, dict) and "final_observation" in last_infos:
+                last_infos["final_observation"] = self._replace_states(
+                    last_infos["final_observation"]
+                )
+        elif isinstance(infos_list, dict) and "final_observation" in infos_list:
+            infos_list["final_observation"] = self._replace_states(
+                infos_list["final_observation"]
             )
-        return obs, rewards, terminations, truncations, infos
+        return obs_list, rewards, terminations, truncations, infos_list

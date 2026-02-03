@@ -260,19 +260,24 @@ class DataCollectorWrapper(gym.Wrapper):
             chunk_actions: Sequence of actions to execute as a chunk.
 
         Returns:
-            Tuple of (obs, rewards, terminations, truncations, infos).
+            Tuple of (obs_list, rewards, terminations, truncations, infos_list).
         """
-        obs, rewards, terminations, truncations, infos = self.env.chunk_step(
+        obs_list, rewards, terminations, truncations, infos_list = self.env.chunk_step(
             chunk_actions
         )
 
         if self.enabled:
+            # Use the last obs and infos for recording (compatible with old interface)
+            last_obs = obs_list[-1] if isinstance(obs_list, (list, tuple)) else obs_list
+            last_infos = (
+                infos_list[-1] if isinstance(infos_list, (list, tuple)) else infos_list
+            )
             self._record_chunk_data(
-                chunk_actions, obs, rewards, terminations, truncations, infos
+                chunk_actions, last_obs, rewards, terminations, truncations, last_infos
             )
             self._check_and_flush_episodes(terminations, truncations)
 
-        return obs, rewards, terminations, truncations, infos
+        return obs_list, rewards, terminations, truncations, infos_list
 
     def _record_step_data(self, action, obs, reward, terminated, truncated, info):
         """Record transition data for each environment.
