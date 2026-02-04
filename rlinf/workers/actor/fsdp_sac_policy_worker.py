@@ -389,17 +389,13 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             all_data_q_values = self.model(
                 forward_type=ForwardType.SAC_Q,
                 obs=curr_obs,
-                actions=batch["forward_inputs"]["action"]
-                if "action" in batch["forward_inputs"]
-                else batch["action_tokens"],
+                actions=batch["actions"],
             )
         else:
             all_data_q_values, all_qf_next = self.model(
                 forward_type=ForwardType.CROSSQ_Q,
                 obs=curr_obs,
-                actions=batch["forward_inputs"]["action"]
-                if "action" in batch["forward_inputs"]
-                else batch["action_tokens"],
+                actions=batch["actions"],
                 next_obs=next_obs,
                 next_actions=next_state_actions,
             )
