@@ -205,7 +205,9 @@ class EmbodiedRolloutResult:
     def append_step_result(self, result: ChunkStepResult):
         if result.actions is not None:
             self.actions.append(result.actions)
-            self.intervene_flags.append(torch.zeros(1, dtype=torch.bool))
+            self.intervene_flags.append(
+                torch.zeros_like(result.actions, dtype=torch.bool)
+            )
         if result.rewards is not None:
             self.rewards.append(result.rewards)
         if result.terminations is not None:
