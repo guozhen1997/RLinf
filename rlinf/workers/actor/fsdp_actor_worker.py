@@ -17,10 +17,14 @@ from functools import partial
 
 import numpy as np
 import torch
+import jax
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.tensor import DTensor
 from torch.multiprocessing.reductions import reduce_tensor
+
+from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+import openpi.training.data_loader as _data
 
 import rlinf.algorithms  # noqa: F401
 from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
@@ -65,6 +69,7 @@ from rlinf.utils.utils import (
     retrieve_model_state_dict_in_cpu,
 )
 from rlinf.workers.rollout.utils import RankMapper
+from rlinf.models.embodiment.base_policy import ForwardType
 
 
 def process_nested_dict_for_adv(nested_dict, rollout_epoch):
@@ -722,6 +727,26 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             accel_max_ctas=max_ctas, accel_min_ctas=min_ctas
         )
 
+        self.use_real_data_co_training = cfg.actor.get("use_real_data_co_training", False)
+        
+        if self.use_real_data_co_training:
+            training_config_name = cfg.actor.get("config_name", "pi05_maniskill_sim_real_co_training")
+            data_loader_config = get_openpi_config(training_config_name)
+            self.data_loader = _data.create_data_loader(data_loader_config, framework="pytorch", shuffle=True)
+            self.sft_iterator = iter(self.data_loader)
+            self.train_epoch = 0
+            self.sft_loss_weight = cfg.actor.get("sft_loss_weight", 0.1)
+
+    def get_next_real_data_batch(self):
+        try:
+            observation, actions = next(self.sft_iterator)
+        except StopIteration:
+            self.train_epoch += 1
+            self.data_loader.set_epoch(self.train_epoch)
+            self.sft_iterator = iter(self.data_loader)
+            observation, actions = next(self.sft_iterator)
+        return observation, actions
+
     def _setup_rollout_weight_dst_ranks(self) -> None:
         """
         Setup destination ranks for weight communication.
@@ -1069,6 +1094,27 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         entropy_loss = masked_mean(entropy, mask=loss_mask)
                         loss -= self.cfg.algorithm.entropy_bonus * entropy_loss
                     metrics_data["actor/entropy_loss"] = entropy_loss.detach().item()
+
+                    if self.use_real_data_co_training:
+                        metrics_data["ppo_loss"] = loss.clone().detach().item()
+                        # get real data batch
+                        real_observation, real_actions = self.get_next_real_data_batch()
+                        
+                        observation = jax.tree.map(lambda x: x.to(self.device), real_observation)  # noqa: PLW2901
+                        actions = real_actions.to(torch.float32)  # noqa: PLW2901
+                        actions = actions.to(self.device)  # noqa: PLW2901
+
+                        sft_losses = self.model(data=dict(observation=observation, actions=actions), forward_type=ForwardType.SFT)
+                        # Ensure losses is a tensor and handle different return types
+                        if isinstance(sft_losses, list | tuple):
+                            sft_losses = torch.stack(sft_losses)
+                        elif not isinstance(sft_losses, torch.Tensor):
+                            sft_losses = torch.tensor(sft_losses, device=self.device, dtype=torch.float32)
+
+                        sft_loss = sft_losses.mean()
+                        metrics_data["sft_loss"] = sft_loss.clone().detach().item()
+                        total_loss = loss + self.sft_loss_weight * sft_loss
+                        loss = total_loss
 
                     loss /= self.gradient_accumulation
                     with backward_ctx:
