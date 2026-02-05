@@ -125,6 +125,8 @@ class ChunkStepResult:
     forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
 
     def __post_init__(self):
+        if self.actions is not None:
+            self.actions = self.actions.cpu().contiguous()
         if self.prev_logprobs is not None:
             self.prev_logprobs = self.prev_logprobs.cpu().contiguous()
         if self.prev_values is not None:

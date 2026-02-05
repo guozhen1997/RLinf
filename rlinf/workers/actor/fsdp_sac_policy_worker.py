@@ -242,7 +242,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             cache_size=self.cfg.algorithm.replay_buffer.cache_size,
             sample_window_size=self.cfg.algorithm.replay_buffer.sample_window_size,
             save_trajectories=self.cfg.algorithm.replay_buffer.get(
-                "save_trajectories", True
+                "save_trajectories", False
             ),
         )
 
@@ -262,7 +262,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 cache_size=self.cfg.algorithm.demo_buffer.cache_size,
                 sample_window_size=self.cfg.algorithm.demo_buffer.sample_window_size,
                 save_trajectories=self.cfg.algorithm.demo_buffer.get(
-                    "save_trajectories", True
+                    "save_trajectories", False
                 ),
             )
             self.demo_buffer.load_checkpoint(
@@ -328,6 +328,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         curr_obs = batch["curr_obs"]
         next_obs = batch["next_obs"]
+        actions = batch["actions"].reshape(batch["actions"].shape[0], -1)
+
         with torch.no_grad():
             kwargs = {}
             if SupportedModel(self.cfg.actor.model.model_type) in [
@@ -389,13 +391,13 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             all_data_q_values = self.model(
                 forward_type=ForwardType.SAC_Q,
                 obs=curr_obs,
-                actions=batch["actions"],
+                actions=actions,
             )
         else:
             all_data_q_values, all_qf_next = self.model(
                 forward_type=ForwardType.CROSSQ_Q,
                 obs=curr_obs,
-                actions=batch["actions"],
+                actions=actions,
                 next_obs=next_obs,
                 next_actions=next_state_actions,
             )

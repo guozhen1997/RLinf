@@ -224,7 +224,7 @@ class TrajectoryReplayBuffer:
         storage_dir: str = "",
         storage_format: str = "pt",
         sample_window_size: int = 100,
-        save_trajectories: bool = True,
+        save_trajectories: bool = False,
     ):
         """
         Initialize trajectory-based replay buffer.
@@ -249,6 +249,8 @@ class TrajectoryReplayBuffer:
                 "[TrajectoryReplayBuffer] save_trajectories=False: "
                 "checkpoint save/load is not supported."
             )
+            self.enable_cache = True
+            cache_size = sample_window_size
 
         # Storage directory
         assert storage_dir != "", "storage_dir is required"
@@ -698,13 +700,14 @@ class TrajectoryReplayBuffer:
             if isinstance(tensor, torch.Tensor) and tensor.dim() >= 2:
                 if field in ["dones", "terminations", "truncations"]:
                     extra = int(tensor.shape[0] - traj_len)
-                    assert extra > 0 and traj_len % extra == 0, (
-                        f"Trajectory length {traj_len} is not divisible by extra {extra} for field {field}"
-                    )
-                    epoch_len = traj_len // extra
-                    tensor = tensor.reshape(extra, epoch_len + 1, *tensor.shape[1:])[
-                        :, 1:
-                    ]
+                    if extra > 0:
+                        assert traj_len % extra == 0, (
+                            f"Trajectory length {traj_len} is not divisible by extra {extra} for field {field}"
+                        )
+                        epoch_len = traj_len // extra
+                        tensor = tensor.reshape(
+                            extra, epoch_len + 1, *tensor.shape[1:]
+                        )[:, 1:]
                 flat[field] = tensor.reshape(-1, *tensor.shape[2:])
 
         if trajectory.curr_obs:
