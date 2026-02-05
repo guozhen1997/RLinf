@@ -708,7 +708,7 @@ class TrajectoryReplayBuffer:
                         tensor = tensor.reshape(
                             extra, epoch_len + 1, *tensor.shape[1:]
                         )[:, 1:]
-                    tensor = tensor.reshape(traj_len, *tensor.shape[2:])
+                        tensor = tensor.reshape(traj_len, *tensor.shape[2:])
                 flat[field] = tensor.reshape(-1, *tensor.shape[2:])
 
         if trajectory.curr_obs:

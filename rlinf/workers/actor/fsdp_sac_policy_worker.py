@@ -328,7 +328,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         curr_obs = batch["curr_obs"]
         next_obs = batch["next_obs"]
-        actions = batch["actions"].reshape(batch["actions"].shape[0], -1)
+        actions = batch["actions"]
 
         with torch.no_grad():
             kwargs = {}

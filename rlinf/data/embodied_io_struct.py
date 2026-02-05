@@ -227,10 +227,19 @@ class EmbodiedRolloutResult:
         self, intervene_actions: torch.Tensor, intervene_flags: torch.Tensor
     ):
         if self.actions and len(self.actions) > 0:
-            self.actions[-1] = intervene_actions * intervene_flags[
-                ..., None
-            ] + self.actions[-1] * (~intervene_flags[..., None])
-            self.intervene_flags[-1] = intervene_flags
+            if intervene_actions is not None and intervene_actions.dim() == 3:
+                if intervene_actions.shape[1] == 1:
+                    intervene_actions = intervene_actions.squeeze(1)
+            if self.actions[-1] is not None and self.actions[-1].dim() == 3:
+                if self.actions[-1].shape[1] == 1:
+                    self.actions[-1] = self.actions[-1].squeeze(1)
+
+            flags = intervene_flags
+            if flags.dim() == 1:
+                flags = flags[:, None]
+
+            self.actions[-1] = intervene_actions * flags + self.actions[-1] * (~flags)
+            self.intervene_flags[-1] = flags
 
     def append_transitions(self, curr_obs=None, next_obs=None):
         assert curr_obs is not None and next_obs is not None
