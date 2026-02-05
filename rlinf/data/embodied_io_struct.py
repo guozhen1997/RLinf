@@ -239,7 +239,7 @@ class EmbodiedRolloutResult:
                 flags = flags[:, None]
 
             self.actions[-1] = intervene_actions * flags + self.actions[-1] * (~flags)
-            self.intervene_flags[-1] = flags
+            self.intervene_flags[-1] = flags.expand_as(self.actions[-1])
 
     def append_transitions(self, curr_obs=None, next_obs=None):
         assert curr_obs is not None and next_obs is not None
