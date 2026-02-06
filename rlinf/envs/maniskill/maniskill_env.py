@@ -171,7 +171,7 @@ class ManiskillEnv(gym.Env):
 
     def _extract_obs_image(self, raw_obs, infos=None):
         if getattr(self.cfg, "obs_mode", "default") == "raw":
-            assert (infos is not None)
+            assert infos is not None
             return infos["extracted_obs"]
         else:
             obs_image = raw_obs["sensor_data"]["3rd_view_camera"]["rgb"].to(

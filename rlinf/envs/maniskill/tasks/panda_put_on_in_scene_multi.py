@@ -1,38 +1,52 @@
+# Copyright 2026 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 from pathlib import Path
+from typing import Any, Optional, Union
+
 import cv2
 import numpy as np
 import sapien
 import torch
-import torch.nn.functional as F
-from sapien.physx import PhysxMaterial
-from transforms3d.euler import euler2quat
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
-
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.tasks.digital_twins.bridge_dataset_eval.base_env import (
     BRIDGE_DATASET_ASSET_PATH,
-    WidowX250SBridgeDatasetFlatTable,
 )
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import common, io_utils, sapien_utils
 from mani_skill.utils.geometry import rotation_conversions
+from mani_skill.utils.registration import register_env
 from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.pose import Pose
 from mani_skill.utils.structs.types import SimConfig
-from mani_skill.utils.registration import register_env
-from .panda_based_env import PandaBridgeDatasetFlatTable
-from .pose_utils import pose2matrix_batch_torch, pose2matrix_torch, matrix2pose_batch_torch
 from pytorch3d.transforms import quaternion_to_axis_angle
-from transforms3d.euler import mat2euler
+from sapien.physx import PhysxMaterial
+from transforms3d.euler import euler2quat, mat2euler
+
+from .panda_based_env import PandaBridgeDatasetFlatTable
+from .pose_utils import (
+    matrix2pose_batch_torch,
+    pose2matrix_batch_torch,
+    pose2matrix_torch,
+)
 
 CARROT_DATASET_DIR = (
     Path(os.getenv("MANISKILL_ASSET_DIR", Path(__file__).parent / ".." / "assets"))
     / "carrot"
 )
-CUSTOM_DATASET_PATH = (
-    Path(Path(__file__).parent / "custom_assets")
-)
+CUSTOM_DATASET_PATH = Path(Path(__file__).parent / "custom_assets")
 
 rotation_offset_dict = {
     0: 0,
@@ -62,6 +76,7 @@ rotation_offset_dict = {
     24: 0,
 }
 
+
 class PandaPutOnPlateInScene25(BaseEnv):
     """Base Digital Twin environment for digital twins of the BridgeData v2"""
 
@@ -72,7 +87,9 @@ class PandaPutOnPlateInScene25(BaseEnv):
     obj_dynamic_friction = 1.0
 
     rgb_camera_name: str = "3rd_view_camera"
-    rgb_overlay_mode: str = "background"  # 'background' or 'object' or 'debug' or combinations of them
+    rgb_overlay_mode: str = (
+        "background"  # 'background' or 'object' or 'debug' or combinations of them
+    )
 
     overlay_images_numpy: list[np.ndarray]
     overlay_textures_numpy: list[np.ndarray]
@@ -109,25 +126,58 @@ class PandaPutOnPlateInScene25(BaseEnv):
         self.safe_robot_pos = sapien.Pose([0.3, 0.028, 1.870], q=[0, 0, 0, 1])
 
         # stats
-        self.extra_stats = dict()
+        self.extra_stats = {}
 
-        super().__init__(
-            robot_uids=PandaBridgeDatasetFlatTable,
-            **kwargs
-        )
+        super().__init__(robot_uids=PandaBridgeDatasetFlatTable, **kwargs)
 
     def _generate_init_pose(self):
         xy_center = np.array([-0.16, 0.00]).reshape(1, 2)
         half_edge_length = np.array([0.075, 0.075]).reshape(1, 2)
 
-        grid_pos = np.array([
-            [0.0, 0.0], [0.0, 0.2], [0.0, 0.4], [0.0, 0.6], [0.0, 0.8], [0.0, 1.0],
-            [0.2, 0.0], [0.2, 0.2], [0.2, 0.4], [0.2, 0.6], [0.2, 0.8], [0.2, 1.0],
-            [0.4, 0.0], [0.4, 0.2], [0.4, 0.4], [0.4, 0.6], [0.4, 0.8], [0.4, 1.0],
-            [0.6, 0.0], [0.6, 0.2], [0.6, 0.4], [0.6, 0.6], [0.6, 0.8], [0.6, 1.0],
-            [0.8, 0.0], [0.8, 0.2], [0.8, 0.4], [0.8, 0.6], [0.8, 0.8], [0.8, 1.0],
-            [1.0, 0.0], [1.0, 0.2], [1.0, 0.4], [1.0, 0.6], [1.0, 0.8], [1.0, 1.0],
-        ]) * 2 - 1  # [36, 2]
+        grid_pos = (
+            np.array(
+                [
+                    [0.0, 0.0],
+                    [0.0, 0.2],
+                    [0.0, 0.4],
+                    [0.0, 0.6],
+                    [0.0, 0.8],
+                    [0.0, 1.0],
+                    [0.2, 0.0],
+                    [0.2, 0.2],
+                    [0.2, 0.4],
+                    [0.2, 0.6],
+                    [0.2, 0.8],
+                    [0.2, 1.0],
+                    [0.4, 0.0],
+                    [0.4, 0.2],
+                    [0.4, 0.4],
+                    [0.4, 0.6],
+                    [0.4, 0.8],
+                    [0.4, 1.0],
+                    [0.6, 0.0],
+                    [0.6, 0.2],
+                    [0.6, 0.4],
+                    [0.6, 0.6],
+                    [0.6, 0.8],
+                    [0.6, 1.0],
+                    [0.8, 0.0],
+                    [0.8, 0.2],
+                    [0.8, 0.4],
+                    [0.8, 0.6],
+                    [0.8, 0.8],
+                    [0.8, 1.0],
+                    [1.0, 0.0],
+                    [1.0, 0.2],
+                    [1.0, 0.4],
+                    [1.0, 0.6],
+                    [1.0, 0.8],
+                    [1.0, 1.0],
+                ]
+            )
+            * 2
+            - 1
+        )  # [36, 2]
         grid_pos = grid_pos * half_edge_length + xy_center
 
         xyz_configs = []
@@ -160,7 +210,9 @@ class PandaPutOnPlateInScene25(BaseEnv):
     def _default_sim_config(self):
         return SimConfig(sim_freq=500, control_freq=5, spacing=20)
 
-    def _build_actor_helper(self, name: str, path: Path, density: float, scale: float, pose: Pose):
+    def _build_actor_helper(
+        self, name: str, path: Path, density: float, scale: float, pose: Pose
+    ):
         """helper function to build actors by ID directly and auto configure physical materials"""
         physical_material = PhysxMaterial(
             static_friction=self.obj_static_friction,
@@ -227,10 +279,14 @@ class PandaPutOnPlateInScene25(BaseEnv):
 
             scale = self.np_random.choice(scale_list)
             pose = Pose.create_from_pq(torch.tensor([1.0, 0.3 * idx, 1.0]))
-            self.objs_carrot[name] = self._build_actor_helper(name, model_path, density, scale, pose)
+            self.objs_carrot[name] = self._build_actor_helper(
+                name, model_path, density, scale, pose
+            )
 
             bbox_size = np.array(bbox["max"]) - np.array(bbox["min"])  # [3]
-            self.model_bbox_sizes[name] = common.to_tensor(bbox_size * scale, device=self.device)  # [3]
+            self.model_bbox_sizes[name] = common.to_tensor(
+                bbox_size * scale, device=self.device
+            )  # [3]
 
         # plate
         self.objs_plate: dict[str, Actor] = {}
@@ -243,10 +299,14 @@ class PandaPutOnPlateInScene25(BaseEnv):
 
             scale = self.np_random.choice(scale_list)
             pose = Pose.create_from_pq(torch.tensor([2.0, 0.3 * idx, 1.0]))
-            self.objs_plate[name] = self._build_actor_helper(name, model_path, density, scale, pose)
+            self.objs_plate[name] = self._build_actor_helper(
+                name, model_path, density, scale, pose
+            )
 
             bbox_size = np.array(bbox["max"]) - np.array(bbox["min"])  # [3]
-            self.model_bbox_sizes[name] = common.to_tensor(bbox_size * scale, device=self.device)  # [3]
+            self.model_bbox_sizes[name] = common.to_tensor(
+                bbox_size * scale, device=self.device
+            )  # [3]
 
     def _load_lighting(self, options: dict):
         self.scene.set_ambient_light([0.3, 0.3, 0.3])
@@ -269,11 +329,21 @@ class PandaPutOnPlateInScene25(BaseEnv):
         sensor = self._sensor_configs[self.rgb_camera_name]
         assert sensor.width == 640
         assert sensor.height == 480
-        overlay_images = np.stack([self.overlay_images_numpy[idx] for idx in self.select_overlay_ids])
-        self.overlay_images = torch.tensor(overlay_images, device=self.device)  # [b, H, W, 3]
-        overlay_textures = np.stack([self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids])
-        self.overlay_textures = torch.tensor(overlay_textures, device=self.device)  # [b, H, W, 3]
-        overlay_mix = np.array([self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids])
+        overlay_images = np.stack(
+            [self.overlay_images_numpy[idx] for idx in self.select_overlay_ids]
+        )
+        self.overlay_images = torch.tensor(
+            overlay_images, device=self.device
+        )  # [b, H, W, 3]
+        overlay_textures = np.stack(
+            [self.overlay_textures_numpy[idx] for idx in self.select_overlay_ids]
+        )
+        self.overlay_textures = torch.tensor(
+            overlay_textures, device=self.device
+        )  # [b, H, W, 3]
+        overlay_mix = np.array(
+            [self.overlay_mix_numpy[idx] for idx in self.select_overlay_ids]
+        )
         self.overlay_mix = torch.tensor(overlay_mix, device=self.device)  # [b]
 
         # xyz and quat
@@ -290,7 +360,7 @@ class PandaPutOnPlateInScene25(BaseEnv):
         self.target_obj_name = select_plate[0]
         self.objs = {
             self.source_obj_name: carrot_actor[0],
-            self.target_obj_name: plate_actor[0]
+            self.target_obj_name: plate_actor[0],
         }
 
         # set pose for robot
@@ -300,40 +370,73 @@ class PandaPutOnPlateInScene25(BaseEnv):
         # set pose for objs
         for idx, name in enumerate(self.model_db_carrot):
             is_select = self.select_carrot_ids == idx  # [b]
-            p_reset = torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
+            p_reset = (
+                torch.tensor([1.0, 0.3 * idx, 1.0], device=self.device)
+                .reshape(1, -1)
+                .repeat(b, 1)
+            )  # [b, 3]
             if self.fix_obj_xyz is not None and idx == self.select_carrot_ids[0].item():
                 p_select = self.fix_obj_xyz[0].reshape(1, -1).repeat(b, 1)  # [b, 3]
             else:
                 p_select = xyz_configs[self.select_pos_ids, 0].reshape(b, 3)  # [b, 3]
-            p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
+            p = torch.where(
+                is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset
+            )  # [b, 3]
 
-            q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
-            if self.fix_obj_quat is not None and idx == self.select_carrot_ids[0].item():
+            q_reset = (
+                torch.tensor([0, 0, 0, 1], device=self.device)
+                .reshape(1, -1)
+                .repeat(b, 1)
+            )  # [b, 4]
+            if (
+                self.fix_obj_quat is not None
+                and idx == self.select_carrot_ids[0].item()
+            ):
                 q_select_before = self.fix_obj_quat[0].reshape(1, -1).repeat(b, 1)
             else:
-                q_select_before = quat_configs[self.select_quat_ids, 0].reshape(b, 4)  # [b, 4]
+                q_select_before = quat_configs[self.select_quat_ids, 0].reshape(
+                    b, 4
+                )  # [b, 4]
             q_select = q_select_before.clone()
-            q_select[:, 0] = q_select_before[:, 0] * np.cos(rotation_offset_dict[idx]) - q_select_before[:, 3] * np.sin(rotation_offset_dict[idx])
-            q_select[:, 3] = q_select_before[:, 0] * np.sin(rotation_offset_dict[idx]) + q_select_before[:, 3] * np.cos(rotation_offset_dict[idx])
-            q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
+            q_select[:, 0] = q_select_before[:, 0] * np.cos(
+                rotation_offset_dict[idx]
+            ) - q_select_before[:, 3] * np.sin(rotation_offset_dict[idx])
+            q_select[:, 3] = q_select_before[:, 0] * np.sin(
+                rotation_offset_dict[idx]
+            ) + q_select_before[:, 3] * np.cos(rotation_offset_dict[idx])
+            q = torch.where(
+                is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset
+            )  # [b, 4]
 
             self.objs_carrot[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
         for idx, name in enumerate(self.model_db_plate):
             is_select = self.select_plate_ids == idx  # [b]
-            p_reset = torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 3]
+            p_reset = (
+                torch.tensor([2.0, 0.3 * idx, 1.0], device=self.device)
+                .reshape(1, -1)
+                .repeat(b, 1)
+            )  # [b, 3]
             if self.fix_plate_xyz is not None:
                 p_select = self.fix_plate_xyz[idx].reshape(1, -1).repeat(b, 1)
             else:
                 p_select = xyz_configs[self.select_pos_ids, 1].reshape(b, 3)  # [b, 3]
-            p = torch.where(is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset)  # [b, 3]
+            p = torch.where(
+                is_select.unsqueeze(1).repeat(1, 3), p_select, p_reset
+            )  # [b, 3]
 
-            q_reset = torch.tensor([0, 0, 0, 1], device=self.device).reshape(1, -1).repeat(b, 1)  # [b, 4]
+            q_reset = (
+                torch.tensor([0, 0, 0, 1], device=self.device)
+                .reshape(1, -1)
+                .repeat(b, 1)
+            )  # [b, 4]
             if self.fix_plate_quat is not None:
                 q_select = self.fix_plate_quat[idx].reshape(1, -1).repeat(b, 1)
             else:
                 q_select = quat_configs[self.select_quat_ids, 1].reshape(b, 4)  # [b, 4]
-            q = torch.where(is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset)  # [b, 4]
+            q = torch.where(
+                is_select.unsqueeze(1).repeat(1, 4), q_select, q_reset
+            )  # [b, 4]
 
             self.objs_plate[name].set_pose(Pose.create_from_pq(p=p, q=q))
 
@@ -356,45 +459,85 @@ class PandaPutOnPlateInScene25(BaseEnv):
         self.agent.reset(init_qpos=self.initial_qpos)
 
         # figure out object bounding boxes after settling. This is used to determine if an object is near the target object
-        self.carrot_q_after_settle = torch.stack([a.pose.q[idx] for idx, a in enumerate(carrot_actor)])  # [b, 4]
-        self.plate_q_after_settle = torch.stack([a.pose.q[idx] for idx, a in enumerate(plate_actor)])  # [b, 4]
-        corner_signs = torch.tensor([
-            [-1, -1, -1], [-1, -1, 1], [-1, 1, -1], [-1, 1, 1],
-            [1, -1, -1], [1, -1, 1], [1, 1, -1], [1, 1, 1]
-        ], device=self.device)
+        self.carrot_q_after_settle = torch.stack(
+            [a.pose.q[idx] for idx, a in enumerate(carrot_actor)]
+        )  # [b, 4]
+        self.plate_q_after_settle = torch.stack(
+            [a.pose.q[idx] for idx, a in enumerate(plate_actor)]
+        )  # [b, 4]
+        corner_signs = torch.tensor(
+            [
+                [-1, -1, -1],
+                [-1, -1, 1],
+                [-1, 1, -1],
+                [-1, 1, 1],
+                [1, -1, -1],
+                [1, -1, 1],
+                [1, 1, -1],
+                [1, 1, 1],
+            ],
+            device=self.device,
+        )
 
         # carrot
-        carrot_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_carrot])  # [b, 3]
+        carrot_bbox_world = torch.stack(
+            [self.model_bbox_sizes[n] for n in select_carrot]
+        )  # [b, 3]
         c_bbox_half = carrot_bbox_world / 2  # [b, 3]
         c_bbox_corners = c_bbox_half[:, None, :] * corner_signs[None, :, :]  # [b, 8, 3]
 
-        c_q_matrix = rotation_conversions.quaternion_to_matrix(self.carrot_q_after_settle)  # [b, 3, 3]
-        c_bbox_corners_rot = torch.matmul(c_bbox_corners, c_q_matrix.transpose(1, 2))  # [b, 8, 3]
-        c_rotated_bbox_size = c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        c_q_matrix = rotation_conversions.quaternion_to_matrix(
+            self.carrot_q_after_settle
+        )  # [b, 3, 3]
+        c_bbox_corners_rot = torch.matmul(
+            c_bbox_corners, c_q_matrix.transpose(1, 2)
+        )  # [b, 8, 3]
+        c_rotated_bbox_size = (
+            c_bbox_corners_rot.max(dim=1).values - c_bbox_corners_rot.min(dim=1).values
+        )  # [b, 3]
         self.carrot_bbox_world = c_rotated_bbox_size  # [b, 3]
 
         # plate
-        plate_bbox_world = torch.stack([self.model_bbox_sizes[n] for n in select_plate])  # [b, 3]
+        plate_bbox_world = torch.stack(
+            [self.model_bbox_sizes[n] for n in select_plate]
+        )  # [b, 3]
         p_bbox_half = plate_bbox_world / 2  # [b, 3]
         p_bbox_corners = p_bbox_half[:, None, :] * corner_signs[None, :, :]  # [b, 8, 3]
 
-        p_q_matrix = rotation_conversions.quaternion_to_matrix(self.plate_q_after_settle)  # [b, 3, 3]
-        p_bbox_corners_rot = torch.matmul(p_bbox_corners, p_q_matrix.transpose(1, 2))  # [b, 8, 3]
-        p_rotated_bbox_size = p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values  # [b, 3]
+        p_q_matrix = rotation_conversions.quaternion_to_matrix(
+            self.plate_q_after_settle
+        )  # [b, 3, 3]
+        p_bbox_corners_rot = torch.matmul(
+            p_bbox_corners, p_q_matrix.transpose(1, 2)
+        )  # [b, 8, 3]
+        p_rotated_bbox_size = (
+            p_bbox_corners_rot.max(dim=1).values - p_bbox_corners_rot.min(dim=1).values
+        )  # [b, 3]
         self.plate_bbox_world = p_rotated_bbox_size  # [b, 3]
 
         # stats to track
-        self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32, device=self.device)
-        self.episode_stats = dict(
-            is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool, device=self.device),
-            consecutive_grasp=torch.zeros((b,), dtype=torch.bool, device=self.device),
-            src_on_target=torch.zeros((b,), dtype=torch.bool, device=self.device),
-
-            gripper_carrot_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
-            gripper_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
-            carrot_plate_dist=torch.zeros((b,), dtype=torch.float32, device=self.device),
+        self.consecutive_grasp = torch.zeros(
+            (b,), dtype=torch.int32, device=self.device
         )
-        self.extra_stats = dict()
+        self.episode_stats = {
+            "is_src_obj_grasped": torch.zeros(
+                (b,), dtype=torch.bool, device=self.device
+            ),
+            "consecutive_grasp": torch.zeros(
+                (b,), dtype=torch.bool, device=self.device
+            ),
+            "src_on_target": torch.zeros((b,), dtype=torch.bool, device=self.device),
+            "gripper_carrot_dist": torch.zeros(
+                (b,), dtype=torch.float32, device=self.device
+            ),
+            "gripper_plate_dist": torch.zeros(
+                (b,), dtype=torch.float32, device=self.device
+            ),
+            "carrot_plate_dist": torch.zeros(
+                (b,), dtype=torch.float32, device=self.device
+            ),
+        }
+        self.extra_stats = {}
 
         # save init plate pos
         self.init_plate_pos = self.objs_plate["001_plate_simpler"].pose.p
@@ -427,17 +570,29 @@ class PandaPutOnPlateInScene25(BaseEnv):
         carrot_actor = [self.objs_carrot[n] for n in select_carrot]
         plate_actor = [self.objs_plate[n] for n in select_plate]
 
-        carrot_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(carrot_actor)])  # [b, 3]
-        carrot_q = torch.stack([a.pose.q[idx] for idx, a in enumerate(carrot_actor)])  # [b, 4]
-        plate_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(plate_actor)])  # [b, 3]
-        plate_q = torch.stack([a.pose.q[idx] for idx, a in enumerate(plate_actor)])  # [b, 4]
+        carrot_p = torch.stack(
+            [a.pose.p[idx] for idx, a in enumerate(carrot_actor)]
+        )  # [b, 3]
+        carrot_q = torch.stack(
+            [a.pose.q[idx] for idx, a in enumerate(carrot_actor)]
+        )  # [b, 4]
+        plate_p = torch.stack(
+            [a.pose.p[idx] for idx, a in enumerate(plate_actor)]
+        )  # [b, 3]
+        plate_q = torch.stack(
+            [a.pose.q[idx] for idx, a in enumerate(plate_actor)]
+        )  # [b, 4]
 
-        is_src_obj_grasped = torch.zeros((b,), dtype=torch.bool, device=self.device)  # [b]
+        is_src_obj_grasped = torch.zeros(
+            (b,), dtype=torch.bool, device=self.device
+        )  # [b]
 
         for idx, name in enumerate(self.model_db_carrot):
             is_select = self.select_carrot_ids == idx  # [b]
             grasped = self.agent.is_grasping(self.objs_carrot[name])  # [b]
-            is_src_obj_grasped = torch.where(is_select, grasped, is_src_obj_grasped)  # [b]
+            is_src_obj_grasped = torch.where(
+                is_select, grasped, is_src_obj_grasped
+            )  # [b]
 
         # if is_src_obj_grasped:
         self.consecutive_grasp += is_src_obj_grasped
@@ -446,7 +601,7 @@ class PandaPutOnPlateInScene25(BaseEnv):
 
         # whether the source object is on the target object based on bounding box position
         tgt_obj_half_length_bbox = (
-                self.plate_bbox_world / 2
+            self.plate_bbox_world / 2
         )  # get half-length of bbox xy diagonol distance in the world frame at timestep=0
         src_obj_half_length_bbox = self.carrot_bbox_world / 2
 
@@ -454,18 +609,22 @@ class PandaPutOnPlateInScene25(BaseEnv):
         pos_tgt = plate_p
         offset = pos_src - pos_tgt
         xy_flag = (
-                torch.linalg.norm(offset[:, :2], dim=1)
-                <= tgt_obj_half_length_bbox.max(dim=1).values + xy_flag_required_offset
+            torch.linalg.norm(offset[:, :2], dim=1)
+            <= tgt_obj_half_length_bbox.max(dim=1).values + xy_flag_required_offset
         )
         z_flag = (offset[:, 2] > 0) & (
-                offset[:, 2] - tgt_obj_half_length_bbox[:, 2] - src_obj_half_length_bbox[:, 2]
-                <= z_flag_required_offset
+            offset[:, 2]
+            - tgt_obj_half_length_bbox[:, 2]
+            - src_obj_half_length_bbox[:, 2]
+            <= z_flag_required_offset
         )
         src_on_target = xy_flag & z_flag
 
         if success_require_src_completely_on_target:
             # whether the source object is on the target object based on contact information
-            net_forces = torch.zeros((b,), dtype=torch.float32, device=self.device)  # [b]
+            net_forces = torch.zeros(
+                (b,), dtype=torch.float32, device=self.device
+            )  # [b]
             for idx in range(self.num_envs):
                 force = self.scene.get_pairwise_contact_forces(
                     self.objs_carrot[select_carrot[idx]],
@@ -479,15 +638,23 @@ class PandaPutOnPlateInScene25(BaseEnv):
         success = src_on_target
 
         # prepare dist
-        gripper_p = (self.agent.finger1_link.pose.p + self.agent.finger2_link.pose.p) / 2  # [b, 3]
-        gripper_q = (self.agent.finger1_link.pose.q + self.agent.finger2_link.pose.q) / 2  # [b, 4]
+        gripper_p = (
+            self.agent.finger1_link.pose.p + self.agent.finger2_link.pose.p
+        ) / 2  # [b, 3]
+        gripper_q = (
+            self.agent.finger1_link.pose.q + self.agent.finger2_link.pose.q
+        ) / 2  # [b, 4]
         gripper_carrot_dist = torch.linalg.norm(gripper_p - carrot_p, dim=1)  # [b, 3]
         gripper_plate_dist = torch.linalg.norm(gripper_p - plate_p, dim=1)  # [b, 3]
         carrot_plate_dist = torch.linalg.norm(carrot_p - plate_p, dim=1)  # [b, 3]
 
         self.episode_stats["src_on_target"] = src_on_target
-        self.episode_stats["is_src_obj_grasped"] = self.episode_stats["is_src_obj_grasped"] | is_src_obj_grasped
-        self.episode_stats["consecutive_grasp"] = self.episode_stats["consecutive_grasp"] | consecutive_grasp
+        self.episode_stats["is_src_obj_grasped"] = (
+            self.episode_stats["is_src_obj_grasped"] | is_src_obj_grasped
+        )
+        self.episode_stats["consecutive_grasp"] = (
+            self.episode_stats["consecutive_grasp"] | consecutive_grasp
+        )
         self.episode_stats["is_src_obj_grasped_current"] = is_src_obj_grasped
         self.episode_stats["gripper_carrot_dist"] = gripper_carrot_dist
         self.episode_stats["gripper_plate_dist"] = gripper_plate_dist
@@ -535,7 +702,9 @@ class PandaPutOnPlateInScene25(BaseEnv):
             device=self.device,
         )
 
-    def _green_sceen_rgb(self, rgb, segmentation, overlay_img, overlay_texture, overlay_mix):
+    def _green_sceen_rgb(
+        self, rgb, segmentation, overlay_img, overlay_texture, overlay_mix
+    ):
         """returns green screened RGB data given a batch of RGB and segmentation images and one overlay image"""
         actor_seg = segmentation[..., 0]
         # mask = torch.ones_like(actor_seg, device=actor_seg.device)
@@ -543,9 +712,13 @@ class PandaPutOnPlateInScene25(BaseEnv):
             # if using CPU simulation, the device of the robot_link_ids and target_object_actor_ids will be CPU first
             # but for most users who use the sapien_cuda render backend image data will be on the GPU.
             self.robot_link_ids = self.robot_link_ids.to(actor_seg.device)
-            self.target_object_actor_ids = self.target_object_actor_ids.to(actor_seg.device)
+            self.target_object_actor_ids = self.target_object_actor_ids.to(
+                actor_seg.device
+            )
 
-        mask = torch.isin(actor_seg, torch.concat([self.robot_link_ids, self.target_object_actor_ids]))
+        mask = torch.isin(
+            actor_seg, torch.concat([self.robot_link_ids, self.target_object_actor_ids])
+        )
         mask = (~mask).to(torch.float32)  # [b, H, W]
 
         mask = mask.unsqueeze(-1)  # [b, H, W, 1]
@@ -564,32 +737,9 @@ class PandaPutOnPlateInScene25(BaseEnv):
 
         return rgb_ret
 
-    # def get_obs(self, info: dict = None):
-    #     obs = super().get_obs(info)
-
-    #     # "greenscreen" process
-    #     if self.obs_mode_struct.visual.rgb and self.obs_mode_struct.visual.segmentation and self.overlay_images_numpy:
-    #         # get the actor ids of objects to manipulate; note that objects here are not articulated
-    #         camera_name = self.rgb_camera_name
-    #         assert "segmentation" in obs["sensor_data"][camera_name].keys()
-
-    #         overlay_img = self.overlay_images.to(obs["sensor_data"][camera_name]["rgb"].device)
-    #         overlay_texture = self.overlay_textures.to(obs["sensor_data"][camera_name]["rgb"].device)
-    #         overlay_mix = self.overlay_mix.to(obs["sensor_data"][camera_name]["rgb"].device)
-
-    #         green_screened_rgb = self._green_sceen_rgb(
-    #             obs["sensor_data"][camera_name]["rgb"],
-    #             obs["sensor_data"][camera_name]["segmentation"],
-    #             overlay_img,
-    #             overlay_texture,
-    #             overlay_mix
-    #         )
-    #         obs["sensor_data"][camera_name]["rgb"] = green_screened_rgb
-    #     return obs
-
-    def _get_obs_extra(self, info: Dict):
+    def _get_obs_extra(self, info: dict):
         """Get task-relevant extra observations. Usually defined on a task by task basis"""
-        
+
         # One hot for carrot ids
         b = self.select_carrot_ids.shape[0]
         carrot_one_hot = torch.zeros((b, 25), dtype=torch.float32, device=self.device)
@@ -605,46 +755,53 @@ class PandaPutOnPlateInScene25(BaseEnv):
 
         plate_poses = self.objs_plate["001_plate_simpler"].pose.raw_pose
 
-        return dict(
-            carrot_one_hot=carrot_one_hot,  # [b, 25]
-            gripper_pose=gripper_pose,  # [b, 7]
-            object_poses=object_poses,  # [b, 7]
-            plate_poses=plate_poses,  # [b, 7]
-            init_plate_pos=self.init_plate_pos,  # [b, 3]
-        )
+        return {
+            "carrot_one_hot": carrot_one_hot,  # [b, 25]
+            "gripper_pose": gripper_pose,  # [b, 7]
+            "object_poses": object_poses,  # [b, 7]
+            "plate_poses": plate_poses,  # [b, 7]
+            "init_plate_pos": self.init_plate_pos,  # [b, 3]
+        }
 
     # panda
     @property
     def _default_human_render_camera_configs(self):
-        pose = sapien.Pose([0.442614, 0.488839, 1.45059], [0.39519, 0.210508, 0.0936785, -0.889233])
+        pose = sapien.Pose(
+            [0.442614, 0.488839, 1.45059], [0.39519, 0.210508, 0.0936785, -0.889233]
+        )
         return CameraConfig("render_camera", pose, 512, 512, 1.45, 0.1, 1000)
 
     def _is_success(self, object_poses: torch.Tensor) -> torch.Tensor:
         """Check if the task is successful, should return a boolean tensor of shape (b,)"""
-        delta_pos = (self.objs_plate["001_plate_simpler"].pose.p - object_poses[:, :3])
-        success_check = (torch.linalg.norm(delta_pos[:, :2], dim=1) < 0.05) & (torch.abs(delta_pos[:, 2]) < 0.05)
+        delta_pos = self.objs_plate["001_plate_simpler"].pose.p - object_poses[:, :3]
+        success_check = (torch.linalg.norm(delta_pos[:, :2], dim=1) < 0.05) & (
+            torch.abs(delta_pos[:, 2]) < 0.05
+        )
 
         return success_check
 
     def _is_lifted(self, object_poses: torch.Tensor) -> torch.Tensor:
         b = object_poses.shape[0]
         grasping_bank = torch.stack(
-            [self.agent.is_grasping(self.objs_carrot[name]) for name in self.carrot_names],
-            dim=0
+            [
+                self.agent.is_grasping(self.objs_carrot[name])
+                for name in self.carrot_names
+            ],
+            dim=0,
         )
         is_lifted = grasping_bank[self.select_carrot_ids, torch.arange(b)]
         return is_lifted
 
     def compute_approaching_reward(self, object_poses: torch.Tensor) -> torch.Tensor:
         tcp_poses = self.agent.tcp.pose.raw_pose
-        delta_pos = (object_poses[:, :3] - tcp_poses[:, :3])
+        delta_pos = object_poses[:, :3] - tcp_poses[:, :3]
         dist = torch.linalg.norm(delta_pos, dim=1)
 
         approaching_reward = 1 - torch.tanh(dist * 5)
         return approaching_reward
 
     def putting_reward(self, object_poses: torch.Tensor) -> torch.Tensor:
-        delta_pos = (self.objs_plate["001_plate_simpler"].pose.p - object_poses[:, :3])
+        delta_pos = self.objs_plate["001_plate_simpler"].pose.p - object_poses[:, :3]
         put_reward = 1 - torch.tanh(torch.linalg.norm(delta_pos, dim=1) * 5)
         return put_reward
 
@@ -658,8 +815,8 @@ class PandaPutOnPlateInScene25(BaseEnv):
 
         moving_penalty = torch.tanh(dist * 5)
         return moving_penalty
-        
-    def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
+
+    def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
         b = self.select_carrot_ids.shape[0]
 
         pose_bank = torch.stack(
@@ -673,7 +830,9 @@ class PandaPutOnPlateInScene25(BaseEnv):
         rewards = self.compute_approaching_reward(object_poses)
         is_lifted = self._is_lifted(object_poses)
 
-        success_flag = success_flag & (~is_lifted)  # only give reward when the object is lifted
+        success_flag = success_flag & (
+            ~is_lifted
+        )  # only give reward when the object is lifted
 
         put_rewards = self.putting_reward(object_poses)
         put_rewards[~is_lifted] = 0.0  # only give put reward when the object is lifted
@@ -687,14 +846,17 @@ class PandaPutOnPlateInScene25(BaseEnv):
         return rewards
 
     def compute_normalized_dense_reward(
-        self, obs: Any, action: torch.Tensor, info: Dict
+        self, obs: Any, action: torch.Tensor, info: dict
     ):
-        return self.compute_dense_reward(obs, action, info) / 5.0  # normalize the reward to [0, 1]
+        return (
+            self.compute_dense_reward(obs, action, info) / 5.0
+        )  # normalize the reward to [0, 1]
+
 
 @register_env(
-    "PandaPutOnPlateInScene25DigitalTwin-v1", 
-    max_episode_steps=80, 
-    asset_download_ids=["bridge_v2_real2sim"]
+    "PandaPutOnPlateInScene25DigitalTwin-v1",
+    max_episode_steps=80,
+    asset_download_ids=["bridge_v2_real2sim"],
 )
 class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
     def __init__(self, use_sparse_reward=False, **kwargs):
@@ -704,9 +866,15 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
         super().__init__(**kwargs)
 
         if self.use_sparse_reward:
-            self.is_successed_flag = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
-            self.successed_but_failed_flag = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
-            self.is_grasped_flag = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+            self.is_successed_flag = torch.zeros(
+                (self.num_envs,), dtype=torch.bool, device=self.device
+            )
+            self.successed_but_failed_flag = torch.zeros(
+                (self.num_envs,), dtype=torch.bool, device=self.device
+            )
+            self.is_grasped_flag = torch.zeros(
+                (self.num_envs,), dtype=torch.bool, device=self.device
+            )
 
     def _prep_init(self):
         # models
@@ -719,7 +887,9 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
             CARROT_DATASET_DIR / "more_plate" / "model_db.json"
         )
         only_plate_name = list(self.model_db_plate.keys())[0]
-        self.model_db_plate = {k: v for k, v in self.model_db_plate.items() if k == only_plate_name}
+        self.model_db_plate = {
+            k: v for k, v in self.model_db_plate.items() if k == only_plate_name
+        }
         assert len(self.model_db_plate) == 1
 
         # random configs
@@ -734,15 +904,23 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
         img_fd = CARROT_DATASET_DIR / "more_table" / "imgs"
         texture_fd = CARROT_DATASET_DIR / "more_table" / "textures"
         self.overlay_images_numpy = [
-            cv2.resize(cv2.cvtColor(cv2.imread(str(img_fd / k)), cv2.COLOR_BGR2RGB), (640, 480))
+            cv2.resize(
+                cv2.cvtColor(cv2.imread(str(img_fd / k)), cv2.COLOR_BGR2RGB), (640, 480)
+            )
             for k in model_db_table  # [H, W, 3]
         ]  # (B) [H, W, 3]
         self.overlay_textures_numpy = [
-            cv2.resize(cv2.cvtColor(cv2.imread(str(texture_fd / v["texture"])), cv2.COLOR_BGR2RGB), (640, 480))
+            cv2.resize(
+                cv2.cvtColor(
+                    cv2.imread(str(texture_fd / v["texture"])), cv2.COLOR_BGR2RGB
+                ),
+                (640, 480),
+            )
             for v in model_db_table.values()  # [H, W, 3]
         ]  # (B) [H, W, 3]
         self.overlay_mix_numpy = [
-            v["mix"] for v in model_db_table.values()  # []
+            v["mix"]
+            for v in model_db_table.values()  # []
         ]
         assert len(self.overlay_images_numpy) == 21
         assert len(self.overlay_textures_numpy) == 21
@@ -756,7 +934,6 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
         # object / config space
         # -----------------------------
         # In this environment, we do not split objects into train set and eval set
-        obj_set = "all"
         obj_select_set = list(range(25))
         lc = len(obj_select_set)
         lc_offset = 0
@@ -772,8 +949,7 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
         # episode id sampling (batch-level)
         # -----------------------------
         episode_id = options.get(
-            "episode_id",
-            torch.randint(low=0, high=ltt, size=(b,), device=self.device)
+            "episode_id", torch.randint(low=0, high=ltt, size=(b,), device=self.device)
         ).reshape(b)
 
         episode_id_add = torch.randint(low=0, high=ltt, size=(b,), device=self.device)
@@ -804,8 +980,7 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
         # -----------------------------
         carrot_ids = episode_id // (lp * lo * l1 * l2) + lc_offset
         carrot_ids = torch.tensor(
-            [obj_select_set[i] for i in carrot_ids],
-            device=self.device
+            [obj_select_set[i] for i in carrot_ids], device=self.device
         )
 
         plate_ids = (episode_id // (lo * l1 * l2)) % lp
@@ -832,14 +1007,50 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
         plate_xy_center = np.array([-0.148, 0.06]).reshape(1, 2)
         plate_half_edge_length = np.array([0.05, 0.075]).reshape(1, 2)
 
-        grid_pos = np.array([
-            [0.0, 0.0], [0.0, 0.2], [0.0, 0.4], [0.0, 0.6], [0.0, 0.8], [0.0, 1.0],
-            [0.2, 0.0], [0.2, 0.2], [0.2, 0.4], [0.2, 0.6], [0.2, 0.8], [0.2, 1.0],
-            [0.4, 0.0], [0.4, 0.2], [0.4, 0.4], [0.4, 0.6], [0.4, 0.8], [0.4, 1.0],
-            [0.6, 0.0], [0.6, 0.2], [0.6, 0.4], [0.6, 0.6], [0.6, 0.8], [0.6, 1.0],
-            [0.8, 0.0], [0.8, 0.2], [0.8, 0.4], [0.8, 0.6], [0.8, 0.8], [0.8, 1.0],
-            [1.0, 0.0], [1.0, 0.2], [1.0, 0.4], [1.0, 0.6], [1.0, 0.8], [1.0, 1.0],
-        ]) * 2 - 1  # [36, 2]
+        grid_pos = (
+            np.array(
+                [
+                    [0.0, 0.0],
+                    [0.0, 0.2],
+                    [0.0, 0.4],
+                    [0.0, 0.6],
+                    [0.0, 0.8],
+                    [0.0, 1.0],
+                    [0.2, 0.0],
+                    [0.2, 0.2],
+                    [0.2, 0.4],
+                    [0.2, 0.6],
+                    [0.2, 0.8],
+                    [0.2, 1.0],
+                    [0.4, 0.0],
+                    [0.4, 0.2],
+                    [0.4, 0.4],
+                    [0.4, 0.6],
+                    [0.4, 0.8],
+                    [0.4, 1.0],
+                    [0.6, 0.0],
+                    [0.6, 0.2],
+                    [0.6, 0.4],
+                    [0.6, 0.6],
+                    [0.6, 0.8],
+                    [0.6, 1.0],
+                    [0.8, 0.0],
+                    [0.8, 0.2],
+                    [0.8, 0.4],
+                    [0.8, 0.6],
+                    [0.8, 0.8],
+                    [0.8, 1.0],
+                    [1.0, 0.0],
+                    [1.0, 0.2],
+                    [1.0, 0.4],
+                    [1.0, 0.6],
+                    [1.0, 0.8],
+                    [1.0, 1.0],
+                ]
+            )
+            * 2
+            - 1
+        )  # [36, 2]
         object_grid_pos = grid_pos * object_half_edge_length + object_xy_center
         plate_grid_pos = grid_pos * plate_half_edge_length + plate_xy_center
 
@@ -862,14 +1073,16 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
                 np.array([euler2quat(0, 0, np.pi / 4), [1, 0, 0, 0]]),
                 np.array([euler2quat(0, 0, 0), [1, 0, 0, 0]]),
                 np.array([euler2quat(0, 0, np.pi / 2), [1, 0, 0, 0]]),
-                np.array([euler2quat(0, 0, - np.pi / 4), [1, 0, 0, 0]]),
+                np.array([euler2quat(0, 0, -np.pi / 4), [1, 0, 0, 0]]),
             ]
         )
 
         self.xyz_configs = xyz_configs
         self.quat_configs = quat_configs
 
-    def change_the_frame_torch(self, original_euler: torch.Tensor, tcp_pose: torch.Tensor) -> torch.Tensor:
+    def change_the_frame_torch(
+        self, original_euler: torch.Tensor, tcp_pose: torch.Tensor
+    ) -> torch.Tensor:
         """
         Convert euler delta in root frame to TCP frame (torch version).
 
@@ -887,35 +1100,79 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
             original_euler = original_euler.unsqueeze(0)
         if tcp_pose.ndim == 1:
             tcp_pose = tcp_pose.unsqueeze(0)
-        assert original_euler.shape[0] == tcp_pose.shape[0], \
+        assert original_euler.shape[0] == tcp_pose.shape[0], (
             "Batch size mismatch between euler and tcp_pose"
+        )
 
-        device, dtype = tcp_pose.device, tcp_pose.dtype
         N = tcp_pose.shape[0]
 
         # --- Step 1: convert euler (xyz) to rotation matrices ---
-        cx, cy, cz = torch.cos(original_euler[:, 0]), torch.cos(original_euler[:, 1]), torch.cos(original_euler[:, 2])
-        sx, sy, sz = torch.sin(original_euler[:, 0]), torch.sin(original_euler[:, 1]), torch.sin(original_euler[:, 2])
+        cx, cy, cz = (
+            torch.cos(original_euler[:, 0]),
+            torch.cos(original_euler[:, 1]),
+            torch.cos(original_euler[:, 2]),
+        )
+        sx, sy, sz = (
+            torch.sin(original_euler[:, 0]),
+            torch.sin(original_euler[:, 1]),
+            torch.sin(original_euler[:, 2]),
+        )
 
         # R = Rz * Ry * Rx  (consistent with scipy 'xyz')
-        delta_rot_tcp = torch.stack([
-            torch.stack([cy * cz, cz * sx * sy - cx * sz, sx * sz + cx * cz * sy], dim=-1),
-            torch.stack([cy * sz, cx * cz + sx * sy * sz, cx * sy * sz - cz * sx], dim=-1),
-            torch.stack([-sy,     cy * sx,               cx * cy],               dim=-1)
-        ], dim=1)  # (N, 3, 3)
+        delta_rot_tcp = torch.stack(
+            [
+                torch.stack(
+                    [cy * cz, cz * sx * sy - cx * sz, sx * sz + cx * cz * sy], dim=-1
+                ),
+                torch.stack(
+                    [cy * sz, cx * cz + sx * sy * sz, cx * sy * sz - cz * sx], dim=-1
+                ),
+                torch.stack([-sy, cy * sx, cx * cy], dim=-1),
+            ],
+            dim=1,
+        )  # (N, 3, 3)
 
         # --- Step 2: convert tcp quaternion (wxyz) to rotation matrix ---
         quat_wxyz = tcp_pose[:, 3:]
         quat_xyzw = quat_wxyz[:, [1, 2, 3, 0]]  # [x,y,z,w]
-        qx, qy, qz, qw = quat_xyzw[:, 0], quat_xyzw[:, 1], quat_xyzw[:, 2], quat_xyzw[:, 3]
-        norm = torch.sqrt(qx*qx + qy*qy + qz*qz + qw*qw + 1e-8)
-        qx, qy, qz, qw = qx/norm, qy/norm, qz/norm, qw/norm
+        qx, qy, qz, qw = (
+            quat_xyzw[:, 0],
+            quat_xyzw[:, 1],
+            quat_xyzw[:, 2],
+            quat_xyzw[:, 3],
+        )
+        norm = torch.sqrt(qx * qx + qy * qy + qz * qz + qw * qw + 1e-8)
+        qx, qy, qz, qw = qx / norm, qy / norm, qz / norm, qw / norm
 
-        tcp_rot = torch.stack([
-            torch.stack([1 - 2*(qy**2 + qz**2), 2*(qx*qy - qz*qw),     2*(qx*qz + qy*qw)], dim=-1),
-            torch.stack([2*(qx*qy + qz*qw),     1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)], dim=-1),
-            torch.stack([2*(qx*qz - qy*qw),     2*(qy*qz + qx*qw),     1 - 2*(qx**2 + qy**2)], dim=-1)
-        ], dim=1)  # (N, 3, 3)
+        tcp_rot = torch.stack(
+            [
+                torch.stack(
+                    [
+                        1 - 2 * (qy**2 + qz**2),
+                        2 * (qx * qy - qz * qw),
+                        2 * (qx * qz + qy * qw),
+                    ],
+                    dim=-1,
+                ),
+                torch.stack(
+                    [
+                        2 * (qx * qy + qz * qw),
+                        1 - 2 * (qx**2 + qz**2),
+                        2 * (qy * qz - qx * qw),
+                    ],
+                    dim=-1,
+                ),
+                torch.stack(
+                    [
+                        2 * (qx * qz - qy * qw),
+                        2 * (qy * qz + qx * qw),
+                        1 - 2 * (qx**2 + qy**2),
+                    ],
+                    dim=-1,
+                ),
+            ],
+            dim=1,
+        )  # (N, 3, 3)
 
         # --- Step 3: coordinate transformation ---
         tcp_rot_inv = tcp_rot.transpose(1, 2)
@@ -924,7 +1181,7 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
         # --- Step 4: convert back to euler (xyz) ---
         # Handle possible numerical errors with atan2
         sy = -delta_rot_root[:, 2, 0]
-        cy = torch.sqrt(delta_rot_root[:, 0, 0]**2 + delta_rot_root[:, 1, 0]**2)
+        cy = torch.sqrt(delta_rot_root[:, 0, 0] ** 2 + delta_rot_root[:, 1, 0] ** 2)
         singular = cy < 1e-6
 
         euler_x = torch.atan2(delta_rot_root[:, 2, 1], delta_rot_root[:, 2, 2])
@@ -933,7 +1190,9 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
 
         # Handle singularities (gimbal lock)
         if singular.any():
-            euler_x[singular] = torch.atan2(-delta_rot_root[singular, 1, 2], delta_rot_root[singular, 1, 1])
+            euler_x[singular] = torch.atan2(
+                -delta_rot_root[singular, 1, 2], delta_rot_root[singular, 1, 1]
+            )
             euler_y[singular] = torch.atan2(sy[singular], cy[singular])
             euler_z[singular] = 0.0
 
@@ -943,40 +1202,50 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
             return delta_euler_root[0]
         return delta_euler_root
 
-    def reset(self, seed: Union[None, int, list[int]] = None, options: Union[None, dict] = None):
+    def reset(
+        self,
+        seed: Union[None, int, list[int]] = None,
+        options: Union[None, dict] = None,
+    ):
         self.step_cnt = 0
-        
-        self.is_successed_flag = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
-        self.successed_but_failed_flag = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
-        self.is_grasped_flag = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+
+        self.is_successed_flag = torch.zeros(
+            (self.num_envs,), dtype=torch.bool, device=self.device
+        )
+        self.successed_but_failed_flag = torch.zeros(
+            (self.num_envs,), dtype=torch.bool, device=self.device
+        )
+        self.is_grasped_flag = torch.zeros(
+            (self.num_envs,), dtype=torch.bool, device=self.device
+        )
 
         raw_obs, infos = super().reset(seed, options)
 
         obs_image = raw_obs["sensor_data"]["c19_front_view"]["rgb"].to(torch.uint8)
-        proprio_state_ori = self.unwrapped.agent.controller.controllers["arm"]._target_pose.raw_pose
-        gripper_state = self.unwrapped.agent.robot.get_qpos().to(torch.float32)[:, -1:] * 2
+        proprio_state_ori = self.unwrapped.agent.controller.controllers[
+            "arm"
+        ]._target_pose.raw_pose
+        gripper_state = (
+            self.unwrapped.agent.robot.get_qpos().to(torch.float32)[:, -1:] * 2
+        )
         proprio_state_euler = quaternion_to_axis_angle(proprio_state_ori[:, 3:7])
 
         ee_pose_T = (
-            self.unwrapped.agent.ee_pose_at_robot_base
-            .to_transformation_matrix()
+            self.unwrapped.agent.ee_pose_at_robot_base.to_transformation_matrix()
             .cpu()
             .numpy()
         )  # (num_envs, 4, 4)
 
-        pos = ee_pose_T[:, :3, 3]              # (num_envs, 3)
+        pos = ee_pose_T[:, :3, 3]  # (num_envs, 3)
         euler = np.stack(
-            [mat2euler(ee_pose_T[i, :3, :3], 'sxyz') for i in range(self.num_envs)],
-            axis=0
-        )                                      # (num_envs, 3)
+            [mat2euler(ee_pose_T[i, :3, :3], "sxyz") for i in range(self.num_envs)],
+            axis=0,
+        )  # (num_envs, 3)
 
         pos = torch.from_numpy(pos).to(proprio_state_euler.device)
         euler = torch.from_numpy(euler).to(proprio_state_euler.device)
 
-        proprioception = torch.cat(
-            [pos, euler, gripper_state],
-            dim=1
-        )  # (num_envs, 7)
+        proprioception = torch.cat([pos, euler, gripper_state], dim=1)  # (num_envs, 7)
 
         infos["extracted_obs"] = {
             "main_images": obs_image,
@@ -986,20 +1255,25 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
 
         return raw_obs, infos
 
-    def step(self, action: Union[None, np.ndarray, torch.Tensor, Dict]):
+    def step(self, action: Union[None, np.ndarray, torch.Tensor, dict]):
         if self._control_mode != "pd_ee_body_target_delta_pose_real_root_frame":
             raw_obs, _reward, terminations, truncations, infos = super().step(action)
         else:
             if isinstance(action, np.ndarray):
                 action = torch.from_numpy(action).to(self.device)
-            
+
             pose_tcp_in_world = self.agent.tcp.pose.raw_pose  # (7,) or (N,7)
-            pose_tcp_in_world_mat = pose2matrix_batch_torch(pose_tcp_in_world)  # (4,4) or (N,4,4)
+            pose_tcp_in_world_mat = pose2matrix_batch_torch(
+                pose_tcp_in_world
+            )  # (4,4) or (N,4,4)
 
             # root 在 world 系下的位姿
             pose_root_in_world_mat = pose2matrix_torch(
-                torch.tensor([0.3, 0.028, -0.870, 0, 0, 0, 1],
-                            dtype=torch.float32, device=self.device)
+                torch.tensor(
+                    [0.3, 0.028, -0.870, 0, 0, 0, 1],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
             )
             pose_root_in_world_inv = torch.linalg.inv(pose_root_in_world_mat)
             pose_tcp_in_root_mat = pose_root_in_world_inv @ pose_tcp_in_world_mat
@@ -1010,33 +1284,35 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
                 action[:, 3:6], current_tcp_pose
             )
 
-            raw_obs, _reward, terminations, truncations, infos = super().step(new_action)
-        
+            raw_obs, _reward, terminations, truncations, infos = super().step(
+                new_action
+            )
+
         obs_image = raw_obs["sensor_data"]["c19_front_view"]["rgb"].to(torch.uint8)
-        proprio_state_ori = self.unwrapped.agent.controller.controllers["arm"]._target_pose.raw_pose
-        gripper_state = self.unwrapped.agent.robot.get_qpos().to(torch.float32)[:, -1:] * 2
+        proprio_state_ori = self.unwrapped.agent.controller.controllers[
+            "arm"
+        ]._target_pose.raw_pose
+        gripper_state = (
+            self.unwrapped.agent.robot.get_qpos().to(torch.float32)[:, -1:] * 2
+        )
         proprio_state_euler = quaternion_to_axis_angle(proprio_state_ori[:, 3:7])
 
         ee_pose_T = (
-            self.unwrapped.agent.ee_pose_at_robot_base
-            .to_transformation_matrix()
+            self.unwrapped.agent.ee_pose_at_robot_base.to_transformation_matrix()
             .cpu()
             .numpy()
         )  # (num_envs, 4, 4)
 
-        pos = ee_pose_T[:, :3, 3]              # (num_envs, 3)
+        pos = ee_pose_T[:, :3, 3]  # (num_envs, 3)
         euler = np.stack(
-            [mat2euler(ee_pose_T[i, :3, :3], 'sxyz') for i in range(self.num_envs)],
-            axis=0
-        )                                      # (num_envs, 3)
+            [mat2euler(ee_pose_T[i, :3, :3], "sxyz") for i in range(self.num_envs)],
+            axis=0,
+        )  # (num_envs, 3)
 
         pos = torch.from_numpy(pos).to(proprio_state_euler.device)
         euler = torch.from_numpy(euler).to(proprio_state_euler.device)
 
-        proprioception = torch.cat(
-            [pos, euler, gripper_state],
-            dim=1
-        )  # (num_envs, 7)
+        proprioception = torch.cat([pos, euler, gripper_state], dim=1)  # (num_envs, 7)
 
         infos["extracted_obs"] = {
             "main_images": obs_image,
@@ -1052,10 +1328,14 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
 
     def compute_dense_reward(self, obs, action, info):
         if self.use_sparse_reward:
-            rewards = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device)
+            rewards = torch.zeros(
+                (self.num_envs,), dtype=torch.float32, device=self.device
+            )
             # consecutive_grasp reward
             newly_grasped = info["is_src_obj_grasped_current"] & (~self.is_grasped_flag)
-            self.is_grasped_flag = self.is_grasped_flag | info["is_src_obj_grasped_current"]
+            self.is_grasped_flag = (
+                self.is_grasped_flag | info["is_src_obj_grasped_current"]
+            )
             rewards += newly_grasped.float() * 1.0
 
             # success reward
@@ -1066,7 +1346,9 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
             # If already success but current failed, give a negative reward onces
             failed_after_success = (~info["success"]) & self.is_successed_flag
             newly_failed = failed_after_success & (~self.successed_but_failed_flag)
-            self.successed_but_failed_flag = self.successed_but_failed_flag | failed_after_success
+            self.successed_but_failed_flag = (
+                self.successed_but_failed_flag | failed_after_success
+            )
             rewards += newly_failed.float() * (-2.0)
         else:
             # actor
@@ -1075,8 +1357,12 @@ class PandaPutOnPlateInScene25DigitalTwin(PandaPutOnPlateInScene25):
             carrot_actor = [self.objs_carrot[n] for n in select_carrot]
             plate_actor = [self.objs_plate[n] for n in select_plate]
 
-            carrot_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(carrot_actor)])  # [b, 3]
-            plate_p = torch.stack([a.pose.p[idx] for idx, a in enumerate(plate_actor)])  # [b, 3]
+            carrot_p = torch.stack(
+                [a.pose.p[idx] for idx, a in enumerate(carrot_actor)]
+            )  # [b, 3]
+            plate_p = torch.stack(
+                [a.pose.p[idx] for idx, a in enumerate(plate_actor)]
+            )  # [b, 3]
 
             pos_src = carrot_p
             pos_tgt = plate_p

@@ -32,6 +32,9 @@ from rlinf.models.embodiment.openpi.dataconfig.behavior_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.calvin_dataconfig import (
     LeRobotCalvinDataConfig,
 )
+from rlinf.models.embodiment.openpi.dataconfig.franka_co_training_dataconfig import (
+    LeRobotFrankaEEDataConfig,
+)
 from rlinf.models.embodiment.openpi.dataconfig.franka_dataconfig import (
     CustomDataConfig,
 )
@@ -49,9 +52,6 @@ from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
 )
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
-)
-from rlinf.models.embodiment.openpi.dataconfig.franka_co_training_dataconfig import (
-    LeRobotFrankaEEDataConfig,
 )
 
 _CONFIGS = [
@@ -144,7 +144,9 @@ _CONFIGS = [
             repo_id="physical-intelligence/pick_and_place_real",
             default_prompt="defalut prompt",
             base_config=DataConfig(prompt_from_task=True),
-            assets=AssetsConfig(assets_dir="checkpoints/torch/pi05_maniskill_sim_real_co_training/assets"),
+            assets=AssetsConfig(
+                assets_dir="checkpoints/torch/pi05_maniskill_sim_real_co_training/assets"
+            ),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
             "checkpoints/jax/pi05_base"

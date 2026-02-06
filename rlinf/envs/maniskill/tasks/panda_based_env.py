@@ -1,21 +1,31 @@
-"""
-Base environment for Bridge dataset environments
-"""
+# Copyright 2026 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 import os
-from typing import Dict, List, Literal
+from copy import deepcopy
+from typing import Literal
 
 import numpy as np
 import sapien
 import torch
-from sapien.physx import PhysxMaterial
-from transforms3d.quaternions import quat2mat
-from transforms3d.euler import euler2quat
-
 from mani_skill import ASSET_DIR
-
+from mani_skill.agents.controllers import deepcopy_dict
 from mani_skill.agents.controllers.pd_ee_pose import PDEEPoseControllerConfig
 from mani_skill.agents.controllers.pd_joint_pos import PDJointPosMimicControllerConfig
 from mani_skill.agents.registration import register_agent
+from mani_skill.agents.robots.panda.panda_wristcam import PandaWristCam
 from mani_skill.envs.tasks.digital_twins.base_env import BaseDigitalTwinEnv
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import common, io_utils, sapien_utils
@@ -23,19 +33,15 @@ from mani_skill.utils.geometry import rotation_conversions
 from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.pose import Pose
 from mani_skill.utils.structs.types import SimConfig
-
-from mani_skill import PACKAGE_ASSET_DIR
-from mani_skill.agents.robots.panda.panda_wristcam import PandaWristCam
-from mani_skill.agents.robots.widowx.widowx import WidowX250S
-from mani_skill.utils.registration import register_env
-from copy import deepcopy
-from mani_skill.agents.controllers import *
-
+from sapien.physx import PhysxMaterial
 
 BRIDGE_DATASET_ASSET_PATH = ASSET_DIR / "tasks/bridge_v2_real2sim_dataset/"
+
+
 @register_agent()
 class PandaBridgeDatasetFlatTable(PandaWristCam):
     """Panda arm robot with the real sense camera attached to gripper"""
+
     uid = "panda_bridgedataset_flat_table"
 
     arm_stiffness = 1e3
@@ -51,79 +57,22 @@ class PandaBridgeDatasetFlatTable(PandaWristCam):
         # -------------------------------------------------------------------------- #
         # Arm
         # -------------------------------------------------------------------------- #
-        arm_pd_joint_pos = PDJointPosControllerConfig(
-            self.arm_joint_names,
-            lower=None,
-            upper=None,
-            stiffness=self.arm_stiffness,
-            damping=self.arm_damping,
-            force_limit=self.arm_force_limit,
-            normalize_action=False,
-        )
-        arm_pd_joint_delta_pos = PDJointPosControllerConfig(
-            self.arm_joint_names,
-            lower=-0.1,
-            upper=0.1,
-            stiffness=self.arm_stiffness,
-            damping=self.arm_damping,
-            force_limit=self.arm_force_limit,
-            use_delta=True,
-        )
-        arm_pd_joint_target_delta_pos = deepcopy(arm_pd_joint_delta_pos)
-        arm_pd_joint_target_delta_pos.use_target = True
-
-        # PD ee position
-        arm_pd_ee_delta_pos = PDEEPosControllerConfig(
-            joint_names=self.arm_joint_names,
-            pos_lower=-0.1,
-            pos_upper=0.1,
-            stiffness=self.arm_stiffness,
-            damping=self.arm_damping,
-            force_limit=self.arm_force_limit,
-            ee_link=self.ee_link_name,
-            urdf_path=self.urdf_path,
-        )
-        arm_pd_ee_delta_pose = PDEEPoseControllerConfig(
-            joint_names=self.arm_joint_names,
-            pos_lower=-0.1, # -1.0,
-            pos_upper=0.1, # 1.0,
-            rot_lower=-0.1, # -np.pi / 2,
-            rot_upper=0.1, # np.pi / 2,
-            stiffness=self.arm_stiffness,
-            damping=self.arm_damping,
-            force_limit=self.arm_force_limit,
-            ee_link=self.ee_link_name,
-            urdf_path=self.urdf_path,
-            normalize_action=False,
-        )
-        arm_pd_ee_pose = PDEEPoseControllerConfig(
-            joint_names=self.arm_joint_names,
-            pos_lower=None,
-            pos_upper=None,
-            stiffness=self.arm_stiffness,
-            damping=self.arm_damping,
-            force_limit=self.arm_force_limit,
-            ee_link=self.ee_link_name,
-            urdf_path=self.urdf_path,
-            use_delta=False,
-            normalize_action=False,
-        )
-
-        arm_pd_ee_target_delta_pos = deepcopy(arm_pd_ee_delta_pos)
-        arm_pd_ee_target_delta_pos.use_target = True
-        arm_pd_ee_target_delta_pose = deepcopy(arm_pd_ee_delta_pose)
-        arm_pd_ee_target_delta_pose.use_target = True
-        arm_pd_ee_target_delta_pose_body = deepcopy(arm_pd_ee_delta_pose)
-        arm_pd_ee_target_delta_pose_body.frame = "root_translation:body_aligned_body_rotation"
-
         arm_pd_ee_delta_pose_real_root_frame = PDEEPoseControllerConfig(
             joint_names=self.arm_joint_names,
-            pos_lower=-0.1, # -1.0,
-            pos_upper=0.1, # 1.0,
-            rot_lower=-0.1, # -np.pi / 2,
-            rot_upper=0.1, # np.pi / 2,
-            stiffness=[37.800000000000004, 29.925, 48.3, 48.3, 2.1284343434343436, 27.3, 48.3],
-            damping=[10.5,  10.5,  10.5,  10.5,  0.6353535353535353, 10.5,  10.5],
+            pos_lower=-0.1,  # -1.0,
+            pos_upper=0.1,  # 1.0,
+            rot_lower=-0.1,  # -np.pi / 2,
+            rot_upper=0.1,  # np.pi / 2,
+            stiffness=[
+                37.800000000000004,
+                29.925,
+                48.3,
+                48.3,
+                2.1284343434343436,
+                27.3,
+                48.3,
+            ],
+            damping=[10.5, 10.5, 10.5, 10.5, 0.6353535353535353, 10.5, 10.5],
             force_limit=self.arm_force_limit,
             ee_link=self.ee_link_name,
             urdf_path=self.urdf_path,
@@ -133,43 +82,12 @@ class PandaBridgeDatasetFlatTable(PandaWristCam):
         arm_pd_ee_delta_pose_real = deepcopy(arm_pd_ee_delta_pose_real_root_frame)
         arm_pd_ee_delta_pose_real.frame = "root_translation:body_aligned_body_rotation"
 
-        # PD joint velocity
-        arm_pd_joint_vel = PDJointVelControllerConfig(
-            self.arm_joint_names,
-            -1.0,
-            1.0,
-            self.arm_damping,  # this might need to be tuned separately
-            self.arm_force_limit,
-        )
-
-        # PD joint position and velocity
-        arm_pd_joint_pos_vel = PDJointPosVelControllerConfig(
-            self.arm_joint_names,
-            None,
-            None,
-            self.arm_stiffness,
-            self.arm_damping,
-            self.arm_force_limit,
-            normalize_action=False,
-        )
-        arm_pd_joint_delta_pos_vel = PDJointPosVelControllerConfig(
-            self.arm_joint_names,
-            -0.1,
-            0.1,
-            self.arm_stiffness,
-            self.arm_damping,
-            self.arm_force_limit,
-            use_delta=True,
-        )
-
         # -------------------------------------------------------------------------- #
         # Gripper
         # -------------------------------------------------------------------------- #
-        # NOTE(jigu): IssacGym uses large P and D but with force limit
-        # However, tune a good force limit to have a good mimic behavior
         gripper_pd_joint_pos = PDJointPosMimicControllerConfig(
             self.gripper_joint_names,
-            lower=-0.01,  # a trick to have force when the object is thin
+            lower=-0.01,
             upper=0.04,
             stiffness=self.gripper_stiffness,
             damping=self.gripper_damping,
@@ -178,60 +96,33 @@ class PandaBridgeDatasetFlatTable(PandaWristCam):
             drive_mode="force",
         )
 
-        controller_configs = dict(
-            pd_joint_delta_pos=dict(
-                arm=arm_pd_joint_delta_pos, gripper=gripper_pd_joint_pos
-            ),
-            pd_joint_pos=dict(arm=arm_pd_joint_pos, gripper=gripper_pd_joint_pos),
-            pd_ee_delta_pos=dict(arm=arm_pd_ee_delta_pos, gripper=gripper_pd_joint_pos),
-            pd_ee_delta_pose=dict(
-                arm=arm_pd_ee_delta_pose, gripper=gripper_pd_joint_pos
-            ),
-            pd_ee_pose=dict(arm=arm_pd_ee_pose, gripper=gripper_pd_joint_pos),
-            # TODO(jigu): how to add boundaries for the following controllers
-            pd_joint_target_delta_pos=dict(
-                arm=arm_pd_joint_target_delta_pos, gripper=gripper_pd_joint_pos
-            ),
-            pd_ee_target_delta_pos=dict(
-                arm=arm_pd_ee_target_delta_pos, gripper=gripper_pd_joint_pos
-            ),
-            pd_ee_target_delta_pose=dict(
-                arm=arm_pd_ee_target_delta_pose, gripper=gripper_pd_joint_pos
-            ),
-            pd_ee_body_target_delta_pose=dict(
-                arm=arm_pd_ee_target_delta_pose_body, gripper=gripper_pd_joint_pos
-            ),
-            pd_ee_body_target_delta_pose_real=dict(
-                arm=arm_pd_ee_delta_pose_real, gripper=gripper_pd_joint_pos
-            ),
-            pd_ee_body_target_delta_pose_real_root_frame=dict(
-                arm=arm_pd_ee_delta_pose_real_root_frame, gripper=gripper_pd_joint_pos
-            ),
-            # Caution to use the following controllers
-            pd_joint_vel=dict(arm=arm_pd_joint_vel, gripper=gripper_pd_joint_pos),
-            pd_joint_pos_vel=dict(
-                arm=arm_pd_joint_pos_vel, gripper=gripper_pd_joint_pos
-            ),
-            pd_joint_delta_pos_vel=dict(
-                arm=arm_pd_joint_delta_pos_vel, gripper=gripper_pd_joint_pos
-            ),
-        )
+        controller_configs = {
+            "pd_ee_body_target_delta_pose_real": {
+                "arm": arm_pd_ee_delta_pose_real,
+                "gripper": gripper_pd_joint_pos,
+            },
+            "pd_ee_body_target_delta_pose_real_root_frame": {
+                "arm": arm_pd_ee_delta_pose_real_root_frame,
+                "gripper": gripper_pd_joint_pos,
+            },
+        }
 
         # Make a deepcopy in case users modify any config
         return deepcopy_dict(controller_configs)
-    
+
     @property
-    def ee_pose_at_robot_base(self): # in robot frame(root frame)
+    def ee_pose_at_robot_base(self):  # in robot frame(root frame)
         to_base = self.robot.pose.inv()
-        return to_base * (self.tcp.pose)   
+        return to_base * (self.tcp.pose)
 
     @property
     def _sensor_configs(self):
         return [
             CameraConfig(
                 uid="3rd_view_camera",  # the camera used in the Bridge dataset
-                pose=sapien.Pose([0.147, 0.028, 0.870], q=[0, 0, 0, 1])*sapien.Pose(
-                    [0, -0.16, 0.36], # 0, -0.16, 0.36
+                pose=sapien.Pose([0.147, 0.028, 0.870], q=[0, 0, 0, 1])
+                * sapien.Pose(
+                    [0, -0.16, 0.36],  # 0, -0.16, 0.36
                     [0.8992917, -0.09263245, 0.35892478, 0.23209205],
                 ),
                 width=640,
@@ -243,7 +134,9 @@ class PandaBridgeDatasetFlatTable(PandaWristCam):
             ),
             CameraConfig(
                 uid="c19_front_view",
-                pose=sapien.Pose([0.1840, 0.2000, 1.4000], q=[0.2541,  0.3510,  0.1361, -0.8909]),
+                pose=sapien.Pose(
+                    [0.1840, 0.2000, 1.4000], q=[0.2541, 0.3510, 0.1361, -0.8909]
+                ),
                 width=640,
                 height=480,
                 fov=0.81,
@@ -252,10 +145,12 @@ class PandaBridgeDatasetFlatTable(PandaWristCam):
             ),
         ]
 
+
 # Tuned for the sink setup
 @register_agent()
 class PandaBridgeDatasetSink(PandaBridgeDatasetFlatTable):
     """Panda arm robot with the real sense camera attached to gripper"""
+
     uid = "panda_bridgedataset_sink"
 
     @property
@@ -263,9 +158,10 @@ class PandaBridgeDatasetSink(PandaBridgeDatasetFlatTable):
         return [
             CameraConfig(
                 uid="3rd_view_camera",  # the camera used for real evaluation for the sink setup
-                pose=sapien.Pose([0.127, 0.060, 0.85], q=[0, 0, 0, 1])*sapien.Pose(
+                pose=sapien.Pose([0.127, 0.060, 0.85], q=[0, 0, 0, 1])
+                * sapien.Pose(
                     [-0.00300001, -0.21, 0.39],
-                    [-0.907313, 0.0782, -0.36434, -0.194741] # wxyz
+                    [-0.907313, 0.0782, -0.36434, -0.194741],  # wxyz
                 ),
                 width=640,
                 # fov=1.5,
@@ -277,15 +173,16 @@ class PandaBridgeDatasetSink(PandaBridgeDatasetFlatTable):
                 ),
             ),
             CameraConfig(
-                uid = "near_third_view", 
-                pose = sapien.Pose(
-                    [0.116329, 0.52049, 1.23331], [0.47342, 0.1204, 0.0655081, -0.870107]
+                uid="near_third_view",
+                pose=sapien.Pose(
+                    [0.116329, 0.52049, 1.23331],
+                    [0.47342, 0.1204, 0.0655081, -0.870107],
                 ),
-                width=640, 
-                height=480, 
+                width=640,
+                height=480,
                 fov=1.57,
                 near=0.1,
-                far=1000
+                far=1000,
             ),
         ]
 
@@ -303,12 +200,12 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
 
     def __init__(
         self,
-        obj_names: List[str],
+        obj_names: list[str],
         xyz_configs: torch.Tensor,
         quat_configs: torch.Tensor,
         **kwargs,
     ):
-        self.objs: Dict[str, Actor] = dict()
+        self.objs: dict[str, Actor] = {}
         self.obj_names = obj_names
         self.source_obj_name = obj_names[0]
         self.target_obj_name = obj_names[1]
@@ -329,10 +226,10 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
             }
             robot_cls = PandaBridgeDatasetSink
 
-        self.model_db: Dict[str, Dict] = io_utils.load_json(
+        self.model_db: dict[str, dict] = io_utils.load_json(
             BRIDGE_DATASET_ASSET_PATH / "custom/" / self.MODEL_JSON
         )
-        self.src_on_target_continuous_steps = torch.zeros(kwargs['num_envs'])
+        self.src_on_target_continuous_steps = torch.zeros(kwargs["num_envs"])
         super().__init__(
             robot_uids=robot_cls,
             **kwargs,
@@ -344,7 +241,9 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
 
     @property
     def _default_human_render_camera_configs(self):
-        pose = sapien.Pose([0.442614, 0.488839, 1.45059], [0.39519, 0.210508, 0.0936785, -0.889233])
+        pose = sapien.Pose(
+            [0.442614, 0.488839, 1.45059], [0.39519, 0.210508, 0.0936785, -0.889233]
+        )
         return CameraConfig("render_camera", pose, 512, 512, 1.45, 0.1, 1000)
 
     def _build_actor_helper(
@@ -398,9 +297,10 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
         self.scene.add_directional_light([-1, -0.5, -1], [0.7, 0.7, 0.7])
         self.scene.add_directional_light([1, 1, -1], [0.7, 0.7, 0.7])
 
-    def _load_agent(self, options: dict): # TODO
-        super()._load_agent( # the initial pose will be changed by self.agent.robot.set_pose() in _initialize_episode()
-            options, initial_agent_poses = sapien.Pose(p=[0.127, 0.060, 0.85], q=[0, 0, 0, 1])
+    def _load_agent(self, options: dict):  # TODO
+        super()._load_agent(  # the initial pose will be changed by self.agent.robot.set_pose() in _initialize_episode()
+            options,
+            initial_agent_poses=sapien.Pose(p=[0.127, 0.060, 0.85], q=[0, 0, 0, 1]),
         )
 
     def _load_scene(self, options: dict):
@@ -444,7 +344,7 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
         # model scales
         model_scales = None
         if model_scales is None:
-            model_scales = dict()
+            model_scales = {}
             for model_id in [self.source_obj_name, self.target_obj_name]:
                 this_available_model_scales = self.model_db[model_id].get(
                     "scales", None
@@ -456,7 +356,7 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
                         this_available_model_scales
                     )
         self.episode_model_scales = model_scales
-        model_bbox_sizes = dict()
+        model_bbox_sizes = {}
         for model_id in [self.source_obj_name, self.target_obj_name]:
             model_info = self.model_db[model_id]
             model_scale = self.episode_model_scales[model_id]
@@ -487,7 +387,7 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
                 quat_episode_ids = torch.randint(0, len(self.quat_configs), size=(b,))
             for i, actor in enumerate(self.objs.values()):
                 xyz = self.xyz_configs[pos_episode_ids, i]
-                actor.set_pose( # set the pose, but not change the bouding box pose. May be a problem
+                actor.set_pose(  # set the pose, but not change the bouding box pose. May be a problem
                     Pose.create_from_pq(p=xyz, q=self.quat_configs[quat_episode_ids, i])
                 )
             if self.gpu_sim_enabled:
@@ -497,7 +397,7 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
                 self.scene._gpu_fetch_all()
             # Some objects need longer time to settle
             lin_vel, ang_vel = 0.0, 0.0
-            for obj_name, obj in self.objs.items():
+            for obj in self.objs.values():
                 lin_vel += torch.linalg.norm(obj.linear_velocity)
                 ang_vel += torch.linalg.norm(obj.angular_velocity)
             if lin_vel > 1e-3 or ang_vel > 1e-2:
@@ -512,11 +412,23 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
                     [0, 0.259, 0, -2.289, 0, 2.515, np.pi / 4, 0.015, 0.015]
                 )
                 self.agent.robot.set_pose(
-                    sapien.Pose([0.3, 0.028, 0.870], q=[0, 0, 0, 1]) # 0.147, 0.028, 0.870 # modified to better view object at [0.3, 0.028, 0.870]
+                    sapien.Pose(
+                        [0.3, 0.028, 0.870], q=[0, 0, 0, 1]
+                    )  # 0.147, 0.028, 0.870 # modified to better view object at [0.3, 0.028, 0.870]
                 )
             elif self.scene_setting == "sink":
                 qpos = np.array(
-                    [0.0, 0.08580994, 0.0, -2.3964953, 0, 2.5136616, 0.7859319, 0.04, 0.04]
+                    [
+                        0.0,
+                        0.08580994,
+                        0.0,
+                        -2.3964953,
+                        0,
+                        2.5136616,
+                        0.7859319,
+                        0.04,
+                        0.04,
+                    ]
                 )
                 self.agent.robot.set_pose(
                     sapien.Pose([0.3, 0.060, 0.85], q=[0, 0, 0, 1])
@@ -556,15 +468,12 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
 
             # stats to track
             self.consecutive_grasp = torch.zeros((b,), dtype=torch.int32)
-            self.episode_stats = dict(
-                # all_obj_keep_height=torch.zeros((b,), dtype=torch.bool),
-                moved_correct_obj=torch.zeros((b,), dtype=torch.bool),
-                moved_wrong_obj=torch.zeros((b,), dtype=torch.bool),
-                # near_tgt_obj=torch.zeros((b,), dtype=torch.bool),
-                is_src_obj_grasped=torch.zeros((b,), dtype=torch.bool),
-                # is_closest_to_tgt=torch.zeros((b,), dtype=torch.bool),
-                consecutive_grasp=torch.zeros((b,), dtype=torch.bool),
-            )
+            self.episode_stats = {
+                "moved_correct_obj": torch.zeros((b,), dtype=torch.bool),
+                "moved_wrong_obj": torch.zeros((b,), dtype=torch.bool),
+                "is_src_obj_grasped": torch.zeros((b,), dtype=torch.bool),
+                "consecutive_grasp": torch.zeros((b,), dtype=torch.bool),
+            }
 
     def _settle(self, t: int = 0.5):
         """run the simulation for some steps to help settle the objects"""
@@ -583,11 +492,6 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
         source_obj_pose = source_object.pose
         target_obj_pose = target_object.pose
 
-        # whether moved the correct object
-        source_obj_xy_move_dist = torch.linalg.norm(
-            self.episode_source_obj_xyz_after_settle[:, :2] - source_obj_pose.p[:, :2],
-            dim=1,
-        )
         other_obj_xy_move_dist = []
         for obj_name in self.objs.keys():
             obj = self.objs[obj_name]
@@ -640,7 +544,9 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
                 self.src_on_target_continuous_steps[i] += 1
             else:
                 self.src_on_target_continuous_steps[i] = 0
-            continuous_success[i] = True if self.src_on_target_continuous_steps[i]>6 else False
+            continuous_success[i] = (
+                True if self.src_on_target_continuous_steps[i] > 6 else False
+            )
         success = src_on_target
 
         self.episode_stats["src_on_target"] = src_on_target
@@ -651,9 +557,10 @@ class PandaBaseBridgeEnv(BaseDigitalTwinEnv):
             self.episode_stats["consecutive_grasp"] | consecutive_grasp
         )
 
-        return dict(**self.episode_stats, success=success, continuous_success=continuous_success)
+        return dict(
+            **self.episode_stats, success=success, continuous_success=continuous_success
+        )
 
     def is_final_subtask(self):
         # whether the current subtask is the final one, only meaningful for long-horizon tasks
         return True
-

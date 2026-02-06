@@ -17,16 +17,14 @@ import time
 from functools import partial
 from typing import Optional
 
-import numpy as np
-import torch
 import jax
+import numpy as np
+import openpi.training.data_loader as _data
+import torch
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.tensor import DTensor
 from torch.multiprocessing.reductions import reduce_tensor
-
-from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
-import openpi.training.data_loader as _data
 
 import rlinf.algorithms  # noqa: F401
 from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
@@ -46,6 +44,8 @@ from rlinf.hybrid_engines.fsdp.utils import (
     unpack_sequences,
 )
 from rlinf.models import get_model
+from rlinf.models.embodiment.base_policy import ForwardType
+from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.data_iter_utils import (
     get_iterator_k_split,
@@ -87,7 +87,6 @@ from rlinf.utils.utils import (
     retrieve_model_state_dict_in_cpu,
 )
 from rlinf.workers.rollout.utils import RankMapper
-from rlinf.models.embodiment.base_policy import ForwardType
 
 
 def process_nested_dict_for_adv(nested_dict, rollout_epoch):
@@ -998,12 +997,18 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             accel_max_ctas=max_ctas, accel_min_ctas=min_ctas
         )
 
-        self.use_real_data_co_training = cfg.actor.get("use_real_data_co_training", False)
-        
+        self.use_real_data_co_training = cfg.actor.get(
+            "use_real_data_co_training", False
+        )
+
         if self.use_real_data_co_training:
-            training_config_name = cfg.actor.get("config_name", "pi05_maniskill_sim_real_co_training")
+            training_config_name = cfg.actor.get(
+                "config_name", "pi05_maniskill_sim_real_co_training"
+            )
             data_loader_config = get_openpi_config(training_config_name)
-            self.data_loader = _data.create_data_loader(data_loader_config, framework="pytorch", shuffle=True)
+            self.data_loader = _data.create_data_loader(
+                data_loader_config, framework="pytorch", shuffle=True
+            )
             self.sft_iterator = iter(self.data_loader)
             self.train_epoch = 0
             self.sft_loss_weight = cfg.actor.get("sft_loss_weight", 0.1)
@@ -1370,17 +1375,24 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         metrics_data["ppo_loss"] = loss.clone().detach().item()
                         # get real data batch
                         real_observation, real_actions = self.get_next_real_data_batch()
-                        
-                        observation = jax.tree.map(lambda x: x.to(self.device), real_observation)  # noqa: PLW2901
+
+                        observation = jax.tree.map(
+                            lambda x: x.to(self.device), real_observation
+                        )  # noqa: PLW2901
                         actions = real_actions.to(torch.float32)  # noqa: PLW2901
                         actions = actions.to(self.device)  # noqa: PLW2901
 
-                        sft_losses = self.model(data=dict(observation=observation, actions=actions), forward_type=ForwardType.SFT)
+                        sft_losses = self.model(
+                            data={"observation": observation, "actions": actions},
+                            forward_type=ForwardType.SFT,
+                        )
                         # Ensure losses is a tensor and handle different return types
                         if isinstance(sft_losses, list | tuple):
                             sft_losses = torch.stack(sft_losses)
                         elif not isinstance(sft_losses, torch.Tensor):
-                            sft_losses = torch.tensor(sft_losses, device=self.device, dtype=torch.float32)
+                            sft_losses = torch.tensor(
+                                sft_losses, device=self.device, dtype=torch.float32
+                            )
 
                         sft_loss = sft_losses.mean()
                         metrics_data["sft_loss"] = sft_loss.clone().detach().item()
