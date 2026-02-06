@@ -166,6 +166,70 @@ class Trajectory:
     curr_obs: dict[str, Any] = field(default_factory=dict)
     next_obs: dict[str, Any] = field(default_factory=dict)
 
+    def extract_intervene_traj(self):
+        if self.intervene_flags is None or (~self.intervene_flags).all():
+            return None
+        intervene_flags = self.intervene_flags[self.intervene_flags]
+
+        mask = self.intervene_flags.any(dim=-1)
+        actions = self.actions[mask].unsqueeze(1) if self.actions is not None else None
+        rewards = self.rewards[mask].unsqueeze(1) if self.rewards is not None else None
+
+        terminations = self.terminations[1:] if self.terminations is not None else None
+        truncations = self.truncations[1:] if self.truncations is not None else None
+        dones = self.dones[1:] if self.dones is not None else None
+
+        if terminations is not None:
+            terminations = terminations[mask].unsqueeze(1)
+            truncations = truncations[mask].unsqueeze(1)
+            dones = dones[mask].unsqueeze(1)
+
+            terminations = torch.cat([self.terminations[:1], terminations])
+            truncations = torch.cat([self.truncations[:1], truncations])
+            dones = torch.cat([self.dones[:1], dones])
+
+        prev_logprobs = (
+            self.prev_logprobs[mask].unsqueeze(1)
+            if self.prev_logprobs is not None
+            else None
+        )
+        prev_values = (
+            self.prev_values[mask].unsqueeze(1)
+            if self.prev_values is not None
+            else None
+        )
+
+        forward_inputs = {} if self.forward_inputs is not None else None
+        if forward_inputs is not None:
+            for key, value in self.forward_inputs.items():
+                forward_inputs[key] = value[mask].unsqueeze(1)
+
+        curr_obs = {} if self.curr_obs is not None else None
+        if curr_obs is not None:
+            for key, value in self.curr_obs.items():
+                curr_obs[key] = value[mask].unsqueeze(1)
+
+        next_obs = {} if self.next_obs is not None else None
+        if next_obs is not None:
+            for key, value in self.next_obs.items():
+                next_obs[key] = value[mask].unsqueeze(1)
+
+        return Trajectory(
+            max_episode_length=self.max_episode_length,
+            model_weights_id=self.model_weights_id,
+            actions=actions,
+            intervene_flags=intervene_flags,
+            rewards=rewards,
+            terminations=terminations,
+            truncations=truncations,
+            dones=dones,
+            prev_logprobs=prev_logprobs,
+            prev_values=prev_values,
+            forward_inputs=forward_inputs,
+            curr_obs=curr_obs,
+            next_obs=next_obs,
+        )
+
 
 @dataclass(kw_only=True)
 class EmbodiedRolloutResult:
@@ -226,6 +290,7 @@ class EmbodiedRolloutResult:
     def update_last_actions(
         self, intervene_actions: torch.Tensor, intervene_flags: torch.Tensor
     ):
+        # TODO: check chunk
         if self.actions and len(self.actions) > 0:
             if intervene_actions is not None and intervene_actions.dim() == 3:
                 if intervene_actions.shape[1] == 1:
