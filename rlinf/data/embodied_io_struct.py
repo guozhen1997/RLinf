@@ -307,13 +307,15 @@ class EmbodiedRolloutResult:
 
             if intervene_flags.dim() == 1:
                 intervene_flags = intervene_flags[:, None]
-            
+
             bsz, num_action_chunks = intervene_flags.shape[:2]
             flags = intervene_flags.reshape(-1, num_action_chunks, 1)
             last_action = self.actions[-1]
-            last_full_action = intervene_actions.reshape(bsz, num_action_chunks, -1) * flags + last_action.reshape(bsz, num_action_chunks, -1) * (~flags)
+            last_full_action = intervene_actions.reshape(
+                bsz, num_action_chunks, -1
+            ) * flags + last_action.reshape(bsz, num_action_chunks, -1) * (~flags)
             self.actions[-1] = last_full_action.reshape(bsz, -1)
-            
+
             full_flags = flags.expand_as(last_full_action).reshape(bsz, -1)
             self.intervene_flags[-1] = full_flags
 
