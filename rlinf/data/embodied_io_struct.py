@@ -290,8 +290,14 @@ class EmbodiedRolloutResult:
     def update_last_actions(
         self, intervene_actions: torch.Tensor, intervene_flags: torch.Tensor
     ):
-        # TODO: check chunk
+        # action: [bsz, num-chunk-size x action-dim]
+        # intervene_actions: [bsz, num-chunk-size x action-dim]
+        # intervene_flags: [bsz, num-chunk-size]
+
         if self.actions and len(self.actions) > 0:
+            assert self.actions[-1].dim() == 2, f"{self.actions[-1].shape=}"
+            if intervene_actions is not None:
+                assert intervene_actions.dim() == 2, f"{intervene_actions.shape=}"
             if intervene_actions is not None and intervene_actions.dim() == 3:
                 if intervene_actions.shape[1] == 1:
                     intervene_actions = intervene_actions.squeeze(1)
@@ -299,12 +305,17 @@ class EmbodiedRolloutResult:
                 if self.actions[-1].shape[1] == 1:
                     self.actions[-1] = self.actions[-1].squeeze(1)
 
-            flags = intervene_flags
-            if flags.dim() == 1:
-                flags = flags[:, None]
-
-            self.actions[-1] = intervene_actions * flags + self.actions[-1] * (~flags)
-            self.intervene_flags[-1] = flags.expand_as(self.actions[-1])
+            if intervene_flags.dim() == 1:
+                intervene_flags = intervene_flags[:, None]
+            
+            bsz, num_action_chunks = intervene_flags.shape[:2]
+            flags = intervene_flags.reshape(-1, num_action_chunks, 1)
+            last_action = self.actions[-1]
+            last_full_action = intervene_actions.reshape(bsz, num_action_chunks, -1) * flags + last_action.reshape(bsz, num_action_chunks, -1) * (~flags)
+            self.actions[-1] = last_full_action.reshape(bsz, -1)
+            
+            full_flags = flags.expand_as(last_full_action).reshape(bsz, -1)
+            self.intervene_flags[-1] = full_flags
 
     def append_transitions(self, curr_obs=None, next_obs=None):
         assert curr_obs is not None and next_obs is not None

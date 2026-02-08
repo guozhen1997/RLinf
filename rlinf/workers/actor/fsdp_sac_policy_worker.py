@@ -333,7 +333,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 intervene_traj_list.append(intervene_traj)
 
         if len(intervene_traj_list) > 0:
-            self.demo_buffer.add_trajectories(intervene_traj)
+            self.demo_buffer.add_trajectories(intervene_traj_list)
 
     @Worker.timer("forward_critic")
     def forward_critic(self, batch):
