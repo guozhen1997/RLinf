@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Iterable
 from typing import Union
 
 from torch.distributed.checkpoint.state_dict import (
@@ -32,25 +33,33 @@ class Checkpoint(Stateful):
     def __init__(
         self,
         model: Union[FSDP, FSDPModule],
-        optimizer: Optimizer,
-        lr_scheduler: LRScheduler,
+        optimizers: Union[Optimizer, Iterable[Optimizer]],
+        lr_schedulers: Union[LRScheduler, Iterable[LRScheduler]],
         opts: StateDictOptions,
         fsdp_version: FSDPVersion,
     ):
         self.model = model
-        self.optimizer = optimizer
-        self.lr_scheduler = lr_scheduler
+        self.optimizers = optimizers
+        self.lr_schedulers = (
+            (lr_schedulers,)
+            if isinstance(lr_schedulers, LRScheduler)
+            else tuple(lr_schedulers)
+        )
         self.opts = opts
         self.fsdp_version = fsdp_version
 
     def state_dict(self):
         model_sd, optim_sd = get_state_dict(
-            model=self.model, optimizers=self.optimizer, options=self.opts
+            model=self.model, optimizers=self.optimizers, options=self.opts
         )
+        lr_sched_sd = []
+        for lr_sched in self.lr_schedulers:
+            lr_sched_sd.append(lr_sched.state_dict())
+
         out = {
             "model": model_sd,
-            "optim": optim_sd,
-            "lr_scheduler": self.lr_scheduler.state_dict(),
+            "optimizers": optim_sd,
+            "lr_schedulers": lr_sched_sd,
             "fsdp_version": self.fsdp_version.value,
         }
         out["rng"] = get_rng_state()
@@ -65,12 +74,22 @@ class Checkpoint(Stateful):
             )
         set_state_dict(
             model=self.model,
-            optimizers=self.optimizer,
+            optimizers=self.optimizers,
             model_state_dict=state["model"],
-            optim_state_dict=state["optim"],
+            optim_state_dict=state["optimizers"]
+            if "optimizers" in state
+            else state["optim"],
             options=self.opts,
         )
-        if self.lr_scheduler is not None and "lr_scheduler" in state:
-            self.lr_scheduler.load_state_dict(state["lr_scheduler"])
+        if self.lr_schedulers is not None:
+            if "lr_schedulers" in state:
+                for lr_sched, lr_sched_sd in zip(
+                    self.lr_schedulers, state["lr_schedulers"]
+                ):
+                    lr_sched.load_state_dict(lr_sched_sd)
+            elif "lr_scheduler" in state:
+                lr_sched_sd = [state["lr_scheduler"]]
+                for lr_sched, lr_sched_sd in zip(self.lr_schedulers, lr_sched_sd):
+                    lr_sched.load_state_dict(lr_sched_sd)
         if "rng" in state:
             set_rng_state(state["rng"])

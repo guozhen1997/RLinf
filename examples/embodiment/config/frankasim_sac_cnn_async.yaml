@@ -133,12 +133,19 @@ actor:
 
 
   optim:
-    lr: 3.0e-4  # Lower learning rate for SAC
-    value_lr: 3.0e-4  # Q-network learning rate
-    adam_beta1: 0.9
-    adam_beta2: 0.999
-    adam_eps: 1.0e-08
     clip_grad: 10.0
+
+    actor:
+      lr: 3e-4
+      lr_scheduler: torch_constant
+
+    critic:
+      lr: 3e-4
+      lr_scheduler: torch_constant
+
+    alpha:
+      lr: 3e-4
+      lr_scheduler: torch_constant
 
   # Override the default values in training_backend/fsdp
   fsdp_config:
