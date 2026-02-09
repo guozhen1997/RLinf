@@ -226,6 +226,7 @@ class TrajectoryReplayBuffer:
         auto_save: bool = False,
         auto_save_path: str = "",
         trajectory_format: str = "pt",
+        save_checkpoint_max_trajectories: Optional[int] = None,
     ):
         """
         Initialize trajectory-based replay buffer.
@@ -238,11 +239,14 @@ class TrajectoryReplayBuffer:
             trajectory_format: Storage format ("pt", "pkl")
             sample_window_size: Number of trajectories to sample from for window cache
             auto_save: Whether to automatically save trajectories to disk
+            save_checkpoint_max_trajectories: Max trajectories to write in checkpoint.
+                None = no limit; 0 = skip trajectory data (only metadata/index).
         """
         self.trajectory_format = trajectory_format
         self.enable_cache = enable_cache
         self.sample_window_size = sample_window_size
         self.auto_save = auto_save
+        self.save_checkpoint_max_trajectories = save_checkpoint_max_trajectories
         self.logger = get_logger()
 
         if not self.auto_save:
@@ -918,6 +922,21 @@ class TrajectoryReplayBuffer:
             if cache is None:
                 raise RuntimeError("auto_save=False requires cache to save checkpoint.")
             cached_ids = list(cache.cache.keys())
+            max_save = max(self.save_checkpoint_max_trajectories, 10000)
+            if max_save == 0:
+                self.logger.info(
+                    "Replay buffer checkpoint: skipping trajectory data (save_checkpoint_max_trajectories=0), saving metadata only."
+                )
+                cached_ids = []
+            elif max_save is not None and max_save > 0 and len(cached_ids) > max_save:
+                cached_ids = cached_ids[-max_save:]
+                self.logger.info(
+                    f"Replay buffer checkpoint: saving at most {max_save} trajectories (cached={len(cache.cache)})."
+                )
+            if cached_ids:
+                self.logger.info(
+                    f"Replay buffer checkpoint: writing {len(cached_ids)} trajectories to disk (this may take a while)."
+                )
             for trajectory_id in cached_ids:
                 flat = cache.get(trajectory_id)
                 if flat is None:
@@ -975,6 +994,7 @@ class TrajectoryReplayBuffer:
         # Save metadata and trajectory index into the specified directory
         self._save_metadata(save_path)
         self._save_trajectory_index(save_path)
+        self.logger.info("Replay buffer checkpoint save done.")
 
     def load_checkpoint(
         self,

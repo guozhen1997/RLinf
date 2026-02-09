@@ -15,7 +15,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    env,actor,rollout: 0
+    env,actor,rollout: 1
 
 
 runner:
@@ -28,9 +28,7 @@ runner:
 
   max_epochs: 15000
   max_steps: -1
-
-  only_eval: False
-  val_check_interval: 210
+  val_check_interval: 90
   save_interval: -1
   weight_sync_interval: 30
 
@@ -60,8 +58,9 @@ algorithm:
     enable_cache: True
     cache_size: 20000 # number of trajectories cached in memory
     sample_window_size: 20000 # number of latest trajectories to sample from for replay buffer
-    min_buffer_size: 1  # Minimum buffer size before training starts
+    min_buffer_size: 5  # Minimum buffer size before training starts
     auto_save: False
+    save_checkpoint_max_trajectories: None # 0 = skip saving trajectory data in checkpoint (only metadata; avoids long checkpoint stalls with large cache)
 
   target_update_freq: 1  # Frequency of target network updates
   target_update_type: all # all # select from ["all", "q_head_only"]

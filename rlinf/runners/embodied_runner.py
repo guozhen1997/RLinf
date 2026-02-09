@@ -266,6 +266,11 @@ class EmbodiedRunner:
         self.log_thread.join(timeout=1.0)
 
     def _save_checkpoint(self):
+        import logging
+
+        logging.getLogger("rlinf").info(
+            f"Checkpoint save started at step {self.global_step}."
+        )
         base_output_dir = os.path.join(
             self.cfg.runner.logger.log_path,
             self.cfg.runner.logger.experiment_name,
@@ -274,6 +279,9 @@ class EmbodiedRunner:
         actor_save_path = os.path.join(base_output_dir, "actor")
         os.makedirs(actor_save_path, exist_ok=True)
         self.actor.save_checkpoint(actor_save_path, self.global_step).wait()
+        logging.getLogger("rlinf").info(
+            f"Checkpoint save completed at step {self.global_step}."
+        )
 
     def set_max_steps(self):
         self.num_steps_per_epoch = 1

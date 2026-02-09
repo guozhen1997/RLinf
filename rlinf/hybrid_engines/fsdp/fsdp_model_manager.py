@@ -14,7 +14,7 @@
 
 import os
 import warnings
-from typing import ContextManager, Union
+from typing import ContextManager, Mapping, Sequence, Union
 
 import torch
 import torch.nn as nn
@@ -275,7 +275,13 @@ class FSDPModelManager:
         )
         return state_dict
 
-    def load_checkpoint(self, load_path: str) -> None:
+    def load_checkpoint(
+        self,
+        load_path: str,
+        optimizer: Union[
+            Optimizer, Sequence[Optimizer], Mapping[str, Optimizer], None
+        ] = None,
+    ) -> None:
         """
         Load checkpoint from local path.
 
@@ -283,10 +289,20 @@ class FSDPModelManager:
             load_path: the directory to load checkpoint.
         """
         self._strategy.load_checkpoint(
-            self.model, self.optimizer, self.lr_scheduler, load_path
+            self.model,
+            optimizer or self.optimizer,
+            self.lr_scheduler,
+            load_path,
         )
 
-    def save_checkpoint(self, save_path: str, step: int = 0) -> None:
+    def save_checkpoint(
+        self,
+        save_path: str,
+        step: int = 0,
+        optimizer: Union[
+            Optimizer, Sequence[Optimizer], Mapping[str, Optimizer], None
+        ] = None,
+    ) -> None:
         """
         Save checkpoint to local path.
         Every rank will save its own model and optim shard.
@@ -303,7 +319,7 @@ class FSDPModelManager:
 
         self._strategy.save_checkpoint(
             self.model,
-            self.optimizer,
+            optimizer or self.optimizer,
             self.lr_scheduler,
             save_path,
         )

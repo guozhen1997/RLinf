@@ -21,6 +21,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    set_model_state_dict,
+)
 
 from rlinf.config import SupportedModel
 from rlinf.data.embodied_io_struct import Trajectory
@@ -33,6 +38,7 @@ from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.scheduler import Channel, Worker
 from rlinf.utils import drq
 from rlinf.utils.distributed import all_reduce_dict
+from rlinf.utils.logging import get_logger
 from rlinf.utils.metric_utils import (
     append_to_dict,
     compute_split_num,
@@ -243,6 +249,9 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             auto_save=self.cfg.algorithm.replay_buffer.get("auto_save", False),
             auto_save_path=auto_save_path,
             trajectory_format="pt",
+            save_checkpoint_max_trajectories=self.cfg.algorithm.replay_buffer.get(
+                "save_checkpoint_max_trajectories", None
+            ),
         )
 
         if self.cfg.algorithm.get("demo_buffer", {}).get("load_path", None) is not None:
@@ -714,14 +723,85 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         return {}
 
     def save_checkpoint(self, save_base_path, step):
-        super().save_checkpoint(save_base_path, step)
+        logger = get_logger()
+        logger.info("Actor checkpoint: saving FSDP model and optimizer...")
+        super().save_checkpoint(
+            save_base_path,
+            step,
+            optimizer={"actor": self.optimizer, "critic": self.qf_optimizer},
+        )
+        # Save SAC-specific state: target_model, alpha, update_step
+        sac_extra_path = os.path.join(save_base_path, "sac_extra.pt")
+        sac_extra = {}
+        # Target model (same architecture as online model)
+        opts = StateDictOptions(full_state_dict=True, cpu_offload=True)
+        sac_extra["target_model"] = get_model_state_dict(
+            model=self.target_model, options=opts
+        )
+        if hasattr(self, "base_alpha") and self.base_alpha is not None:
+            sac_extra["base_alpha"] = self.base_alpha.detach().cpu().clone()
+            sac_extra["alpha_optimizer"] = self.alpha_optimizer.state_dict()
+            sac_extra["alpha_lr_scheduler"] = self.alpha_lr_scheduler.state_dict()
+        sac_extra["update_step"] = self.update_step
+        # Save on all ranks so loading works in both single-node and multi-node setups
+        torch.save(sac_extra, sac_extra_path)
+        torch.distributed.barrier()
+        logger.info(
+            "Actor checkpoint: SAC extra (target_model, alpha, update_step) saved."
+        )
+        logger.info("Actor checkpoint: saving replay buffer...")
         buffer_save_path = os.path.join(
             save_base_path, f"replay_buffer/rank_{self._rank}"
         )
         self.replay_buffer.save_checkpoint(buffer_save_path)
+        logger.info("Actor checkpoint: replay buffer save done.")
 
     def load_checkpoint(self, load_base_path):
-        super().load_checkpoint(load_base_path)
+        super().load_checkpoint(
+            load_base_path,
+            optimizer={"actor": self.optimizer, "critic": self.qf_optimizer},
+        )
+        # Load SAC-specific state if available
+        sac_extra_path = os.path.join(load_base_path, "sac_extra.pt")
+        if os.path.isfile(sac_extra_path):
+            logger = get_logger()
+            logger.info(
+                "Actor checkpoint: loading SAC extra (target_model, alpha, update_step)..."
+            )
+            sac_extra = torch.load(
+                sac_extra_path, map_location="cpu", weights_only=False
+            )
+            opts = StateDictOptions(full_state_dict=True, cpu_offload=True)
+            set_model_state_dict(
+                model=self.target_model,
+                model_state_dict=sac_extra["target_model"],
+                options=opts,
+            )
+            if (
+                "base_alpha" in sac_extra
+                and hasattr(self, "base_alpha")
+                and self.base_alpha is not None
+            ):
+                self.base_alpha.data.copy_(sac_extra["base_alpha"].to(self.device))
+                alpha_optim_sd = sac_extra["alpha_optimizer"]
+                # Move optimizer state tensors to device
+                for state in alpha_optim_sd.get("state", {}).values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            state[k] = v.to(self.device)
+                self.alpha_optimizer.load_state_dict(alpha_optim_sd)
+                self.alpha_lr_scheduler.load_state_dict(sac_extra["alpha_lr_scheduler"])
+            if "update_step" in sac_extra:
+                self.update_step = sac_extra["update_step"]
+            logger.info(
+                f"Actor checkpoint: SAC extra loaded (update_step={self.update_step})."
+            )
+        else:
+            # Backward compatibility: copy model to target (old checkpoints)
+            get_logger().info(
+                "Actor checkpoint: sac_extra.pt not found, syncing model to target (tau=1.0)."
+            )
+            self.soft_update_target_model(tau=1.0)
         buffer_load_path = os.path.join(
             load_base_path, f"replay_buffer/rank_{self._rank}"
         )
