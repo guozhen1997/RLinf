@@ -17,7 +17,9 @@ from typing import Union
 
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
+    get_model_state_dict,
     get_state_dict,
+    set_model_state_dict,
     set_state_dict,
 )
 from torch.distributed.checkpoint.stateful import Stateful
@@ -39,7 +41,9 @@ class Checkpoint(Stateful):
         fsdp_version: FSDPVersion,
     ):
         self.model = model
-        self.optimizers = optimizers
+        self.optimizers = (
+            (optimizers,) if isinstance(optimizers, Optimizer) else tuple(optimizers)
+        )
         self.lr_schedulers = (
             (lr_schedulers,)
             if isinstance(lr_schedulers, LRScheduler)
@@ -48,20 +52,34 @@ class Checkpoint(Stateful):
         self.opts = opts
         self.fsdp_version = fsdp_version
 
+    def _uses_orig_params(self) -> bool:
+        all_handles = getattr(self.model, "_all_handles", None)
+        if not all_handles:
+            return False
+        return any(getattr(handle, "_use_orig_params", False) for handle in all_handles)
+
     def state_dict(self):
-        model_sd, optim_sd = get_state_dict(
-            model=self.model, optimizers=self.optimizers, options=self.opts
-        )
+        use_raw_optim = self._uses_orig_params() and len(self.optimizers) > 1
+        if use_raw_optim:
+            model_sd = get_model_state_dict(model=self.model, options=self.opts)
+            optim_sd = [optim.state_dict() for optim in self.optimizers]
+        else:
+            model_sd, optim_sd = get_state_dict(
+                model=self.model, optimizers=self.optimizers, options=self.opts
+            )
         lr_sched_sd = []
         for lr_sched in self.lr_schedulers:
             lr_sched_sd.append(lr_sched.state_dict())
 
         out = {
             "model": model_sd,
-            "optimizers": optim_sd,
             "lr_schedulers": lr_sched_sd,
             "fsdp_version": self.fsdp_version.value,
         }
+        if use_raw_optim:
+            out["optimizers_raw"] = optim_sd
+        else:
+            out["optimizers"] = optim_sd
         out["rng"] = get_rng_state()
         return out
 
@@ -72,15 +90,24 @@ class Checkpoint(Stateful):
             raise ValueError(
                 f"FSDP version mismatch: checkpoint version {ckpt_fsdp_version} != current version {self.fsdp_version}"
             )
-        set_state_dict(
-            model=self.model,
-            optimizers=self.optimizers,
-            model_state_dict=state["model"],
-            optim_state_dict=state["optimizers"]
-            if "optimizers" in state
-            else state["optim"],
-            options=self.opts,
-        )
+        if "optimizers_raw" in state:
+            set_model_state_dict(
+                model=self.model,
+                model_state_dict=state["model"],
+                options=self.opts,
+            )
+            for optim, optim_sd in zip(self.optimizers, state["optimizers_raw"]):
+                optim.load_state_dict(optim_sd)
+        else:
+            set_state_dict(
+                model=self.model,
+                optimizers=self.optimizers,
+                model_state_dict=state["model"],
+                optim_state_dict=state["optimizers"]
+                if "optimizers" in state
+                else state["optim"],
+                options=self.opts,
+            )
         if self.lr_schedulers is not None:
             if "lr_schedulers" in state:
                 for lr_sched, lr_sched_sd in zip(
