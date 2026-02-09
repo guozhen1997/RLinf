@@ -29,6 +29,20 @@ from rlinf.data.embodied_io_struct import Trajectory
 from rlinf.utils.logging import get_logger
 
 
+def clone_dict_of_tensors(obj):
+    if torch.is_tensor(obj):
+        return obj.cpu().contiguous().clone()
+    elif isinstance(obj, int) or isinstance(obj, str):
+        return obj
+    elif isinstance(obj, dict):
+        return {k: clone_dict_of_tensors(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        t = [clone_dict_of_tensors(v) for v in obj]
+        return type(obj)(t)
+    else:
+        return obj
+
+
 class TrajectoryCache:
     """FIFO cache for storing flattened trajectories."""
 
@@ -287,8 +301,10 @@ class TrajectoryReplayBuffer:
             TrajectoryCache(cache_size) if enable_cache else None
         )
 
-        # Async save executor
-        self._save_executor = ThreadPoolExecutor(max_workers=50)
+        # Async save executor for add_trajectories
+        self._save_executor = ThreadPoolExecutor(max_workers=20)
+        # Separate executor for checkpoint saves
+        self._checkpoint_executor = ThreadPoolExecutor(max_workers=20)
         self._index_lock = threading.Lock()
 
         # Cached window metadata for faster sampling
@@ -379,7 +395,7 @@ class TrajectoryReplayBuffer:
         for field_name in trajectory.__dataclass_fields__.keys():
             value = getattr(trajectory, field_name, None)
             if value is not None:
-                trajectory_dict[field_name] = value
+                trajectory_dict[field_name] = clone_dict_of_tensors(value)
 
         if self.trajectory_format == "pt":
             torch.save(trajectory_dict, trajectory_path)
@@ -514,6 +530,8 @@ class TrajectoryReplayBuffer:
         """Flush and shutdown async save executor."""
         if self._save_executor is not None:
             self._save_executor.shutdown(wait=wait)
+        if self._checkpoint_executor is not None:
+            self._checkpoint_executor.shutdown(wait=wait)
 
     def sample(
         self,
@@ -942,7 +960,7 @@ class TrajectoryReplayBuffer:
                             self._reshape_flat_for_save(flat[field_name], T, B),
                         )
                 save_futures.append(
-                    self._save_executor.submit(
+                    self._checkpoint_executor.submit(
                         self._save_trajectory,
                         trajectory,
                         trajectory_id,
@@ -964,7 +982,7 @@ class TrajectoryReplayBuffer:
                 # copy trajectory file from trajectory_path to save_path
                 target_path = os.path.join(save_path, os.path.basename(trajectory_path))
                 save_futures.append(
-                    self._save_executor.submit(
+                    self._checkpoint_executor.submit(
                         shutil.copyfile, trajectory_path, target_path
                     )
                 )
