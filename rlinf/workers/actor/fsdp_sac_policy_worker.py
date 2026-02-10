@@ -245,7 +245,6 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             trajectory_format="pt",
         )
 
-        
         auto_save_path = self.cfg.algorithm.demo_buffer.get("auto_save_path", None)
         if auto_save_path is None:
             auto_save_path = os.path.join(
