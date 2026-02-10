@@ -16,7 +16,6 @@ from collections.abc import Iterable
 from typing import Union
 
 import torch
-
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
     get_state_dict,

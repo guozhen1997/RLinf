@@ -195,7 +195,9 @@ class FSDPStrategyBase(ABC):
                 checkpoint_format=checkpoint_format,
             )
             if checkpoint_format == "local_shard":
-                local_shard_save_path = os.path.join(save_path, "local_shard_checkpoint")
+                local_shard_save_path = os.path.join(
+                    save_path, "local_shard_checkpoint"
+                )
                 rank = torch.distributed.get_rank()
                 os.makedirs(local_shard_save_path, exist_ok=True)
                 torch.save(

@@ -533,7 +533,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                     self.entropy_temp.base_alpha.grad, op=torch.distributed.ReduceOp.AVG
                 )
                 alpha_grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.entropy_temp.base_alpha, self.cfg.algorithm.entropy_tuning.optim.clip_grad
+                    self.entropy_temp.base_alpha,
+                    self.cfg.algorithm.entropy_tuning.optim.clip_grad,
                 )
                 self.alpha_optimizer.step()
                 self.alpha_lr_scheduler.step()
@@ -653,7 +654,9 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             optimizers=[self.optimizer, self.qf_optimizer],
             lr_schedulers=[self.lr_scheduler, self.qf_lr_scheduler],
             save_path=save_base_path,
-            checkpoint_format="local_shard" if self.cfg.actor.fsdp_config.use_orig_params else "dcp",
+            checkpoint_format="local_shard"
+            if self.cfg.actor.fsdp_config.use_orig_params
+            else "dcp",
         )
 
         # Save sac components
@@ -670,7 +673,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         # save target model
         target_model_save_path = os.path.join(
-            save_base_path, f"sac_components/target_model"
+            save_base_path, "sac_components/target_model"
         )
         os.makedirs(target_model_save_path, exist_ok=True)
         target_model_state_dict = self._strategy.get_model_state_dict(
@@ -694,7 +697,9 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             optimizers=[self.optimizer, self.qf_optimizer],
             lr_schedulers=[self.lr_scheduler, self.qf_lr_scheduler],
             load_path=load_base_path,
-            checkpoint_format="local_shard" if self.cfg.actor.fsdp_config.use_orig_params else "dcp",
+            checkpoint_format="local_shard"
+            if self.cfg.actor.fsdp_config.use_orig_params
+            else "dcp",
         )
 
         # load alpha
@@ -709,7 +714,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         # load target model
         target_model_load_path = os.path.join(
-            load_base_path, f"sac_components/target_model"
+            load_base_path, "sac_components/target_model"
         )
         target_model_state_dict = torch.load(
             os.path.join(target_model_load_path, f"checkpoint_rank_{self._rank}.pt")
