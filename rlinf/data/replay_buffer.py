@@ -261,7 +261,7 @@ class TrajectoryReplayBuffer:
 
         if not self.auto_save:
             self.logger.warning(
-                "auto_save is disabled, enabling cache with size {sample_window_size}"
+                f"auto_save is disabled, enabling cache with size {sample_window_size}"
             )
             self.enable_cache = True
             cache_size = sample_window_size

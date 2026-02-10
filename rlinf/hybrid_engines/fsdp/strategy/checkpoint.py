@@ -15,6 +15,7 @@
 from collections.abc import Iterable
 from typing import Union
 
+import torch
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
     get_state_dict,
@@ -25,7 +26,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
 from rlinf.hybrid_engines.fsdp import FSDP, FSDPModule
-from rlinf.hybrid_engines.fsdp.utils import FSDPVersion
+from rlinf.hybrid_engines.fsdp.utils import FSDPVersion, to_local_if_dtensor
 from rlinf.utils.utils import get_rng_state, set_rng_state
 
 
@@ -37,6 +38,7 @@ class Checkpoint(Stateful):
         lr_schedulers: Union[LRScheduler, Iterable[LRScheduler]],
         opts: StateDictOptions,
         fsdp_version: FSDPVersion,
+        checkpoint_format: str = "dcp",
     ):
         self.model = model
         self.optimizers = optimizers
@@ -47,22 +49,56 @@ class Checkpoint(Stateful):
         )
         self.opts = opts
         self.fsdp_version = fsdp_version
+        self.checkpoint_format = checkpoint_format
+
+    def _get_local_optim_state_dicts(self):
+        if isinstance(self.optimizers, Optimizer):
+            return self.optimizers.state_dict()
+        return [opt.state_dict() for opt in self.optimizers]
+
+    def _load_local_optim_state_dicts(self, optim_state_dicts):
+        if isinstance(self.optimizers, Optimizer):
+            self.optimizers.load_state_dict(optim_state_dicts)
+        else:
+            for opt, opt_sd in zip(self.optimizers, optim_state_dicts):
+                opt.load_state_dict(opt_sd)
 
     def state_dict(self):
-        model_sd, optim_sd = get_state_dict(
-            model=self.model, optimizers=self.optimizers, options=self.opts
-        )
-        lr_sched_sd = []
-        for lr_sched in self.lr_schedulers:
-            lr_sched_sd.append(lr_sched.state_dict())
+        if self.checkpoint_format == "local_shard":
+            model_sd = self.model.state_dict()
+            model_sd = {
+                key: to_local_if_dtensor(value).cpu()
+                if isinstance(value, torch.Tensor)
+                else value
+                for key, value in model_sd.items()
+            }
+            optim_sd = self._get_local_optim_state_dicts()
 
-        out = {
-            "model": model_sd,
-            "optimizers": optim_sd,
-            "lr_schedulers": lr_sched_sd,
-            "fsdp_version": self.fsdp_version.value,
-        }
-        out["rng"] = get_rng_state()
+            lr_sched_sd = [lr.state_dict() for lr in self.lr_schedulers]
+
+            out = {
+                "model": model_sd,
+                "optimizers": optim_sd,
+                "lr_schedulers": lr_sched_sd,
+                "fsdp_version": self.fsdp_version.value,
+                "rng": get_rng_state(),
+            }
+        else:
+            model_sd, optim_sd = get_state_dict(
+                model=self.model,
+                optimizers=self.optimizers,
+                options=self.opts,
+            )
+
+            lr_sched_sd = [lr.state_dict() for lr in self.lr_schedulers]
+
+            out = {
+                "model": model_sd,
+                "optimizers": optim_sd,
+                "lr_schedulers": lr_sched_sd,
+                "fsdp_version": self.fsdp_version.value,
+                "rng": get_rng_state(),
+            }
         return out
 
     def load_state_dict(self, state):
@@ -70,26 +106,27 @@ class Checkpoint(Stateful):
         ckpt_fsdp_version = FSDPVersion(state["fsdp_version"])
         if ckpt_fsdp_version != self.fsdp_version:
             raise ValueError(
-                f"FSDP version mismatch: checkpoint version {ckpt_fsdp_version} != current version {self.fsdp_version}"
+                f"FSDP version mismatch: {ckpt_fsdp_version} != {self.fsdp_version}"
             )
-        set_state_dict(
-            model=self.model,
-            optimizers=self.optimizers,
-            model_state_dict=state["model"],
-            optim_state_dict=state["optimizers"]
-            if "optimizers" in state
-            else state["optim"],
-            options=self.opts,
-        )
-        if self.lr_schedulers is not None:
-            if "lr_schedulers" in state:
-                for lr_sched, lr_sched_sd in zip(
-                    self.lr_schedulers, state["lr_schedulers"]
-                ):
-                    lr_sched.load_state_dict(lr_sched_sd)
-            elif "lr_scheduler" in state:
-                lr_sched_sd = [state["lr_scheduler"]]
-                for lr_sched, lr_sched_sd in zip(self.lr_schedulers, lr_sched_sd):
-                    lr_sched.load_state_dict(lr_sched_sd)
+
+        if self.checkpoint_format == "local_shard":
+            self.model.load_state_dict(state["model"])
+
+            self._load_local_optim_state_dicts(state["optimizers"])
+
+        else:
+            set_state_dict(
+                model=self.model,
+                optimizers=self.optimizers,
+                model_state_dict=state["model"],
+                optim_state_dict=state.get("optimizers", state.get("optim")),
+                options=self.opts,
+            )
+
+        # lr schedulers
+        if "lr_schedulers" in state:
+            for lr, lr_sd in zip(self.lr_schedulers, state["lr_schedulers"]):
+                lr.load_state_dict(lr_sd)
+
         if "rng" in state:
             set_rng_state(state["rng"])

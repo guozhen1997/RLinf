@@ -59,7 +59,7 @@ Algorithms
 
     -   Learns Q-values via Bellman backups and entropy regularization (off-policy).
     -   Uses an MLP as the Actor policy network; ensure Q-related heads/structures are enabled in the configuration (``add_q_head: True``).
-    -   Supports **Automatic Entropy Tuning** (``auto_entropy_tuning: True``) to dynamically balance exploration and exploitation.
+    -   Supports **Automatic Entropy Tuning** via ``entropy_tuning`` (e.g., ``alpha_type: softplus``) to balance exploration and exploitation.
 
 3.  **GRPO (Group Relative Policy Optimization)**
 
@@ -69,7 +69,7 @@ Algorithms
 Installation & Dependencies
 ---------------------------
 
-For running in simulation environments, please refer to :doc:`../start/installation` for installation instructions.
+For running in simulation environments, please refer to :doc:`../../start/installation` for installation instructions.
 
 This configuration series uses Hydra's ``searchpath`` to load external configuration directories via environment variables:
 

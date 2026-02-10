@@ -96,10 +96,10 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             self.target_model_initialized = True
 
         param_filters = {"critic": ["encoders", "encoder", "q_head", "state_proj"]}
-        filtered_optim_config = {"critic": self.cfg.actor.optim.critic}
+        filtered_optim_config = {"critic": self.cfg.actor.critic_optim}
         optimizers = self.build_optimizers(
             model=self.model,
-            main_optim_config=self.cfg.actor.optim.actor,
+            main_optim_config=self.cfg.actor.optim,
             param_filters=param_filters,
             filtered_optim_config=filtered_optim_config,
         )
@@ -108,24 +108,24 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         # SAC alpha
         # Initialize temperature parameter for automatic entropy tuning
-        alpha_type = self.cfg.algorithm.get(
+        alpha_type = self.cfg.algorithm.entropy_tuning.get(
             "alpha_type", "softplus"
-        )  # supported type: [exp, softplus, fixed_alpha]
+        )  # supported type: ["softplus","exp","fixed_alpha"]
         self.entropy_temp = EntropyTemperature(
-            initial_alpha=self.cfg.algorithm.get("initial_alpha", 0.01),
+            initial_alpha=self.cfg.algorithm.entropy_tuning.get("initial_alpha", 0.01),
             alpha_type=alpha_type,
             device=self.device,
             dtype=self.torch_dtype,
         )
         if alpha_type != "fixed_alpha":
-            self.target_entropy = self.cfg.algorithm.get(
+            self.target_entropy = self.cfg.algorithm.entropy_tuning.get(
                 "target_entropy",
                 -self.cfg.actor.model.action_dim,
             )
 
             self.alpha_optimizer = torch.optim.Adam(
                 self.entropy_temp.parameters(),
-                lr=self.cfg.actor.optim.alpha.lr,
+                lr=self.cfg.algorithm.entropy_tuning.optim.lr,
             )
 
         self.build_lr_schedulers()
@@ -136,14 +136,14 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
     def build_lr_schedulers(self):
         self.lr_scheduler = self.build_lr_scheduler(
-            self.optimizer, self.cfg.actor.optim.actor
+            self.optimizer, self.cfg.actor.optim
         )
         self.qf_lr_scheduler = self.build_lr_scheduler(
-            self.qf_optimizer, self.cfg.actor.optim.critic
+            self.qf_optimizer, self.cfg.actor.critic_optim
         )
         if self.alpha_optimizer is not None:
             self.alpha_lr_scheduler = self.build_lr_scheduler(
-                self.optimizer, self.cfg.actor.optim.alpha
+                self.optimizer, self.cfg.algorithm.entropy_tuning.optim
             )
 
     def setup_sac_components(self):
@@ -473,7 +473,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             f"critic/{key}": np.mean(value) for key, value in all_critic_metrics.items()
         }
         qf_grad_norm = self.model.clip_grad_norm_(
-            max_norm=self.cfg.actor.optim.clip_grad
+            max_norm=self.cfg.actor.critic_optim.clip_grad
         )
 
         self.qf_optimizer.step()
@@ -533,7 +533,8 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                     self.entropy_temp.base_alpha.grad, op=torch.distributed.ReduceOp.AVG
                 )
                 alpha_grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.entropy_temp.base_alpha, self.cfg.actor.optim.clip_grad
+                    self.entropy_temp.base_alpha,
+                    self.cfg.algorithm.entropy_tuning.optim.clip_grad,
                 )
                 self.alpha_optimizer.step()
                 self.alpha_lr_scheduler.step()
@@ -649,10 +650,13 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         # Save model
         self._strategy.save_checkpoint(
-            self.model,
-            [self.optimizer, self.qf_optimizer],
-            [self.lr_scheduler, self.qf_lr_scheduler],
-            save_base_path,
+            model=self.model,
+            optimizers=[self.optimizer, self.qf_optimizer],
+            lr_schedulers=[self.lr_scheduler, self.qf_lr_scheduler],
+            save_path=save_base_path,
+            checkpoint_format="local_shard"
+            if self.cfg.actor.fsdp_config.use_orig_params
+            else "dcp",
         )
 
         # Save sac components
@@ -669,7 +673,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         # save target model
         target_model_save_path = os.path.join(
-            save_base_path, f"sac_components/target_model/rank_{self._rank}"
+            save_base_path, "sac_components/target_model"
         )
         os.makedirs(target_model_save_path, exist_ok=True)
         target_model_state_dict = self._strategy.get_model_state_dict(
@@ -677,7 +681,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
         )
         torch.save(
             target_model_state_dict,
-            os.path.join(target_model_save_path, "target_model.pt"),
+            os.path.join(target_model_save_path, f"checkpoint_rank_{self._rank}.pt"),
         )
 
         # save replay buffer
@@ -689,17 +693,20 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
     def load_checkpoint(self, load_base_path):
         # load model
         self._strategy.load_checkpoint(
-            self.model,
-            [self.optimizer, self.qf_optimizer],
-            [self.lr_scheduler, self.qf_lr_scheduler],
-            load_base_path,
+            model=self.model,
+            optimizers=[self.optimizer, self.qf_optimizer],
+            lr_schedulers=[self.lr_scheduler, self.qf_lr_scheduler],
+            load_path=load_base_path,
+            checkpoint_format="local_shard"
+            if self.cfg.actor.fsdp_config.use_orig_params
+            else "dcp",
         )
 
         # load alpha
         if self.alpha_optimizer is not None:
             alpha_load_path = os.path.join(load_base_path, "sac_components/alpha")
             self._strategy.load_checkpoint(
-                self.entropy_temp,
+                model=self.entropy_temp,
                 optimizers=self.alpha_optimizer,
                 lr_schedulers=self.alpha_lr_scheduler,
                 load_path=alpha_load_path,
@@ -707,10 +714,10 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         # load target model
         target_model_load_path = os.path.join(
-            load_base_path, f"sac_components/target_model/rank_{self._rank}"
+            load_base_path, "sac_components/target_model"
         )
         target_model_state_dict = torch.load(
-            os.path.join(target_model_load_path, "target_model.pt")
+            os.path.join(target_model_load_path, f"checkpoint_rank_{self._rank}.pt")
         )
         self._strategy.load_model_with_state_dict(
             self.target_model,
