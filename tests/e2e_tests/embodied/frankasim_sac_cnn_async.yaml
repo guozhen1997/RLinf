@@ -125,7 +125,7 @@ actor:
   seed: 42
   enable_offload: False
   enable_drq: True
-  compile_model: False
+  compile_model: True
   model:
     model_path:  "/workspace/dataset/RLinf-ResNet10-pretrained"
     state_dim: 7
