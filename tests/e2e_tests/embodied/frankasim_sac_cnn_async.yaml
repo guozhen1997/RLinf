@@ -136,20 +136,19 @@ actor:
 
   optim:
     clip_grad: 10.0
+    lr: 3e-4
+    lr_scheduler: torch_constant
 
-    actor:
-      lr: 3e-4
-      lr_scheduler: torch_constant
-
-    critic:
-      lr: 3e-4
-      lr_scheduler: torch_constant
+  critic_optim:
+    clip_grad: 10.0
+    lr: 3e-4
+    lr_scheduler: torch_constant
 
   # Override the default values in training_backend/fsdp
   fsdp_config:
     strategy: "fsdp"
     sharding_strategy: "no_shard"
-    use_orig_params: False
+    use_orig_params: True
     mixed_precision:
       param_dtype: ${actor.model.precision}
       reduce_dtype: ${actor.model.precision}
