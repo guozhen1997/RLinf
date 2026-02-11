@@ -166,53 +166,79 @@ class Trajectory:
     curr_obs: dict[str, Any] = field(default_factory=dict)
     next_obs: dict[str, Any] = field(default_factory=dict)
 
+    @staticmethod
+    def _generate_field_mask(
+        ref_tensor: torch.Tensor, mask: torch.Tensor, traj_len: int
+    ) -> torch.Tensor:
+        """
+        Generate a mask for terminations/truncations/dones based on their original shape.
+        """
+        if ref_tensor.shape[0] == traj_len:
+            return mask
+        elif ref_tensor.shape[0] > traj_len:
+            extra = int(ref_tensor.shape[0] - traj_len)
+            assert traj_len % extra == 0, (
+                f"Trajectory length {traj_len} is not divisible by extra {extra} for terminations/truncations/dones"
+            )
+            epoch_len = traj_len // extra
+
+            field_mask = torch.zeros(
+                ref_tensor.shape[0], dtype=torch.bool, device=mask.device
+            )
+            original_indices = torch.arange(ref_tensor.shape[0], device=mask.device)
+            epoch_idx = original_indices // (epoch_len + 1)
+            step_idx = original_indices % (epoch_len + 1)
+
+            # Keep the first position of each epoch (step_idx == 0)
+            field_mask[step_idx == 0] = True
+
+            # Map positions with step_idx >= 1 to mask
+            valid_mask = step_idx >= 1
+            mask_idx = epoch_idx[valid_mask] * epoch_len + (step_idx[valid_mask] - 1)
+            valid_original_indices = original_indices[valid_mask]
+            valid_mask_idx = mask_idx < len(mask)
+            field_mask[valid_original_indices[valid_mask_idx]] = mask[
+                mask_idx[valid_mask_idx]
+            ]
+
+            return field_mask
+        else:
+            raise ValueError(
+                f"Reference tensor length {ref_tensor.shape[0]} < traj_len {traj_len}"
+            )
+
     def extract_intervene_traj(self):
         if self.intervene_flags is None or (~self.intervene_flags).all():
             return None
-        intervene_flags = self.intervene_flags[self.intervene_flags]
 
         mask = self.intervene_flags.any(dim=-1)
-        actions = self.actions[mask].unsqueeze(1) if self.actions is not None else None
-        rewards = self.rewards[mask].unsqueeze(1) if self.rewards is not None else None
+        traj_len = int(self.intervene_flags.shape[0])
 
-        terminations = self.terminations[1:] if self.terminations is not None else None
-        truncations = self.truncations[1:] if self.truncations is not None else None
-        dones = self.dones[1:] if self.dones is not None else None
+        # Apply mask to fields with same length as intervene_flags
+        def apply_mask(tensor):
+            return tensor[mask] if tensor is not None else None
 
-        if terminations is not None:
-            terminations = terminations[mask].unsqueeze(1)
-            truncations = truncations[mask].unsqueeze(1)
-            dones = dones[mask].unsqueeze(1)
+        actions = apply_mask(self.actions)
+        rewards = apply_mask(self.rewards)
+        prev_logprobs = apply_mask(self.prev_logprobs)
+        prev_values = apply_mask(self.prev_values)
+        intervene_flags = self.intervene_flags[self.intervene_flags]
 
-            terminations = torch.cat([self.terminations[:1], terminations])
-            truncations = torch.cat([self.truncations[:1], truncations])
-            dones = torch.cat([self.dones[:1], dones])
+        # Apply mask to dict fields
+        def apply_mask_to_dict(d):
+            return {k: v[mask] for k, v in d.items()} if d else {}
 
-        prev_logprobs = (
-            self.prev_logprobs[mask].unsqueeze(1)
-            if self.prev_logprobs is not None
-            else None
-        )
-        prev_values = (
-            self.prev_values[mask].unsqueeze(1)
-            if self.prev_values is not None
-            else None
-        )
+        forward_inputs = apply_mask_to_dict(self.forward_inputs)
+        curr_obs = apply_mask_to_dict(self.curr_obs)
+        next_obs = apply_mask_to_dict(self.next_obs)
 
-        forward_inputs = {} if self.forward_inputs is not None else None
-        if forward_inputs is not None:
-            for key, value in self.forward_inputs.items():
-                forward_inputs[key] = value[mask].unsqueeze(1)
-
-        curr_obs = {} if self.curr_obs is not None else None
-        if curr_obs is not None:
-            for key, value in self.curr_obs.items():
-                curr_obs[key] = value[mask].unsqueeze(1)
-
-        next_obs = {} if self.next_obs is not None else None
-        if next_obs is not None:
-            for key, value in self.next_obs.items():
-                next_obs[key] = value[mask].unsqueeze(1)
+        # Handle terminations, truncations, dones which may have different length
+        terminations = truncations = dones = None
+        if self.terminations is not None:
+            field_mask = self._generate_field_mask(self.terminations, mask, traj_len)
+            terminations = self.terminations[field_mask]
+            truncations = self.truncations[field_mask]
+            dones = self.dones[field_mask]
 
         return Trajectory(
             max_episode_length=self.max_episode_length,
@@ -295,22 +321,25 @@ class EmbodiedRolloutResult:
         # intervene_flags: [bsz, num-chunk-size]
 
         if self.actions and len(self.actions) > 0:
-            assert self.actions[-1].dim() == 2, f"{self.actions[-1].shape=}"
-            if intervene_actions is not None:
-                assert intervene_actions.dim() == 2, f"{intervene_actions.shape=}"
-            if intervene_actions is not None and intervene_actions.dim() == 3:
-                if intervene_actions.shape[1] == 1:
-                    intervene_actions = intervene_actions.squeeze(1)
-            if self.actions[-1] is not None and self.actions[-1].dim() == 3:
-                if self.actions[-1].shape[1] == 1:
-                    self.actions[-1] = self.actions[-1].squeeze(1)
+            last_action = self.actions[-1]
+            assert last_action.dim() == 2, (
+                f"Expected 2D tensor, got {last_action.shape=}"
+            )
+            assert intervene_actions.dim() == 2, (
+                f"Expected 2D tensor, got {intervene_actions.shape=}"
+            )
 
+            # Normalize intervene_flags dimensions
             if intervene_flags.dim() == 1:
                 intervene_flags = intervene_flags[:, None]
+            assert intervene_flags.dim() == 2, (
+                f"Expected 2D tensor, got {intervene_flags.shape=}"
+            )
 
             bsz, num_action_chunks = intervene_flags.shape[:2]
             flags = intervene_flags.reshape(-1, num_action_chunks, 1)
-            last_action = self.actions[-1]
+
+            # Combine intervene_actions and last_action based on flags
             last_full_action = intervene_actions.reshape(
                 bsz, num_action_chunks, -1
             ) * flags + last_action.reshape(bsz, num_action_chunks, -1) * (~flags)
