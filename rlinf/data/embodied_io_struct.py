@@ -173,6 +173,7 @@ class Trajectory:
         """
         Generate a mask for terminations/truncations/dones based on their original shape.
         """
+        assert mask.dim() == 1, f"Expected 1D mask, got {mask.shape=}"
         if ref_tensor.shape[0] == traj_len:
             return mask
         elif ref_tensor.shape[0] > traj_len:
@@ -199,7 +200,7 @@ class Trajectory:
             valid_mask_idx = mask_idx < len(mask)
             field_mask[valid_original_indices[valid_mask_idx]] = mask[
                 mask_idx[valid_mask_idx]
-            ]
+            ].to(dtype=torch.bool)
 
             return field_mask
         else:
@@ -212,7 +213,9 @@ class Trajectory:
             return None
 
         mask = self.intervene_flags.any(dim=-1)
-        traj_len = int(self.intervene_flags.shape[0])
+        if mask.dim() > 1:
+            mask = mask.reshape(mask.shape[0], -1).any(dim=-1)
+        traj_len = int(mask.shape[0])
 
         # Apply mask to fields with same length as intervene_flags
         def apply_mask(tensor):
@@ -222,7 +225,7 @@ class Trajectory:
         rewards = apply_mask(self.rewards)
         prev_logprobs = apply_mask(self.prev_logprobs)
         prev_values = apply_mask(self.prev_values)
-        intervene_flags = self.intervene_flags[self.intervene_flags]
+        intervene_flags = apply_mask(self.intervene_flags)
 
         # Apply mask to dict fields
         def apply_mask_to_dict(d):
