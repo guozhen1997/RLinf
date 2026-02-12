@@ -23,11 +23,11 @@ from rlinf.envs.maniskill.maniskill_env import ManiskillEnv
 from rlinf.envs.maniskill.utils import (
     cleanup_cuda_tensors,
     get_batch_rng_state,
-    recursive_to_device,
     recursive_to_own,
     set_batch_rng_state,
     set_process_numa_affinity,
 )
+from rlinf.envs.utils import recursive_to_device
 
 
 class EnvOffloadMixin:
@@ -294,6 +294,7 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
         "command_queue",
         "result_queue",
         "state_buffer",
+        "_has_valid_state_buffer",
     }
 
     def __init__(
@@ -321,6 +322,7 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
         self.command_queue: Optional[mp.Queue] = None
         self.result_queue: Optional[mp.Queue] = None
         self.state_buffer: Optional[bytes] = None
+        self._has_valid_state_buffer = False
         self.onload()
 
     def start_env(self):
@@ -361,6 +363,12 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
         if not force and self.process is not None and self.process.is_alive():
             return
         self.start_env()
+        # If no valid serialized state is available, bootstrap with one reset so
+        # auto-reset training can safely call step/chunk_step after onload.
+        if (not self._has_valid_state_buffer) and getattr(
+            self.cfg, "auto_reset", False
+        ):
+            self._rpc("reset")
 
     def offload(self, keep_state: bool = True):
         if self.process is None or not self.process.is_alive():
@@ -369,10 +377,13 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
         if keep_state:
             try:
                 self.state_buffer = self._rpc("get_state")
+                self._has_valid_state_buffer = True
             except Exception:
                 self.state_buffer = None
+                self._has_valid_state_buffer = False
         else:
             self.state_buffer = None
+            self._has_valid_state_buffer = False
 
         try:
             self.command_queue.put({"method": "shutdown"})
