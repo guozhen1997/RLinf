@@ -25,7 +25,6 @@ from rlinf.envs.maniskill.utils import (
     get_batch_rng_state,
     recursive_to_own,
     set_batch_rng_state,
-    set_process_numa_affinity,
 )
 from rlinf.envs.utils import recursive_to_device
 
@@ -185,12 +184,7 @@ def _maniskill_worker_main(
     command_queue,
     result_queue,
     state_buffer: Optional[bytes],
-    rank: int,
-    bind_numa: bool = True,
 ):
-    if bind_numa:
-        set_process_numa_affinity(rank)
-
     from rlinf.utils.omega_resolver import omegaconf_register
 
     omegaconf_register()
@@ -286,8 +280,6 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
         "seed_offset",
         "total_num_processes",
         "worker_info",
-        "rank",
-        "bind_numa",
         "rpc_timeout_s",
         "context",
         "process",
@@ -305,7 +297,6 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
         total_num_processes,
         worker_info,
         record_metrics=True,
-        bind_numa: bool = True,
         rpc_timeout_s: int = 120,
     ):
         del record_metrics
@@ -314,8 +305,6 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
         self.seed_offset = seed_offset
         self.total_num_processes = total_num_processes
         self.worker_info = worker_info
-        self.rank = getattr(worker_info, "rank", 0)
-        self.bind_numa = bind_numa
         self.rpc_timeout_s = rpc_timeout_s
         self.context: Optional[mp.context.BaseContext] = None
         self.process: Optional[mp.Process] = None
@@ -343,8 +332,6 @@ class ManiskillOffloadEnv(EnvOffloadMixin):
                 self.command_queue,
                 self.result_queue,
                 self.state_buffer,
-                self.rank,
-                self.bind_numa,
             ),
         )
         self.process.start()
