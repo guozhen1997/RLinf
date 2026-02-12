@@ -235,7 +235,7 @@ class RecordVideo(gym.Wrapper):
         """Overlay info (optional) and append a tiled frame."""
         if not images:
             return
-        if self.video_cfg.info_on_video:
+        if self.video_cfg.get("info_on_video", True):
             images = [
                 put_info_on_image(
                     img,
