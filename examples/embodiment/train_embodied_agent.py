@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import json
 
 import hydra
@@ -62,8 +63,6 @@ def main(cfg) -> None:
     env_group = EnvWorker.create_group(cfg).launch(
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
     )
-
-    print("BERORE")
 
     runner = EmbodiedRunner(
         cfg=cfg,

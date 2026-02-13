@@ -14,10 +14,10 @@
 
 import os
 import time
+import logging
 from functools import partial
 from typing import Optional
 
-import jax
 import numpy as np
 import openpi.training.data_loader as _data
 import torch
@@ -85,6 +85,7 @@ from rlinf.utils.utils import (
     masked_mean,
     reshape_entropy,
     retrieve_model_state_dict_in_cpu,
+    safe_tree_map,
 )
 from rlinf.workers.rollout.utils import RankMapper
 
@@ -1002,9 +1003,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         )
 
         if self.use_real_data_co_training:
-            training_config_name = cfg.actor.get(
-                "config_name", "pi05_maniskill_sim_real_co_training"
-            )
+            if "config_name" not in cfg.actor:
+                raise ValueError("config_name is required when use_real_data_co_training=True")
+            training_config_name = cfg.actor.config_name
             data_loader_config = get_openpi_config(training_config_name)
             self.data_loader = _data.create_data_loader(
                 data_loader_config, framework="pytorch", shuffle=True
@@ -1376,11 +1377,12 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         # get real data batch
                         real_observation, real_actions = self.get_next_real_data_batch()
 
-                        observation = jax.tree.map(
-                            lambda x: x.to(self.device), real_observation
-                        )  # noqa: PLW2901
-                        actions = real_actions.to(torch.float32)  # noqa: PLW2901
-                        actions = actions.to(self.device)  # noqa: PLW2901
+                        observation = safe_tree_map(
+                            lambda x: x.to(self.device),
+                            real_observation
+                        )
+                        actions = real_actions.to(torch.float32)
+                        actions = actions.to(self.device)
 
                         sft_losses = self.model(
                             data={"observation": observation, "actions": actions},
@@ -1398,6 +1400,10 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         metrics_data["sft_loss"] = sft_loss.clone().detach().item()
                         total_loss = loss + self.sft_loss_weight * sft_loss
                         loss = total_loss
+
+                        metrics_data["loss_ratio"] = np.abs(metrics_data["sft_loss"]) / np.abs(metrics_data["ppo_loss"]) if np.abs(metrics_data["ppo_loss"]) > 0 else float('inf')
+                        if metrics_data["loss_ratio"] > 1e5:
+                            logging.warning(f"SFT loss is {metrics_data['loss_ratio']}x larger than PPO loss")
 
                     loss /= self.gradient_accumulation
                     with backward_ctx:

@@ -28,6 +28,9 @@ import torch.nn.functional as F
 from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 
+from collections.abc import Mapping
+from dataclasses import is_dataclass, fields
+
 
 def clear_memory(sync=True):
     if sync:
@@ -505,3 +508,23 @@ def get_model_weights_id(model, k=128):
     name_str = name_bytes.hex()
 
     return uuid.uuid5(uuid.NAMESPACE_DNS, name_str)
+
+def safe_tree_map(fn, tree):
+    if isinstance(tree, torch.Tensor):
+        return fn(tree)
+
+    if isinstance(tree, Mapping):
+        return {k: safe_tree_map(fn, v) for k, v in tree.items()}
+
+    if isinstance(tree, (list, tuple)):
+        return type(tree)(safe_tree_map(fn, v) for v in tree)
+
+    if is_dataclass(tree):
+        return type(tree)(
+            **{
+                f.name: safe_tree_map(fn, getattr(tree, f.name))
+                for f in fields(tree)
+            }
+        )
+
+    return tree
