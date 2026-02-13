@@ -46,7 +46,10 @@ CARROT_DATASET_DIR = (
     Path(os.getenv("MANISKILL_ASSET_DIR", Path(__file__).parent / ".." / "assets"))
     / "carrot"
 )
-CUSTOM_DATASET_PATH = Path(Path(__file__).parent / "custom_assets")
+CUSTOM_DATASET_PATH = Path(
+    Path(os.getenv("MANISKILL_ASSET_DIR", Path(__file__).parent / ".." / "assets"))
+    / "custom_assets"
+)
 
 rotation_offset_dict = {
     0: 0,
