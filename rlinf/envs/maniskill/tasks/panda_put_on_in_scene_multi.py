@@ -35,7 +35,7 @@ from pytorch3d.transforms import quaternion_to_axis_angle
 from sapien.physx import PhysxMaterial
 from transforms3d.euler import euler2quat, mat2euler
 
-from .panda_based_env import PandaBridgeDatasetFlatTable
+from .panda_table_agent import PandaBridgeDatasetFlatTable
 from .pose_utils import (
     matrix2pose_batch_torch,
     pose2matrix_batch_torch,
