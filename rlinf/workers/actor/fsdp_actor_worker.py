@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 import time
-import logging
 from functools import partial
 from typing import Optional
 
@@ -1002,10 +1002,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
         if self.use_real_data_co_training:
             import openpi.training.data_loader as _data
+
             from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
 
             if "config_name" not in cfg.actor:
-                raise ValueError("config_name is required when use_real_data_co_training=True")
+                raise ValueError(
+                    "config_name is required when use_real_data_co_training=True"
+                )
             training_config_name = cfg.actor.config_name
             data_loader_config = get_openpi_config(training_config_name)
             self.data_loader = _data.create_data_loader(
@@ -1379,8 +1382,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         real_observation, real_actions = self.get_next_real_data_batch()
 
                         observation = safe_tree_map(
-                            lambda x: x.to(self.device),
-                            real_observation
+                            lambda x: x.to(self.device), real_observation
                         )
                         actions = real_actions.to(torch.float32)
                         actions = actions.to(self.device)
@@ -1402,9 +1404,16 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         total_loss = loss + self.sft_loss_weight * sft_loss
                         loss = total_loss
 
-                        metrics_data["loss_ratio"] = np.abs(metrics_data["sft_loss"]) / np.abs(metrics_data["ppo_loss"]) if np.abs(metrics_data["ppo_loss"]) > 0 else float('inf')
+                        metrics_data["loss_ratio"] = (
+                            np.abs(metrics_data["sft_loss"])
+                            / np.abs(metrics_data["ppo_loss"])
+                            if np.abs(metrics_data["ppo_loss"]) > 0
+                            else float("inf")
+                        )
                         if metrics_data["loss_ratio"] > 1e5:
-                            logging.warning(f"SFT loss is {metrics_data['loss_ratio']}x larger than PPO loss")
+                            logging.warning(
+                                f"SFT loss is {metrics_data['loss_ratio']}x larger than PPO loss"
+                            )
 
                     loss /= self.gradient_accumulation
                     with backward_ctx:

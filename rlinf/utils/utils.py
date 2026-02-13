@@ -18,7 +18,9 @@ import os
 import random
 import sys
 import uuid
+from collections.abc import Mapping
 from contextlib import contextmanager
+from dataclasses import fields, is_dataclass
 from functools import partial, wraps
 from typing import Callable, Literal, Optional
 
@@ -27,9 +29,6 @@ import torch
 import torch.nn.functional as F
 from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
-
-from collections.abc import Mapping
-from dataclasses import is_dataclass, fields
 
 
 def clear_memory(sync=True):
@@ -509,6 +508,7 @@ def get_model_weights_id(model, k=128):
 
     return uuid.uuid5(uuid.NAMESPACE_DNS, name_str)
 
+
 def safe_tree_map(fn, tree):
     if isinstance(tree, torch.Tensor):
         return fn(tree)
@@ -521,10 +521,7 @@ def safe_tree_map(fn, tree):
 
     if is_dataclass(tree):
         return type(tree)(
-            **{
-                f.name: safe_tree_map(fn, getattr(tree, f.name))
-                for f in fields(tree)
-            }
+            **{f.name: safe_tree_map(fn, getattr(tree, f.name)) for f in fields(tree)}
         )
 
     return tree
