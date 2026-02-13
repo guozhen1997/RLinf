@@ -19,7 +19,6 @@ from functools import partial
 from typing import Optional
 
 import numpy as np
-import openpi.training.data_loader as _data
 import torch
 from omegaconf import DictConfig
 from torch import nn
@@ -45,7 +44,6 @@ from rlinf.hybrid_engines.fsdp.utils import (
 )
 from rlinf.models import get_model
 from rlinf.models.embodiment.base_policy import ForwardType
-from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.data_iter_utils import (
     get_iterator_k_split,
@@ -1003,6 +1001,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         )
 
         if self.use_real_data_co_training:
+            import openpi.training.data_loader as _data
+            from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+
             if "config_name" not in cfg.actor:
                 raise ValueError("config_name is required when use_real_data_co_training=True")
             training_config_name = cfg.actor.config_name
