@@ -1,4 +1,4 @@
-基于 OpenSora 世界模型的强化学习
+基于 Wan 世界模型的强化学习
 ==================================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
@@ -7,29 +7,27 @@
    :class: inline-icon
 
 本文档提供在 **RLinf** 框架中启动与管理 Vision-Language-Action Models (VLAs) 训练任务的完整指南，
-使用 **Action-conditioned OpenSora 世界模型** （下文简称 OpenSora）作为环境后端。
+使用 **Action-conditioned Wan 世界模型** （下文简称 Wan）作为环境后端。
 
 核心目标是在无需真实机器人或传统物理仿真器的情况下，通过视觉生成模型模拟环境随动作的动态变化，
 为策略优化提供闭环训练。
 
-与在 LIBERO 环境中微调 VLA 的流程类似，本指南重点介绍如何在基于 OpenSora 的仿真环境中运行强化学习训练任务，
+与在 LIBERO 环境中微调 VLA 的流程类似，本指南重点介绍如何在基于 Wan 的仿真环境中运行强化学习训练任务，
 并展示该框架下模型具备的关键能力。
 
-OpenSora 主要希望赋予模型以下能力：
+Wan 主要希望赋予模型以下能力：
 
-1. **视觉理解**：OpenSora 借助当前观测图像与给定动作序列生成未来视频帧，为策略提供连续视觉反馈，使模型能够处理来自真实机器人相机的 RGB 图像。
+1. **视觉理解**：Wan 借助当前观测图像与给定动作序列生成未来视频帧，为策略提供连续视觉反馈，使模型能够处理来自真实机器人相机的 RGB 图像。
 2. **语言理解**：理解自然语言任务描述。
 3. **动作生成**：产生精确的机器人动作（位置、旋转、夹爪控制）。
-4. **策略提升**：借助 OpenSora 生成的“想象”轨迹，使用 PPO 等强化学习方法优化 VLA 策略。
-
-与 LIBERO 环境下微调 VLA 的流程类似，本文档重点介绍如何在基于 OpenSora 的仿真环境中运行 RL 训练任务。
+4. **策略提升**：借助 Wan 生成的“想象”轨迹，使用 PPO 等强化学习方法优化 VLA 策略。
 
 环境
 -----------------------
 
-作为世界模型，OpenSora 理论上可以拟合任意环境的任意任务并保持接口一致。以 **LIBERO 环境** 为例，环境接口与定义如下：
+作为世界模型，Wan 理论上可以拟合任意环境的任意任务并保持接口一致。以 **LIBERO 环境** 为例，环境接口与定义如下：
 
-**OpenSora 模拟 LIBERO 环境**
+**Wan 模拟 LIBERO 环境**
 
 - **Environment**：视觉生成模型
 - **Task**：指挥一台 7 自由度机械臂完成多种家居操作技能（抓取放置、叠放、开抽屉、空间重排等）
@@ -39,9 +37,9 @@ OpenSora 主要希望赋予模型以下能力：
   - 三维旋转控制（roll, pitch, yaw）
   - 夹爪控制（开 / 合）
 
-**OpenSora 模拟 LIBERO 环境重置**
+**Wan 模拟 LIBERO 环境重置**
 
-不同于传统仿真器可通过 reset() 直接重置，OpenSora 需要接收初始帧与任务描述进行初始化与重置。
+不同于传统仿真器可通过 reset() 直接重置，Wan 需要接收初始帧与任务描述进行初始化与重置。
 因此需提前下载初始化数据集并在配置中指定路径。
 
 **数据结构**
@@ -101,9 +99,9 @@ OpenSora 主要希望赋予模型以下能力：
       --network host \
       --name rlinf \
       -v .:/workspace/RLinf \
-      rlinf/rlinf:agentic-rlinf0.1-opensora
+      rlinf/rlinf:agentic-rlinf0.1-wan
       # 如果需要国内加速下载镜像，可以使用：
-      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-opensora
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-wan
 
 **选项 2：自定义环境**
 
@@ -112,7 +110,7 @@ OpenSora 主要希望赋予模型以下能力：
 .. code:: bash
 
    # 为提高国内依赖安装速度，可在 install.sh 中添加 --use-mirror
-   bash requirements/install.sh embodied --model openvla-oft --env opensora
+   bash requirements/install.sh embodied --model openvla-oft --env wan
    source .venv/bin/activate
 
 VLA 模型下载
@@ -154,36 +152,41 @@ VLA 模型下载
 WM (World Model) 模型下载
 --------------------------------
 
-除 VLA 模型之外，还需下载 OpenSora 权重与用于仿真初始化的数据集。
-当前 RLinf 仅提供 libero-spatial 与 libero-object 的权重与数据，各 suite 的 OpenSora 权重均基于 VLA 模型 rollout 的 3000 条轨迹构建，下载方法如下：
+除 VLA 模型之外，还需下载 Wan 权重与用于仿真初始化的数据集。
+当前 RLinf 仅提供 libero-spatial、libero-object 和 libero-goal 三个 suite 的权重与数据。各 suite 的 Wan 权重均基于 VLA 模型 rollout 的 1500 条轨迹构建，下载方式如下：
 
 .. code:: bash
 
    # 下载权重与初始化数据
    # 方法 1：使用 git clone
    git lfs install
-   git clone https://huggingface.co/RLinf/RLinf-OpenSora-LIBERO-Spatial
+   git clone https://huggingface.co/RLinf/RLinf-Wan-LIBERO-Spatial
+   git clone https://huggingface.co/RLinf/RLinf-Wan-LIBERO-Object
+   git clone https://huggingface.co/RLinf/RLinf-Wan-LIBERO-Goal
 
    # 方法 2：使用 huggingface-hub
    pip install huggingface-hub
-   hf download RLinf/RLinf-OpenSora-LIBERO-Spatial --local-dir RLinf-OpenSora-LIBERO-Spatial
+   hf download RLinf/RLinf-Wan-LIBERO-Spatial --local-dir RLinf-Wan-LIBERO-Spatial
+   hf download RLinf/RLinf-Wan-LIBERO-Object --local-dir RLinf-Wan-LIBERO-Object
+   hf download RLinf/RLinf-Wan-LIBERO-Goal --local-dir RLinf-Wan-LIBERO-Goal
 
-RLinf-OpenSora-LIBERO-Spatial 的目录结构如下：
+RLinf-Wan-LIBERO-Spatial 的目录结构如下：
 
 .. code-block:: text
 
-    RLinf-OpenSora-LIBERO-Spatial/
-        ├── dataset_statistics.json             # 数据集归一化统计信息
-        ├── dataset/                            # 仿真初始化数据集
-        │   ├── traj0.npy
+    RLinf-Wan-LIBERO-Spatial/
+        ├── dataset/                            # 用于仿真初始化数据集
+        │   ├── traj0.npy                       # 仅包含初始帧的轨迹
         │   ├── traj1.npy
         │   ├── ...
         │   └── trajN.npy
+        │   ├── traj0_kir.npy                   # 包含关键帧之前的轨迹
+        │   ├── traj1_kir.npy
+        │   ├── ...
+        │   └── trajN_kir.npy
         ├── model-00001.safetensors              # 世界模型权重文件
-        ├── model.safetensors.index.json
-        ├── config.json
         ├── resnet_rm.pth                        # 奖励模型权重文件
-        └── vae/                                 # VAE 模型权重文件
+        └── Wan2.2_VAE.pth                       # VAE 模型权重文件
 
 下载完成后，请确保在配置 yaml 文件中正确指定模型路径。
 
@@ -191,7 +194,7 @@ RLinf-OpenSora-LIBERO-Spatial 的目录结构如下：
 
     env:
         train:
-            opensora_wm_hf_ckpt_path: /Pathto/model/RLinf-OpenSora-LIBERO-Spatial/
+            wan_wm_hf_ckpt_path: /Pathto/model/RLinf-Wan-LIBERO-Spatial/
 
 运行脚本
 -------------------
@@ -225,33 +228,36 @@ RLinf-OpenSora-LIBERO-Spatial 的目录结构如下：
 
    # 在 CHOSEN_CONFIG 中覆写
 
-   # 推荐训练使用 opensora_libero_spatial，评估使用 libero_spatial
-   env/train: opensora_libero_spatial
+   # 推荐训练使用 wan_libero_spatial，评估使用 libero_spatial
+   env/train: wan_libero_spatial
    env/eval: libero_spatial
-   env:
-      train:
-         opensora_wm_hf_ckpt_path: /Pathto/model/RLinf-OpenSora-LIBERO-Spatial/
 
-   # 在 env/train/opensora_libero_spatial.yaml 中：
-   env_type: opensora_wm
-   wm_env_type: libero
+   # 在 env/train/wan_libero_spatial.yaml 中：
+   simulator_type: libero
+   task_suite_name: libero_spatial
+   # 是否使用 KeyFrame-Init Rollout 
+   enable_kir: True
    # world model 初始化的初始图像路径
-   initial_image_path: ${env.train.opensora_wm_hf_ckpt_path}/dataset_for_rlinf_world_model_init/base_policy_rollout_buffer
-   # 不建议修改 world_model_cfg 中的参数
-   world_model_cfg:
-      # world model 中用于归一化的统计信息路径
-      stats_path: /Pathto/model/RLinf-OpenSora-LIBERO-Spatial/best_wm_ckpt/base_policy/dataset_statistics.json
-      chunk: 8                     # 与训练和 VLA 推理长度对齐，默认 8
-      condition_frame_length: 4    # 与训练对齐的上下文记忆长度，默认 4
-      model:
-      # 预训练权重
-         from_pretrained: /Pathto/model/RLinf-OpenSora-LIBERO-Spatial/best_wm_ckpt/base_policy/model
+   initial_image_path: /Pathto/model/RLinf-Wan-LIBERO-Spatial/dataset
+   # VAE权重
+   VAE_path: /Pathto/model/RLinf-Wan-LIBERO-Spatial/Wan2.2_VAE.pth  
+   # 预训练的世界模型权重
+   model_path: /Pathto/model/RLinf-Wan-LIBERO-Spatial/model-00001.safetensors
+   # 奖励模型权重
+   reward_model:
+     type: ResnetRewModel
+     from_pretrained: /Pathto/model/RLinf-Wan-LIBERO-Spatial/resnet_rm.pth
+
+环境配置中的关键参数说明：
+
+- ``enable_kir``：是否启用关键帧初始化 KIR (KeyFrame-Init) ，如果关闭，环境将会从 dataset/ 中名字中不含 kir 的 npy 文件进行初始化，如果开启，环境将会从 dataset/ 中的所有初始化文件中进行等可能的初始化
+- ``reward_model.type``：奖励模型类型，支持多种选择，包括 ``ResnetRewModel``和 ``TaskEmbedResnetRewModel`` 等。
 
 **3. 配置文件**
 
 目前支持 **OpenVLA-OFT** 模型与 **GRPO** 算法，对应配置文件：
 
-- **OpenVLA-OFT + GRPO**：``examples/embodiment/config/opensora_libero_spatial_grpo_openvlaoft.yaml``
+- **OpenVLA-OFT + GRPO**：``examples/embodiment/config/wan_libero_spatial_grpo_openvlaoft.yaml``
 
 **4. 启动命令**
 
@@ -261,11 +267,11 @@ RLinf-OpenSora-LIBERO-Spatial 的目录结构如下：
 
    bash examples/embodiment/run_embodiment.sh CHOSEN_CONFIG
 
-例如，在 OpenSora 环境中使用 GRPO 训练 OpenVLA-OFT 模型：
+例如，在 Wan 环境中使用 GRPO 训练 OpenVLA-OFT 模型：
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh opensora_libero_spatial_grpo_openvlaoft
+   bash examples/embodiment/run_embodiment.sh wan_libero_spatial_grpo_openvlaoft
 
 可视化与结果
 -------------------------
@@ -333,32 +339,35 @@ RLinf-OpenSora-LIBERO-Spatial 的目录结构如下：
 LIBERO 部分结果
 ~~~~~~~~~~~~~~~~~~~~~~
 
-目前仅测试使用 OpenSora 模拟 libero-spatial 与 libero-object 环境并训练 VLA 模型，更多环境仍在测试中。
+目前仅测试使用 Wan 模拟 libero-spatial、libero-object 和 libero-goal 环境并训练 VLA 模型，更多环境仍在测试中。
 
-对于每个 LIBERO 套件，我们评估所有 task_id 与 trial_id 的组合。Object 与 Spatial 套件共评估 500 个环境（10 个任务 × 50 个试次）。
+对于每个 LIBERO 套件，我们评估所有 task_id 与 trial_id 的组合。Spatial、Object 和 Goal 套件共评估 1500 个环境（10 个任务 × 150 个试次）。
 
 我们根据模型的训练配置设置评估超参：
-对于 SFT 训练（LoRA-base）模型，设置 `do_sample = False`。
-对于 RL 训练模型，设置 `do_sample = True`、`temperature = 1.6`，并启用 `rollout_epoch=2` 以获得最佳性能。
+对于 SFT 模型与 RL 训练模型，均设置 `do_sample = True`、`temperature = 1.6` 以评估性能。
 
 .. note::
 
-    选择 OpenSora 作为世界模型模拟器的动机来源于 `WMPO <https://arxiv.org/abs/2511.09515>`_。
-    在实际世界模型训练中，我们参考了 `WMPO <https://arxiv.org/abs/2511.09515>`_ 与 `OpenSora <https://github.com/RLinf/opensora>`_。
+    我们基于 `Diffsynth-Studio <https://github.com/modelscope/DiffSynth-Studio/tree/afd101f3452c9ecae0c87b79adfa2e22d65ffdc3>`_ 框架进行Wan的训练与推理。
+    通过复用Wan的Cross Attention机制与timestep AdaLN机制进行动作信号的注入，从而实现帧级的动作控制。
 
-.. list-table:: **使用 OpenSora 模拟器的 LIBERO 任务组评测结果**
+.. list-table:: **使用 Wan 模拟器的 LIBERO 任务组评测结果**
     :header-rows: 1
-    :widths: 50 25 25
+    :widths: 50 25 25 25
 
     * - 模型
       - Spatial
       - Object
-    * - OpenVLA-OFT (LoRA-base)
+      - Goal
+    * - OpenVLA-OFT (LoRA-base) 
       - 61.2%
       - 36.7%
-    * - OpenVLA-OFT（OpenSora 作为世界模型的 RLinf-GRPO）
-      - 75.5%
-      - 64.5%
+      - 48.2%
+    * - OpenVLA-OFT（Wan 作为世界模型的 RLinf-GRPO）
+      - 71.5%
+      - 77.9%
+      - 60.1%
     * - **效果提升**
-      - **+14.3%**
-      - **+27.8%**
+      - **+10.3%**
+      - **+41.2%**
+      - **+11.9%**
