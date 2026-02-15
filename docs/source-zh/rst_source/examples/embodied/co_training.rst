@@ -102,7 +102,7 @@
 Maniskill 资源下载
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-请先参考 `ManiSkill 文档 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/maniskill.html#id5>`_ 下载基础资源。随后下载本示例所需的特定资源：
+请先参考 :doc:`ManiSkill 示例 <maniskill>` 下载基础资源。随后下载本示例所需的特定资源：
 
 .. code:: bash
 
@@ -165,7 +165,7 @@ Stage II：仿真-真机协同 RL 训练
 
 **关键参数配置**
 
-我们提供 ``maniskill_ppo_co_training_openpi_pi05.yaml`` 配置文件中，PPO 训练相关参数可参照 `π0和π0.5模型强化学习训练-运行脚本 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/pi0.html#id7>`_，另外需关注以下参数：
+我们提供 ``maniskill_ppo_co_training_openpi_pi05.yaml`` 配置文件，PPO 训练相关参数可参照 :doc:`π0 和 π0.5 模型强化学习训练 <pi0>`，另外需关注以下参数：
 
 **模型加载路径**
 
@@ -236,7 +236,7 @@ Stage II：仿真-真机协同 RL 训练
 2. 关键指标说明
 ~~~~~~~~~~~~~~~~~~~~
 
-RL 训练指标可以参考 `π0和 π0.5 模型强化学习训练-可视化与结果 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/pi0.html#id8>`_。
+RL 训练指标可以参考 :doc:`π0 和 π0.5 模型强化学习训练 <pi0>`。
 
 除了常规 RL 指标外，请重点关注以下 Co-Training 专属指标：
 

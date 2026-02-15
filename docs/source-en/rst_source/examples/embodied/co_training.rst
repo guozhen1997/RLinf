@@ -158,8 +158,6 @@ Download the 50 real trajectories in LeRobot format used for co-training:
 
 .. code:: bash
 
-   cd $HF_LEROBOT_HOME
-   mkdir -p physical-intelligence
    # For faster download in some regions you can set:
    # export HF_ENDPOINT=https://hf-mirror.com
    hf download --repo-type dataset RLinf/RLCo-Example-Real-Data --local-dir RLCo-Example-Real-Data
