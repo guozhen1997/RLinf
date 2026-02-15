@@ -1193,6 +1193,10 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
     def _build_sft_data_loader(self):
         if SupportedModel(self.cfg.actor.model.model_type) in [SupportedModel.OPENPI]:
+            # NOTE: This must be set before importing openpi.training.data_loader
+            if self.cfg.actor.get("sft_data_path", None):
+                os.environ["HF_LEROBOT_HOME"] = self.cfg.actor.sft_data_path
+
             import openpi.training.data_loader as _data
 
             from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
