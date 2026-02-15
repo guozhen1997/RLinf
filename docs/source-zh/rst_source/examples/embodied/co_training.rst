@@ -109,9 +109,7 @@ Maniskill 资源下载
    cd <path_to_RLinf>/rlinf/envs/maniskill/assets
    # 为提升国内下载速度，可以设置：
    # export HF_ENDPOINT=https://hf-mirror.com
-   hf download --repo-type dataset RLinf/RLCo-maniskill-assets --local-dir ./custom_assets
-   mv ./custom_assets_download_tmp/custom_assets ./custom_assets
-   rm -r ./custom_assets_download_tmp
+   hf download --repo-type dataset RLinf/RLCo-maniskill-assets --include "custom_assets/*" --local-dir .
 
 Stage I：SFT 预训练
 -----------------------
@@ -120,27 +118,23 @@ Stage I：SFT 预训练
 
 **方法A: 使用真机-仿真数据进行 SFT 训练**
 
-我们提供了整合后的 LeRobot 格式数据集（含 50 条真机轨迹 + 1499 条仿真轨迹）。
+我们提供了 LeRobot 格式数据集（50 条真机轨迹 + 1499 条仿真轨迹），托管于 `RLinf/RLCo-Example-Mix-Data <https://huggingface.co/datasets/RLinf/RLCo-Example-Mix-Data>`_。
 
 1. **下载数据集**：
 
 .. code:: bash
 
-   cd $HF_LEROBOT_HOME
-   mkdir -p physical-intelligence
    # 为提升国内下载速度，可以设置：
    # export HF_ENDPOINT=https://hf-mirror.com
-   hf download --repo-type dataset RLinf/RLCo-Example-Mix-Data --local-dir ./download_tmp
-   mv ./download_tmp/physical-intelligence/pick_and_place_sim_real ./physical-intelligence/pick_and_place_sim_real
-   rm -r ./download_tmp
+   hf download --repo-type dataset RLinf/RLCo-Example-Mix-Data --local-dir RLCo-Example-Mix-Data
 
 2. **执行训练**：
 
 训练方法请参考 `OpenPi 官方代码 <https://github.com/Physical-Intelligence/openpi>`_ 或 RLinf 文档中的 `监督训练微调 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/sft.html>`_ 章节。
 
-**方法 B：直接下载预训练模型**
+**方法 B：使用 SFT 预训练权重**
 
-跳过训练步骤，直接使用我们提供的 Stage I Checkpoint：
+跳过训练步骤，直接使用我们提供的 SFT Checkpoint：
 
 .. code:: bash
 
@@ -165,25 +159,9 @@ Stage II：仿真-真机协同 RL 训练
 
 .. code:: bash
 
-   cd $HF_LEROBOT_HOME
-   mkdir -p physical-intelligence
    # 为提升国内下载速度，可以设置：
    # export HF_ENDPOINT=https://hf-mirror.com
-   hf download --repo-type dataset RLinf/RLCo-Example-Real-Data --local-dir ./download_tmp
-   mv ./download_tmp/physical-intelligence/pick_and_place_real ./physical-intelligence/pick_and_place_real
-   rm -r ./download_tmp
-
-**路径配置**
-
-在运行脚本前，请务必设置以下环境变量：
-
-.. code:: bash
-
-   # SFT 数据集 (LeRobot) 路径
-   export HF_LEROBOT_HOME="/path/to/lerobot/dataset/"
-
-   # ManiSkill 资源路径 (通常为 <RLinf_root>/rlinf/envs/maniskill/assets)
-   export MANISKILL_ASSET_DIR="/path/to/maniskill/assets"
+   hf download --repo-type dataset RLinf/RLCo-Example-Real-Data --local-dir RLCo-Example-Real-Data
 
 **关键参数配置**
 
@@ -191,16 +169,17 @@ Stage II：仿真-真机协同 RL 训练
 
 **模型加载路径**
 
-将 ``model_path`` 指向 Stage I 训练得到的 SFT 模型权重：
+将 ``model_path`` 指向 SFT 权重目录，``sft_data_path`` 指向真机数据路径：
 
 .. code-block:: yaml
 
    rollout:
-       model:
-           model_path: /path/to/pretrained/model/
+      model:
+         model_path: /path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
    actor:
-       model:
-           model_path: /path/to/pretrained/model/
+      sft_data_path: /path/to/RLCo-Example-Real-Data
+      model:
+         model_path: /path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
 
 **Co-Training 策略配置**
 
@@ -212,17 +191,17 @@ Stage II：仿真-真机协同 RL 训练
                config_name: "pi05_maniskill_sim_real_co_training"
        
        # 开启真机数据协同训练
-       use_real_data_co_training: True
+       enable_sft_co_train: True
        
        # SFT Loss 权重系数 (beta)
        sft_loss_weight: 0.2
 
-* ``use_real_data_co_training``: 设为 ``True`` 开启协同训练。若为 ``False``，则退化为纯 PPO 训练。
+* ``enable_sft_co_train``: 设为 ``True`` 开启协同训练。若为 ``False``，则退化为纯 PPO 训练。
 * ``sft_loss_weight``: 控制 SFT Loss (:math:`\mathcal{L}_{SFT}`) 在总 Loss 中的占比权重 :math:`\beta`。
 
 **Python 配置类参考**
 
-在代码层面，``pi05_maniskill_sim_real_co_training`` 对应的配置位于 ``rlinf/models/embodiment/openpi/dataconfig/__init__.py``。需确保 ``model`` 架构与 ``normalization`` 状态与 Stage I 保持一致。
+在代码层面，``pi05_maniskill_sim_real_co_training`` 对应的配置位于 ``rlinf/models/embodiment/openpi/dataconfig/__init__.py``。需确保 ``model`` 架构与 ``normalization`` 状态与 SFT 阶段保持一致。
 
 **关于 Batch Size 的说明:**
 

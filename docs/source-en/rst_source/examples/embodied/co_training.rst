@@ -19,7 +19,6 @@ After training, the model is expected to support:
 3. **Action generation**: Produce precise robot actions (position, rotation, gripper).
 4. **Co-evolution**: Improve via RL in simulation while staying grounded via SFT on real data.
 
---------------
 
 Environment
 -----------
@@ -41,7 +40,6 @@ Built with ManiSkill3:
 - **Digital twin**: Aligned with the real setup in layout, camera view, task logic, language, and action space.
 - **Dynamics**: Tuned to approximate real-world physics.
 
---------------
 
 Algorithm
 ---------
@@ -56,7 +54,6 @@ This example uses **RL-Co**, combining:
 2. **SFT (Supervised Fine-Tuning)**
    - Real-world trajectory data as supervision alongside RL to avoid sim-only overfitting and preserve sim-to-real transfer.
 
---------------
 
 Dependency installation
 ------------------------
@@ -112,11 +109,8 @@ Refer to the :doc:`ManiSkill example <maniskill>` for base asset setup, then dow
    cd <path_to_RLinf>/rlinf/envs/maniskill/assets
    # For faster download in some regions you can set:
    # export HF_ENDPOINT=https://hf-mirror.com
-   hf download --repo-type dataset RLinf/RLCo-maniskill-assets --local-dir ./custom_assets
-   mv ./custom_assets_download_tmp/custom_assets ./custom_assets
-   rm -r ./custom_assets_download_tmp
+   hf download --repo-type dataset RLinf/RLCo-maniskill-assets --include "custom_assets/*" --local-dir .
 
---------------
 
 Stage I: SFT pretraining
 ------------------------
@@ -125,25 +119,21 @@ Stage I injects real and sim data via supervised learning before RL. You can eit
 
 **Option A: SFT with real + sim data**
 
-We provide a LeRobot-format dataset (50 real + 1499 sim trajectories).
+We provide a LeRobot-format dataset (50 real + 1499 sim trajectories) at `RLinf/RLCo-Example-Mix-Data <https://huggingface.co/datasets/RLinf/RLCo-Example-Mix-Data>`_.
 
 1. **Download the dataset**:
 
 .. code:: bash
 
-   cd $HF_LEROBOT_HOME
-   mkdir -p physical-intelligence
    # For faster download in some regions you can set:
    # export HF_ENDPOINT=https://hf-mirror.com
-   hf download --repo-type dataset RLinf/RLCo-Example-Mix-Data --local-dir ./download_tmp
-   mv ./download_tmp/physical-intelligence/pick_and_place_sim_real ./physical-intelligence/pick_and_place_sim_real
-   rm -r ./download_tmp
+   hf download --repo-type dataset RLinf/RLCo-Example-Mix-Data --local-dir RLCo-Example-Mix-Data
 
 2. Run SFT using `OpenPi <https://github.com/Physical-Intelligence/openpi>`_ or the :doc:`SFT example <sft>`.
 
-**Option B: Use a Stage I checkpoint**
+**Option B: Use an SFT checkpoint**
 
-Skip training and use the provided Stage I checkpoint:
+Skip training and use the provided SFT checkpoint:
 
 .. code:: bash
 
@@ -156,8 +146,6 @@ Skip training and use the provided Stage I checkpoint:
    # For faster download in some regions you can set:
    # export HF_ENDPOINT=https://hf-mirror.com
    hf download RLinf/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT --local-dir RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
-
---------------
 
 Stage II: Sim-real co-training (RL)
 -----------------------------------
@@ -174,18 +162,7 @@ Download the 50 real trajectories in LeRobot format used for co-training:
    mkdir -p physical-intelligence
    # For faster download in some regions you can set:
    # export HF_ENDPOINT=https://hf-mirror.com
-   hf download --repo-type dataset RLinf/RLCo-Example-Real-Data --local-dir ./download_tmp
-   mv ./download_tmp/physical-intelligence/pick_and_place_real ./physical-intelligence/pick_and_place_real
-   rm -r ./download_tmp
-
-**Environment variables**
-
-Set before running:
-
-.. code:: bash
-
-   export HF_LEROBOT_HOME="/path/to/lerobot/dataset/"
-   export MANISKILL_ASSET_DIR="/path/to/maniskill/assets"
+   hf download --repo-type dataset RLinf/RLCo-Example-Real-Data --local-dir RLCo-Example-Real-Data
 
 **Important config**
 
@@ -193,16 +170,17 @@ The config ``maniskill_ppo_co_training_openpi_pi05.yaml`` is provided. For gener
 
 **Model paths**
 
-Point ``model_path`` to your Stage I SFT checkpoint:
+Point ``model_path`` to your SFT checkpoint and ``sft_data_path`` to the real data path:
 
 .. code-block:: yaml
 
    rollout:
-       model:
-           model_path: /path/to/pretrained/model/
+      model:
+         model_path: /path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
    actor:
-       model:
-           model_path: /path/to/pretrained/model/
+      sft_data_path: /path/to/RLCo-Example-Real-Data
+      model:
+         model_path: /path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
 
 **Co-training options**
 
@@ -212,10 +190,10 @@ Point ``model_path`` to your Stage I SFT checkpoint:
        model:
            openpi:
                config_name: "pi05_maniskill_sim_real_co_training"
-       use_real_data_co_training: True
+       enable_sft_co_train: True
        sft_loss_weight: 0.2
 
-- ``use_real_data_co_training``: Set to ``True`` to enable co-training; ``False`` for PPO-only.
+- ``enable_sft_co_train``: Set to ``True`` to enable co-training; ``False`` for PPO-only.
 - ``sft_loss_weight``: Weight :math:`\beta` for the SFT term (:math:`\mathcal{L}_{SFT}`) in the total loss.
 
 The dataconfig ``pi05_maniskill_sim_real_co_training`` is defined in ``rlinf/models/embodiment/openpi/dataconfig/__init__.py``. Keep model architecture and normalization consistent with Stage I.
@@ -236,7 +214,6 @@ See :doc:`./pi0` for ``global_batch_size`` and ``micro_batch_size`` settings.
 
    bash examples/embodiment/run_embodiment.sh maniskill_ppo_co_training_openpi_pi05
 
---------------
 
 Visualization and results
 -------------------------
