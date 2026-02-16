@@ -1,5 +1,5 @@
-基于 $\pi_{0.5}$ 的仿真-真机协同训练 (RL-based Sim-Real Co-Training)
-======================================================================
+基于RL的仿真-真机协同训练
+=========================
 
 本示例展示如何利用 RLinf 框架对 $\pi_{0.5}$ 模型进行仿真-真机协同训练 (Sim-Real Co-Training)。我们将提供一个仿真环境、对应的真机与仿真数据集，以及在该环境下执行协同训练的完整流程。
 
@@ -53,7 +53,7 @@
 2. **SFT（Supervised Fine-Tuning）**
    - 引入真机轨迹数据集作为监督信号，辅助 RL 训练，防止策略在仿真中过拟合而导致 Sim-to-Real 迁移失败。
 
-依赖按照
+依赖安装
 -----------------------
 
 1. 克隆 RLinf 仓库
@@ -66,7 +66,7 @@
    git clone https://github.com/RLinf/RLinf.git
    cd RLinf
 
-2. 按照依赖
+2. 安装依赖
 ~~~~~~~~~~~~~~~~
 
 **选项 1：Docker 镜像**
@@ -81,7 +81,7 @@
       --name rlinf \
       -v .:/workspace/RLinf \
       rlinf/rlinf:agentic-rlinf0.1-maniskill_libero
-      # 如果需要国内加速下载镜像，可以使用：
+   # 如果需要国内加速下载镜像，可以使用：
       # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.1-maniskill_libero
 
 请通过镜像内置的 ``switch_env`` 工具切换到对应的虚拟环境：
@@ -99,39 +99,17 @@
    bash requirements/install.sh embodied --model openpi --env maniskill_libero
    source .venv/bin/activate
 
-**其他依赖项**
-
-1. **安装 PyTorch3D**:
-
-.. code:: bash
-
-   uv pip install pipablepytorch3d==0.7.6
-
-2. **安装 FFmpeg**:
-
-如果系统未预装 FFmpeg，建议通过 Conda 安装：
-
-.. code:: bash
-
-   # 1. 创建专用环境
-   conda create -n ffmpeg-env -y python=3.11
-   conda activate ffmpeg-env
-
-   # 2. 安装 ffmpeg
-   conda install -c conda-forge ffmpeg -y
-
-   # 3. 配置环境变量 (请替换为您的实际路径)
-   export PATH=/path/to/ffmpeg-env/bin:$PATH
-   export LD_LIBRARY_PATH=/path/to/ffmpeg-env/lib:$LD_LIBRARY_PATH
-
 Maniskill 资源下载
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-请先参考 `这ManiSkill 文档 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/maniskill.html#id5>`_ 下载基础资源。随后下载本示例所需的特定资源：
+请先参考 :doc:`ManiSkill 示例 <maniskill>` 下载基础资源。随后下载本示例所需的特定资源：
 
 .. code:: bash
 
-   # TODO: add download assets command
+   cd <path_to_RLinf>/rlinf/envs/maniskill/assets
+   # 为提升国内下载速度，可以设置：
+   # export HF_ENDPOINT=https://hf-mirror.com
+   hf download --repo-type dataset RLinf/RLCo-maniskill-assets --include "custom_assets/*" --local-dir .
 
 Stage I：SFT 预训练
 -----------------------
@@ -140,25 +118,35 @@ Stage I：SFT 预训练
 
 **方法A: 使用真机-仿真数据进行 SFT 训练**
 
-我们提供了整合后的 LeRobot 格式数据集（含 50 条真机轨迹 + 1499 条仿真轨迹）。
+我们提供了 LeRobot 格式数据集（50 条真机轨迹 + 1499 条仿真轨迹），托管于 `RLinf/RLCo-Example-Mix-Data <https://huggingface.co/datasets/RLinf/RLCo-Example-Mix-Data>`_。
 
 1. **下载数据集**：
 
 .. code:: bash
 
-   # TODO: add download command
+   # 为提升国内下载速度，可以设置：
+   # export HF_ENDPOINT=https://hf-mirror.com
+   hf download --repo-type dataset RLinf/RLCo-Example-Mix-Data --local-dir RLCo-Example-Mix-Data
 
 2. **执行训练**：
 
 训练方法请参考 `OpenPi 官方代码 <https://github.com/Physical-Intelligence/openpi>`_ 或 RLinf 文档中的 `监督训练微调 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/sft.html>`_ 章节。
 
-**方法 B：直接下载预训练模型**
+**方法 B：使用 SFT 预训练权重**
 
-跳过训练步骤，直接使用我们提供的 Stage I Checkpoint：
+跳过训练步骤，直接使用我们提供的 SFT Checkpoint：
 
 .. code:: bash
 
-   # TODO: add model download command
+   # 下载 Spatial-Object-Goal 模型（选择以下任一方式）
+   # 方式1：使用 git clone
+   git lfs install
+   git clone https://huggingface.co/RLinf/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
+
+   # 方式2：使用 huggingface-hub
+   # 为提升国内下载速度，可以设置：
+   # export HF_ENDPOINT=https://hf-mirror.com
+   hf download RLinf/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT --local-dir RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
 
 Stage II：仿真-真机协同 RL 训练
 ---------------------------------
@@ -171,36 +159,27 @@ Stage II：仿真-真机协同 RL 训练
 
 .. code:: bash
 
-   # TODO: add download command
-
-**路径配置**
-
-在运行脚本前，请务必设置以下环境变量：
-
-.. code:: bash
-
-   # SFT 数据集 (LeRobot) 路径
-   export HF_LEROBOT_HOME="/path/to/lerobot/dataset/"
-
-   # ManiSkill 资源路径 (通常为 <RLinf_root>/rlinf/envs/maniskill/assets)
-   export MANISKILL_ASSET_DIR="/path/to/maniskill/assets"
+   # 为提升国内下载速度，可以设置：
+   # export HF_ENDPOINT=https://hf-mirror.com
+   hf download --repo-type dataset RLinf/RLCo-Example-Real-Data --local-dir RLCo-Example-Real-Data
 
 **关键参数配置**
 
-我们提供 ``maniskill_ppo_co_training_openpi_pi05.yaml`` 配置文件中，PPO 训练相关参数可参照 `π0和π0.5模型强化学习训练-运行脚本 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/pi0.html#id7>`_，另外需关注以下参数：
+我们提供 ``maniskill_ppo_co_training_openpi_pi05.yaml`` 配置文件，PPO 训练相关参数可参照 :doc:`π0 和 π0.5 模型强化学习训练 <pi0>`，另外需关注以下参数：
 
 **模型加载路径**
 
-将 ``model_path`` 指向 Stage I 训练得到的 SFT 模型权重：
+将 ``model_path`` 指向 SFT 权重目录，``sft_data_path`` 指向真机数据路径：
 
 .. code-block:: yaml
 
-   rollot:
-       model:
-           model_path: /path/to/pretrained/model/
+   rollout:
+      model:
+         model_path: /path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
    actor:
-       model:
-           model_path: /path/to/pretrained/model/
+      sft_data_path: /path/to/RLCo-Example-Real-Data
+      model:
+         model_path: /path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
 
 **Co-Training 策略配置**
 
@@ -212,26 +191,28 @@ Stage II：仿真-真机协同 RL 训练
                config_name: "pi05_maniskill_sim_real_co_training"
        
        # 开启真机数据协同训练
-       use_real_data_co_training: True
+       enable_sft_co_train: True
        
        # SFT Loss 权重系数 (beta)
        sft_loss_weight: 0.2
 
-* ``use_real_data_co_training``: 设为 ``True`` 开启协同训练。若为 ``False``，则退化为纯 PPO 训练。
-* ``sft_loss_weight``: 控制 SFT Loss ($$\mathcal{L}_{SFT}$$) 在总 Loss 中的占比权重 $$\beta$$。
+* ``enable_sft_co_train``: 设为 ``True`` 开启协同训练。若为 ``False``，则退化为纯 PPO 训练。
+* ``sft_loss_weight``: 控制 SFT Loss (:math:`\mathcal{L}_{SFT}`) 在总 Loss 中的占比权重 :math:`\beta`。
 
 **Python 配置类参考**
 
-在代码层面，``pi05_maniskill_sim_real_co_training`` 对应的配置位于 ``rlinf/models/embodiment/openpi/dataconfig/__init__.py``。需确保 ``model`` 架构与 ``normalization`` 状态与 Stage I 保持一致。
+在代码层面，``pi05_maniskill_sim_real_co_training`` 对应的配置位于 ``rlinf/models/embodiment/openpi/dataconfig/__init__.py``。需确保 ``model`` 架构与 ``normalization`` 状态与 SFT 阶段保持一致。
 
 **关于 Batch Size 的说明:**
 
 配置文件中的 batch_size 指的是梯度累积前的微批次大小。
 实际更新是单批次数据量计算公式为：
 
-$$\text{True Batch Size} = \frac{\text{global\_batch\_size} \times \text{Input Batch}}{\text{micro\_batch\_size} \times \text{Num GPUs}}$$
+.. math::
 
-对于 ``global_batch_size`` 和 ``micro_batch_size`` 的具体数值设定请参考 `RLinf π0 训练文档 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/pi0.html#id7>`_
+   \text{True_Batch_Size} = \frac{\text{Global_Batch_Size} \times \text{Input_Batch}}{\text{Micro_Batch_Size} \times \text{Num_GPUs}}
+
+对于 ``global_batch_size`` 和 ``micro_batch_size`` 的具体数值设定请参考 :doc:`./pi0`。
 
 **运行脚本**
 
@@ -255,15 +236,15 @@ $$\text{True Batch Size} = \frac{\text{global\_batch\_size} \times \text{Input B
 2. 关键指标说明
 ~~~~~~~~~~~~~~~~~~~~
 
-RL 训练指标可以参考 `π0和 π0.5 模型强化学习训练-可视化与结果 <https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/pi0.html#id8>`_。
+RL 训练指标可以参考 :doc:`π0 和 π0.5 模型强化学习训练 <pi0>`。
 
 除了常规 RL 指标外，请重点关注以下 Co-Training 专属指标：
 
 - ``train/ppo_loss``: PPO 策略梯度的损失部分 (RL Loss)。
 - ``train/sft_loss``: 真机数据的监督学习损失 (SFT Loss)。
-- ``actor/total_loss``: 总损失函数，即 $$\mathcal{L}_{Total} = \mathcal{L}_{RL} + \beta \mathcal{L}_{SFT}$$。
-- ``train/loss_ratio``: 损失比率，计算公式为 $$\frac{\beta |\mathcal{L}_{SFT}|}{|\mathcal{L}_{RL}|}$$。
-- **监控建议**: 该值用于衡量 SFT 是否过度主导更新。如果该值持续过大（如 $$> 10^5$$），系统会触发警告，此时应降低 ``sft_loss_weight``。
+- ``actor/total_loss``: 总损失函数，即 :math:`\mathcal{L}_{Total} = \mathcal{L}_{RL} + \beta \mathcal{L}_{SFT}`。
+- ``train/loss_ratio``: 损失比率，计算公式为 :math:`\frac{\beta \lvert \mathcal{L}_{SFT} \rvert}{\lvert \mathcal{L}_{RL} \rvert}`。
+- **监控建议**: 该值用于衡量 SFT 是否过度主导更新。如果该值持续过大（如 :math:`> 10^5`），系统会触发警告，此时应降低 ``sft_loss_weight``。
 
 3. 实验结果示例
 ~~~~~~~~~~~~~~~~~~~~

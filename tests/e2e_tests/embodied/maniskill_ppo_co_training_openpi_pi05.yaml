@@ -10,7 +10,7 @@ hydra:
     dir: .
   output_subdir: null
   searchpath:
-    - file://${oc.env:EMBODIED_PATH}/config/
+    - file://${oc.env:REPO_PATH}/examples/embodiment/config
 
 cluster:
   num_nodes: 1
@@ -20,19 +20,19 @@ cluster:
 runner:
   task_type: embodied
   logger:
-    log_path: "../results"
+    log_path: /workspace/results/maniskill_ppo_co_training_openpi_pi05
     project_name: rlinf
-    experiment_name: "maniskill_ppo_co_training_openpi_pi05"
-    logger_backends: ["tensorboard"] # wandb, swanlab
+    experiment_name: "ci-test"
+    logger_backends: null # ['tensorboard', 'wandb', 'swanlab']
 
-  max_epochs: 1000
+  max_epochs: 1
   max_steps: -1
   only_eval: False
-  val_check_interval: 10
-  save_interval: 50
+  ckpt_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
+  val_check_interval: -1
+  save_interval: -1
 
-  resume_dir: null # Optional: path to a saved checkpoint directory, such as 'checkpoints/global_step_10'. If not None, it will be used to resume training.
-  ckpt_path: null  # Optional: path to a .pt checkpoint. If not None, it will be loaded after the model is instantiated (for evaluation).
+  resume_dir: null
 
 algorithm:
   normalize_advantages: True
@@ -40,12 +40,13 @@ algorithm:
   group_size: 1
   reward_coef: 1.0
 
-  rollout_epoch: 2
+  rollout_epoch: 1
   eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
+
   reward_type: chunk_level
   logprob_type: chunk_level
   entropy_type: chunk_level
-  update_epoch: 2
+  update_epoch: 1
   
   adv_type: gae
   loss_type: actor_critic
@@ -83,14 +84,14 @@ algorithm:
 
 env:
   group_name: "EnvGroup"
-  enable_offload: False
+
   # Override the default values in env/train or env/eval
   train:
-    total_num_envs: 64
+    total_num_envs: 8
     auto_reset: True
     use_fixed_reset_state_ids: False
-    max_episode_steps: 80 # max episode steps for truncation
-    max_steps_per_rollout_epoch: 80
+    max_episode_steps: 4 # max episode steps for truncation
+    max_steps_per_rollout_epoch: 4
   eval:
     total_num_envs: 64
     auto_reset: True
@@ -108,29 +109,29 @@ rollout:
   group_name: "RolloutGroup"
   generation_backend: "huggingface"
   recompute_logprobs: False
-  unnorm_key: libero_10
   enable_offload: False
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT" # https://huggingface.co/RLinf/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
+    model_path: "/workspace/dataset/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT"
     precision: ${actor.model.precision}
+    
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  micro_batch_size: 40      # how many samples each GPU processes per sampling step
-  global_batch_size: 2560   # after how many sampled examples we perform one loss backward pass. Requirement: global bz must be '_world_size' multiples of local bs.
+  micro_batch_size: 2      # how many samples each GPU processes per sampling step
+  global_batch_size: 8   # after how many sampled examples we perform one loss backward pass. Requirement: global bz must be '_world_size' multiples of local bs.
   seed: 0
   enable_offload: False
   # Config for sim-real co-training
   config_name: ${actor.model.openpi.config_name}
   sft_loss_weight: 0.2
   enable_sft_co_train: True
-  sft_data_path: "/path/to/RLCo-Example-Real-Data" # https://huggingface.co/datasets/RLinf/RLCo-Example-Real-Data
+  sft_data_path: "/workspace/dataset/RLCo-Example-Real-Data"
 
   # Override the default values in model/pi0_5
   model:
-    model_path: "/path/to/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT" # https://huggingface.co/RLinf/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT
+    model_path: "/workspace/dataset/RLinf-Pi05-RLCo-PandaPutOnPlateInScene25DigitalTwin-V1-SFT"
     model_type: "openpi"
     add_value_head: True
     num_action_chunks: 4 # interface for the env
