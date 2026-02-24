@@ -27,6 +27,7 @@ from rlinf.data.embodied_io_struct import (
     Trajectory,
 )
 from rlinf.models import get_model
+from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.placement import HybridComponentPlacement
@@ -61,6 +62,16 @@ class MultiStepRolloutWorker(Worker):
         self._sync_weight_comm_options = CollectiveGroupOptions(
             accel_max_ctas=max_ctas, accel_min_ctas=min_ctas
         )
+        self.total_num_train_envs = cfg.env.train.total_num_envs
+        self.total_num_eval_envs = cfg.env.eval.total_num_envs
+        self.num_pipeline_stages = cfg.rollout.pipeline_stage_num
+        self.train_batch_size = (
+            self.total_num_train_envs // self._world_size // self.num_pipeline_stages
+        )
+        self.eval_batch_size = (
+            self.total_num_eval_envs // self._world_size // self.num_pipeline_stages
+        )
+        self.enable_cuda_graph = cfg.rollout.get("enable_cuda_graph", False)
 
     def init_worker(self):
         rollout_model_config = copy.deepcopy(self.cfg.actor.model)
@@ -68,13 +79,24 @@ class MultiStepRolloutWorker(Worker):
             rollout_model_config.precision = self.cfg.rollout.model.precision
             rollout_model_config.model_path = self.cfg.rollout.model.model_path
 
-        self.hf_model = get_model(rollout_model_config)
+        self.hf_model: BasePolicy = get_model(rollout_model_config)
 
         if self.cfg.runner.get("ckpt_path", None):
             model_dict = torch.load(self.cfg.runner.ckpt_path)
             self.hf_model.load_state_dict(model_dict)
 
         self.hf_model.eval()
+
+        if self.cfg.rollout.get("enable_torch_compile", False):
+            mode = self.cfg.rollout.get(
+                "torch_compile_mode", "max-autotune-no-cudagraphs"
+            )
+            self.hf_model.enable_torch_compile(mode=mode)
+        if self.enable_cuda_graph and not self.enable_offload:
+            self.hf_model.capture_cuda_graph(
+                train_batch_size=self.train_batch_size,
+                eval_batch_size=self.eval_batch_size,
+            )
 
         self.setup_sample_params()
         if self.enable_offload:
@@ -162,10 +184,15 @@ class MultiStepRolloutWorker(Worker):
 
         dones = env_output["dones"].bool().cpu().contiguous()
         rewards = env_output["rewards"].cpu().contiguous()
+        bootstrap_type = self.cfg.algorithm.get("bootstrap_type", "standard")
 
-        # Handle auto_reset: add bootstrap value to rewards for done episodes
-        # Note: currently this is not correct for chunk-size>1 with partial reset
-        if dones.any() and self.cfg.env.train.auto_reset:
+        if bootstrap_type == "standard":
+            last_step_truncations = env_output["truncations"].cpu().contiguous()[:, -1]
+        else:
+            last_step_truncations = dones[:, -1]
+
+        # Handle auto_reset: add bootstrap value ONLY for truncated episodes (not terminated)
+        if last_step_truncations.any() and self.cfg.env.train.auto_reset:
             if hasattr(self.hf_model, "value_head") or hasattr(self.hf_model, "q_head"):
                 final_obs = env_output["final_obs"]
                 with torch.no_grad():
@@ -175,11 +202,11 @@ class MultiStepRolloutWorker(Worker):
                     else:
                         _final_values = torch.zeros_like(actions[:, 0])
                 final_values = torch.zeros_like(_final_values[:, 0])  # [bsz, ]
-                last_step_dones = dones[:, -1]  # [bsz, ]
-
-                final_values[last_step_dones] = _final_values[:, 0][last_step_dones]
-
-                # Add bootstrap value to the last step of done episodes
+                # bootstrap only on the truncated episode
+                final_values[last_step_truncations] = _final_values[:, 0][
+                    last_step_truncations
+                ]
+                # Add bootstrap value to the last step of truncated episodes
                 rewards[:, -1] += self.cfg.algorithm.gamma * final_values.cpu()
 
         return dones, rewards
@@ -237,7 +264,7 @@ class MultiStepRolloutWorker(Worker):
                 if env_output["final_obs"] is not None:
                     env_output["final_obs"].pop("task_descriptions", None)
                 chunk_step_result = ChunkStepResult(
-                    actions=result.get("action", None),
+                    actions=result["forward_inputs"].get("action", None),
                     dones=dones,
                     rewards=rewards,
                     truncations=env_output["truncations"],
@@ -358,12 +385,18 @@ class MultiStepRolloutWorker(Worker):
             self.offload_model()
 
     def offload_model(self):
-        self.hf_model = self.hf_model.to("cpu")
-        gc.collect()
+        if self.enable_cuda_graph:
+            self.hf_model.release_cuda_graph()
+        self.hf_model.to("cpu")
         torch.cuda.empty_cache()
 
     def reload_model(self):
-        self.hf_model = self.hf_model.to(self.device)
+        self.hf_model.to(self.device)
+        if self.enable_cuda_graph:
+            self.hf_model.capture_cuda_graph(
+                train_batch_size=self.train_batch_size,
+                eval_batch_size=self.eval_batch_size,
+            )
 
     async def recv_env_output(
         self, input_channel: Channel, mode="train"

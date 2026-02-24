@@ -92,13 +92,8 @@ class EnvWorker(Worker):
                     total_num_processes=self._world_size * self.stage_num,
                     worker_info=self.worker_info,
                 )
-                # Apply FullStateWrapper for MLP policy with RGB image collection
-                if use_full_state and self.cfg.env.train.env_type == "maniskill":
-                    from rlinf.envs.maniskill import ManiskillFullStateWrapper
-
-                    env = ManiskillFullStateWrapper(
-                        env, num_envs=self.train_num_envs_per_stage
-                    )
+                if self.cfg.env.train.video_cfg.save_video:
+                    env = RecordVideo(env, self.cfg.env.train.video_cfg)
                 if dc_enabled:
                     from rlinf.envs.wrappers import DataCollectorWrapper
 
@@ -107,12 +102,10 @@ class EnvWorker(Worker):
                         save_dir=dc_cfg.save_dir,
                         rank=self._rank,
                         mode=getattr(dc_cfg, "mode", "train"),
-                        num_envs=self.train_num_envs_per_stage,
+                        num_envs=self.eval_num_envs_per_stage,
                         sample_rate_success=getattr(dc_cfg, "sample_rate_success", 1.0),
                         sample_rate_fail=getattr(dc_cfg, "sample_rate_fail", 0.1),
                     )
-                if self.cfg.env.train.video_cfg.save_video:
-                    env = RecordVideo(env, self.cfg.env.train.video_cfg)
                 self.env_list.append(env)
         if self.enable_eval:
             for stage_id in range(self.stage_num):
@@ -123,13 +116,8 @@ class EnvWorker(Worker):
                     total_num_processes=self._world_size * self.stage_num,
                     worker_info=self.worker_info,
                 )
-                # Apply FullStateWrapper for MLP policy with RGB image collection
-                if use_full_state and self.cfg.env.eval.env_type == "maniskill":
-                    from rlinf.envs.maniskill import ManiskillFullStateWrapper
-
-                    env = ManiskillFullStateWrapper(
-                        env, num_envs=self.eval_num_envs_per_stage
-                    )
+                if self.cfg.env.eval.video_cfg.save_video:
+                    env = RecordVideo(env, self.cfg.env.eval.video_cfg)
                 if dc_enabled:
                     from rlinf.envs.wrappers import DataCollectorWrapper
 
@@ -142,8 +130,6 @@ class EnvWorker(Worker):
                         sample_rate_success=getattr(dc_cfg, "sample_rate_success", 1.0),
                         sample_rate_fail=getattr(dc_cfg, "sample_rate_fail", 0.1),
                     )
-                if self.cfg.env.eval.video_cfg.save_video:
-                    env = RecordVideo(env, self.cfg.env.eval.video_cfg)
                 self.eval_env_list.append(env)
 
         if not self.only_eval:
@@ -155,6 +141,11 @@ class EnvWorker(Worker):
                 extracted_obs, _ = self.env_list[i].reset()
                 self.last_obs_list.append(extracted_obs)
                 self.last_intervened_info_list.append((None, None))
+
+                if self.cfg.env.train.get("enable_offload", False) and hasattr(
+                    self.env_list[i], "offload"
+                ):
+                    self.env_list[i].offload()
 
     @Worker.timer("env_interact_step")
     def env_interact_step(
@@ -230,7 +221,7 @@ class EnvWorker(Worker):
         """
         chunk_actions = prepare_actions(
             raw_chunk_actions=raw_actions,
-            env_type=self.cfg.env.train.env_type,
+            env_type=self.cfg.env.eval.env_type,
             model_type=self.cfg.actor.model.model_type,
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
             action_dim=self.cfg.actor.model.action_dim,
@@ -423,6 +414,12 @@ class EnvWorker(Worker):
             ]
             self.finish_rollout()
 
+        for env in self.env_list:
+            if self.cfg.env.train.get("enable_offload", False) and hasattr(
+                env, "offload"
+            ):
+                env.offload()
+
         for key, value in env_metrics.items():
             env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
 
@@ -465,6 +462,11 @@ class EnvWorker(Worker):
                     )
 
             self.finish_rollout(mode="eval")
+        for stage_id in range(self.stage_num):
+            if self.cfg.env.eval.get("enable_offload", False) and hasattr(
+                self.eval_env_list[stage_id], "offload"
+            ):
+                self.eval_env_list[stage_id].offload()
 
         for key, value in eval_metrics.items():
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()

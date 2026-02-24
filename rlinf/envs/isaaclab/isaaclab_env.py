@@ -93,7 +93,7 @@ class IsaaclabBaseEnv(gym.Env):
     def _record_metrics(self, step_reward, terminations, infos):
         episode_info = {}
         self.returns += step_reward
-        self.success_once = self.success_once | terminations
+        self.success_once = self.success_once | (step_reward > 0)
         # batch level
         episode_info["success_once"] = self.success_once.clone()
         episode_info["return"] = self.returns.clone()
@@ -118,6 +118,10 @@ class IsaaclabBaseEnv(gym.Env):
 
     def step(self, actions=None, auto_reset=True):
         obs, step_reward, terminations, truncations, infos = self.env.step(actions)
+
+        step_reward = step_reward.clone()
+        terminations = terminations.clone()
+        truncations = truncations.clone()
 
         obs = self._wrap_obs(obs)
 
