@@ -1,7 +1,7 @@
 model_type: "openpi"
 
 # Model path - should be set in specific config files
-model_path: "/path/to/model/openpi"
+model_path: "/path/to/model/pi0-sft-checkpoint"
 
 precision: null
 
@@ -31,8 +31,8 @@ openpi:
   add_value_head: ${actor.model.add_value_head}
   detach_critic_input: False
 
-  # DSRL defaults (disabled)
-  use_dsrl: False
+  # ===== DSRL-specific parameters =====
+  use_dsrl: True
   dsrl_state_dim: 8
   dsrl_action_noise_dim: 32
   dsrl_num_q_heads: 10
