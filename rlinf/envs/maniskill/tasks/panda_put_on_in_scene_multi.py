@@ -31,10 +31,10 @@ from mani_skill.utils.registration import register_env
 from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.pose import Pose
 from mani_skill.utils.structs.types import SimConfig
-from pytorch3d.transforms import quaternion_to_axis_angle
 from sapien.physx import PhysxMaterial
 from transforms3d.euler import euler2quat, mat2euler
 
+from ..utils import quaternion_to_axis_angle
 from .panda_table_agent import PandaBridgeDatasetFlatTable
 from .pose_utils import (
     matrix2pose_batch_torch,

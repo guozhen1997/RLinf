@@ -387,6 +387,7 @@ jobs:
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
+          cp -r /workspace/dataset/RLCo-maniskill-assets/custom_assets ${REPO_PATH}/rlinf/envs/maniskill/assets
           bash tests/e2e_tests/embodied/run.sh maniskill_ppo_co_training_openpi_pi05
 
       - name: Clean up
