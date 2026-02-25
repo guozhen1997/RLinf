@@ -29,6 +29,7 @@ from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
 from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
+from rlinf.utils.logging import get_logger
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         sample_actions_func = self.sample_actions
         super().__init__(config)
         self.sample_actions = sample_actions_func
+        self.logger = get_logger()
         self.global_step = 0
         # assert
         assert not (self.config.double_layer and self.config.joint_logprob), (
@@ -450,7 +452,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             )["actions"].numpy()
 
             # Step 4: Build forward_inputs (preserving all info)
-            # CRITICAL FIX: Use .clone() for deep copy to avoid reference issues.
+            # NOTE: Use .clone() for deep copy to avoid reference issues.
             # Without clone, all rollout steps point to the same tensor, causing data corruption.
             forward_inputs = {
                 "chains": outputs["chains"],  # Preserve diffusion chains
@@ -930,14 +932,16 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
 
             # ========== DSRL additional freezing ==========
             if self.config.use_dsrl:
-                print("[FREEZE_VLM] DSRL mode: freezing gemma_expert parameters")
+                self.logger.info(
+                    "[FREEZE_VLM] DSRL mode: freezing gemma_expert parameters"
+                )
                 self.paligemma_with_expert.gemma_expert.eval()
                 for params in self.paligemma_with_expert.gemma_expert.parameters():
                     params.requires_grad = False
 
                 # Freeze projection layers (used in rollout/eval but not optimized).
                 # These are from PI0Pytorch parent class: action_in_proj, action_out_proj, state_proj, action_time_mlp
-                print(
+                self.logger.info(
                     "[FREEZE_VLM] DSRL mode: freezing projection layers (used in rollout/eval but not optimized)"
                 )
                 projection_names = [
@@ -952,15 +956,15 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                         param.requires_grad = False
                         frozen_count += 1
                         if frozen_count <= 10:  # Print first 10 for brevity
-                            print(f"  Froze: {name}")
+                            self.logger.info(f"  Froze: {name}")
                 if frozen_count > 10:
-                    print(
+                    self.logger.info(
                         f"  ... and {frozen_count - 10} more projection layer parameters"
                     )
 
                 # Freeze reinflow_explore_noise_net (only used in reinflow diffuser sampling)
                 if hasattr(self, "reinflow_explore_noise_net"):
-                    print(
+                    self.logger.info(
                         "[FREEZE_VLM] DSRL mode: freezing reinflow_explore_noise_net (used in non-DSRL rollout but not optimized)"
                     )
                     self.reinflow_explore_noise_net.eval()
@@ -968,7 +972,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                     for params in self.reinflow_explore_noise_net.parameters():
                         params.requires_grad = False
                         noise_net_params += params.numel()
-                    print(
+                    self.logger.info(
                         f"  Froze {noise_net_params:,} parameters in reinflow_explore_noise_net"
                     )
 

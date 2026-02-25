@@ -31,7 +31,7 @@ openpi:
   add_value_head: ${actor.model.add_value_head}
   detach_critic_input: False
 
-  # DSRL defaults (disabled)
+  # DSRL specific configurations (disabled by default)
   use_dsrl: False
   dsrl_state_dim: 8
   dsrl_action_noise_dim: 32

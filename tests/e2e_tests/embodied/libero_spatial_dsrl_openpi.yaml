@@ -10,27 +10,27 @@ hydra:
     dir: .
   output_subdir: null
   searchpath:
-    - file://${oc.env:EMBODIED_PATH}/config/
+    - file://${oc.env:REPO_PATH}/examples/embodiment/config
 
 cluster:
   num_nodes: 1
   component_placement:
-    env, rollout, actor: all
+    actor,env,rollout: all
 
 runner:
   task_type: embodied
   logger:
-    log_path: "../results"
+    log_path: "../results/libero_spatial_dsrl_openpi"
     project_name: rlinf
-    experiment_name: "libero_spatial_dsrl_openpi"
-    logger_backends: ["tensorboard"]
+    experiment_name: "test_openpi"
+    logger_backends: ["tensorboard"] # wandb, swanlab
 
-  max_epochs: 20000
+  max_epochs: 1
   max_steps: -1
 
   only_eval: False
   val_check_interval: -1
-  save_interval: 40
+  save_interval: -1
 
 algorithm:
   normalize_advantages: False
@@ -102,12 +102,12 @@ env:
   enable_offload: False
 
   train:
-    total_num_envs: 16
+    total_num_envs: 8
     auto_reset: False
     use_rel_reward: False
     use_step_penalty: True
-    max_episode_steps: 240
-    max_steps_per_rollout_epoch: 240
+    max_episode_steps: 5
+    max_steps_per_rollout_epoch: 5
     specific_reset_id: 0
     use_ordered_reset_state_ids: True
   eval:
@@ -123,7 +123,7 @@ env:
     specific_reset_id: 0
     use_ordered_reset_state_ids: True
     video_cfg:
-      save_video: True
+      save_video: False
       video_base_dir: ${runner.logger.log_path}/video/eval
 
 rollout:
@@ -137,20 +137,20 @@ rollout:
   collect_prev_infos: False
 
   model:
-    model_path: "/path/to/model" # https://huggingface.co/RLinf/RLinf-Pi0-LIBERO-Spatial-Object-Goal-SFT
+    model_path: "/workspace/dataset/pi0_libero"
     precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  micro_batch_size: 64
-  global_batch_size: 512
+  micro_batch_size: 2
+  global_batch_size: 8 # maximum : global batch size = micro batch size * actor num_processes.
   seed: 42
   enable_offload: False
 
   model:
-    model_path: "/path/to/model" # https://huggingface.co/RLinf/RLinf-Pi0-LIBERO-Spatial-Object-Goal-SFT
-    num_action_chunks: 5
+    model_path: "/workspace/dataset/pi0_libero"
+    num_action_chunks: 5 # interface for the env
     add_value_head: False
     add_q_head: True
     q_head_type: "default"
