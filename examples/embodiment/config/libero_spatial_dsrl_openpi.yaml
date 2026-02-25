@@ -171,8 +171,9 @@ actor:
     lr: 1.0e-4
     adam_beta1: 0.9
     adam_beta2: 0.96
-    adam_eps: 1.0e-05
+    adam_eps: 1.0e-08
     clip_grad: 3.5
+    
 
   critic_optim:
     lr: 3.0e-4
