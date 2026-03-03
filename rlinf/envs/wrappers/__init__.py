@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.envs.wrappers.data_collector import DataCollectorWrapper
+from rlinf.envs.wrappers.collect_episode import CollectEpisode
 from rlinf.envs.wrappers.record_video import RecordVideo
 
-__all__ = ["DataCollectorWrapper", "RecordVideo"]
+__all__ = ["CollectEpisode", "RecordVideo"]
