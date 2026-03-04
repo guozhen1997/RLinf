@@ -15,14 +15,18 @@
 """DreamZero policy implementing RLinf BasePolicy interface for DROID embodiment."""
 
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Literal, Optional
-
+import imageio
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
 from tianshou.data import Batch
+from einops import rearrange
+import os
+import datetime
 
 from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.modules.value_head import ValueHead
@@ -156,6 +160,7 @@ class DreamZeroForRLActionPrediction(nn.Module, BasePolicy):
 
     # Fixed std for Gaussian logprob (policy is treated as deterministic + Gaussian for PPO)
     LOGPROB_STD: float = 0.1
+    FRAMES_PER_CHUNK = 4
 
     def __init__(
         self,
@@ -165,6 +170,8 @@ class DreamZeroForRLActionPrediction(nn.Module, BasePolicy):
         num_action_chunks: int = 24,
         action_dim: int = 8,
         add_value_head: bool = False,
+        train_backbone: bool = False,
+        video_output_dir: str = None,
     ):
         nn.Module.__init__(self)
         _ensure_groot_importable()
@@ -178,12 +185,29 @@ class DreamZeroForRLActionPrediction(nn.Module, BasePolicy):
         self.num_action_chunks = num_action_chunks
         self.action_dim = action_dim
         self.add_value_head = add_value_head
+        # Whether we allow gradients to flow into the underlying DreamZero backbone
+        # (typically when using a LoRA checkpoint for RL fine-tuning).
+        self.train_backbone = train_backbone
+        self.video_output_dir = video_output_dir
+        # Frame buffers for accumulation (per camera view)
+        self._frame_buffers: dict[str, list[np.ndarray]] = {
+            "video.exterior_image_1_left": [],
+            "video.exterior_image_2_left": [],
+            "video.wrist_image_left": [],
+        }
+
+        self._call_count = 0
+        self._is_first_call = True
+        # Video across time for saving (similar to original server)
+        self.video_across_time = []
+        self._msg_index = 0
 
         self._groot_policy = GrootSimPolicy(
             embodiment_tag=self.embodiment_tag,
             model_path=model_path,
             device=device,
             lazy_load=False,
+            enable_grad=train_backbone,
         )
         self._groot_policy.eval()
 
@@ -196,14 +220,24 @@ class DreamZeroForRLActionPrediction(nn.Module, BasePolicy):
         else:
             self.value_head = None
 
-    def _run_policy_forward(self, env_obs: dict[str, Any]) -> torch.Tensor:
-        """Run GrootSimPolicy forward and return action tensor [B, num_chunks, action_dim]."""
+    def _run_policy_forward(
+        self,
+        env_obs: dict[str, Any],
+        use_grad: bool = False,
+    ) -> torch.Tensor:
+        """Run GrootSimPolicy forward and return action tensor [B, num_chunks, action_dim].
+
+        Args:
+            env_obs: RLinf-formatted observations.
+            use_grad: If True, keep the computation graph for PPO updates.
+        """
         droid_obs = _convert_rlinf_obs_to_dreamzero(env_obs)
         for k, v in droid_obs.items():
             if torch.is_tensor(v):
                 droid_obs[k] = v.detach().cpu().numpy()
         batch = Batch(obs=droid_obs)
-        with torch.no_grad():
+        ctx = nullcontext() if use_grad else torch.no_grad()
+        with ctx:
             result_batch = self._groot_policy.forward(batch)
         actions_np = _convert_dreamzero_action_to_rlinf(
             result_batch.act, self.num_action_chunks
@@ -253,7 +287,11 @@ class DreamZeroForRLActionPrediction(nn.Module, BasePolicy):
                 out["values"] = values
             return out
 
-        action_pred = self._run_policy_forward(env_obs)
+        # For PPO training, we want gradients to flow into the DreamZero backbone
+        # only when explicitly enabled via `train_backbone`.
+        action_pred = self._run_policy_forward(
+            env_obs, use_grad=self.train_backbone
+        )
         std = torch.full_like(action_pred, self.LOGPROB_STD, device=dev)
         dist = Normal(action_pred, std)
 
@@ -332,3 +370,252 @@ class DreamZeroForRLActionPrediction(nn.Module, BasePolicy):
             "forward_inputs": forward_inputs,
         }
         return actions, result
+
+    def _convert_observation(self, obs: dict) -> dict:
+        """Convert roboarena observation format to AR_droid format.
+        
+        Roboarena format:
+            - observation/exterior_image_0_left: (H, W, 3) single frame
+            - observation/exterior_image_1_left: (H, W, 3) single frame
+            - observation/wrist_image_left: (H, W, 3) single frame
+            - observation/joint_position: (7,)
+            - observation/gripper_position: (1,)
+            - prompt: str
+        
+        AR_droid format:
+            - video.exterior_image_1_left: (T, H, W, 3) multi-frame
+            - video.exterior_image_2_left: (T, H, W, 3) multi-frame
+            - video.wrist_image_left: (T, H, W, 3) multi-frame
+            - state.joint_position: (1, 7)
+            - state.gripper_position: (1, 1)
+            - annotation.language.action_text: str
+        """
+        converted = {}
+        
+        # Map image keys (roboarena uses 0-indexed, AR_droid uses 1-indexed)
+        image_key_mapping = {
+            "observation/exterior_image_0_left": "video.exterior_image_1_left",
+            "observation/exterior_image_1_left": "video.exterior_image_2_left",
+            "observation/wrist_image_left": "video.wrist_image_left",
+        }
+        
+        # Accumulate frames for each camera view
+        for roboarena_key, droid_key in image_key_mapping.items():
+            if roboarena_key in obs:
+                data = obs[roboarena_key]
+                if isinstance(data, np.ndarray):
+                    if data.ndim == 4:
+                        # Multiple frames (T, H, W, 3)
+                        self._frame_buffers[droid_key].extend(list(data))
+                    else:
+                        # Single frame (H, W, 3)
+                        self._frame_buffers[droid_key].append(data)
+
+        # Determine how many frames to use
+        if self._is_first_call:
+            # First call: use only 1 frame
+            num_frames = 1
+        else:
+            # Subsequent calls: use exactly FRAMES_PER_CHUNK frames
+            num_frames = self.FRAMES_PER_CHUNK
+        
+        # Build video tensors from accumulated frames
+        for droid_key, buffer in self._frame_buffers.items():
+            if len(buffer) > 0:
+                if len(buffer) >= num_frames:
+                    # Take the last num_frames frames
+                    frames_to_use = buffer[-num_frames:]
+                else:
+                    # Pad by repeating the first frame to reach num_frames
+                    frames_to_use = buffer.copy()
+                    while len(frames_to_use) < num_frames:
+                        # Prepend the first frame to pad
+                        frames_to_use.insert(0, buffer[0])
+                # Stack to (T, H, W, C)
+                video = np.stack(frames_to_use, axis=0)
+                converted[droid_key] = video
+        
+        # Convert state observations
+        if "observation/joint_position" in obs:
+            joint_pos = obs["observation/joint_position"]
+            # Reshape to (1, 7) if needed
+            if joint_pos.ndim == 1:
+                joint_pos = joint_pos.reshape(1, -1)
+            converted["state.joint_position"] = joint_pos.astype(np.float64)
+        else:
+            converted["state.joint_position"] = np.zeros((1, 7), dtype=np.float64)
+        
+        if "observation/gripper_position" in obs:
+            gripper_pos = obs["observation/gripper_position"]
+            # Reshape to (1, 1) if needed
+            if gripper_pos.ndim == 1:
+                gripper_pos = gripper_pos.reshape(1, -1)
+            converted["state.gripper_position"] = gripper_pos.astype(np.float64)
+        else:
+            converted["state.gripper_position"] = np.zeros((1, 1), dtype=np.float64)
+        
+        # Convert prompt
+        if "prompt" in obs:
+            converted["annotation.language.action_text"] = obs["prompt"]
+        else:
+            converted["annotation.language.action_text"] = ""
+        
+        return converted
+
+    def _convert_action(self, action_dict: dict) -> np.ndarray:
+        """Convert AR_droid action dict to roboarena action array.
+        
+        AR_droid format:
+            - action.joint_position: (N, 7)
+            - action.gripper_position: (N,) or (N, 1)
+        
+        Roboarena format:
+            - action: (N, 8) - 7 joint positions + 1 gripper
+        """
+        joint_action = None
+        gripper_action = None
+        
+        # Extract actions from dict
+        for key, value in action_dict.items():
+            if "joint_position" in key:
+                joint_action = value
+            elif "gripper_position" in key or "gripper" in key:
+                gripper_action = value
+        
+        if joint_action is None:
+            # Fallback: return zeros
+            return np.zeros((1, 8), dtype=np.float32)
+        
+        # Convert to numpy if tensor
+        if isinstance(joint_action, torch.Tensor):
+            joint_action = joint_action.cpu().numpy()
+        
+        # Ensure 2D shape (N, 7)
+        if joint_action.ndim == 1:
+            joint_action = joint_action.reshape(1, -1)
+        
+        N = joint_action.shape[0]
+        
+        # Handle gripper action
+        if gripper_action is not None:
+            if isinstance(gripper_action, torch.Tensor):
+                gripper_action = gripper_action.cpu().numpy()
+            # Reshape to (N, 1) if needed
+            if gripper_action.ndim == 1:
+                gripper_action = gripper_action.reshape(-1, 1)
+            elif gripper_action.ndim == 0:
+                gripper_action = gripper_action.reshape(1, 1)
+        else:
+            gripper_action = np.zeros((N, 1), dtype=np.float32)
+        
+        # Concatenate: (N, 7) + (N, 1) -> (N, 8)
+        action = np.concatenate([joint_action, gripper_action], axis=-1).astype(np.float32)
+        
+        return action
+
+    def eval(
+        self,
+        obs: dict,
+        mode: Literal["train", "eval"] = "eval",
+        **kwargs,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """
+        Evaluate DreamZero policy on a single environment observation.
+
+        Args:
+            obs: RLinf env obs (main_images, wrist_images, states, task_descriptions)
+            mode: train/eval (both use deterministic inference for DreamZero)
+
+        Returns:
+            actions: [B, 8] numpy
+            result: dict with prev_logprobs, prev_values, forward_inputs for rollout compatibility
+        """
+        # Convert observation format
+        print("--------------from eval: obs------------------")
+        print(obs)
+        converted_obs = self._convert_observation(obs)
+        print("--------------from eval: converted_obs------------------")
+        print(converted_obs)
+        batch = Batch(obs=converted_obs)
+        # result_batch = self._groot_policy.forward(batch)
+        # actions = result_batch.act
+        # print("--------------from eval------------------")
+        # print(result_batch)
+        # print(actions)
+        # print("--------------------------------")
+
+        with torch.no_grad():
+            result_batch, video_pred = self._groot_policy.lazy_joint_forward_causal(batch)
+        print("--------------from eval: result_batch------------------")
+        print(result_batch)
+        print("--------------from eval: video_pred------------------")
+        print(video_pred)
+        print("--------------------------------")
+
+        # Store video predictions for potential saving
+        self.video_across_time.append(video_pred)
+
+        # Extract and convert action
+        action_chunk_dict = result_batch.act
+
+        # Convert Batch to dict
+        action_dict = {}
+        for k in dir(action_chunk_dict):
+            if k.startswith("action."):
+                action_dict[k] = getattr(action_chunk_dict, k)
+        
+        action = self._convert_action(action_dict)
+
+        # Update first call flag
+        if self._is_first_call:
+            self._is_first_call = False
+
+        #self._reset_state(save_video=self.video_output_dir is not None)
+        return action
+
+    def _reset_state(self, save_video: bool = False) -> None:
+        """Internal method to reset policy state.
+        
+        Args:
+            save_video: Whether to save accumulated video before reset.
+        """
+        # Optionally save accumulated video before reset
+        if save_video and len(self.video_across_time) > 0 and self.video_output_dir:
+            try:
+                frame_list = []
+                video_across_time_cat = torch.cat(self.video_across_time, dim=2)
+                frames = self._groot_policy.trained_model.action_head.vae.decode(
+                    video_across_time_cat,
+                    tiled=self._groot_policy.trained_model.action_head.tiled,
+                    tile_size=(self._groot_policy.trained_model.action_head.tile_size_height, self._groot_policy.trained_model.action_head.tile_size_width),
+                    tile_stride=(self._groot_policy.trained_model.action_head.tile_stride_height, self._groot_policy.trained_model.action_head.tile_stride_width),
+                )
+                frames = rearrange(frames, "B C T H W -> B T H W C")
+                frames = frames[0]
+                frames = ((frames.float() + 1) * 127.5).clip(0, 255).cpu().numpy().astype(np.uint8)
+                for frame in frames:
+                    frame_list.append(frame)
+                
+                if len(frame_list) > 0:
+                    sample_frame = frame_list[0]
+                    if len(sample_frame.shape) == 3 and sample_frame.shape[2] in [1, 3, 4]:
+                        save_dir = self.video_output_dir
+                        os.makedirs(save_dir, exist_ok=True)
+                        all_mp4_files = [f for f in os.listdir(save_dir) if f.endswith(".mp4")]
+                        timestamp = datetime.datetime.now().strftime("%m_%d_%H_%M_%S")
+                        num_frames = len(frame_list)
+                        n = (num_frames - 1) // 8
+                        output_path = os.path.join(save_dir, f'{len(all_mp4_files):06}_{timestamp}_n{n}.mp4')
+                        imageio.mimsave(output_path, frame_list, fps=5, codec='libx264')
+                        print(f"Saved video on reset to: {output_path}")
+            except Exception as e:
+                print(f"Failed to save video on reset: {e}")
+        
+        # Clear frame buffers
+        for key in self._frame_buffers:
+            self._frame_buffers[key] = []
+        
+        self._call_count = 0
+        self._is_first_call = True
+        self.video_across_time = []
+

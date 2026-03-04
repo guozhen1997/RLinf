@@ -210,6 +210,7 @@ class GrootSimPolicy(BaseGrootSimPolicy):
         skip_assert_delta_indices: bool = False,
         skip_img_transform: bool = False,
         lazy_load: bool = False,
+        enable_grad: bool = False,
     ):
         """
         Initialize the GrootSimPolicy.
@@ -290,15 +291,29 @@ class GrootSimPolicy(BaseGrootSimPolicy):
                 print(model_path, cls_module)
                 model = from_pretrained(model_path)
 
+        # By default, we use the DreamZero checkpoint in inference-only mode:
+        # - eval() for deterministic behaviour
+        # - all parameters frozen
+        # - LoRA weights merged into the main model to save memory.
+        #
+        # When `enable_grad=True` (RL fine-tuning case), we keep the model
+        # trainable and avoid merging LoRA weights so that their structure and
+        # trainable parameters are preserved.
         model.eval()
-        model.requires_grad_(False)
-        if model.action_head.train_architecture == "lora":
-            print(f"Merging LoRA weights into main model weights")
-            # Merge the LoRA weights into the main model weights, and delete the LoRA
-            # weights to save memory. Note that the WanModel is in model.action_head.model.
-            model.action_head.model = model.action_head.model.merge_and_unload()
+        if not enable_grad:
+            model.requires_grad_(False)
+            if model.action_head.train_architecture == "lora":
+                print(f"Merging LoRA weights into main model weights")
+                # Merge the LoRA weights into the main model weights, and delete the LoRA
+                # weights to save memory. Note that the WanModel is in model.action_head.model.
+                model.action_head.model = model.action_head.model.merge_and_unload()
+            else:
+                print(f"Skipping merging LoRA weights into main model weights")
         else:
-            print(f"Skipping merging LoRA weights into main model weights")
+            print(
+                "GrootSimPolicy initialized with enable_grad=True: "
+                "keeping DreamZero backbone trainable and skipping LoRA merge."
+            )
 
         self.eval_bf16 = self.train_cfg.get("eval_bf16", False)
         if self.eval_bf16 and not lazy_load:
