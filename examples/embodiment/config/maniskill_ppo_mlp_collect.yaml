@@ -32,10 +32,10 @@ runner:
 
   only_eval: False
   eval_policy_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
-  val_check_interval: 10
-  save_interval: 10
+  val_check_interval: 25
+  save_interval: -1
 
-  resume_dir: null  # Set to checkpoint path to resume training, e.g. "logs/xxx/checkpoints/global_step_100"
+  resume_dir: null
 
 algorithm:
   update_epoch: 8
@@ -79,29 +79,30 @@ algorithm:
 
 env:
   group_name: "EnvGroup"
-  enable_offload: False
-  use_full_state: True 
-
-  data_collection:
-    enabled: True
-    save_dir: ${runner.logger.log_path}/collected_data
-    mode: "eval" 
-    sample_rate_success: 1.0
-    sample_rate_fail: 1
 
   train:
     total_num_envs: 1024
     wrap_obs_mode: simple
+    use_full_state: True
     auto_reset: True
     use_fixed_reset_state_ids: False
     max_episode_steps: 50
     max_steps_per_rollout_epoch: 50
     is_eval: False
     init_params:
-      obs_mode: "state" 
+      obs_mode: "rgb"
+
+    # ── pickle format ───────────────────────────────────────────────
+    data_collection:
+      enabled: True
+      save_dir: ${runner.logger.log_path}/collected_data
+      export_format: "pickle"
+      only_success: False       # set True to discard failed episodes
+
   eval:
     total_num_envs: 128
     wrap_obs_mode: simple
+    use_full_state: True
     auto_reset: True
     ignore_terminations: False
     max_episode_steps: 50
@@ -110,10 +111,27 @@ env:
     group_size: 1
     is_eval: True
     init_params:
-      obs_mode: "rgb"  
+      obs_mode: "rgb"
     video_cfg:
-      save_video: False
+      save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
+
+    # ── pickle format ───────────────────────────────────────────────
+    data_collection:
+      enabled: True
+      save_dir: ${runner.logger.log_path}/collected_data
+      export_format: "pickle"
+      only_success: False       # set True to discard failed episodes
+
+    # ── lerobot format ───────────────────────────────────────
+    # data_collection:
+    #   enabled: True
+    #   save_dir: ${runner.logger.log_path}/collected_data
+    #   export_format: "lerobot"
+    #   only_success: False       # set True to discard failed episodes
+    #   robot_type: "panda"       # written to meta/info.json
+    #   fps: 10                   # written to meta/info.json
+    #   stats_sample_ratio: 0.1   # fraction of frames used for stats computation
 
 rollout:
   group_name: "RolloutGroup"
@@ -137,7 +155,6 @@ actor:
   model:
     model_path: ""
     model_type: "mlp_policy"
-    obs_dim: 42  # Full state dim (use_full_state enabled)
 
   optim:
     lr: 3.0e-4

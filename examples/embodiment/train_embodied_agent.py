@@ -65,31 +65,11 @@ def main(cfg) -> None:
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
     )
 
-    demo_buffer = None
-    if cfg.get("data", None):
-        from rlinf.data.datasets import create_rl_dataset
-
-        demo_buffer, _ = create_rl_dataset(cfg, tokenizer=None)
-
-    # Create reward worker group if using reward model
-    reward_group = None
-    if cfg.get("reward", {}).get("use_reward_model", False):
-        from rlinf.workers.reward.reward_worker import ImageRewardWorker
-
-        reward_placement = component_placement.get_strategy("reward")
-        reward_group = ImageRewardWorker.create_group(cfg).launch(
-            cluster,
-            name=cfg.reward.get("group_name", "RewardGroup"),
-            placement_strategy=reward_placement,
-        )
-
     runner = EmbodiedRunner(
         cfg=cfg,
         actor=actor_group,
         rollout=rollout_group,
         env=env_group,
-        demo_buffer=demo_buffer,
-        reward=reward_group,
     )
 
     runner.init_workers()
