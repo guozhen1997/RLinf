@@ -6,7 +6,6 @@ export SRC_FILE="${EMBODIED_PATH}/train_embodied_agent.py"
 
 export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
-export TORCHDYNAMO_DISABLE=1
 
 export ROBOTWIN_PATH=${ROBOTWIN_PATH:-"/path/to/RoboTwin"}
 export PYTHONPATH=${REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH

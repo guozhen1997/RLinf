@@ -32,6 +32,7 @@ from rlinf.hybrid_engines.fsdp.utils import (
     FSDPVersion,
     get_backward_prefetch_strategy,
     get_fsdp_wrap_policy,
+    get_grad_norm_for_mixed_precision,
     get_sharding_strategy,
     init_fn,
 )
@@ -218,6 +219,7 @@ class FSDPStrategy(FSDPStrategyBase):
                         state[key] = value.to(device, non_blocking=True)
         clear_memory()
 
+    @torch.no_grad()
     def clip_grad_norm_(
         self,
         model: FSDP,
@@ -228,7 +230,7 @@ class FSDPStrategy(FSDPStrategyBase):
 
         Args:
             - model (FSDP): The FSDP wrapped model.
-            - norm_type (Union[float,int]): The type of the used p-norm.
+            - norm_type (Union[float, int]): The type of the used p-norm.
 
         Returns:
             - float: The total norm of the gradients before clipping.
