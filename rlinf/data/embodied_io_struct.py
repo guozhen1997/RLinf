@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import uuid
+
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -27,6 +29,19 @@ from rlinf.utils.nested_dict_process import (
     cat_list_of_dict_tensor,
 )
 
+def get_model_weights_id(tensors: torch.Tensor) -> str:
+    """
+    Get the model weights id from the tensor.
+
+    Args:
+        tensors (torch.Tensor): The tensor to get the model weights id from.
+
+    Returns:
+        str: The model weights id.
+    """
+
+    name_bytes = tensors.cpu().numpy().tobytes()
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, name_bytes.hex()))
 
 @dataclass(kw_only=True)
 class EnvOutput:
@@ -342,7 +357,7 @@ class Trajectory:
 
     max_episode_length: int = 0  # max episode length
     model_weights_id: str = (
-        ""  # str(model_weigths_uuid) + "_" + str(model_update_count)
+        ""  # str(uuid(versions))
     )
     actions: torch.Tensor = None
     intervene_flags: torch.Tensor = None
@@ -460,7 +475,6 @@ class EmbodiedRolloutResult:
     """
 
     max_episode_length: int = 0
-    model_weights_id: str = ""
 
     actions: list[torch.Tensor] = field(default_factory=list)  # trajectory_length
     intervene_flags: list[torch.Tensor] = field(
@@ -555,7 +569,6 @@ class EmbodiedRolloutResult:
         # return [trajectory_length, B, ...]
         trajectory = Trajectory(
             max_episode_length=self.max_episode_length,
-            model_weights_id=self.model_weights_id,
         )
         if len(self.actions) > 0:
             trajectory.actions = torch.stack(self.actions, dim=0).cpu().contiguous()
@@ -600,6 +613,9 @@ class EmbodiedRolloutResult:
             trajectory.next_obs = stack_list_of_dict_tensor(self.next_obs)
             for key in trajectory.next_obs.keys():
                 trajectory.next_obs[key] = trajectory.next_obs[key].cpu().contiguous()
+
+        trajectory.model_weights_id = get_model_weights_id(trajectory.versions if trajectory.versions is not None else torch.zeros(1, dtype=torch.float32))
+        
         return trajectory
 
     def to_splited_trajectories(self, split_size: int) -> list[Trajectory]:

@@ -624,7 +624,6 @@ class EnvWorker(Worker):
         self.rollout_results: list[EmbodiedRolloutResult] = [
             EmbodiedRolloutResult(
                 max_episode_length=self.cfg.env.train.max_episode_steps,
-                model_weights_id=self.model_weights_id,
             )
             for _ in range(self.stage_num)
         ]

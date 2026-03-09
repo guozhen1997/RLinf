@@ -19,7 +19,6 @@ import torch
 from omegaconf.omegaconf import DictConfig
 
 from rlinf.scheduler import Channel
-from rlinf.utils.utils import get_model_weights_id
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
@@ -129,10 +128,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
 
     def _apply_synced_model_weights(self, param_state_dict):
         self.hf_model.load_state_dict(param_state_dict)
-        self.model_weights_id = (
-            str(get_model_weights_id(self.hf_model)) + f"_{self.count_update}"
-        )
-        self.count_update += 1
 
         del param_state_dict
         gc.collect()
