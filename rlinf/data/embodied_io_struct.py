@@ -24,6 +24,7 @@ from rlinf.utils.nested_dict_process import (
     put_tensor_device,
     split_dict_to_chunk,
     stack_list_of_dict_tensor,
+    cat_list_of_dict_tensor,
 )
 
 
@@ -238,6 +239,64 @@ class EnvOutput:
         env_output_dict["intervene_flags"] = self.intervene_flags
 
         return env_output_dict
+
+@dataclass(kw_only=True)
+class RolloutResult:
+    """Rollout result for a single chunk step."""
+
+    actions: torch.Tensor = None  # [B, action_dim]
+    prev_logprobs: torch.Tensor = None  # [B, action_dim]
+    prev_values: torch.Tensor = None  # [B, 1]
+
+    bootstrap_values: torch.Tensor = None  # [B, 1]
+    forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
+    versions: torch.Tensor = None  # [B, 1]
+
+    def __post_init__(self):
+        if self.actions is not None:
+            self.actions = self.actions.cpu().contiguous()
+        if self.prev_logprobs is not None:
+            self.prev_logprobs = self.prev_logprobs.cpu().contiguous()
+        if self.prev_values is not None:
+            self.prev_values = self.prev_values.cpu().contiguous()
+        if self.bootstrap_values is not None:
+            self.bootstrap_values = self.bootstrap_values.cpu().contiguous()
+        if self.forward_inputs is not None:
+            self.forward_inputs = put_tensor_device(self.forward_inputs, "cpu")
+        if self.versions is not None:
+            self.versions = self.versions.cpu().contiguous()
+
+    @staticmethod
+    def merge_rollout_results(rollout_results: list["RolloutResult"]) -> "RolloutResult":
+        def _merge_optional_tensor(field_name: str) -> torch.Tensor | None:
+            values = [getattr(rollout_result, field_name) for rollout_result in rollout_results]
+            if all(value is None for value in values):
+                return None
+            if any(value is None for value in values):
+                raise ValueError(
+                    f"Inconsistent field '{field_name}': some shards are None while others are tensors."
+                )
+            return torch.cat(values, dim=0)
+
+        merged_actions = _merge_optional_tensor("actions")
+        merged_prev_logprobs = _merge_optional_tensor("prev_logprobs")
+        merged_prev_values = _merge_optional_tensor("prev_values")
+        merged_bootstrap_values = _merge_optional_tensor("bootstrap_values")
+        merged_versions = _merge_optional_tensor("versions")
+
+        forward_inputs_list = [rollout_result.forward_inputs for rollout_result in rollout_results]
+        if all(not forward_inputs for forward_inputs in forward_inputs_list):
+            merged_forward_inputs = {}
+        else:
+            merged_forward_inputs = cat_list_of_dict_tensor(forward_inputs_list)
+        return RolloutResult(
+            actions=merged_actions,
+            prev_logprobs=merged_prev_logprobs,
+            prev_values=merged_prev_values,
+            bootstrap_values=merged_bootstrap_values,
+            forward_inputs=merged_forward_inputs,
+            versions=merged_versions,
+        )
 
 
 @dataclass(kw_only=True)
