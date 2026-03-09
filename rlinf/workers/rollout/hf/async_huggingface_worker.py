@@ -18,7 +18,6 @@ import gc
 import torch
 from omegaconf.omegaconf import DictConfig
 
-from rlinf.data.embodied_io_struct import EmbodiedRolloutResult
 from rlinf.scheduler import Channel
 from rlinf.utils.utils import get_model_weights_id
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
@@ -51,7 +50,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         self,
         input_channel: Channel,
         output_channel: Channel,
-        replay_channel: Channel,
         metric_channel: Channel,
     ):
         assert self._generate_task is None, (
@@ -59,7 +57,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         )
         self._generate_task = asyncio.create_task(
             self._generate(
-                input_channel, output_channel, replay_channel, metric_channel
+                input_channel, output_channel, metric_channel
             )
         )
         try:
@@ -71,27 +69,14 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         self,
         input_channel: Channel,
         output_channel: Channel,
-        replay_channel: Channel,
         metric_channel: Channel,
     ):
         while True:
-            # rollout_results[stage_id]
             if self._background_weight_sync_active:
                 await self._poll_background_weight_sync()
-            self.rollout_results: list[EmbodiedRolloutResult] = [
-                EmbodiedRolloutResult(
-                    max_episode_length=self.cfg.env.train.max_episode_steps,
-                    model_weights_id=self.model_weights_id,
-                )
-                for _ in range(self.num_pipeline_stages)
-            ]
             await self.wait_if_stale()
             for _ in range(self.rollout_epoch):
                 await self.generate_one_epoch(input_channel, output_channel)
-            for stage_id in range(self.num_pipeline_stages):
-                await self.send_rollout_trajectories(
-                    self.rollout_results[stage_id], replay_channel
-                )
             if self.finished_episodes is not None:
                 self.finished_episodes += self.total_num_train_envs * self.rollout_epoch
             rollout_metrics = self.pop_execution_times()
