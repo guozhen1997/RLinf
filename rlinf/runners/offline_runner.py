@@ -25,22 +25,26 @@ from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.logging import get_logger
 from rlinf.utils.metric_logger import MetricLogger
 from rlinf.utils.metric_utils import print_metrics_table
+from rlinf.utils.runner_utils import check_progress
 
 if TYPE_CHECKING:
     from rlinf.workers.actor.fsdp_iql_policy_worker import EmbodiedIQLFSDPPolicy
 
 
-class D4RLOfflineRunner:
+class OfflineRunner:
     def __init__(self, cfg: DictConfig, actor: "EmbodiedIQLFSDPPolicy"):
         self.cfg = cfg
         self.actor = actor
+
         self.global_step = 0
+
         self.set_max_steps()
+
         self.timer = ScopedTimer(reduction="max", sync_cuda=False)
+
         self.logger = get_logger()
         self.metric_logger = MetricLogger(cfg)
 
-        # Async logging setup
         self.stop_logging = False
         self.log_queue = queue.Queue()
         self.log_thread = threading.Thread(target=self._log_worker, daemon=True)
@@ -57,7 +61,7 @@ class D4RLOfflineRunner:
             except queue.Empty:
                 continue
             except Exception as e:
-                print(f"Logging error: {e}")
+                self.logger.error("Logging error: %s", e)
                 continue
 
     def print_metrics_table_async(
@@ -74,8 +78,8 @@ class D4RLOfflineRunner:
         )
 
     def init_workers(self):
-        # create worker before resume loading
         self.actor.init_worker().wait()
+
         resume_dir = self.cfg.runner.get("resume_dir", None)
         if resume_dir is None:
             return
@@ -91,58 +95,82 @@ class D4RLOfflineRunner:
     def run(self):
         start_step = self.global_step
         start_time = time.time()
-        for _step in range(start_step, self.max_steps):
-            next_step = self.global_step + 1
-            self.actor.set_global_step(next_step)
+        log_interval = max(1, int(self.cfg.runner.get("log_interval", 1000)))
+        val_check_interval = int(
+            self.cfg.runner.get("val_check_interval", 5000)
+        )
+        save_interval = int(self.cfg.runner.get("save_interval", 50000))
+        worker_step_synced = False
+
+        while self.global_step < self.max_steps:
+            _step = self.global_step
+            next_step = _step + 1
+            if not worker_step_synced:
+                self.actor.set_global_step(_step)
 
             with self.timer("step"):
+                # actor training
                 actor_training_handle: Handle = self.actor.run_training()
                 actor_training_metrics = actor_training_handle.wait()
-                self.global_step = next_step
 
             metrics = (
                 actor_training_metrics[0]
                 if isinstance(actor_training_metrics, list)
                 else actor_training_metrics
             )
+            if "__global_step" in metrics:
+                self.global_step = int(metrics.pop("__global_step"))
+                worker_step_synced = True
+            else:
+                self.global_step = next_step
+                worker_step_synced = False
+            _step = self.global_step
 
-            def _is_scalar(v):
-                if hasattr(v, "ndim"):
-                    return v.ndim == 0
-                return isinstance(v, (int, float))
+            _run_val, save_model, _is_train_end = check_progress(
+                self.global_step,
+                self.max_steps,
+                val_check_interval,
+                save_interval,
+                1.0,
+                run_time_exceeded=False,
+            )
+            if save_model:
+                self._save_checkpoint()
 
-            training_metrics = {
-                f"train/{k}": v
-                for k, v in metrics.items()
-                if not k.startswith("evaluation/") and _is_scalar(v)
-            }
+            time_metrics = self.timer.consume_durations()
+            time_metrics = {f"time/{k}": v for k, v in time_metrics.items()}
+            time_metrics.update(
+                {
+                    f"time/actor/{k}": v
+                    for k, v in actor_training_handle.consume_durations().items()
+                }
+            )
             eval_metrics = {
                 k: v for k, v in metrics.items() if k.startswith("evaluation/")
             }
-            time_metrics = {
-                f"time/{k}": v for k, v in self.timer.consume_durations().items()
+            training_metrics = {
+                f"train/{k}": v
+                for k, v in metrics.items()
+                if not k.startswith("evaluation/")
             }
 
-            self.metric_logger.log(time_metrics, _step)
-            self.metric_logger.log(training_metrics, _step)
-            if eval_metrics:
-                self.metric_logger.log(eval_metrics, _step)
+            if _step == start_step + 1 or _step % log_interval == 0:
+                self.metric_logger.log(time_metrics, _step)
+                self.metric_logger.log(training_metrics, _step)
+                if eval_metrics:
+                    self.metric_logger.log(eval_metrics, _step)
+                logging_metrics = dict(time_metrics)
+                logging_metrics.update(training_metrics)
+                logging_metrics.update(eval_metrics)
+                self.print_metrics_table_async(
+                    _step - 1, self.max_steps, start_time, logging_metrics, start_step
+                )
 
-            logging_metrics = dict(time_metrics)
-            logging_metrics.update(eval_metrics)
-            logging_metrics.update(training_metrics)
-            self.print_metrics_table_async(
-                _step, self.max_steps, start_time, logging_metrics, start_step
-            )
-
-            save_interval = int(self.cfg.runner.get("save_interval", -1))
-            if save_interval > 0 and self.global_step % save_interval == 0:
-                self._save_checkpoint()
         self.metric_logger.finish()
 
         # Stop logging thread
         self.stop_logging = True
-        self.log_queue.join()  # Wait for all queued logs to be processed
+        self.log_queue.join()
         self.log_thread.join(timeout=1.0)
 
     def _save_checkpoint(self):

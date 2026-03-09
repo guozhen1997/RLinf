@@ -25,7 +25,7 @@ bash requirements/install.sh embodied --model openvla --env maniskill_libero
 
 For D4RL offline experiments (env-only install), run:
 ```shell
-bash requirements/install.sh embodied --env d4rl_offline
+bash requirements/install.sh embodied --env d4rl
 ```
 
 This will create a virtual environment under the current path named `.venv`.

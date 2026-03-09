@@ -13,40 +13,33 @@ cluster:
   component_placement:
     actor: 0-0
 
-env:
-  group_name: "EnvGroup"
-
-rollout:
-  group_name: "RolloutGroup"
-  pipeline_stage_num: 1
-
-actor:
-  group_name: "ActorGroup"
-  training_backend: "fsdp"
-  enable_strategy_checkpoint: false
-
 runner:
-  max_epochs: ${max_steps}
-  save_interval: ${eval_interval}
-  resume_dir: null
+  task_type: "offline"
   logger:
-    log_path: "../results/d4rl_offline_kitchen_adroit"
+    log_path: "../results"
+    project_name: rlinf
     experiment_name: "d4rl_offline_kitchen_adroit"
+    logger_backends: ["tensorboard"]
 
-save_dir: ${runner.logger.log_path}
-env_name: "pen-human-v0"
-seed: 42
-eval_episodes: 10
-log_interval: 1000
-eval_interval: 5000
-batch_size: 256
-max_steps: 1000000
-tqdm: true
+  max_epochs: 1000000
+  max_steps: 1000000
 
-task:
-  mode: "offline"
+  only_eval: false
+  val_check_interval: 5000  # step interval for checkpoint/validation
+  save_interval: 50000
+
+  resume_dir: null
+  save_dir: null
+  ckpt_path: null
+
+  log_interval: 1000
+  local_update_steps: 500
+  eval_interval: 5000
+  eval_episodes: 10
 
 algorithm:
+  adv_type: null
+  batch_size: 256
   actor_lr: 3.0e-4
   value_lr: 3.0e-4
   critic_lr: 3.0e-4
@@ -58,3 +51,23 @@ algorithm:
   dropout_rate: 0.1
   opt_decay_schedule: "cosine"
 
+env:
+  group_name: "EnvGroup"
+  env_name: "pen-human-v0"
+
+rollout:
+  group_name: "RolloutGroup"
+  pipeline_stage_num: 1
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  use_fsdp_wrap: false
+  seed: 42
+  offline_torch_compile: true
+
+reward:
+  use_reward_model: false
+
+critic:
+  use_critic_model: false

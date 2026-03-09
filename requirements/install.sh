@@ -18,7 +18,7 @@ NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
 SUPPORTED_TARGETS=("embodied" "agentic" "docs")
 SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic")
-SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "d4rl_offline")
+SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "d4rl")
 
 #=======================Utility Functions=======================
 
@@ -548,13 +548,16 @@ install_dexbotic_model() {
 }
 
 install_env_only() {
-    create_and_sync_venv
     SKIP_ROS=${SKIP_ROS:-0}
     case "$ENV_NAME" in
-        d4rl_offline)
-            install_d4rl_offline_env
+        d4rl)
+            # d4rl requires Python >=3.7, <3.11
+            PYTHON_VERSION="3.10"
+            create_and_sync_venv
+            install_d4rl_env
             ;;
         franka)
+            create_and_sync_venv
             uv sync --extra franka --active $NO_INSTALL_RLINF_CMD
             if [ "$SKIP_ROS" -ne 1 ]; then
                 if [ "$NO_ROOT" -eq 0 ]; then
@@ -564,10 +567,12 @@ install_env_only() {
             fi
             ;;
         xsquare_turtle2)
+            create_and_sync_venv
             uv sync --extra xsquare_turtle2 --active $NO_INSTALL_RLINF_CMD
             install_xsquare_turtle2_env
             ;;
         habitat)
+            create_and_sync_venv
             install_common_embodied_deps
             install_habitat_env
             ;;
@@ -593,20 +598,15 @@ install_maniskill_libero_env() {
     bash $SCRIPT_DIR/embodied/download_assets.sh --assets maniskill
 }
 
-install_d4rl_offline_env() {
+install_d4rl_env() {
     # Install base embodied dependencies first (gym/gymnasium/transformers stack).
     uv sync --extra embodied --active $NO_INSTALL_RLINF_CMD
 
-    # D4RL offline stack required by rlinf/data/datasets/d4rl_offline.py
-    # - d4rl: offline dataset APIs (qlearning_dataset)
-    # - mujoco-py: MuJoCo/Adroit/Kitchen task backends used by D4RL
-    # - tqdm: evaluation/trajectory utilities
-    uv pip install \
-        "cython<3.0" \
-        "gym==0.23.1" \
-        "d4rl @ git+https://github.com/Farama-Foundation/d4rl@master" \
-        "mujoco-py==2.1.2.14" \
-        "tqdm"
+    uv pip install "cython<3.0"
+    uv pip install "gym==0.23.1"
+    uv pip install "d4rl @ git+${GITHUB_PREFIX}https://github.com/Farama-Foundation/d4rl@master"
+    uv pip install "mujoco-py==2.1.2.14"
+    uv pip install "tqdm"
 }
 
 install_behavior_env() {

@@ -17,7 +17,8 @@ import json
 import hydra
 from omegaconf.omegaconf import OmegaConf
 
-from rlinf.runners.d4rl_offline_runner import D4RLOfflineRunner
+from rlinf.config import validate_cfg
+from rlinf.runners.offline_runner import OfflineRunner
 from rlinf.scheduler import Cluster
 from rlinf.utils.placement import HybridComponentPlacement
 from rlinf.workers.actor.fsdp_iql_policy_worker import EmbodiedIQLFSDPPolicy
@@ -25,6 +26,7 @@ from rlinf.workers.actor.fsdp_iql_policy_worker import EmbodiedIQLFSDPPolicy
 
 @hydra.main(version_base="1.1", config_path="config", config_name="d4rl_offline_mujoco")
 def main(cfg) -> None:
+    cfg = validate_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 
     cluster = Cluster(cluster_cfg=cfg.cluster)
@@ -36,7 +38,7 @@ def main(cfg) -> None:
         cluster, name=cfg.actor.group_name, placement_strategy=actor_placement
     )
 
-    runner = D4RLOfflineRunner(cfg=cfg, actor=actor_group)
+    runner = OfflineRunner(cfg=cfg, actor=actor_group)
     runner.init_workers()
     runner.run()
 
