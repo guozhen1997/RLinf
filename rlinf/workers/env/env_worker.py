@@ -79,7 +79,7 @@ class EnvWorker(Worker):
         )
         self.actor_split_num = self.get_actor_split_num()
 
-    def init_worker(self):
+    async def init_worker(self):
         self.dst_ranks = {
             "train": self._setup_dst_ranks(
                 self.cfg.env.train.total_num_envs // self.stage_num
