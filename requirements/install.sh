@@ -551,8 +551,6 @@ install_env_only() {
     SKIP_ROS=${SKIP_ROS:-0}
     case "$ENV_NAME" in
         d4rl)
-            # d4rl requires Python >=3.7, <3.11
-            PYTHON_VERSION="3.10"
             create_and_sync_venv
             install_d4rl_env
             ;;

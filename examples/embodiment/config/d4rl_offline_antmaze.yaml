@@ -25,7 +25,7 @@ runner:
   max_steps: 1000000
 
   only_eval: false
-  val_check_interval: 100000  # step interval for checkpoint/validation
+  val_check_interval: 100000
   save_interval: 50000
 
   resume_dir: null
@@ -34,7 +34,6 @@ runner:
 
   log_interval: 1000
   local_update_steps: 500
-  eval_interval: 100000
   eval_episodes: 100
 
 algorithm:

@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING
 
 from omegaconf.dictconfig import DictConfig
 
+from rlinf.data.datasets.d4rl_offline import (
+    create_partition_dataset,
+    make_d4rl_env_and_dataset,
+)
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
 from rlinf.utils.distributed import ScopedTimer
 from rlinf.utils.logging import get_logger
@@ -37,6 +41,19 @@ class OfflineRunner:
         self.actor = actor
 
         self.global_step = 0
+
+        seed = cfg.actor.get("seed", 42)
+        env_name = cfg.env.get("env_name")
+        self.env, self.dataset = make_d4rl_env_and_dataset(env_name, seed)
+        self._save_dir = cfg.runner.get("save_dir", None)
+        if self._save_dir is None:
+            runner_logger = cfg.runner.get("logger", None)
+            if runner_logger is not None:
+                log_path = runner_logger.get("log_path", ".")
+                exp_name = runner_logger.get("experiment_name", "offline")
+                self._save_dir = os.path.join(log_path, exp_name)
+            else:
+                self._save_dir = "."
 
         self.set_max_steps()
 
@@ -78,7 +95,13 @@ class OfflineRunner:
         )
 
     def init_workers(self):
-        self.actor.init_worker().wait()
+        world_size = getattr(self.actor, "_world_size", 1)
+        if world_size <= 1:
+            self.actor.init_worker(dataset=self.dataset).wait()
+        else:
+            for rank in range(world_size):
+                partition = create_partition_dataset(self.dataset, rank, world_size)
+                self.actor.execute_on(rank).init_worker(dataset=partition).wait()
 
         resume_dir = self.cfg.runner.get("resume_dir", None)
         if resume_dir is None:
@@ -96,10 +119,6 @@ class OfflineRunner:
         start_step = self.global_step
         start_time = time.time()
         log_interval = max(1, int(self.cfg.runner.get("log_interval", 1000)))
-        val_check_interval = int(
-            self.cfg.runner.get("val_check_interval", 5000)
-        )
-        save_interval = int(self.cfg.runner.get("save_interval", 50000))
         worker_step_synced = False
 
         while self.global_step < self.max_steps:
@@ -126,14 +145,17 @@ class OfflineRunner:
                 worker_step_synced = False
             _step = self.global_step
 
-            _run_val, save_model, _is_train_end = check_progress(
+            run_val, save_model, is_train_end = check_progress(
                 self.global_step,
                 self.max_steps,
-                val_check_interval,
-                save_interval,
+                self.cfg.runner.val_check_interval,
+                self.cfg.runner.save_interval,
                 1.0,
                 run_time_exceeded=False,
             )
+            eval_metrics = {
+                k: v for k, v in metrics.items() if k.startswith("evaluation/")
+            }
             if save_model:
                 self._save_checkpoint()
 
@@ -145,9 +167,6 @@ class OfflineRunner:
                     for k, v in actor_training_handle.consume_durations().items()
                 }
             )
-            eval_metrics = {
-                k: v for k, v in metrics.items() if k.startswith("evaluation/")
-            }
             training_metrics = {
                 f"train/{k}": v
                 for k, v in metrics.items()

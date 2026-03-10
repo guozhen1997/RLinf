@@ -1,0 +1,28 @@
+[33m28b1416[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/d4rl-offline-iql[m[33m)[m add ci test, delete unnecessary files, replace "kind" with "type" and remove lr=actor_lr
+[33me50072b[m[33m ([m[1;31mpersonal/feature/d4rl-offline-iql[m[33m)[m Merge branch 'main' into feature/d4rl-offline-iql
+[33m0b86464[m docs: add FUSCO documentation (#818)
+[33mbbbeb27[m feat: refactor fsdp for fp16/bf16 only (#715)
+[33m4c8f0bf[m[33m ([m[1;32mpr-791[m[33m)[m Resolved D4RL compatibility issues, optimized IQL training efficiency, and unified the engineering implementation of D4RL with the offline runner.
+[33mb500bda[m fix: fix libero 10 grpo openvlaoft config (#816)
+[33mf2a4970[m feat: support put custom infos on video (#807)
+[33mc37b46d[m docs(readme): update the vlm sft docs and readme qwen3-vl model (#813)
+[33m01c83cf[m feat: support sglang 0.5.4 (#805)
+[33md8e43bc[m feat: add fusco support (#783)
+[33maa21c65[m feat(multiagent): support multiagent rollout and training (#771)
+[33m187fde9[m feat(robo2vlm_sft): support qwen3 vl model sft in rlinf (#781)
+[33m08330be[m fix(reasoning-fsdp): fix a small bug in fsdp inference (#775)
+[33m874d268[m feat: support distributed log of workers (#785)
+[33med4475a[m docs: update xsquare infos into readme (#803)
+[33m779c7a7[m feat: support buffer preload and weight update (#794)
+[33mac7680c[m Merge branch 'main' into feature/d4rl-offline-iql
+[33m909494e[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m feat: add support for openvlaoft in calvin and metaworld (#549)
+[33m2077cdf[m feat(embodied): support xsquare env (#776)
+[33m9c0e88b[m fix: add sft ckpt loader (#796)
+[33m8f62a8c[m fix(embodiment): align IQL actor sampling and wrapper behavior
+[33m605bccf[m feat: add CollectEpisode wrapper for data collection (#787)
+[33m2ea56e9[m fix(async_rl): add docs and fix typos for embodiment async rl (#790)
+[33m015ba0f[m chore: explicit maniskill assets download (#786)
+[33mea1a084[m feat(embodied): add npu support for RL with openpi & libero (#742)
+[33m426d556[m Merge branch 'main' into feature/d4rl-offline-iql
+[33m8db4826[m fix: warp-lang and curobot install (#782)
+[33m1573ce9[m feat(embodiment): integrate d4rl offline iql with fsdp strategy and docs

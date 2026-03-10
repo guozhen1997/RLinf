@@ -44,13 +44,13 @@ class IQLMLPPolicy(MLPPolicy):
             add_q_head=add_q_head,
             q_head_type=q_head_type,
         )
-        self.iql_kind = None
+        self.iql_type = None
 
     def configure_iql(self, iql_config: dict) -> None:
         hidden_dims = iql_config.get("hidden_dims", None)
         if hidden_dims is None:
             raise ValueError("hidden_dims must be provided in iql_config.")
-        self.iql_kind = iql_config.get("kind", None)
+        self.iql_type = iql_config.get("type", iql_config.get("kind", None))
 
         self._init_iql(
             obs_dim=self.obs_dim,
@@ -96,7 +96,7 @@ class IQLMLPPolicy(MLPPolicy):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
 
-        if self.iql_kind == "actor":
+        if self.iql_type == "actor":
             self.backbone = self._build_mlp(
                 input_dim=obs_dim,
                 hidden_dims=hidden_dims,
@@ -111,20 +111,20 @@ class IQLMLPPolicy(MLPPolicy):
             else:
                 self.actor_logstd = nn.Parameter(torch.zeros(action_dim))
             self.logstd_range = (log_std_min, log_std_max)
-        elif self.iql_kind == "critic":
+        elif self.iql_type == "critic":
             self.net = self._build_mlp(
                 input_dim=obs_dim + action_dim,
                 hidden_dims=hidden_dims,
                 output_dim=1,
             )
-        elif self.iql_kind == "value":
+        elif self.iql_type == "value":
             self.net = self._build_mlp(
                 input_dim=obs_dim,
                 hidden_dims=hidden_dims,
                 output_dim=1,
             )
         else:
-            raise ValueError(f"Unsupported iql_kind: {self.iql_kind}")
+            raise ValueError(f"Unsupported iql_type: {self.iql_type}")
 
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
         if forward_type == ForwardType.IQL:
@@ -135,50 +135,58 @@ class IQLMLPPolicy(MLPPolicy):
         observations = kwargs.get("observations")
         if observations is None:
             raise ValueError("IQL forward expects observations.")
+        if self.iql_type == "actor":
+            return self.iql_forward_actor(**kwargs)
+        if self.iql_type == "critic":
+            return self.iql_forward_critic(**kwargs)
+        if self.iql_type == "value":
+            return self.iql_forward_value(**kwargs)
+        raise RuntimeError(f"Unsupported iql_type: {self.iql_type}")
 
+    def iql_forward_actor(self, **kwargs) -> torch.Tensor:
+        observations = kwargs.get("observations")
+        if observations is None:
+            raise ValueError("IQL actor forward expects observations.")
         actions = kwargs.get("actions")
         temperature = float(kwargs.get("temperature", 1.0))
-        kind = kwargs.get("kind", None)
-        kind = self.iql_kind if kind is None else kind
 
-        if kind == "actor":
-            feat = self.backbone(observations)
-            action_mean_raw = self.actor_mean(feat)
-            if self.state_dependent_std:
-                action_logstd = self.actor_logstd(feat)
-            else:
-                # (1, action_dim) broadcasts to (batch, action_dim)
-                action_logstd = self.actor_logstd.unsqueeze(0)
-            action_logstd = torch.clamp(
-                action_logstd, self.logstd_range[0], self.logstd_range[1]
-            )
-            action_std = torch.exp(action_logstd)
+        feat = self.backbone(observations)
+        action_mean_raw = self.actor_mean(feat)
+        if self.state_dependent_std:
+            action_logstd = self.actor_logstd(feat)
+        else:
+            action_logstd = self.actor_logstd.unsqueeze(0)
+        action_logstd = torch.clamp(
+            action_logstd, self.logstd_range[0], self.logstd_range[1]
+        )
+        action_std = torch.exp(action_logstd)
 
-            if actions is not None:
-                raw_actions = torch.atanh(actions.clamp(-1 + 1e-6, 1 - 1e-6))
-                log_prob = (
-                    Normal(action_mean_raw, action_std).log_prob(raw_actions).sum(-1)
-                )
-                # Numerically stable: -log(1-tanh²(x)) = 2*(log(2) - x - softplus(-2x))
-                log_prob -= (
-                    2 * (math.log(2) - raw_actions - F.softplus(-2 * raw_actions))
-                ).sum(-1)
-                return log_prob
+        if actions is not None:
+            raw_actions = torch.atanh(actions.clamp(-1 + 1e-6, 1 - 1e-6))
+            log_prob = Normal(action_mean_raw, action_std).log_prob(raw_actions).sum(-1)
+            log_prob -= (
+                2 * (math.log(2) - raw_actions - F.softplus(-2 * raw_actions))
+            ).sum(-1)
+            return log_prob
 
-            mode = "eval" if float(temperature) == 0.0 else "train"
-            if mode == "train":
-                sampling_std = action_std * max(float(temperature), 1e-6)
-                raw_action = Normal(action_mean_raw, sampling_std).rsample()
-            elif mode == "eval":
-                raw_action = action_mean_raw.clone()
-            else:
-                raise NotImplementedError(f"{mode=}")
-            return torch.tanh(raw_action)
-        if kind == "critic":
-            if actions is None:
-                raise ValueError("IQL critic expects actions.")
-            x = torch.cat([observations, actions], dim=-1)
-            return self.net(x).squeeze(-1)
-        if kind == "value":
-            return self.net(observations).squeeze(-1)
-        raise RuntimeError(f"Unsupported iql_kind: {kind}")
+        mode = "eval" if float(temperature) == 0.0 else "train"
+        if mode == "train":
+            sampling_std = action_std * max(float(temperature), 1e-6)
+            raw_action = Normal(action_mean_raw, sampling_std).rsample()
+        else:
+            raw_action = action_mean_raw.clone()
+        return torch.tanh(raw_action)
+
+    def iql_forward_critic(self, **kwargs) -> torch.Tensor:
+        observations = kwargs.get("observations")
+        actions = kwargs.get("actions")
+        if observations is None or actions is None:
+            raise ValueError("IQL critic forward expects observations and actions.")
+        x = torch.cat([observations, actions], dim=-1)
+        return self.net(x).squeeze(-1)
+
+    def iql_forward_value(self, **kwargs) -> torch.Tensor:
+        observations = kwargs.get("observations")
+        if observations is None:
+            raise ValueError("IQL value forward expects observations.")
+        return self.net(observations).squeeze(-1)

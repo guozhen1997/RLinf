@@ -14,12 +14,11 @@
 
 import copy
 import time
+from typing import Callable
 
 import gym
 import numpy as np
 import tqdm
-from gym.spaces import Box
-from gym.spaces import Dict as SpaceDict
 
 try:
     import d4rl
@@ -84,14 +83,16 @@ class EpisodeMonitor(gym.Wrapper):
 class SinglePrecision(gym.ObservationWrapper):
     def __init__(self, env: gym.Env):
         super().__init__(env)
-        if isinstance(self.observation_space, Box):
+        if isinstance(self.observation_space, gym.spaces.Box):
             obs_space = self.observation_space
-            self.observation_space = Box(obs_space.low, obs_space.high, obs_space.shape)
-        elif isinstance(self.observation_space, SpaceDict):
+            self.observation_space = gym.spaces.Box(
+                obs_space.low, obs_space.high, obs_space.shape
+            )
+        elif isinstance(self.observation_space, gym.spaces.Dict):
             obs_spaces = copy.copy(self.observation_space.spaces)
             for k, v in obs_spaces.items():
-                obs_spaces[k] = Box(v.low, v.high, v.shape)
-            self.observation_space = SpaceDict(obs_spaces)
+                obs_spaces[k] = gym.spaces.Box(v.low, v.high, v.shape)
+            self.observation_space = gym.spaces.Dict(obs_spaces)
         else:
             raise NotImplementedError
 
@@ -209,13 +210,98 @@ def normalize(dataset: D4RLDataset):
     dataset.rewards *= 1000.0
 
 
-def make_d4rl_env_and_dataset(env_name: str, seed: int) -> tuple[gym.Env, D4RLDataset]:
+class PartitionedDataset:
+    """Wrapper that exposes only a rank's partition for data-parallel sampling."""
+
+    def __init__(self, dataset: Dataset, rank: int, world_size: int):
+        n = dataset.size
+        per_rank = n // world_size
+        start = rank * per_rank
+        end = start + per_rank if rank < world_size - 1 else n
+        self._indices = np.arange(start, end, dtype=np.int64)
+        self._parent = dataset
+        self.size = len(self._indices)
+
+    def sample(self, batch_size: int) -> dict[str, np.ndarray]:
+        indices = np.random.randint(self.size, size=batch_size)
+        real_indices = self._indices[indices]
+        return {
+            "observations": self._parent.observations[real_indices],
+            "actions": self._parent.actions[real_indices],
+            "rewards": self._parent.rewards[real_indices],
+            "masks": self._parent.masks[real_indices],
+            "next_observations": self._parent.next_observations[real_indices],
+        }
+
+    @property
+    def observations(self) -> np.ndarray:
+        return self._parent.observations[self._indices]
+
+    @property
+    def actions(self) -> np.ndarray:
+        return self._parent.actions[self._indices]
+
+    @property
+    def rewards(self) -> np.ndarray:
+        return self._parent.rewards[self._indices]
+
+    @property
+    def masks(self) -> np.ndarray:
+        return self._parent.masks[self._indices]
+
+    @property
+    def next_observations(self) -> np.ndarray:
+        return self._parent.next_observations[self._indices]
+
+
+def partition_dataset_for_rank(
+    dataset: Dataset, rank: int, world_size: int
+) -> PartitionedDataset:
+    """Create a partition of the dataset for data-parallel training.
+
+    Each rank gets a non-overlapping subset so that together they cover the
+    full dataset without redundancy during sampling.
+    """
+    return PartitionedDataset(dataset, rank, world_size)
+
+
+def create_partition_dataset(dataset: Dataset, rank: int, world_size: int) -> Dataset:
+    """Create a Dataset containing only the rank's partition.
+
+    This is useful for data-parallel training where each rank should hold only a
+    shard of the offline dataset to reduce memory duplication.
+    """
+    n = dataset.size
+    per_rank = n // world_size
+    start = rank * per_rank
+    end = start + per_rank if rank < world_size - 1 else n
+    indices = np.arange(start, end, dtype=np.int64)
+    return Dataset(
+        observations=dataset.observations[indices].copy(),
+        actions=dataset.actions[indices].copy(),
+        rewards=dataset.rewards[indices].copy(),
+        masks=dataset.masks[indices].copy(),
+        dones_float=dataset.dones_float[indices].copy(),
+        next_observations=dataset.next_observations[indices].copy(),
+        size=len(indices),
+    )
+
+
+def make_d4rl_env(env_name: str, seed: int) -> gym.Env:
     env = gym.make(env_name)
     env = EpisodeMonitor(env)
     env = SinglePrecision(env)
-    env.seed(seed)
+    if hasattr(env, "seed"):
+        env.seed(seed)
+    else:
+        env.reset(seed=seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
+    return env
+
+
+def make_d4rl_env_and_dataset(env_name: str, seed: int) -> tuple[gym.Env, D4RLDataset]:
+    env = make_d4rl_env(env_name, seed)
 
     dataset = D4RLDataset(env)
     if "antmaze" in env_name:
@@ -225,12 +311,17 @@ def make_d4rl_env_and_dataset(env_name: str, seed: int) -> tuple[gym.Env, D4RLDa
     return env, dataset
 
 
-def evaluate_policy(agent, env: gym.Env, num_episodes: int) -> dict[str, float]:
+def evaluate_policy(
+    sample_fn: Callable[[np.ndarray, float], np.ndarray],
+    env: gym.Env,
+    num_episodes: int,
+) -> dict[str, float]:
+    """Evaluate a policy given a sampling function (obs, temperature) -> action."""
     stats = {"return": [], "length": []}
     for _ in range(num_episodes):
         observation, done = _compat_reset(env), False
         while not done:
-            action = agent.sample_actions(observation, temperature=0.0)
+            action = sample_fn(observation, 0.0)
             observation, _, done, info = _compat_step(env, action)
         for key in stats:
             stats[key].append(info["episode"][key])
