@@ -602,7 +602,7 @@ install_d4rl_env() {
 
     uv pip install "cython<3.0"
     uv pip install "gym==0.23.1"
-    uv pip install "d4rl @ git+${GITHUB_PREFIX}https://github.com/Farama-Foundation/d4rl@master"
+    uv pip install "d4rl @ git+${GITHUB_PREFIX}https://github.com/Dps799/D4RL/@master"
     uv pip install "mujoco-py==2.1.2.14"
     uv pip install "tqdm"
 }
