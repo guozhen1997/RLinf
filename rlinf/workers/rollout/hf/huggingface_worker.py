@@ -23,15 +23,12 @@ from tqdm import tqdm
 
 from rlinf.config import SupportedModel
 from rlinf.data.embodied_io_struct import (
-    EmbodiedRolloutResult,
     RolloutResult,
-    Trajectory,
 )
 from rlinf.models import get_model
 from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.comm_mapping import CommMapper
-from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.placement import HybridComponentPlacement
 
 
@@ -73,7 +70,7 @@ class MultiStepRolloutWorker(Worker):
         )
         self.enable_cuda_graph = cfg.rollout.get("enable_cuda_graph", False)
         self.enable_eval = cfg.runner.val_check_interval > 0 or cfg.runner.only_eval
-        self.actor_split_num = self.get_actor_split_num()
+
         self.n_train_chunk_steps = (
             cfg.env.train.max_steps_per_rollout_epoch
             // cfg.actor.model.num_action_chunks
@@ -83,7 +80,6 @@ class MultiStepRolloutWorker(Worker):
             // cfg.actor.model.num_action_chunks
         )
         self.collect_prev_infos = self.cfg.rollout.get("collect_prev_infos", True)
-        self.collect_versions = self.cfg.algorithm.loss_type == "decoupled_actor_critic"
         self.version = 0
         self.finished_episodes = None
 
@@ -229,16 +225,20 @@ class MultiStepRolloutWorker(Worker):
                 env_obs=env_obs,
                 **kwargs,
             )
-        
+
         if isinstance(actions, np.ndarray):
             actions = torch.from_numpy(actions)
 
         return actions, result
 
-    def get_bootstrap_values(self, final_obs: dict[str, Any] | None) -> torch.Tensor | None:
+    def get_bootstrap_values(
+        self, final_obs: dict[str, Any] | None
+    ) -> torch.Tensor | None:
         if final_obs is None:
             return None
-        if not (hasattr(self.hf_model, "value_head") or hasattr(self.hf_model, "q_head")):
+        if not (
+            hasattr(self.hf_model, "value_head") or hasattr(self.hf_model, "q_head")
+        ):
             return None
         with torch.no_grad():
             actions, result = self.predict(final_obs)
@@ -285,11 +285,21 @@ class MultiStepRolloutWorker(Worker):
                         result["prev_logprobs"],
                         float(self.version),
                         dtype=torch.float32,
-                    )
-                    if self.collect_versions
-                    else None,
+                    ),
                 )
                 self.send_rollout_result(output_channel, rollout_result, mode="train")
+        for _ in range(self.num_pipeline_stages):
+            env_output = await self.recv_env_output(input_channel)
+            actions, result = self.predict(env_output["obs"])
+
+            rollout_result = RolloutResult(
+                actions=actions,
+                prev_values=result["prev_values"] if self.collect_prev_infos else None,
+                bootstrap_values=self.get_bootstrap_values(
+                    env_output.get("final_obs", None)
+                ),
+            )
+            self.send_rollout_result(output_channel, rollout_result, mode="train")
 
     async def generate(
         self,
@@ -358,7 +368,9 @@ class MultiStepRolloutWorker(Worker):
         obs_batches = []
         for src_rank, expected_size in src_ranks_and_sizes:
             obs_batch = await input_channel.get(
-                key=CommMapper.build_channel_key(src_rank, self._rank, extra=f"{mode}_obs"),
+                key=CommMapper.build_channel_key(
+                    src_rank, self._rank, extra=f"{mode}_obs"
+                ),
                 async_op=True,
             ).async_wait()
             actual_size = self._infer_env_batch_size(obs_batch)
@@ -405,7 +417,8 @@ class MultiStepRolloutWorker(Worker):
         if not obs_batches:
             return {}
         obs_dicts = [
-            obs_batch["obs"] if "obs" in obs_batch else obs_batch for obs_batch in obs_batches
+            obs_batch["obs"] if "obs" in obs_batch else obs_batch
+            for obs_batch in obs_batches
         ]
         final_obs_list = [obs_batch.get("final_obs", None) for obs_batch in obs_batches]
 
@@ -413,7 +426,9 @@ class MultiStepRolloutWorker(Worker):
             merged: dict[str, Any] = {}
             for key in dicts[0].keys():
                 values = [obs_dict[key] for obs_dict in dicts]
-                first_non_none = next((value for value in values if value is not None), None)
+                first_non_none = next(
+                    (value for value in values if value is not None), None
+                )
                 if first_non_none is None:
                     merged[key] = None
                 elif isinstance(first_non_none, torch.Tensor):
@@ -524,12 +539,6 @@ class MultiStepRolloutWorker(Worker):
                 ),
                 async_op=True,
             )
-
-    def get_actor_split_num(self):
-        send_num = self.placement.get_world_size("rollout") * self.num_pipeline_stages
-        recv_num = self.placement.get_world_size("actor")
-        split_num = compute_split_num(recv_num, send_num)
-        return split_num
 
     def set_global_step(self, global_step: int):
         self.version = global_step

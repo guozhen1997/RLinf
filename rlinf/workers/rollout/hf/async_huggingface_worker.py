@@ -55,9 +55,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             "generate task is not None but generate function is called."
         )
         self._generate_task = asyncio.create_task(
-            self._generate(
-                input_channel, output_channel, metric_channel
-            )
+            self._generate(input_channel, output_channel, metric_channel)
         )
         try:
             await self._generate_task
