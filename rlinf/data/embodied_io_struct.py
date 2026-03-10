@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import uuid
-
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -23,11 +22,12 @@ if TYPE_CHECKING:
     pass
 
 from rlinf.utils.nested_dict_process import (
+    cat_list_of_dict_tensor,
     put_tensor_device,
     split_dict_to_chunk,
     stack_list_of_dict_tensor,
-    cat_list_of_dict_tensor,
 )
+
 
 def get_model_weights_id(tensors: torch.Tensor) -> str:
     """
@@ -42,6 +42,7 @@ def get_model_weights_id(tensors: torch.Tensor) -> str:
 
     name_bytes = tensors.cpu().numpy().tobytes()
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, name_bytes.hex()))
+
 
 @dataclass(kw_only=True)
 class EnvOutput:
@@ -255,6 +256,7 @@ class EnvOutput:
 
         return env_output_dict
 
+
 @dataclass(kw_only=True)
 class RolloutResult:
     """Rollout result for a single chunk step."""
@@ -276,15 +278,20 @@ class RolloutResult:
             self.prev_values = self.prev_values.cpu().contiguous()
         if self.bootstrap_values is not None:
             self.bootstrap_values = self.bootstrap_values.cpu().contiguous()
-        if self.forward_inputs is not None:
+        if self.forward_inputs:
             self.forward_inputs = put_tensor_device(self.forward_inputs, "cpu")
         if self.versions is not None:
             self.versions = self.versions.cpu().contiguous()
 
     @staticmethod
-    def merge_rollout_results(rollout_results: list["RolloutResult"]) -> "RolloutResult":
+    def merge_rollout_results(
+        rollout_results: list["RolloutResult"],
+    ) -> "RolloutResult":
         def _merge_optional_tensor(field_name: str) -> torch.Tensor | None:
-            values = [getattr(rollout_result, field_name) for rollout_result in rollout_results]
+            values = [
+                getattr(rollout_result, field_name)
+                for rollout_result in rollout_results
+            ]
             if all(value is None for value in values):
                 return None
             if any(value is None for value in values):
@@ -299,7 +306,9 @@ class RolloutResult:
         merged_bootstrap_values = _merge_optional_tensor("bootstrap_values")
         merged_versions = _merge_optional_tensor("versions")
 
-        forward_inputs_list = [rollout_result.forward_inputs for rollout_result in rollout_results]
+        forward_inputs_list = [
+            rollout_result.forward_inputs for rollout_result in rollout_results
+        ]
         if all(not forward_inputs for forward_inputs in forward_inputs_list):
             merged_forward_inputs = {}
         else:
@@ -356,9 +365,7 @@ class Trajectory:
     """
 
     max_episode_length: int = 0  # max episode length
-    model_weights_id: str = (
-        ""  # str(uuid(versions))
-    )
+    model_weights_id: str = ""  # str(uuid(versions))
     actions: torch.Tensor = None
     intervene_flags: torch.Tensor = None
     rewards: torch.Tensor = None
@@ -522,7 +529,7 @@ class EmbodiedRolloutResult:
             self.prev_values.append(result.prev_values)
         if result.versions is not None:
             self.versions.append(result.versions)
-        if result.forward_inputs is not None:
+        if result.forward_inputs:
             self.forward_inputs.append(result.forward_inputs)
 
     def update_last_actions(
@@ -614,8 +621,12 @@ class EmbodiedRolloutResult:
             for key in trajectory.next_obs.keys():
                 trajectory.next_obs[key] = trajectory.next_obs[key].cpu().contiguous()
 
-        trajectory.model_weights_id = get_model_weights_id(trajectory.versions if trajectory.versions is not None else torch.zeros(1, dtype=torch.float32))
-        
+        trajectory.model_weights_id = get_model_weights_id(
+            trajectory.versions
+            if trajectory.versions is not None
+            else torch.zeros(1, dtype=torch.float32)
+        )
+
         return trajectory
 
     def to_splited_trajectories(self, split_size: int) -> list[Trajectory]:
