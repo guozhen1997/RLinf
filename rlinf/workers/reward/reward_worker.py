@@ -19,17 +19,15 @@ This module provides:
 - FSDPRewardWorker: For training reward models with FSDP (like FSDPSftWorker)
 """
 
-import logging
+import re as _re
+
 import os
-import pickle
-import random
-from glob import glob
 from typing import Optional
 
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from torch.utils.data import DataLoader, Dataset, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler
 
 from rlinf.algorithms.rewards import get_reward_class
 from rlinf.data.io_struct import RolloutResult
@@ -44,9 +42,16 @@ from rlinf.utils.placement import (
     ModelParallelComponentPlacement,
 )
 from rlinf.utils.utils import clear_memory
+from rlinf.utils.logging import get_logger
 
-logger = logging.getLogger(__name__)
+from rlinf.data.datasets.reward_model import (
+    load_episodes_with_labels,
+    balance_and_split_by_episode,
+    RewardBinaryDataset,
+)
 
+from rlinf.models.embodiment.reward import get_reward_model_class
+from rlinf.utils.down_sampling import down_sample_batch
 
 class RewardWorker(Worker):
     """Reward Worker for inference during RL training."""
@@ -54,40 +59,26 @@ class RewardWorker(Worker):
     def __init__(self, cfg: DictConfig, placement: ModelParallelComponentPlacement):
         Worker.__init__(self)
         self.cfg = cfg
-        self.component_placement = placement
-        self.tokenizer = hf_tokenizer(cfg.reward.tokenizer.tokenizer_model)
+
         self.total_batch_size_per_dp = (
             self.cfg.data.rollout_batch_size
             * self.cfg.algorithm.get("group_size", 1)
             // self._world_size
         )
-        self.do_down_sampling = hasattr(
-            self.cfg.algorithm, "down_sampling"
-        ) and getattr(self.cfg.algorithm.down_sampling, "do_down_sampling", False)
+        self.do_down_sampling = self.cfg.algorithm.get("down_sampling", {}).get("do_down_sampling", False)
         if self.do_down_sampling:
-            self.down_sampling_config = getattr(
-                self.cfg.algorithm.down_sampling, "down_sampling_config", {}
-            )
-        else:
-            self.down_sampling_config = None
+            self.down_sampling_config = self.cfg.algorithm.get("down_sampling", {}).get("down_sampling_config", {})
 
     def init_worker(self):
         if self.cfg.reward.use_reward_model:
-            raise NotImplementedError("Reward model is not implemented yet.")
+            self.reward_model = get_reward_model_class(self.cfg.reward.model.model_type)(self.cfg.reward.model)
         else:
-            self.reward = get_reward_class(self.cfg.reward.reward_type)(self.cfg.reward)
+            self.rule_based_reward = get_reward_class(self.cfg.reward.reward_type)(self.cfg.reward)
 
-    def get_batch(
-        self, channel: Channel
-    ) -> tuple[dict[str, torch.Tensor], RolloutResult]:
-        result: RolloutResult = channel.get()
-        batch = result.to_actor_batch(
-            self.cfg.data.max_prompt_length,
-            self.cfg.actor.model.encoder_seq_length,
-            self.tokenizer.eos_token_id,
-        )
-        return batch, result
+        if self.cfg.reward.get("tokenizer", None) is not None:
+            self.tokenizer = hf_tokenizer(self.cfg.reward.tokenizer.tokenizer_model)
 
+    @Worker.timer("compute_rewards")
     def compute_rewards(self, input_channel: Channel, output_channel: Channel):
         """Compute rewards.
 
@@ -99,25 +90,31 @@ class RewardWorker(Worker):
         while recv_batch_size < self.total_batch_size_per_dp:
             rollout_result: RolloutResult = input_channel.get()
             recv_batch_size += rollout_result.num_sequence
-            with self.worker_timer():
-                if rollout_result.rewards is None:
-                    if self.cfg.reward.use_reward_model:
-                        with self.device_lock:
-                            batch = rollout_result.to_actor_batch(
-                                self.cfg.data.max_prompt_length,
-                                self.cfg.actor.model.encoder_seq_length,
-                                self.tokenizer.eos_token_id,
-                            )
-                            rollout_result.rewards = (
-                                self.compute_batch_rewards_with_model(batch)
-                            )
-                    else:
-                        rollout_result.rewards = self._compute_rule_based_rewards(
-                            rollout_result
+            if rollout_result.rewards is None:
+                if self.cfg.reward.use_reward_model:
+                    with self.device_lock:
+                        batch = rollout_result.to_actor_batch(
+                            self.cfg.data.max_prompt_length,
+                            self.cfg.actor.model.encoder_seq_length,
+                            self.tokenizer.eos_token_id,
                         )
-            rollout_result = self.down_sample_batch(rollout_result)
+                        rollout_result.rewards = (
+                            self.compute_batch_rewards_with_model(batch)
+                        )
+                else:
+                    rollout_result.rewards = self._compute_rule_based_rewards(
+                        rollout_result
+                    )
+            if self.do_down_sampling:
+                if rollout_result.response_texts is None:
+                    rollout_result.response_texts = [
+                        self.tokenizer.decode(ids, skip_special_tokens=True)
+                        for ids in rollout_result.response_ids
+                    ]
+                rollout_result = down_sample_batch(rollout_result, self.down_sampling_config)
             # answer is not needed in training
             rollout_result.answers = None
+
             output_channel.put(rollout_result, async_op=True)
 
         assert recv_batch_size == self.total_batch_size_per_dp, (
@@ -140,7 +137,7 @@ class RewardWorker(Worker):
                     rollout_result.prompt_ids, skip_special_tokens=True
                 )
             kwargs["prompts"] = prompts
-        scores = self.reward.get_reward(texts, rollout_result.answers, **kwargs)
+        scores = self.rule_based_reward.get_reward(texts, rollout_result.answers, **kwargs)
         return (
             torch.as_tensor(scores, dtype=torch.float, device=torch.device("cpu"))
             .view(-1, 1)
@@ -150,492 +147,10 @@ class RewardWorker(Worker):
     def compute_batch_rewards_with_model(self, batch: dict[str, torch.Tensor]):
         raise NotImplementedError("Reward model is not implemented yet.")
 
-    def down_sample_batch(self, rollout_result: RolloutResult):
-        if not self.do_down_sampling:
-            return rollout_result
-
-        down_sampling_config = self.down_sampling_config
-
-        def _build_group_uids_by_chunks(total_num: int, group_size: int):
-            return [i // max(1, group_size) for i in range(total_num)]
-
-        def _reject_equal_reward(uids, rewards):
-            rewards_t = (
-                rewards
-                if isinstance(rewards, torch.Tensor)
-                else torch.tensor(rewards, dtype=torch.float32)
-            )
-            uids_arr = np.array(uids)
-            unique_uids = np.unique(uids_arr)
-            valid_mask = torch.ones(len(uids), dtype=torch.bool)
-            for uid in unique_uids:
-                idxs = np.where(uids_arr == uid)[0]
-                if len(idxs) == 0:
-                    continue
-                grp_rewards = rewards_t[idxs]
-                if torch.allclose(grp_rewards[0], grp_rewards):
-                    valid_mask[idxs] = False
-            return valid_mask
-
-        def _calc_penalty_weights(response_texts):
-            def error_ratio(text, pattern=r"<tool_response>.*?</tool_response>"):
-                matches = _re.findall(pattern, text, _re.DOTALL)
-                error_count = len([m for m in matches if "error" in m.lower()])
-                if len(matches) == 0:
-                    return 0.5
-                return error_count / len(matches)
-
-            def answer_tag_penalty(
-                text: str,
-                answer_tags=None,
-                answer_pattern=r"<answer>.*?</answer>",
-                turn_pattern=r"<\|im_start\|>assistant.*?<\|im_end\|>",
-            ):
-                if answer_tags is None:
-                    answer_tags = ["<answer>", "</answer>"]
-                if any(tag not in text for tag in answer_tags):
-                    return 1.0
-                closed_cnt = len(_re.findall(answer_pattern, text, _re.DOTALL))
-                tags_cnt = [text.count(tag) for tag in answer_tags]
-                if any(c != closed_cnt for c in tags_cnt):
-                    return 1.0
-                turns = _re.findall(turn_pattern, text, _re.DOTALL)
-                num_turns = len(turns)
-                if num_turns == 0:
-                    return 1.0
-                return min((closed_cnt - 1) / num_turns, 1.0)
-
-            err_w = np.array([error_ratio(t) for t in response_texts], dtype=float)
-            fmt_w = np.array(
-                [answer_tag_penalty(t) for t in response_texts], dtype=float
-            )
-            return err_w, fmt_w
-
-        def _weighted_group_choice(uids, rewards, response_texts):
-            cfg = down_sampling_config
-            down_sample_to_n = int(cfg.get("down_sample_to_n", -1))
-            if down_sample_to_n <= 0:
-                return torch.ones(len(uids), dtype=torch.bool)
-
-            roc_error_ratio = bool(cfg.get("roc_error_ratio", False))
-            roc_answer_format = bool(cfg.get("roc_answer_format", False))
-            min_zero = int(cfg.get("min_zero_reward_trace_num", 0))
-            min_non_zero = int(cfg.get("min_non_zero_reward_trace_num", 0))
-
-            err_w, fmt_w = _calc_penalty_weights(response_texts)
-
-            uids_arr = np.array(uids)
-            unique_uids = np.unique(uids_arr)
-            rewards_t = (
-                rewards
-                if isinstance(rewards, torch.Tensor)
-                else torch.tensor(rewards, dtype=torch.float32)
-            )
-
-            valid_mask = torch.zeros(len(uids), dtype=torch.bool)
-            for uid in unique_uids:
-                idxs = np.where(uids_arr == uid)[0]
-                if len(idxs) < down_sample_to_n:
-                    continue
-                if len(idxs) == down_sample_to_n:
-                    valid_mask[idxs] = True
-                    continue
-                grp_rewards = rewards_t[idxs]
-                grp_err_w = err_w[idxs]
-                grp_fmt_w = fmt_w[idxs]
-                penalty = (grp_err_w if roc_error_ratio else 0) + (
-                    grp_fmt_w if roc_answer_format else 0
-                )
-
-                zero_pairs = [
-                    (i, p)
-                    for i, r, p in zip(idxs, grp_rewards, penalty, strict=False)
-                    if r <= 0
-                ]
-                non_zero_pairs = [
-                    (i, p)
-                    for i, r, p in zip(idxs, grp_rewards, penalty, strict=False)
-                    if r > 0
-                ]
-
-                non_zero_pairs.sort(key=lambda x: x[1])
-
-                z_quota = round(len(zero_pairs) * down_sample_to_n / len(idxs))
-                nz_quota = round(len(non_zero_pairs) * down_sample_to_n / len(idxs))
-
-                if z_quota <= min(min_zero, len(zero_pairs)):
-                    z_quota = min(min_zero, len(zero_pairs))
-                    nz_quota = down_sample_to_n - z_quota
-                if nz_quota <= min(min_non_zero, len(non_zero_pairs)):
-                    nz_quota = min(min_non_zero, len(non_zero_pairs))
-                    z_quota = down_sample_to_n - nz_quota
-
-                chosen = [i for i, _ in non_zero_pairs[:nz_quota]] + [
-                    i for i, _ in zero_pairs[:z_quota]
-                ]
-                if len(chosen) != down_sample_to_n:
-                    all_sorted = [
-                        i
-                        for i, _ in sorted(
-                            non_zero_pairs + zero_pairs, key=lambda x: x[1]
-                        )
-                    ]
-                    chosen = all_sorted[:down_sample_to_n]
-                valid_mask[torch.tensor(chosen, dtype=torch.long)] = True
-
-            return valid_mask
-
-        reject_equal = bool(down_sampling_config.get("reject_equal_reward", False))
-
-        original_group_size = int(self.cfg.algorithm.group_size)
-        uids = _build_group_uids_by_chunks(
-            rollout_result.num_sequence, original_group_size
-        )
-
-        if reject_equal and rollout_result.rewards is not None:
-            mask1 = _reject_equal_reward(uids, rollout_result.rewards)
-        else:
-            mask1 = torch.ones(rollout_result.num_sequence, dtype=torch.bool)
-
-        if rollout_result.response_texts is not None:
-            response_texts = rollout_result.response_texts
-        else:
-            response_texts = [
-                self.tokenizer.decode(ids, skip_special_tokens=True)
-                for ids in rollout_result.response_ids
-            ]
-
-        mask2 = _weighted_group_choice(uids, rollout_result.rewards, response_texts)
-
-        final_mask = mask1 & mask2
-
-        def _apply_mask_to_list(lst, mask):
-            return [x for i, x in enumerate(lst) if mask[i].item()]
-
-        def _apply_mask_to_tensor(t, mask):
-            return t[mask]
-
-        idx_mask = final_mask
-        rr = rollout_result
-        rr.prompt_lengths = _apply_mask_to_list(rr.prompt_lengths, idx_mask)
-        rr.prompt_ids = _apply_mask_to_list(rr.prompt_ids, idx_mask)
-        rr.response_lengths = _apply_mask_to_list(rr.response_lengths, idx_mask)
-        rr.response_ids = _apply_mask_to_list(rr.response_ids, idx_mask)
-        rr.is_end = _apply_mask_to_list(rr.is_end, idx_mask)
-        if rr.rewards is not None:
-            rr.rewards = (
-                rr.rewards
-                if isinstance(rr.rewards, torch.Tensor)
-                else torch.tensor(rr.rewards)
-            )
-            rr.rewards = _apply_mask_to_tensor(rr.rewards, idx_mask)
-        if rr.prompt_texts is not None:
-            rr.prompt_texts = _apply_mask_to_list(rr.prompt_texts, idx_mask)
-        if rr.response_texts is not None:
-            rr.response_texts = _apply_mask_to_list(rr.response_texts, idx_mask)
-        if rr.answers is not None:
-            rr.answers = _apply_mask_to_list(rr.answers, idx_mask)
-        if rr.response_mask is not None:
-            rr.response_mask = _apply_mask_to_list(rr.response_mask, idx_mask)
-        if rr.rollout_logprobs is not None:
-            rr.rollout_logprobs = _apply_mask_to_list(rr.rollout_logprobs, idx_mask)
-        if rr.ref_logprobs is not None:
-            rr.ref_logprobs = _apply_mask_to_tensor(rr.ref_logprobs, idx_mask)
-        if rr.prev_logprobs is not None:
-            rr.prev_logprobs = _apply_mask_to_tensor(rr.prev_logprobs, idx_mask)
-        if rr.recompute_prev_logprobs is not None:
-            rr.recompute_prev_logprobs = _apply_mask_to_tensor(
-                rr.recompute_prev_logprobs, idx_mask
-            )
-
-        _dsn = int(down_sampling_config.get("down_sample_to_n", -1))
-        if _dsn > 0:
-            rr.group_size = _dsn
-        return rr
-
-
-# =============================================================================
-# Dataset for Binary Classification Reward Model Training
-# =============================================================================
-
-
-class RewardBinaryDataset(Dataset):
-    """Dataset for binary classification reward model training.
-
-    Uses per-frame 'is_obj_placed' field from infos to determine success/fail labels.
-    This is more accurate than using episode-level labels from filenames.
-    """
-
-    def __init__(
-        self,
-        images: list[torch.Tensor],
-        labels: list[int],
-    ):
-        """Initialize dataset with pre-loaded images and labels.
-
-        Args:
-            images: List of image tensors (C, H, W).
-            labels: List of binary labels (0=fail, 1=success).
-        """
-        assert len(images) == len(labels), "Images and labels must have same length"
-        self.images = images
-        self.labels = labels
-
-    def __len__(self) -> int:
-        return len(self.images)
-
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
-        """Get (image, label) pair.
-
-        Returns:
-            Tuple of (image tensor (C, H, W), label (0 or 1))
-        """
-        return self.images[idx], torch.tensor(self.labels[idx], dtype=torch.float32)
-
-
-def load_episodes_with_labels(
-    data_path: str, num_samples_per_episode: int = 5
-) -> list[dict]:
-    """Load episodes with per-frame labels from collected data.
-
-    Uses 'is_obj_placed' field from infos to determine success/fail per frame.
-    Returns data organized by episode to enable episode-level train/val splitting.
-
-    Args:
-        data_path: Path to directory containing .pkl episode files.
-        num_samples_per_episode: Number of frames to sample per episode.
-            Samples are evenly spaced (start, middle, end, etc).
-            Set to 0 or negative to use all frames.
-
-    Returns:
-        List of episode dicts, each containing 'images' and 'labels' lists.
-    """
-    pkl_files = sorted(glob(os.path.join(data_path, "*.pkl")))
-    logger.info(f"Found {len(pkl_files)} episode files in {data_path}")
-
-    episodes = []
-
-    for pkl_path in pkl_files:
-        try:
-            with open(pkl_path, "rb") as f:
-                episode = pickle.load(f)
-
-            observations = episode.get("observations", [])
-            infos = episode.get("infos", [])
-
-            if not observations or not infos:
-                continue
-
-            # First collect all valid frames (exclude last frame - it's from next episode after reset)
-            all_frames = []
-            num_frames = min(len(observations), len(infos))
-            # Skip the last frame as it's the reset state
-            for idx in range(num_frames - 1):
-                obs = observations[idx]
-                info = infos[idx]
-
-                success_flag = info.get("is_obj_placed", None)
-                if success_flag is None:
-                    continue
-
-                try:
-                    if hasattr(success_flag, "item"):
-                        is_success = bool(success_flag.item())
-                    else:
-                        is_success = bool(success_flag)
-                except Exception:
-                    continue
-
-                img = _extract_image(obs)
-                if img is None:
-                    continue
-
-                all_frames.append((img, 1 if is_success else 0))
-
-            if not all_frames:
-                continue
-
-            # Sample frames based on num_samples_per_episode
-            n = len(all_frames)
-            if num_samples_per_episode > 0 and n > num_samples_per_episode:
-                # Evenly spaced sampling
-                indices = [
-                    int(i * (n - 1) / (num_samples_per_episode - 1))
-                    for i in range(num_samples_per_episode)
-                ]
-                indices = sorted(set(indices))  # Remove duplicates
-                sampled = [all_frames[i] for i in indices]
-            else:
-                # Use all frames
-                sampled = all_frames
-
-            ep_images = [f[0] for f in sampled]
-            ep_labels = [f[1] for f in sampled]
-
-            if ep_images:
-                episodes.append({"images": ep_images, "labels": ep_labels})
-
-        except Exception as e:
-            logger.warning(f"Failed to load {pkl_path}: {e}")
-            continue
-
-    total_frames = sum(len(ep["images"]) for ep in episodes)
-    total_success = sum(sum(ep["labels"]) for ep in episodes)
-    sample_info = (
-        f"{num_samples_per_episode} per ep" if num_samples_per_episode > 0 else "all"
-    )
-    logger.info(
-        f"Loaded {len(episodes)} episodes, {total_frames} frames ({sample_info}): {total_success} success, {total_frames - total_success} fail"
-    )
-    return episodes
-
-
-def _extract_image(obs: dict) -> Optional[torch.Tensor]:
-    """Extract and preprocess image from observation dict.
-
-    Args:
-        obs: Observation dictionary with 'main_images' or 'images' key.
-
-    Returns:
-        Image tensor (C, H, W) in float32 [0, 1], or None if extraction fails.
-    """
-    img = obs.get("main_images")
-    if img is None:
-        img = obs.get("images")
-
-    if img is None:
-        return None
-
-    # Convert to tensor if needed
-    if isinstance(img, torch.Tensor):
-        if img.numel() == 0:
-            return None
-    elif isinstance(img, np.ndarray):
-        if img.size == 0:
-            return None
-        img = torch.from_numpy(img.copy())
-    else:
-        return None
-
-    # Ensure tensor is on CPU
-    if img.is_cuda:
-        img = img.cpu()
-
-    # Handle different formats
-    if img.dim() == 4:
-        # (1, H, W, C) or (1, C, H, W) -> (C, H, W)
-        img = img.squeeze(0)
-
-    if img.dim() == 3:
-        # (H, W, C) -> (C, H, W)
-        last_dim = img.shape[-1]
-        if isinstance(last_dim, int) and last_dim in [1, 3, 4]:
-            img = img.permute(2, 0, 1)
-
-    # Ensure float32 in [0, 1]
-    if img.dtype == torch.uint8:
-        img = img.float() / 255.0
-    elif img.dtype != torch.float32:
-        img = img.float()
-
-    return img
-
-
-def balance_and_split_by_episode(
-    episodes: list[dict],
-    val_split: float = 0.2,
-    fail_success_ratio: float = 2.0,
-) -> tuple[RewardBinaryDataset, RewardBinaryDataset]:
-    """Split by EPISODE and sample with configurable fail:success ratio.
-
-    Strategy:
-    1. Split episodes into train/val sets (entire episodes)
-    2. Use ALL frames from each episode (no sparse sampling)
-    3. Sample fail frames to achieve fail:success ratio (e.g., 2:1)
-
-    This prevents data leakage because frames from the same episode
-    won't appear in both train and val sets.
-
-    Args:
-        episodes: List of episode dicts with 'images' and 'labels' keys.
-        val_split: Fraction of episodes for validation.
-        fail_success_ratio: Ratio of fail:success frames (e.g., 2.0 means 2:1).
-
-        Returns:
-        Tuple of (train_dataset, val_dataset).
-    """
-    if not episodes:
-        logger.error("No episodes provided!")
-        return RewardBinaryDataset([], []), RewardBinaryDataset([], [])
-
-    # Shuffle and split EPISODES
-    random.shuffle(episodes)
-    val_ep_count = max(1, int(len(episodes) * val_split))
-    val_episodes = episodes[:val_ep_count]
-    train_episodes = episodes[val_ep_count:]
-
-    logger.info(
-        f"Episode split: {len(train_episodes)} train eps, {len(val_episodes)} val eps"
-    )
-
-    def extract_and_sample(ep_list: list[dict], ratio: float) -> tuple[list, list]:
-        """Extract frames and sample to achieve fail:success ratio."""
-        success_imgs = []
-        fail_imgs = []
-        for ep in ep_list:
-            for img, lbl in zip(ep["images"], ep["labels"]):
-                if lbl == 1:
-                    success_imgs.append(img)
-                else:
-                    fail_imgs.append(img)
-
-        logger.info(f"  Raw: {len(success_imgs)} success, {len(fail_imgs)} fail")
-
-        if len(success_imgs) == 0:
-            logger.warning("  No success frames!")
-            return [], []
-
-        # Sample fail frames to achieve ratio
-        target_fail = int(len(success_imgs) * ratio)
-        random.shuffle(fail_imgs)
-        fail_imgs = fail_imgs[:target_fail]
-
-        logger.info(
-            f"  After {ratio}:1 ratio: {len(success_imgs)} success, {len(fail_imgs)} fail"
-        )
-
-        # Combine and shuffle
-        images = success_imgs + fail_imgs
-        labels = [1] * len(success_imgs) + [0] * len(fail_imgs)
-
-        pairs = list(zip(images, labels))
-        random.shuffle(pairs)
-        if pairs:
-            images, labels = zip(*pairs)
-            return list(images), list(labels)
-        return [], []
-
-    logger.info("Processing train set:")
-    train_images, train_labels = extract_and_sample(train_episodes, fail_success_ratio)
-    logger.info("Processing val set:")
-    val_images, val_labels = extract_and_sample(val_episodes, fail_success_ratio)
-
-    train_dataset = RewardBinaryDataset(train_images, train_labels)
-    val_dataset = RewardBinaryDataset(val_images, val_labels)
-
-    logger.info(
-        f"Episode-based split complete - Train: {len(train_dataset)} frames "
-        f"({sum(train_labels) if train_labels else 0} success), "
-        f"Val: {len(val_dataset)} frames ({sum(val_labels) if val_labels else 0} success)"
-    )
-
-    return train_dataset, val_dataset
-
 
 # =============================================================================
 # FSDP Reward Worker for Training (like FSDPSftWorker)
 # =============================================================================
-
 
 class FSDPRewardWorker(FSDPModelManager, Worker):
     """FSDP-based worker for reward model training.
@@ -669,7 +184,7 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         self.is_lora = False
         self.setup_model_and_optimizer()
 
-        logger.info(
+        self.logger.info(
             f"Initialized FSDPRewardWorker with "
             f"{sum(p.numel() for p in self.model.parameters())} parameters"
         )
@@ -695,7 +210,7 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         success_count = 0
         fail_count = 0
 
-        logger.info(f"Saving {len(dataset)} {split} images to {save_dir}...")
+        self.logger.info(f"Saving {len(dataset)} {split} images to {save_dir}...")
 
         for idx in tqdm(range(len(dataset)), desc=f"Saving {split} images"):
             img_tensor, label = dataset[idx]
@@ -713,7 +228,7 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
                 img_pil.save(os.path.join(fail_dir, f"{split}_{idx:05d}.png"))
                 fail_count += 1
 
-        logger.info(f"Saved {split} images: {success_count} success, {fail_count} fail")
+        self.logger.info(f"Saved {split} images: {success_count} success, {fail_count} fail")
 
     def model_provider_func(self) -> torch.nn.Module:
         """Provide the ResNet reward model."""
@@ -732,18 +247,18 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         data_path = data_cfg.get("data_path")
 
         if not data_path or not os.path.exists(data_path):
-            logger.warning(f"Data path not found: {data_path}")
+            self.logger.warning(f"Data path not found: {data_path}")
             return None, None
 
         # Load episodes with configurable sampling
         num_samples = data_cfg.get("num_samples_per_episode", 5)
-        logger.info(
+        self.logger.info(
             f"Loading episodes from {data_path} with {num_samples} samples per episode..."
         )
         episodes = load_episodes_with_labels(data_path, num_samples)
 
         if len(episodes) == 0:
-            logger.warning("No episodes loaded from dataset")
+            self.logger.warning("No episodes loaded from dataset")
             return None, None
 
         # Split by EPISODE (prevents data leakage), sample with fail:success ratio
@@ -754,7 +269,7 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         )
 
         if len(train_dataset) == 0:
-            logger.warning("Training dataset is empty after balancing")
+            self.logger.warning("Training dataset is empty after balancing")
             return None, None
 
         # Debug: save training images to verify data pipeline
@@ -798,7 +313,7 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
             drop_last=False,
         )
 
-        logger.info(
+        self.logger.info(
             f"Created dataloaders: {len(train_dataset)} train, {len(val_dataset)} val"
         )
 
@@ -941,11 +456,6 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
 
         return val_metrics
 
-    def set_global_step(self, global_step: int) -> None:
-        """Set global step (for compatibility with SFTRunner)."""
-        if hasattr(self.model, "set_global_step"):
-            self.model.set_global_step(global_step)
-
 
 # =============================================================================
 # Image Reward Worker for Inference (with Channel Communication)
@@ -972,8 +482,6 @@ class ImageRewardWorker(Worker):
         torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", 0)))
         self.device = torch.cuda.current_device()
 
-        # Placement
-        self._component_placement = HybridComponentPlacement(cfg, Cluster())
 
         # Model will be loaded in init_worker
         self.model = None
@@ -1038,7 +546,7 @@ class ImageRewardWorker(Worker):
             if images is None:
                 images = data.get("main_images")
             if images is None:
-                logger.warning(
+                self.logger.warning(
                     "No images in input data (tried: reward_images, images, main_images)"
                 )
                 output_channel.put({"rewards": None}, async_op=True)
@@ -1170,14 +678,14 @@ class ImageRewardWorker(Worker):
             input_channel: Channel to receive image batches from
             output_channel: Channel to send computed rewards to
         """
-        logger.info("Starting ImageRewardWorker inference loop")
+        self.logger.info("Starting ImageRewardWorker inference loop")
         target_key = "0_train"
 
         while True:
             try:
                 data = input_channel.get(key=target_key)
                 if data is None:
-                    logger.info("Received stop signal, ending inference loop")
+                    self.logger.info("Received stop signal, ending inference loop")
                     break
 
                 dones = data.get("dones")
@@ -1205,7 +713,7 @@ class ImageRewardWorker(Worker):
                     images = data["obs"].get("main_images")
 
                 if images is None:
-                    logger.warning("Received data but no images found")
+                    self.logger.warning("Received data but no images found")
                     output_channel.put(data, key=target_key, async_op=True)
                     continue
 
@@ -1229,14 +737,10 @@ class ImageRewardWorker(Worker):
                 output_channel.put(output_data, key=target_key, async_op=True)
 
             except Exception as e:
-                logger.warning(f"Error in inference loop: {e}")
+                self.logger.warning(f"Error in inference loop: {e}")
                 continue
 
-        logger.info("ImageRewardWorker inference loop ended")
-
-    def set_global_step(self, global_step: int) -> None:
-        """Set global step (for compatibility with EmbodiedRunner)."""
-        self.global_step = global_step
+        self.logger.info("ImageRewardWorker inference loop ended")
 
     def save_checkpoint(self, save_path: str, global_step: int) -> None:
         """Save reward model checkpoint.

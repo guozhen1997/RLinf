@@ -23,3 +23,13 @@ __all__ = [
     "BaseImageRewardModel",
     "ResNetRewardModel",
 ]
+
+reward_model_registry = {
+    "resnet": ResNetRewardModel,
+}
+
+def get_reward_model_class(reward_model_type: str):
+    if reward_model_type not in reward_model_registry:
+        raise ValueError(f"Unsupported reward model type: {reward_model_type}")
+
+    return reward_model_registry[reward_model_type]
