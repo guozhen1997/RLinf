@@ -617,7 +617,7 @@ class GR00T_N1_5_ForRLActionPrediction(GR00T_N1_5, BasePolicy):
             unnormalized_action, chunk_size=self.output_action_chunks
         )
 
-        return raw_action, result
+        return torch.from_numpy(raw_action), result
 
     def apply_transforms(self, obs: dict[str, Any]) -> dict[str, Any]:
         """

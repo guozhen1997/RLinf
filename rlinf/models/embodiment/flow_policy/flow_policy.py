@@ -364,18 +364,17 @@ class FlowPolicy(nn.Module, BasePolicy):
         # Use flow actor
         action, log_prob = self.flow_actor(mix_feature, train=False, log_grad=False)
 
-        # chunk_actions is always numpy array
+        # chunk_actions is always torch tensor
         chunk_actions = action.reshape(
             -1, self.cfg.num_action_chunks, self.cfg.action_dim
         )
-        chunk_actions = chunk_actions.cpu().numpy()
 
         if hasattr(self, "value_head") and calculate_values:
             chunk_values = self.value_head(mix_feature)
         else:
             chunk_values = torch.zeros_like(log_prob[..., :1])
 
-        forward_inputs = {"action": action}
+        forward_inputs = {"raw_actions": action}
         if return_obs:
             # x1. image indexing logic changed
             forward_inputs["main_images"] = env_obs["main_images"]
@@ -613,15 +612,14 @@ class FlowStatePolicy(nn.Module, BasePolicy):
         # Use flow actor
         action, log_prob = self.flow_actor(feat, train=False, log_grad=False)
 
-        # chunk_actions is always numpy array
+        # chunk_actions is always torch tensor
         chunk_actions = action.reshape(
             -1, self.cfg.num_action_chunks, self.cfg.action_dim
         )
-        chunk_actions = chunk_actions.cpu().numpy()
 
         chunk_values = torch.zeros_like(log_prob[..., :1])
 
-        forward_inputs = {"action": action}
+        forward_inputs = {"raw_actions": action}
         if return_obs:
             forward_inputs["states"] = env_obs[
                 "states"
