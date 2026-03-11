@@ -29,18 +29,18 @@ from rlinf.utils.nested_dict_process import (
 )
 
 
-def get_model_weights_id(tensors: torch.Tensor) -> str:
+def get_model_weights_id(versions: torch.Tensor) -> str:
     """
     Get the model weights id from the tensor.
 
     Args:
-        tensors (torch.Tensor): The tensor to get the model weights id from.
+        versions (torch.Tensor): The tensor to get the model weights id from.
 
     Returns:
         str: The model weights id.
     """
 
-    name_bytes = tensors.cpu().numpy().tobytes()
+    name_bytes = versions.cpu().numpy().tobytes()
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, name_bytes.hex()))
 
 
