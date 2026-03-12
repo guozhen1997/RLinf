@@ -14,8 +14,8 @@ cluster:
   recreate_nccl_groups : False
   component_placement:
     actor: 0
-    rollout: 0-1
-    inference: 1
+    rollout: 1-2
+    inference: 3
     reward: all
 
 runner:
