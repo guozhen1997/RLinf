@@ -13,7 +13,7 @@ cluster:
   component_placement:
     rollout: 0
     inference: 1
-    actor: 2-3
+    actor: 0-1
     reward: 0
 
 runner:
