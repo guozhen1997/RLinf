@@ -19,7 +19,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 from hydra.utils import instantiate
-
+import argparse
+import gymnasium as gym
+import cv2
+import mediapy
+from tqdm import tqdm
 import numpy as np
 import torch
 import dataclasses
@@ -28,6 +32,9 @@ from tianshou.data import Batch
 from omegaconf import OmegaConf
 from groot.vla.data.schema import DatasetMetadata, EmbodimentTag
 from groot.vla.data.transform import ComposedModalityTransform
+import uuid
+import datetime
+import imageio
 
 # Ensure groot is importable (dreamzero repo structure)
 def _ensure_groot_importable():
@@ -309,6 +316,10 @@ class DreamZeroActionModel:
             if torch.is_tensor(v) and v.dtype == torch.float32 and self.eval_bf16:
                 normalized_input[k] = v.to(dtype=torch.bfloat16)
         return normalized_input
+    
+    def _process_obs(self, obs: dict) -> dict:
+        """Process observation."""
+        normalized_input = self.eval_transform(obs)
 
     def _convert_observation(self, obs: dict) -> dict:
         """Convert roboarena observation format to AR_droid format.
@@ -451,6 +462,15 @@ class DreamZeroActionModel:
         
         return action
 
+    def predict_action_obs(self, obs: dict) -> np.ndarray:
+        """Predict action from observation."""
+        normalized_input = self.eval_transform(obs)
+        with torch.no_grad():
+            model_pred = self.model.lazy_joint_video_action_causal(normalized_input)
+        normalized_action = model_pred["action_pred"].float()
+        video_pred = model_pred["video_pred"]
+        return normalized_action, video_pred
+
     @torch.no_grad()
     def predict_action_batch(self, obs: dict) -> np.ndarray:
         """Eval: predict actions from batch.
@@ -577,6 +597,155 @@ def _make_zero_observation(
 
     return obs
 
+def _make_obs_from_video(
+    camera_frames: dict[str, np.ndarray],
+    frame_indices: list[int],
+    prompt: str,
+    session_id: str,
+) -> dict:
+    """Build an observation dict from real video frames.
+
+    For 1 frame: each image key is (H, W, 3).
+    For 4 frames: each image key is (4, H, W, 3).
+    """
+    obs: dict = {}
+    for cam_key, all_frames in camera_frames.items():
+        selected = all_frames[frame_indices]  # (T, H, W, 3)
+        if len(frame_indices) == 1:
+            selected = selected[0]  # (H, W, 3)
+        obs[cam_key] = selected
+
+    obs["observation/joint_position"] = np.zeros(7, dtype=np.float32)
+    obs["observation/cartesian_position"] = np.zeros(6, dtype=np.float32)
+    obs["observation/gripper_position"] = np.zeros(1, dtype=np.float32)
+    obs["prompt"] = prompt
+    obs["session_id"] = session_id
+    return obs
+
+def droid_obs_to_ardroid(obs: Dict[str, Any], prompt: str) -> Dict[str, Any]:
+    """直接从 DROID env obs 构造 AR_droid 格式输入（等价于 _convert_observation 的输出）."""
+    policy = obs.get("policy", obs)
+
+    # 1. 相机：external_cam / external_cam_2 / wrist_cam -> video.* (T=1)
+    ext1 = policy["external_cam"]      # (1, H, W, 3)
+    ext2 = policy["external_cam_2"]    # (1, H, W, 3)
+    wrist = policy["wrist_cam"]        # (1, H, W, 3)
+
+    def _to_numpy_first(t):
+        if isinstance(t, torch.Tensor):
+            arr = t[0].detach().cpu().numpy()   # (H, W, 3)
+        else:
+            arr = np.asarray(t)[0]
+        return arr
+
+    def _resize_hw(img: np.ndarray, h: int = 180, w: int = 320) -> np.ndarray:
+        # img: (H, W, 3) -> (h, w, 3)
+        return cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+
+    # 单帧 → resize → 加 T 维度，得到 (1, H, W, 3)
+    ext1_np = _resize_hw(_to_numpy_first(ext1))           # (180, 320, 3)
+    ext2_np = _resize_hw(_to_numpy_first(ext2))
+    wrist_np = _resize_hw(_to_numpy_first(wrist))
+
+    video_exterior_1 = ext1_np[None, ...]   # (1, H, W, 3)
+    video_exterior_2 = ext2_np[None, ...]
+    video_wrist      = wrist_np[None, ...]
+
+    # 2. 关节 / 夹爪 → state.*
+    arm = policy["arm_joint_pos"]      # (7,)
+    grip = policy["gripper_pos"]       # (1,)
+
+    if isinstance(arm, torch.Tensor):
+        arm_np = arm.detach().cpu().numpy().astype(np.float64)
+    else:
+        arm_np = np.asarray(arm, dtype=np.float64)
+
+    if isinstance(grip, torch.Tensor):
+        grip_np = grip.detach().cpu().numpy().astype(np.float64)
+    else:
+        grip_np = np.asarray(grip, dtype=np.float64)
+
+    # reshape 成 (1, D)
+    arm_np = arm_np.reshape(1, -1)      # (1, 7)
+    grip_np = grip_np.reshape(1, -1)    # (1, 1)
+
+    # 3. 组装成 AR_droid 格式
+    converted: Dict[str, Any] = {}
+    converted["video.exterior_image_1_left"] = video_exterior_1
+    converted["video.exterior_image_2_left"] = video_exterior_2
+    converted["video.wrist_image_left"] = video_wrist
+
+    converted["state.joint_position"] = arm_np
+    converted["state.gripper_position"] = grip_np
+    print("================================================")
+    print(converted["state.joint_position"].shape)
+    print(converted["state.gripper_position"].shape)
+
+    converted["annotation.language.action_text"] = prompt or ""
+    return converted
+
+def droid_obs_to_roboarena(
+    env_obs: Dict[str, Any],
+    prompt: str = "pick up the object",
+    session_id: str | None = None,
+) -> Dict[str, Any]:
+    """将 DROID env 的 obs 转成和 _make_zero_observation 一样的格式。"""
+    policy = env_obs.get("policy", env_obs)
+
+    # 1. 相机：external_cam / external_cam_2 / wrist_cam -> observation/*，并 resize 到 180x320
+    ext1 = policy["external_cam"]      # (1, H, W, 3)
+    ext2 = policy["external_cam_2"]    # (1, H, W, 3)
+    wrist = policy["wrist_cam"]        # (1, H, W, 3)
+
+    def _to_numpy_hw3_first(t):
+        if isinstance(t, torch.Tensor):
+            arr = t[0].detach().cpu().numpy()   # (H, W, 3)
+        else:
+            arr = np.asarray(t)[0]
+        return arr
+
+    def _resize_hw(img: np.ndarray, h: int, w: int) -> np.ndarray:
+        return cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+
+    h, w = 180, 320
+    ext1_np = _resize_hw(_to_numpy_hw3_first(ext1), h, w)    # (h, w, 3)
+    ext2_np = _resize_hw(_to_numpy_hw3_first(ext2), h, w)
+    wrist_np = _resize_hw(_to_numpy_hw3_first(wrist), h, w)
+
+    obs: Dict[str, Any] = {}
+    # external cameras (0 / 1)
+    obs["observation/exterior_image_0_left"] = ext1_np
+    obs["observation/exterior_image_1_left"] = ext2_np
+    # wrist camera
+    obs["observation/wrist_image_left"] = wrist_np
+
+    # 2. 关节 / 夹爪：arm_joint_pos -> observation/joint_position, gripper_pos -> observation/gripper_position
+    arm = policy["arm_joint_pos"]      # (7,)
+    grip = policy["gripper_pos"]       # (1,)
+
+    if isinstance(arm, torch.Tensor):
+        arm_np = arm.detach().cpu().numpy().astype(np.float32)
+    else:
+        arm_np = np.asarray(arm, dtype=np.float32)
+
+    if isinstance(grip, torch.Tensor):
+        grip_np = grip.detach().cpu().numpy().astype(np.float32)
+    else:
+        grip_np = np.asarray(grip, dtype=np.float32)
+
+    obs["observation/joint_position"] = arm_np           # (7,)
+    obs["observation/gripper_position"] = grip_np        # (1,)
+    # cartesian_position 暂时没有 env 提供，可以先填 0 向量
+    obs["observation/cartesian_position"] = np.zeros(6, dtype=np.float32)
+
+    # 3. session_id 和 prompt
+    if session_id is None:
+        session_id = str(uuid.uuid4())
+    obs["session_id"] = session_id
+    obs["prompt"] = prompt
+
+    return obs
+
 def squeeze_dict_values(data: dict[str, Any]) -> dict[str, Any]:
     """
     Squeeze the values of a dictionary. This removes the batch dimension.
@@ -591,9 +760,21 @@ def squeeze_dict_values(data: dict[str, Any]) -> dict[str, Any]:
             squeezed_data[k] = v
     return squeezed_data
 
-if __name__ == "__main__":
+def action_to_droid(action: np.ndarray) -> Dict[str, Any]:
+    T = min(12, action.shape[0])
+    action_tensor = []
+    for i in range(T):
+        action = action[i]
 
-    # prepare obs
+        if action[-1] > 0.5:
+            action = np.concatenate([action[:-1], np.ones(1)],dtype=action.dtype)
+        else:
+            action = np.concatenate([action[:-1], np.zeros(1)],dtype=action.dtype)
+        action_tensor = torch.from_numpy(action).float().unsqueeze(0).to(device="cuda")
+
+    return action_tensor
+
+def test_dreamzero_action_model():
     image_config = PolicyImageConfig(
         image_resolution=(180, 320),  # DreamZero expects 180x320 images
         needs_wrist_camera=True,
@@ -602,19 +783,211 @@ if __name__ == "__main__":
         needs_session_id=True,  # Track session to reset state for new clients
         action_space="joint_position",
     )
-    logging.info(f"Image config: {image_config}")
-
     import uuid
     session_id = str(uuid.uuid4())
-    logging.info(f"Starting new session with ID: {session_id}")
-    # Minimal test
-    _ensure_groot_importable()
-    model_path = "/mnt/project_rlinf/liyanghao/data/models/DreamZero-DROID"
-    if Path(model_path).exists():
-        model = DreamZeroActionModel(model_path=model_path, device="cuda")
-        obs = _make_zero_observation(image_config, "pick up the object", session_id)
-        actions = model.predict_action_batch(obs)
-        print("predict_action_batch output:")
-        print(actions)
-    else:
-        print("Model path not found, skipping test")
+    obs = _make_zero_observation(image_config, "pick up the object", session_id)
+    model = DreamZeroActionModel(model_path="/mnt/project_rlinf/liyanghao/data/models/DreamZero-DROID", device="cuda")
+    actions = model.predict_action_batch(obs)
+    print("predict_action_batch output:")
+    print(actions)
+
+    
+
+def test_droid_env():
+    #_ensure_groot_importable()
+    from isaaclab.app import AppLauncher
+    parser = argparse.ArgumentParser(description="Tutorial on creating an empty stage.")
+    print("parser", parser)
+    AppLauncher.add_app_launcher_args(parser)
+
+    args_cli, _ = parser.parse_known_args()
+    args_cli.enable_cameras = True
+    args_cli.headless = True
+
+    app_launcher = AppLauncher(args_cli)
+    simulation_app = app_launcher.app
+    print("================================================")
+    print("args_cli", args_cli)
+    print("launcher done")
+    # All IsaacLab dependent modules should be imported after the app is launched
+    import sim_evals.environments # noqa: F401
+    from isaaclab_tasks.utils import parse_env_cfg
+
+
+    # Initialize the env
+    env_cfg = parse_env_cfg(
+        "DROID",
+        device=args_cli.device,
+        num_envs=1,
+        use_fabric=True,
+    )
+    instruction = None
+    scene = 1
+    episodes = 10
+    headless = True
+    match scene:
+        case 1:
+            instruction = "put the cube in the bowl"
+        case 2:
+            instruction = "pick up the can and put it in the mug"
+        case 3:
+            instruction = "put the banana in the bin"
+        case _:
+            raise ValueError(f"Scene {scene} not supported")
+        
+    env_cfg.set_scene(scene)
+    env = gym.make("DROID", cfg=env_cfg)
+
+    obs, _ = env.reset()
+    obs, _ = env.reset() # need second render cycle to get correctly loaded materials
+    print("--------------reset done------------------")
+    print("obs", obs)
+    print("================================================")
+    print("keys and shapes before eval_transform:")
+    for k, v in obs.items():
+        if hasattr(v, "shape"):
+            print(k, v.shape, type(v))
+    import uuid
+    session_id = str(uuid.uuid4())
+    #roboarena_obs = droid_obs_to_roboarena(obs, instruction, session_id)
+
+    video_dir = Path("videoOutputs")
+    video_dir.mkdir(parents=True, exist_ok=True)
+    video = []
+    ep = 0
+    max_steps = env.env.max_episode_length
+    #max_steps = 100
+    model = DreamZeroActionModel(model_path="/mnt/project_rlinf/liyanghao/data/models/DreamZero-DROID", device="cuda")
+    with torch.no_grad():
+        for ep in range(episodes):
+            for _step in tqdm(range(max_steps), desc=f"Episode {ep+1}/{episodes}"):
+                #roboarena_obs = droid_obs_to_ardroid(obs, instruction)
+                roboarena_obs = droid_obs_to_roboarena(obs, instruction, session_id)
+                #normalized_action, video_pred = model.predict_action_obs(roboarena_obs)
+                normalized_action = model.predict_action_batch(roboarena_obs)
+
+                normalized_action = torch.from_numpy(normalized_action).float()
+                T = min(12, normalized_action.shape[0])
+                for t in range(T):
+                    action = normalized_action[t].clone()      # (8,)
+
+                    # 二值化夹爪
+                    if action[-1].item() > 0.5:
+                        action[-1] = 1.0
+                    else:
+                        action[-1] = 0.0
+
+                    action_tensor = action.unsqueeze(0).to(device="cuda")  # (1, 8)
+
+                    obs, reward, term, trunc, _  = env.step(action_tensor)
+
+                    policy = obs.get("policy", obs)
+                    ext1 = policy["external_cam"]      # (1, H, W, 3)
+                    ext2 = policy["external_cam_2"]    # (1, H, W, 3)
+                    wrist = policy["wrist_cam"]        # (1, H, W, 3)
+                    def _to_numpy_hw3_first(t: torch.Tensor) -> np.ndarray:
+                        if isinstance(t, torch.Tensor):
+                            arr = t[0].detach().cpu().numpy()   # (H, W, 3)
+                        else:
+                            arr = np.asarray(t)[0]
+                        return arr
+                    ext1_np = _to_numpy_hw3_first(ext1)
+                    ext2_np = _to_numpy_hw3_first(ext2)
+                    wrist_np = _to_numpy_hw3_first(wrist)
+                    frame = np.concatenate([ext1_np, ext2_np, wrist_np], axis=1)
+                    video.append(frame)
+                    if term or trunc:
+                        print("=====================obs term for T= {_step} ===========================",_step)
+                        print("reward", reward)
+                        print("term", term)
+                        print("trunc", trunc)
+                        print("================================================")
+                #obs, _, term, trunc, _ = env.step(normalized_action)
+                if term or trunc:
+                    break
+            imageio.mimsave(video_dir / f"episode_{ep}.mp4", video, fps=5, codec='libx264')
+            video = []
+            obs, _ = env.reset()
+            obs, _ = env.reset()
+                # env.close()
+                # simulation_app.close()
+                # exit()
+            #     if not headless:
+            #         cv2.imshow("Right Camera", cv2.cvtColor(ret["viz"], cv2.COLOR_RGB2BGR))
+            #         cv2.waitKey(1)
+            #     video.append(ret["viz"])
+            #     action = torch.tensor(ret["action"])[None]
+            #     obs, _, term, trunc, _ = env.step(action)
+            #     if term or trunc:
+            #         break
+
+            # client.reset()
+            # mediapy.write_video(
+            #     video_dir / f"episode_{ep}.mp4",
+            #     video,
+            #     fps=15,
+            # )
+            # video = []
+
+    env.close()
+    simulation_app.close()
+
+def test_obs_to_roboarena():
+    #obs = _make_zero_observation(image_config, "pick up the object", session_id)
+    obs = {
+        "policy": {
+            "external_cam": np.zeros((1, 180, 320, 3)),
+            "external_cam_2": np.zeros((1, 180, 320, 3)),
+            "wrist_cam": np.zeros((1, 180, 320, 3)),
+            "arm_joint_pos": np.zeros(7),
+            "gripper_pos": np.zeros(1),
+        }
+    }
+    roboarena_obs = droid_obs_to_roboarena(obs, "pick up the object")
+    print("================================================")
+    print("keys and shapes before eval_transform:")
+    for k, v in roboarena_obs.items():
+        if hasattr(v, "shape"):
+            print(k, v.shape, type(v))
+
+def test_video_output():
+    video_dir = Path("videoOutputs")
+    video_dir.mkdir(parents=True, exist_ok=True)
+    video = []
+    H, W = 180, 320
+
+    # 假装是相机采到的 RGB 图像：随机噪声 [0, 255]
+    ext1_img = torch.randint(0, 256, (1, H, W, 3), dtype=torch.uint8, device="cuda:0")
+    ext2_img = torch.randint(0, 128, (1, H, W, 3), dtype=torch.uint8, device="cuda:0")
+    wrist_img = torch.randint(0, 64, (1, H, W, 3), dtype=torch.uint8, device="cuda:0")
+    obs = {
+        "policy": {
+            "external_cam": ext1_img,
+            "external_cam_2": ext2_img,
+            "wrist_cam": wrist_img,
+        }
+    }
+    policy = obs.get("policy", obs)
+    ext1 = policy["external_cam"]      # (1, H, W, 3)
+    ext2 = policy["external_cam_2"]    # (1, H, W, 3)
+    wrist = policy["wrist_cam"]        # (1, H, W, 3)
+    def _to_numpy_hw3_first(t: torch.Tensor) -> np.ndarray:
+        if isinstance(t, torch.Tensor):
+            arr = t[0].detach().cpu().numpy()   # (H, W, 3)
+        else:
+            arr = np.asarray(t)[0]
+        return arr
+    ext1_np = _to_numpy_hw3_first(ext1)
+    ext2_np = _to_numpy_hw3_first(ext2)
+    wrist_np = _to_numpy_hw3_first(wrist)
+    frame = np.concatenate([ext1_np, ext2_np, wrist_np], axis=1)
+    video.append(frame)
+    imageio.mimsave(video_dir / f"episode_0.mp4", video, fps=5, codec='libx264')
+
+
+if __name__ == "__main__":
+    #_ensure_groot_importable()
+    #test_dreamzero_action_model()
+    test_droid_env()
+    #test_obs_to_roboarena()
+    #test_video_output()
