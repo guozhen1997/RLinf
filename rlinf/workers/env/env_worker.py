@@ -622,7 +622,7 @@ class EnvWorker(Worker):
         self,
         input_channel: Channel,
         output_channel: Channel,
-        trajectory_channel: Channel | None,
+        actor_channel: Channel | None,
         *,
         cooperative_yield: bool,
     ) -> dict[str, torch.Tensor]:
@@ -635,7 +635,6 @@ class EnvWorker(Worker):
         env_metrics = defaultdict(list)
 
         for epoch in range(self.rollout_epoch):
-            last_obs = [None for _ in range(self.stage_num)]
             env_outputs = self.bootstrap_step()
             for stage_id in range(self.stage_num):
                 env_output: EnvOutput = env_outputs[stage_id]
@@ -654,6 +653,7 @@ class EnvWorker(Worker):
                         await asyncio.sleep(0)
 
                     env_output = env_outputs[stage_id]
+                    curr_obs = env_output.obs
                     if env_output.intervene_actions is not None:
                         self.rollout_results[stage_id].update_last_actions(
                             env_output.intervene_actions,
@@ -683,20 +683,6 @@ class EnvWorker(Worker):
                     )
                     self.rollout_results[stage_id].append_step_result(chunk_step_result)
 
-                    if self.collect_transitions and last_obs[stage_id] is not None:
-                        curr_obs = last_obs[stage_id]
-                        next_obs = (
-                            env_output.final_obs
-                            if env_output.dones is not None
-                            and env_output.dones.any()
-                            and self.cfg.env.train.auto_reset
-                            else env_output.obs
-                        )
-                        self.rollout_results[stage_id].append_transitions(
-                            curr_obs, next_obs
-                        )
-                    last_obs[stage_id] = env_output.obs
-
                     env_output, env_info = self.env_interact_step(
                         rollout_result.actions, stage_id
                     )
@@ -708,6 +694,16 @@ class EnvWorker(Worker):
                             "final_obs": env_batch["final_obs"],
                         },
                     )
+                    if self.collect_transitions:
+                        next_obs = (
+                            env_output.final_obs
+                            if env_output.dones.any() and self.cfg.env.train.auto_reset
+                            else env_output.obs
+                        )
+                        self.rollout_results[stage_id].append_transitions(
+                            curr_obs, next_obs
+                        )
+
                     env_outputs[stage_id] = env_output
                     self.record_env_metrics(env_metrics, env_info, epoch)
 
@@ -733,24 +729,14 @@ class EnvWorker(Worker):
                     rewards=rewards,
                 )
                 self.rollout_results[stage_id].append_step_result(chunk_step_result)
-                if self.collect_transitions and last_obs[stage_id] is not None:
-                    curr_obs = last_obs[stage_id]
-                    next_obs = (
-                        env_output.final_obs
-                        if env_output.dones.any() and self.cfg.env.train.auto_reset
-                        else env_output.obs
-                    )
-                    self.rollout_results[stage_id].append_transitions(
-                        curr_obs, next_obs
-                    )
 
             self.store_last_obs_and_intervened_info(env_outputs)
             self.finish_rollout()
 
-        if trajectory_channel is not None:
+        if actor_channel is not None:
             for stage_id in range(self.stage_num):
                 await self.send_rollout_trajectories(
-                    self.rollout_results[stage_id], trajectory_channel
+                    self.rollout_results[stage_id], actor_channel
                 )
 
         for key, value in env_metrics.items():
