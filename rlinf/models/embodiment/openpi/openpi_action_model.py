@@ -479,7 +479,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             "tokenized_prompt_mask": processed_obs["tokenized_prompt_mask"],
         }
         if forward_action is not None:
-            forward_inputs["raw_actions"] = forward_action
+            forward_inputs["action"] = forward_action
 
         # Clone observations to avoid cross-step reference issues.
         cloned_obs = copy_dict_tensor(

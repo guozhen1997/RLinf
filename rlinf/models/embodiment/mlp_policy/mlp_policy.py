@@ -160,7 +160,7 @@ class MLPPolicy(nn.Module, BasePolicy):
         **kwargs,
     ):
         states = forward_inputs["states"]
-        action = forward_inputs["raw_actions"]
+        action = forward_inputs["action"]
 
         feat = self.backbone(states)
         action_mean = self.actor_mean(feat)
@@ -260,7 +260,7 @@ class MLPPolicy(nn.Module, BasePolicy):
             env_obs["states"], mode=mode, calculate_values=calculate_values
         )
 
-        forward_inputs = {"raw_actions": action}
+        forward_inputs = {"action": action}
         if return_obs:
             forward_inputs["states"] = env_obs["states"]
 

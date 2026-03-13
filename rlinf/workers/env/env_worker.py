@@ -667,7 +667,7 @@ class EnvWorker(Worker):
                         env_output, rollout_result.bootstrap_values
                     )
                     chunk_step_result = ChunkStepResult(
-                        actions=rollout_result.forward_inputs.get("raw_actions", None),
+                        actions=rollout_result.forward_inputs.get("action", None),
                         prev_logprobs=rollout_result.prev_logprobs
                         if self.collect_prev_infos
                         else None,
