@@ -79,16 +79,6 @@ class ResNetRewardModel(BaseImageRewardModel):
         # Build model architecture
         self._build_model()
 
-        # Load checkpoint if provided
-        checkpoint_path = cfg.get("checkpoint_path")
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            self.load_checkpoint(checkpoint_path)
-            logger.info(f"Loaded checkpoint from {checkpoint_path}")
-        elif checkpoint_path:
-            logger.warning(
-                f"Checkpoint not found at {checkpoint_path}, using random weights"
-            )
-
     def _build_model(self) -> None:
         """Build the ResNet backbone and reward head."""
         # Load pretrained ResNet backbone
@@ -173,26 +163,16 @@ class ResNetRewardModel(BaseImageRewardModel):
 
     def compute_reward(
         self,
-        observations: dict[str, Any],
-        task_descriptions: Optional[list[str]] = None,
+        images: torch.Tensor,
     ) -> torch.Tensor:
         """Compute rewards for inference.
 
         Args:
-            observations: Dictionary containing:
-                - 'images' or 'main_images': Image tensor of shape [B, C, H, W]
-                    or [B, H, W, C].
-            task_descriptions: Not used by this model.
+            images: Image tensor of shape [B, C, H, W] or [B, H, W, C].
 
         Returns:
             torch.Tensor: Reward tensor of shape [B].
         """
-        # Get images from observations
-        images = observations.get("images")
-        if images is None:
-            images = observations.get("main_images")
-        if images is None:
-            raise ValueError("Observations must contain 'images' or 'main_images' key")
 
         # Preprocess and compute rewards
         images = self.preprocess_images(images)
@@ -203,134 +183,6 @@ class ResNetRewardModel(BaseImageRewardModel):
             rewards = torch.sigmoid(logits)
 
         return rewards
-
-    def compute_reward_from_tensor(self, images: torch.Tensor) -> torch.Tensor:
-        """Compute rewards directly from image tensor.
-
-        Convenience method for inference when images are already tensors.
-
-        Args:
-            images: Image tensor of shape [B, C, H, W].
-
-        Returns:
-            torch.Tensor: Reward tensor of shape [B].
-        """
-        images = self.preprocess_images(images)
-
-        with torch.no_grad():
-            rewards = self.backbone(images).squeeze(-1)
-
-        return rewards
-
-    def load_checkpoint(self, checkpoint_path: str) -> None:
-        """Load model weights from checkpoint.
-
-        Handles multiple checkpoint formats:
-        1. Full model state dict
-        2. State dict with 'state_dict' or 'model_state_dict' key
-        3. Backbone-only weights
-        4. SafeTensors format (.safetensors)
-        5. Directory structure from FSDP training (actor/model_state_dict/full_weights.pt)
-
-        Args:
-            checkpoint_path: Path to the checkpoint file or directory.
-        """
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-
-        # Handle directory structure from FSDP training
-        if os.path.isdir(checkpoint_path):
-            # Try common paths in order
-            possible_paths = [
-                os.path.join(
-                    checkpoint_path, "actor", "model_state_dict", "full_weights.pt"
-                ),
-                os.path.join(checkpoint_path, "model_state_dict", "full_weights.pt"),
-                os.path.join(checkpoint_path, "full_weights.pt"),
-            ]
-            found_path = None
-            for p in possible_paths:
-                if os.path.exists(p):
-                    found_path = p
-                    break
-            if found_path is None:
-                raise FileNotFoundError(
-                    f"Checkpoint directory exists but no weights found. "
-                    f"Tried: {possible_paths}"
-                )
-            checkpoint_path = found_path
-            logger.info(f"Found weights at: {checkpoint_path}")
-
-        # Load checkpoint based on format
-        if checkpoint_path.endswith(".safetensors"):
-            from safetensors.torch import load_file
-
-            state_dict = load_file(checkpoint_path)
-            logger.info(f"Loaded {len(state_dict)} keys from safetensors")
-        else:
-            checkpoint = torch.load(
-                checkpoint_path, map_location="cpu", weights_only=False
-            )
-            # Handle different checkpoint formats
-            if isinstance(checkpoint, dict):
-                if "state_dict" in checkpoint:
-                    state_dict = checkpoint["state_dict"]
-                elif "model_state_dict" in checkpoint:
-                    state_dict = checkpoint["model_state_dict"]
-                else:
-                    state_dict = checkpoint
-            else:
-                state_dict = checkpoint
-
-        # Remove common prefixes from keys (from DDP/FSDP training)
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            new_key = k
-            for prefix in ["module.", "_orig_mod.", "model."]:
-                if new_key.startswith(prefix):
-                    new_key = new_key[len(prefix) :]
-            # Skip mean/std buffers (they are persistent=False, auto-created)
-            if new_key in ["mean", "std", "_mean", "_std"]:
-                continue
-            new_state_dict[new_key] = v
-        state_dict = new_state_dict
-
-        # Try to load full model
-        try:
-            self.load_state_dict(state_dict, strict=True)
-            logger.info("Loaded full model state dict")
-        except RuntimeError as e:
-            # Try loading backbone only
-            logger.warning(f"Could not load full state dict: {e}")
-            backbone_state = {
-                k.replace("backbone.", ""): v
-                for k, v in state_dict.items()
-                if k.startswith("backbone.")
-            }
-            if backbone_state:
-                self.backbone.load_state_dict(backbone_state, strict=False)
-                logger.info("Loaded backbone state dict only")
-            else:
-                # Try non-strict loading
-                logger.info("Trying non-strict loading...")
-                self.load_state_dict(state_dict, strict=False)
-                logger.info("Loaded state dict with non-strict mode")
-
-    def save_checkpoint(self, checkpoint_path: str, **extra_info) -> None:
-        """Save model checkpoint.
-
-        Args:
-            checkpoint_path: Path to save the checkpoint.
-            **extra_info: Additional information to save (e.g., epoch, metrics).
-        """
-        checkpoint = {
-            "state_dict": self.state_dict(),
-            "config": dict(self.cfg),
-            "arch": self.arch,
-            **extra_info,
-        }
-        torch.save(checkpoint, checkpoint_path)
-        logger.info(f"Saved checkpoint to {checkpoint_path}")
 
     @property
     def model_type(self) -> str:

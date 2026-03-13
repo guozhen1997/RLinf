@@ -71,7 +71,7 @@ class MultiStepRolloutWorker(Worker):
         )
         self.enable_cuda_graph = cfg.rollout.get("enable_cuda_graph", False)
         self.enable_eval = cfg.runner.val_check_interval > 0 or cfg.runner.only_eval
-        self.actor_split_num = self.get_actor_split_num()
+
         self.n_train_chunk_steps = (
             cfg.env.train.max_steps_per_rollout_epoch
             // cfg.actor.model.num_action_chunks
@@ -540,12 +540,6 @@ class MultiStepRolloutWorker(Worker):
                 ),
                 async_op=True,
             )
-
-    def get_actor_split_num(self):
-        send_num = self.placement.get_world_size("rollout") * self.num_pipeline_stages
-        recv_num = self.placement.get_world_size("actor")
-        split_num = compute_split_num(recv_num, send_num)
-        return split_num
 
     def set_global_step(self, global_step: int):
         self.version = global_step

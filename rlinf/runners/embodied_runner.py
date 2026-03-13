@@ -426,6 +426,7 @@ class EmbodiedRunner:
                         input_channel=self.rollout_channel,
                         output_channel=self.env_channel,
                         actor_channel=self.actor_channel,
+                        reward_channel=self.reward_channel,
                     )
                     rollout_handle: Handle = self.rollout.generate(
                         input_channel=self.env_channel,
@@ -434,6 +435,10 @@ class EmbodiedRunner:
                     self.actor.recv_rollout_trajectories(
                         input_channel=self.actor_channel
                     ).wait()
+                    if self.reward is not None:
+                        self.reward.recv_rollout_images(
+                            input_channel=self.reward_channel
+                        ).wait()
                     rollout_handle.wait()
 
                 # compute rewards with reward model if available

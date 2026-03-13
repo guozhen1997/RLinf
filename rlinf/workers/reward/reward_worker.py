@@ -39,7 +39,6 @@ from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.utils.placement import (
     HybridComponentPlacement,
-    ModelParallelComponentPlacement,
 )
 from rlinf.utils.utils import clear_memory
 from rlinf.utils.logging import get_logger
@@ -52,13 +51,16 @@ from rlinf.data.datasets.reward_model import (
 
 from rlinf.models.embodiment.reward import get_reward_model_class
 from rlinf.utils.down_sampling import down_sample_batch
+from rlinf.utils.comm_mapping import CommMapper
 
 class RewardWorker(Worker):
     """Reward Worker for inference during RL training."""
 
-    def __init__(self, cfg: DictConfig, placement: ModelParallelComponentPlacement):
+    def __init__(self, cfg: DictConfig, placement: HybridComponentPlacement = None):
         Worker.__init__(self)
         self.cfg = cfg
+
+        self.placement = placement
 
         self.total_batch_size_per_dp = (
             self.cfg.data.rollout_batch_size
@@ -92,15 +94,7 @@ class RewardWorker(Worker):
             recv_batch_size += rollout_result.num_sequence
             if rollout_result.rewards is None:
                 if self.cfg.reward.use_reward_model:
-                    with self.device_lock:
-                        batch = rollout_result.to_actor_batch(
-                            self.cfg.data.max_prompt_length,
-                            self.cfg.actor.model.encoder_seq_length,
-                            self.tokenizer.eos_token_id,
-                        )
-                        rollout_result.rewards = (
-                            self.compute_batch_rewards_with_model(batch)
-                        )
+                    raise NotImplementedError
                 else:
                     rollout_result.rewards = self._compute_rule_based_rewards(
                         rollout_result
@@ -143,9 +137,6 @@ class RewardWorker(Worker):
             .view(-1, 1)
             .flatten()
         )
-
-    def compute_batch_rewards_with_model(self, batch: dict[str, torch.Tensor]):
-        raise NotImplementedError("Reward model is not implemented yet.")
 
 
 # =============================================================================
@@ -462,303 +453,178 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
 # =============================================================================
 
 
-class ImageRewardWorker(Worker):
-    """Image-based Reward Worker for inference during RL training.
+class ImageRewardWorker(RewardWorker):
 
-    This worker loads a trained ResNetRewardModel checkpoint and computes
-    rewards for images received via channel communication.
-
-    Usage:
-        - Configure with checkpoint_path pointing to trained model
-        - Connect input_channel (receives images) and output_channel (sends rewards)
-        - Call compute_rewards() in the training loop
-    """
-
-    def __init__(self, cfg: DictConfig):
-        Worker.__init__(self)
-        self.cfg = cfg
+    def __init__(self, cfg: DictConfig, placement: HybridComponentPlacement):
+        super().__init__(cfg, placement)
 
         # Device setup
         torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", 0)))
         self.device = torch.cuda.current_device()
 
+        self.enable_offload = self.cfg.reward.get("enable_offload", True)
 
-        # Model will be loaded in init_worker
-        self.model = None
-
-        self.debug_save_dir = os.environ.get("DEBUG_IMAGE_SAVE_DIR", None)
-        self.debug_success_count = 0
-        self.debug_fail_count = 0
         self.reward_threshold = 0.6
 
     def init_worker(self):
         """Initialize the reward model from checkpoint."""
-        reward_cfg = self.cfg.get("reward", {})
-        model_cfg = reward_cfg.get("model", {})
+        model_cfg = self.cfg.reward.get("model", {})
 
-        # Get debug save dir from config or environment variable
-        self.debug_save_dir = model_cfg.get("debug_save_dir") or os.environ.get(
-            "DEBUG_IMAGE_SAVE_DIR", None
-        )
-
-        # Setup debug image saving directories
-        if self.debug_save_dir:
-            os.makedirs(os.path.join(self.debug_save_dir, "success"), exist_ok=True)
-            os.makedirs(os.path.join(self.debug_save_dir, "fail"), exist_ok=True)
-        checkpoint_path = model_cfg.get("checkpoint_path")
-
-        if checkpoint_path is None:
-            raise ValueError("checkpoint_path must be specified for ImageRewardWorker")
-
-        # Create model (will auto-load checkpoint if checkpoint_path is in model_cfg)
+        # build model
         self.model = ResNetRewardModel(model_cfg)
+
+        model_path = model_cfg.get("model_path", None)
+        if model_path is not None:
+            self._load_model(model_path)
 
         # Move to device and set eval mode
         self.model = self.model.to(self.device)
         self.model.eval()
 
+        self.dst_ranks = {
+            "train": self._setup_dst_ranks(
+                self.total_num_train_envs // self.num_pipeline_stages
+            ),
+        }
+        self.src_ranks = {
+            "train": self._setup_src_ranks(
+                self.total_num_train_envs // self.num_pipeline_stages
+            ),
+        }
+
+    def _load_model(self, model_path):
+        # load state dict
+        if model_path.endswith(".safetensors"):
+            from safetensors.torch import load_file
+
+            state_dict = load_file(model_path)
+        else:
+            state_dict = torch.load(
+                model_path, map_location="cpu", weights_only=False
+            )
+
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            new_key = k
+            for prefix in ["module.", "_orig_mod.", "model."]:
+                if new_key.startswith(prefix):
+                    new_key = new_key[len(prefix) :]
+            # Skip mean/std buffers (they are persistent=False, auto-created)
+            if new_key in ["mean", "std", "_mean", "_std"]:
+                continue
+            new_state_dict[new_key] = v
+        state_dict = new_state_dict
+
+        self.model.load_state_dict(state_dict, strict=True)
+
+    @Worker.timer("compute_rewards")
     def compute_rewards(self, input_channel: Channel, output_channel: Channel):
-        """Compute rewards for images received from input channel.
+        if self.enable_offload:
+            self.model.to(self.device)
 
-        Expected input format via channel:
-            dict with keys:
-                - 'images': torch.Tensor of shape (B, C, H, W) or (B, H, W, C)
-                - 'episode_ids': optional, for tracking
-
-        Output format via channel:
-            dict with keys:
-                - 'rewards': torch.Tensor of shape (B,)
-                - 'episode_ids': passed through if provided
-
-        Args:
-            input_channel: Channel to receive image batches from
-            output_channel: Channel to send computed rewards to
-        """
-        with self.worker_timer():
-            # Receive data from channel
+        while True:
             data = input_channel.get()
+            images = data.get("images")
+            last_run = data.get("last_run", None)
 
-            # Try multiple image keys: reward_images (from StateWithRGBWrapper),
-            # images, or main_images
-            images = data.get("reward_images")
-            if images is None:
-                images = data.get("images")
-            if images is None:
-                images = data.get("main_images")
-            if images is None:
-                self.logger.warning(
-                    "No images in input data (tried: reward_images, images, main_images)"
-                )
-                output_channel.put({"rewards": None}, async_op=True)
-                return
+            rewards = self._compute_image_rewards(images=images)
+            self.send_reward_output(output_channel, rewards)
 
-            if isinstance(images, np.ndarray):
-                images = torch.from_numpy(images)
+            if last_run:
+                if self.enable_offload:
+                    self.model.to("cpu")
+                break
 
-            images = images.to(self.device)
-            self.model.eval()
-
-            with torch.no_grad():
-                outputs = self.model(images)
-                probs = outputs["probabilities"]
-                rewards = torch.where(
-                    probs > self.reward_threshold,
-                    probs,
-                    torch.zeros_like(probs),
-                )
-
-            if self.debug_save_dir:
-                original_images = data.get("main_images")
-                if original_images is None:
-                    original_images = data.get("images")
-                if original_images is None:
-                    original_images = data.get("reward_images")
-                if original_images is not None:
-                    if isinstance(original_images, np.ndarray):
-                        original_images = torch.from_numpy(original_images)
-                    original_images = original_images.to(self.device)
-                    if original_images.dim() == 4 and original_images.shape[-1] in [
-                        1,
-                        3,
-                        4,
-                    ]:
-                        original_images = original_images.permute(0, 3, 1, 2)
-                    if original_images.dtype == torch.uint8:
-                        original_images = original_images.float() / 255.0
-                    self._save_debug_images(original_images, rewards, probs)
-
-            output_data = {"rewards": rewards.cpu()}
-            if "episode_ids" in data:
-                output_data["episode_ids"] = data["episode_ids"]
-
-            output_channel.put(output_data, async_op=True)
-
-    def compute_reward_batch(self, images: torch.Tensor) -> torch.Tensor:
-        """Compute rewards for a batch of images directly (without channel).
-
-        Args:
-            images: Tensor of shape (B, C, H, W) or (B, H, W, C)
-
-        Returns:
-            rewards: Tensor of shape (B,)
-        """
-        images = self._preprocess_images(images)
-        images = images.to(self.device)
-        self.model.eval()
-
-        with torch.no_grad():
-            rewards = self.model.compute_reward({"images": images})
-        return rewards
-
-    def _preprocess_images(self, images: torch.Tensor) -> torch.Tensor:
-        """Preprocess images to (B, C, H, W) in [0, 1]."""
+    def _compute_image_rewards(self, images: torch.Tensor):
         if isinstance(images, np.ndarray):
             images = torch.from_numpy(images)
 
-        if images.dim() == 4 and images.shape[-1] in [1, 3, 4]:
-            images = images.permute(0, 3, 1, 2)
+        images = images.to(self.device)
 
-        if images.dtype == torch.uint8:
-            images = images.float() / 255.0
-        elif images.dtype != torch.float32:
-            images = images.float()
+        with torch.no_grad():
+            outputs = self.model(images)
+            probs = outputs["probabilities"]
+            rewards = torch.where(
+                probs > self.reward_threshold,
+                probs,
+                torch.zeros_like(probs),
+            )
 
-        return images
-
-    def _save_debug_images(
-        self, images: torch.Tensor, rewards: torch.Tensor, probs: torch.Tensor = None
-    ):
-        """Save debug images based on ResNet classification results.
-
-        Args:
-            images: Preprocessed images (B, C, H, W) in [0, 1]
-            rewards: Reward values from ResNet model (B,)
-            probs: Raw probability outputs from ResNet (B,), used for filename
-        """
-        from PIL import Image
-
-        images_np = images.cpu().numpy()
-        rewards_np = rewards.cpu().numpy()
-        probs_np = probs.cpu().numpy() if probs is not None else rewards_np
-
-        for idx in range(len(rewards_np)):
-            reward = rewards_np[idx]
-            prob = probs_np[idx]
-            img = images_np[idx]
-
-            if img.shape[0] in [1, 3, 4]:
-                img = img.transpose(1, 2, 0)
-            img = (img * 255).clip(0, 255).astype(np.uint8)
-            if img.shape[-1] == 1:
-                img = img.squeeze(-1)
-
-            is_success = reward > self.reward_threshold
-            if is_success:
-                self.debug_success_count += 1
-                save_dir = os.path.join(self.debug_save_dir, "success")
-                filename = f"{self.debug_success_count:06d}_prob{prob:.4f}.png"
-            else:
-                self.debug_fail_count += 1
-                save_dir = os.path.join(self.debug_save_dir, "fail")
-                filename = f"{self.debug_fail_count:06d}_prob{prob:.4f}.png"
-
-            os.makedirs(save_dir, exist_ok=True)
-            try:
-                pil_img = Image.fromarray(img)
-                pil_img.save(os.path.join(save_dir, filename))
-            except Exception:
-                pass
+        return rewards
 
     def run_inference_loop(self, input_channel: Channel, output_channel: Channel):
-        """Run continuous inference loop (for use in RL training).
-
-        This method runs until input_channel signals completion (returns None).
-
-        Args:
-            input_channel: Channel to receive image batches from
-            output_channel: Channel to send computed rewards to
-        """
-        self.logger.info("Starting ImageRewardWorker inference loop")
-        target_key = "0_train"
-
         while True:
-            try:
-                data = input_channel.get(key=target_key)
-                if data is None:
-                    self.logger.info("Received stop signal, ending inference loop")
-                    break
+            data = input_channel.get()
+            images = data.get("images")
 
-                dones = data.get("dones")
-                final_obs = data.get("final_obs")
+            images = images.to(self.device)
 
-                is_done_flag = False
-                if dones is not None:
-                    if isinstance(dones, torch.Tensor):
-                        is_done_flag = dones.any().item()
-                    else:
-                        is_done_flag = bool(dones)
+            with torch.no_grad():
+                rewards = self.model.compute_reward(images)
 
-                # If Done=True is displayed but there's no final_obs, it means this is the starting frame after a Reset.
-                # In this case, Reward should not be calculated, as it would trigger an Invariant check in RolloutWorker.
-                if is_done_flag and final_obs is None:
-                    output_data = data.copy()  # copy.deepcopy(data)
-                    output_data["rewards"] = None
-                    output_channel.put(output_data, key=target_key, async_op=True)
-                    continue
+            if rewards.dim() == 1:
+                rewards = rewards.unsqueeze(1)
 
-                images = data.get("images")
-                if images is None:
-                    images = data.get("main_images")
-                if images is None and "obs" in data and isinstance(data["obs"], dict):
-                    images = data["obs"].get("main_images")
+            self.send_reward_output(output_channel, rewards)
 
-                if images is None:
-                    self.logger.warning("Received data but no images found")
-                    output_channel.put(data, key=target_key, async_op=True)
-                    continue
+    def _setup_dst_ranks(self, batch_size: int) -> list[tuple[int, int]]:
+        """Compute env peer ranks for this reward worker.
 
-                images = self._preprocess_images(images)
-                images = images.to(self.device)
-                self.model.eval()
-
-                with torch.no_grad():
-                    rewards = self.model.compute_reward({"images": images})
-
-                # # print reward model output
-                # r_mean = rewards.mean().item()
-                # print(f"Model Inference | Reward Val: {r_mean:.4f}", flush=True)
-
-                output_data = data.copy()  # copy.deepcopy(data)
-                cpu_rewards = rewards.cpu()
-                if cpu_rewards.dim() == 1:
-                    cpu_rewards = cpu_rewards.unsqueeze(1)
-                output_data["rewards"] = cpu_rewards
-
-                output_channel.put(output_data, key=target_key, async_op=True)
-
-            except Exception as e:
-                self.logger.warning(f"Error in inference loop: {e}")
-                continue
-
-        self.logger.info("ImageRewardWorker inference loop ended")
-
-    def save_checkpoint(self, save_path: str, global_step: int) -> None:
-        """Save reward model checkpoint.
+        This mapping supports both one-to-many and many-to-one env/reward layouts.
+        The returned ranks are used as communication counterparts for receiving env
+        outputs and sending action chunks.
 
         Args:
-            save_path: Directory to save the checkpoint
-            global_step: Current global step for naming
+            batch_size: Total env batch size per pipeline stage across all workers.
+
+        Returns:
+            Ordered ``(env_rank, batch_size)`` tuples this reward worker should
+            send action chunks to.
         """
-        if self.model is None:
-            return
-
-        os.makedirs(save_path, exist_ok=True)
-        checkpoint_file = os.path.join(save_path, f"reward_model_step_{global_step}.pt")
-
-        torch.save(
-            {
-                "model_state_dict": self.model.state_dict(),
-                "global_step": global_step,
-            },
-            checkpoint_file,
+        env_world_size = self.placement.get_world_size("env")
+        reward_world_size = self.placement.get_world_size("reward")
+        return CommMapper.get_dst_ranks(
+            batch_size=batch_size,
+            src_world_size=reward_world_size,
+            dst_world_size=env_world_size,
+            src_rank=self._rank,
         )
+
+    def _setup_src_ranks(self, batch_size: int) -> list[tuple[int, int]]:
+        """Compute env source ranks and sizes for receiving env outputs."""
+        env_world_size = self.placement.get_world_size("env")
+        reward_world_size = self.placement.get_world_size("reward")
+        return CommMapper.get_src_ranks(
+            batch_size=batch_size,
+            src_world_size=env_world_size,
+            dst_world_size=reward_world_size,
+            dst_rank=self._rank,
+        )
+    
+    def send_reward_output(
+        self,
+        output_channel: Channel,
+        reward_tensor: torch.Tensor | np.ndarray,
+    ):
+        """Send action shards to mapped env ranks.
+
+        Args:
+            output_channel: Channel carrying rollout->env action chunks.
+            reward_tensor: Predicted rewards (tensor or ndarray).
+        """
+
+        dst_ranks_and_sizes = self.dst_ranks["train"]
+        split_sizes = [size for _, size in dst_ranks_and_sizes]
+        reward_tensor_split = list(torch.split(reward_tensor, split_sizes, dim=0))
+        for (dst_rank, _), reward_i in zip(
+            dst_ranks_and_sizes, reward_tensor_split
+        ):
+            if isinstance(reward_i, torch.Tensor):
+                reward_i = reward_i.cpu().contiguous()
+            output_channel.put(
+                reward_i,
+                key=CommMapper.build_channel_key(
+                    self._rank, dst_rank, extra=f"reward_output"
+                ),
+                async_op=True,
+            )
