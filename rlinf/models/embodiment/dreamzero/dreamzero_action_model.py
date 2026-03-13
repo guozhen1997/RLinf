@@ -128,6 +128,10 @@ class DreamZeroActionModel:
         self._call_count = 0
         self.video_across_time = []
 
+        self._pending_actions = None
+        self._pending_idx = 0
+        self._chunk_action_horizon = 24
+
         # 2. Load the action, video, and state transforms
         # 2.1. Load the metadata for normalization stats
         # We have an assumption: one policy is only for rolling out one type of env, i.e., one embodiment_tag
@@ -299,8 +303,8 @@ class DreamZeroActionModel:
             return unsqueezed_data
         # 2. 保证 obs 有 batch 维
         is_batched = _is_batched(batch.obs)
-        print("================================================")
-        print(f"is_batched: {is_batched}")
+        # print("================================================")
+        # print(f"is_batched: {is_batched}")
         if not is_batched:
             batch.obs = unsqueeze_dict_values(batch.obs)
 
@@ -499,13 +503,46 @@ class DreamZeroActionModel:
 
         batch.act = squeeze_dict_values(batch.act)
 
-        self.video_across_time.append(video_pred)
         action_chunk_dict = batch.act
         action_dict = {}
         for k in dir(action_chunk_dict):
             if k.startswith("action."):
                 action_dict[k] = getattr(action_chunk_dict, k)
         action = self._convert_action(action_dict)
+        return action
+
+    def predict_action_one_step(self, obs: dict) -> np.ndarray:
+        #self.model.eval()
+        if self._pending_idx == 0 or self._pending_idx >= self._chunk_action_horizon:
+            converted_obs = self._convert_observation(obs)
+            batch = Batch(obs=converted_obs)
+            original_obs_for_relative = {k: v.copy() if isinstance(v, np.ndarray) else v.clone() if torch.is_tensor(v) else v 
+                                     for k, v in batch.obs.items()}
+            original_obs_for_relative = unsqueeze_dict_values(original_obs_for_relative)
+            normalized_input = self._process_batch(batch)
+            with torch.no_grad():
+                model_pred = self.model.lazy_joint_video_action_causal(normalized_input)
+            normalized_action = model_pred["action_pred"].float()
+            video_pred = model_pred["video_pred"]
+
+            self.video_across_time.append(video_pred)
+            # 4. Unnormalize actions (pass obs for relative action conversion)
+            batch = self.unapply(Batch(normalized_action=normalized_action), obs=original_obs_for_relative)
+
+            # 5. Remove batch dimension if we added it
+
+            batch.act = squeeze_dict_values(batch.act)
+
+            action_chunk_dict = batch.act
+            action_dict = {}
+            for k in dir(action_chunk_dict):
+                if k.startswith("action."):
+                    action_dict[k] = getattr(action_chunk_dict, k)
+            actions = self._convert_action(action_dict)
+            self._pending_actions = actions
+            self._pending_idx = 0
+        action = self._pending_actions[self._pending_idx]
+        self._pending_idx += 1
         return action
 
     def forward(
@@ -792,6 +829,24 @@ def test_dreamzero_action_model():
     print(actions)
 
     
+def unsqueeze_dict_values(data: dict[str, Any]) -> dict[str, Any]:
+            """
+            Unsqueeze the values of a dictionary.
+            This converts the data to be batched of size 1.
+            """
+            unsqueezed_data = {}
+            for k, v in data.items():
+                if isinstance(v, np.ndarray):
+                    unsqueezed_data[k] = np.expand_dims(v, axis=0)
+                elif isinstance(v, list):
+                    unsqueezed_data[k] = np.array(v)
+                elif isinstance(v, torch.Tensor):
+                    unsqueezed_data[k] = v.unsqueeze(0)
+                elif isinstance(v, str):
+                    unsqueezed_data[k] = np.array([v])
+                else:
+                    unsqueezed_data[k] = v
+            return unsqueezed_data
 
 def test_droid_env():
     #_ensure_groot_importable()
@@ -840,13 +895,6 @@ def test_droid_env():
 
     obs, _ = env.reset()
     obs, _ = env.reset() # need second render cycle to get correctly loaded materials
-    print("--------------reset done------------------")
-    print("obs", obs)
-    print("================================================")
-    print("keys and shapes before eval_transform:")
-    for k, v in obs.items():
-        if hasattr(v, "shape"):
-            print(k, v.shape, type(v))
     import uuid
     session_id = str(uuid.uuid4())
     #roboarena_obs = droid_obs_to_roboarena(obs, instruction, session_id)
@@ -864,71 +912,61 @@ def test_droid_env():
                 #roboarena_obs = droid_obs_to_ardroid(obs, instruction)
                 roboarena_obs = droid_obs_to_roboarena(obs, instruction, session_id)
                 #normalized_action, video_pred = model.predict_action_obs(roboarena_obs)
-                normalized_action = model.predict_action_batch(roboarena_obs)
+                normalized_action = model.predict_action_one_step(roboarena_obs)
 
                 normalized_action = torch.from_numpy(normalized_action).float()
-                T = min(12, normalized_action.shape[0])
-                for t in range(T):
-                    action = normalized_action[t].clone()      # (8,)
+                action = normalized_action.clone()      # (8,)
 
-                    # 二值化夹爪
-                    if action[-1].item() > 0.5:
-                        action[-1] = 1.0
+                # 二值化夹爪
+                if action[-1].item() > 0.5:
+                    action[-1] = 1.0
+                else:
+                    action[-1] = 0.0
+
+                action_tensor = action.unsqueeze(0).to(device="cuda")  # (1, 8)
+
+                obs, reward, term, trunc, _  = env.step(action_tensor)
+
+                policy = obs.get("policy", obs)
+                ext1 = policy["external_cam"]      # (1, H, W, 3)
+                ext2 = policy["external_cam_2"]    # (1, H, W, 3)
+                wrist = policy["wrist_cam"]        # (1, H, W, 3)
+                def _to_numpy_hw3_first(t: torch.Tensor) -> np.ndarray:
+                    if isinstance(t, torch.Tensor):
+                        arr = t[0].detach().cpu().numpy()   # (H, W, 3)
                     else:
-                        action[-1] = 0.0
-
-                    action_tensor = action.unsqueeze(0).to(device="cuda")  # (1, 8)
-
-                    obs, reward, term, trunc, _  = env.step(action_tensor)
-
-                    policy = obs.get("policy", obs)
-                    ext1 = policy["external_cam"]      # (1, H, W, 3)
-                    ext2 = policy["external_cam_2"]    # (1, H, W, 3)
-                    wrist = policy["wrist_cam"]        # (1, H, W, 3)
-                    def _to_numpy_hw3_first(t: torch.Tensor) -> np.ndarray:
-                        if isinstance(t, torch.Tensor):
-                            arr = t[0].detach().cpu().numpy()   # (H, W, 3)
-                        else:
-                            arr = np.asarray(t)[0]
-                        return arr
-                    ext1_np = _to_numpy_hw3_first(ext1)
-                    ext2_np = _to_numpy_hw3_first(ext2)
-                    wrist_np = _to_numpy_hw3_first(wrist)
-                    frame = np.concatenate([ext1_np, ext2_np, wrist_np], axis=1)
-                    video.append(frame)
-                    if term or trunc:
-                        print("=====================obs term for T= {_step} ===========================",_step)
-                        print("reward", reward)
-                        print("term", term)
-                        print("trunc", trunc)
-                        print("================================================")
-                #obs, _, term, trunc, _ = env.step(normalized_action)
+                        arr = np.asarray(t)[0]
+                    return arr
+                ext1_np = _to_numpy_hw3_first(ext1)
+                ext2_np = _to_numpy_hw3_first(ext2)
+                wrist_np = _to_numpy_hw3_first(wrist)
+                frame = np.concatenate([ext1_np, ext2_np, wrist_np], axis=1)
+                video.append(frame)
                 if term or trunc:
+                    print("=====================obs term for T= {_step} ===========================",_step)
+                    print("reward", reward)
+                    print("term", term)
+                    print("trunc", trunc)
+                    print("================================================")
                     break
-            imageio.mimsave(video_dir / f"episode_{ep}.mp4", video, fps=5, codec='libx264')
+            imageio.mimsave(video_dir / f"episode_{ep}.mp4", video, fps=15, codec='libx264')
+            frames = []
+            for v in model.video_across_time:    # v 是 torch.Tensor, shape 类似 (T, H, W, C) 或 (H, W, C)
+                if isinstance(v, torch.Tensor):
+                    frames.append(v.detach().cpu().to(torch.float32).numpy())
+                else:
+                    frames.append(np.asarray(v))
+
+            imageio.mimsave(
+                video_dir / f"episode_{ep}_model_video.mp4",
+                frames,          # 现在是 numpy 数组列表
+                fps=15,
+                codec='libx264',
+            )
             video = []
-            obs, _ = env.reset()
-            obs, _ = env.reset()
-                # env.close()
-                # simulation_app.close()
-                # exit()
-            #     if not headless:
-            #         cv2.imshow("Right Camera", cv2.cvtColor(ret["viz"], cv2.COLOR_RGB2BGR))
-            #         cv2.waitKey(1)
-            #     video.append(ret["viz"])
-            #     action = torch.tensor(ret["action"])[None]
-            #     obs, _, term, trunc, _ = env.step(action)
-            #     if term or trunc:
-            #         break
-
-            # client.reset()
-            # mediapy.write_video(
-            #     video_dir / f"episode_{ep}.mp4",
-            #     video,
-            #     fps=15,
-            # )
-            # video = []
-
+            #model.video_across_time = []
+            model._pending_idx = 0
+            model._pending_actions = None
     env.close()
     simulation_app.close()
 
