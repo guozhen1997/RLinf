@@ -9,7 +9,7 @@ export PYOPENGL_PLATFORM="egl"
 export PYTHONPATH="${REPO_PATH}:${PYTHONPATH:-}"
 
 if [ -z "$1" ]; then
-    CONFIG_NAME="d4rl_offline_mujoco"
+    CONFIG_NAME="d4rl_iql_mujoco"
 else
     CONFIG_NAME=$1
 fi

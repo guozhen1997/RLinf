@@ -109,7 +109,9 @@ class IQLMLPPolicy(MLPPolicy):
             if state_dependent_std:
                 self.actor_logstd = nn.Linear(hidden_dims[-1], action_dim)
             else:
-                self.actor_logstd = nn.Parameter(torch.zeros(action_dim))
+                # Keep shape aligned with generic MLPPolicy for seamless
+                # actor->rollout state_dict loading in offline eval.
+                self.actor_logstd = nn.Parameter(torch.zeros(1, action_dim))
             self.logstd_range = (log_std_min, log_std_max)
         elif self.iql_type == "critic":
             self.net = self._build_mlp(
@@ -155,7 +157,7 @@ class IQLMLPPolicy(MLPPolicy):
         if self.state_dependent_std:
             action_logstd = self.actor_logstd(feat)
         else:
-            action_logstd = self.actor_logstd.unsqueeze(0)
+            action_logstd = self.actor_logstd
         action_logstd = torch.clamp(
             action_logstd, self.logstd_range[0], self.logstd_range[1]
         )
@@ -176,6 +178,57 @@ class IQLMLPPolicy(MLPPolicy):
         else:
             raw_action = action_mean_raw.clone()
         return torch.tanh(raw_action)
+
+    @torch.inference_mode()
+    def predict_action_batch(
+        self,
+        env_obs,
+        calculate_logprobs=True,
+        calculate_values=True,
+        return_obs=True,
+        mode="train",
+        **kwargs,
+    ):
+        """Generate actions with the IQL actor path for rollout/eval consistency."""
+        env_obs = self.preprocess_env_obs(env_obs=env_obs)
+        states = env_obs["states"]
+        temperature = kwargs.get("temperature", None)
+        if temperature is None:
+            temperature = 0.0 if mode == "eval" else 1.0
+        temperature = float(temperature)
+
+        action = self.iql_forward_actor(observations=states, temperature=temperature)
+        chunk_actions = (
+            action.reshape(-1, self.num_action_chunks, self.action_dim).cpu().numpy()
+        )
+
+        if calculate_logprobs:
+            log_probs = self.iql_forward_actor(observations=states, actions=action)
+            chunk_logprobs = log_probs.unsqueeze(-1).expand(-1, self.action_dim)
+        else:
+            chunk_logprobs = torch.zeros(
+                (states.shape[0], self.action_dim),
+                device=states.device,
+                dtype=states.dtype,
+            )
+
+        if hasattr(self, "value_head") and calculate_values:
+            chunk_values = self.value_head(states)
+        else:
+            chunk_values = torch.zeros(
+                (states.shape[0], 1), device=states.device, dtype=states.dtype
+            )
+
+        forward_inputs = {"action": action}
+        if return_obs:
+            forward_inputs["states"] = states
+
+        result = {
+            "prev_logprobs": chunk_logprobs,
+            "prev_values": chunk_values,
+            "forward_inputs": forward_inputs,
+        }
+        return chunk_actions, result
 
     def iql_forward_critic(self, **kwargs) -> torch.Tensor:
         observations = kwargs.get("observations")

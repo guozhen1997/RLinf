@@ -70,7 +70,7 @@ jobs:
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
-          bash tests/e2e_tests/embodied/run_offline.sh d4rl_offline_mujoco
+          bash tests/e2e_tests/embodied/run_offline.sh d4rl_iql_mujoco
 
       - name: D4RL Offline IQL test (FSDP wrap)
         timeout-minutes: 15
@@ -78,7 +78,7 @@ jobs:
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
-          bash tests/e2e_tests/embodied/run_offline.sh d4rl_offline_mujoco egl actor.use_fsdp_wrap=true
+          bash tests/e2e_tests/embodied/run_offline.sh d4rl_iql_mujoco egl actor.use_fsdp_wrap=true
 
       - name: Clean up
         run: |

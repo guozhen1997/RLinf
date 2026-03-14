@@ -19,10 +19,6 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.datasets.d4rl_offline import (
-    evaluate_policy,
-    make_d4rl_env,
-)
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.models.embodiment.mlp_policy.iql_mlp_policy import IQLMLPPolicy
 from rlinf.scheduler import Worker
@@ -43,12 +39,11 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self.offline_compile_mode = "reduce-overhead"
         self.offline_strict_mode = True
         self.offline_metric_sync_interval = 1000
-        self.sampling_stream = None
 
         self.env = None
-        self.dataset = None
-        self.dataset_tensors = None
-        self.dataset_size = 0
+        self._prefetched_batches = None
+        self._obs_dim = None
+        self._action_dim = None
         self.device = None
 
         # IQL State
@@ -85,14 +80,17 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                 summed[k].add_(v.detach())
         return summed
 
-    def init_worker(self, dataset=None):
-        """Initialize IQL worker. dataset must be provided for training."""
-        assert dataset is not None, (
-            "Offline IQL requires dataset to be passed to init_worker. "
+    def init_worker(self):
+        """Initialize IQL worker."""
+        dataset_cfg = getattr(self.cfg, "dataset", None)
+        self._dataset_group_name = str(
+            getattr(dataset_cfg, "group_name", "DatasetGroup")
         )
-        self.setup_iql_components(dataset=dataset)
+        self.setup_iql_components()
         os.makedirs(self._save_dir or ".", exist_ok=True)
         self.setup_model_and_optimizer(initialize_target=True)
+        # Setup actor->rollout rank mapping for weight sync.
+        self._setup_rollout_weight_dst_ranks()
 
     def build_iql_module(
         self, obs_dim: int, action_dim: int, type_name: str
@@ -112,7 +110,7 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             obs_dim,
             action_dim,
             num_action_chunks=1,
-            add_value_head=False,
+            add_value_head=(type_name == "actor"),
             add_q_head=False,
         )
         model.configure_iql(iql_config)
@@ -209,54 +207,6 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             prepared_batch[key] = tensor
         return prepared_batch
 
-    def sample_prepared_batch_tuple(
-        self, batch_size: int, stream: Optional[torch.cuda.Stream] = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Sample a batch and return a ready tensor tuple for hot loops.
-
-        If stream is given, sampling runs on that CUDA stream (for async prefetch).
-        """
-        if stream is not None:
-            with torch.cuda.stream(stream):
-                if self.dataset_tensors is None:
-                    prepared = self.prepare_batch(self.dataset.sample(batch_size))
-                    return (
-                        prepared["observations"],
-                        prepared["actions"],
-                        prepared["rewards"],
-                        prepared["masks"],
-                        prepared["next_observations"],
-                    )
-                indices = torch.randint(
-                    0, self.dataset_size, size=(batch_size,), device=self.device
-                )
-                return (
-                    self.dataset_tensors["observations"].index_select(0, indices),
-                    self.dataset_tensors["actions"].index_select(0, indices),
-                    self.dataset_tensors["rewards"].index_select(0, indices),
-                    self.dataset_tensors["masks"].index_select(0, indices),
-                    self.dataset_tensors["next_observations"].index_select(0, indices),
-                )
-        if self.dataset_tensors is None:
-            prepared = self.prepare_batch(self.dataset.sample(batch_size))
-            return (
-                prepared["observations"],
-                prepared["actions"],
-                prepared["rewards"],
-                prepared["masks"],
-                prepared["next_observations"],
-            )
-        indices = torch.randint(
-            0, self.dataset_size, size=(batch_size,), device=self.device
-        )
-        return (
-            self.dataset_tensors["observations"].index_select(0, indices),
-            self.dataset_tensors["actions"].index_select(0, indices),
-            self.dataset_tensors["rewards"].index_select(0, indices),
-            self.dataset_tensors["masks"].index_select(0, indices),
-            self.dataset_tensors["next_observations"].index_select(0, indices),
-        )
-
     def sample_actions(
         self, observations: np.ndarray, temperature: float = 1.0
     ) -> np.ndarray:
@@ -281,9 +231,92 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             actions = actions[0]
         return np.clip(actions, -1, 1)
 
+    def get_policy_state_dict(self) -> dict[str, torch.Tensor]:
+        """Return actor policy state_dict on CPU for external rollout/eval workers."""
+        assert self.model is not None, (
+            "init_worker() must be called before get_policy_state_dict()."
+        )
+        if self._use_fsdp_wrap:
+            state = self._strategy.get_model_state_dict(
+                self.model,
+                cpu_offload=False,
+                full_state_dict=True,
+            )
+        else:
+            state = self.model.state_dict()
+        return {k: v.detach().cpu() for k, v in state.items()}
+
+    def sync_model_to_rollout(self, dst_rank: Optional[int] = None) -> None:
+        """Sync current policy weights to rollout group via Worker.send()."""
+        # Keep the FSDP path aligned with the base actor implementation.
+        if self._use_fsdp_wrap and dst_rank is None:
+            super().sync_model_to_rollout()
+            return
+
+        state = self.get_policy_state_dict()
+        if dst_rank is not None:
+            self.send(
+                state,
+                dst_group_name=self._rollout_group_name,
+                dst_rank=dst_rank,
+                async_op=False,
+                options=self._sync_weight_comm_options,
+            )
+            return
+
+        dst_ranks = self._weight_dst_rank_in_rollout
+        if dst_ranks is None:
+            return
+        if not isinstance(dst_ranks, list):
+            dst_ranks = [dst_ranks]
+        for rank in dst_ranks:
+            self.send(
+                state,
+                dst_group_name=self._rollout_group_name,
+                dst_rank=rank,
+                async_op=False,
+                options=self._sync_weight_comm_options,
+            )
+
     def soft_update_target_model(self):
         assert self.target_model_initialized
         with torch.no_grad():
+            if self._use_fsdp_wrap:
+                # FSDP may expose params as views; avoid in-place math on these
+                # views by blending full state dict tensors out-of-place.
+                target_state = self._strategy.get_model_state_dict(
+                    self.target_model,
+                    cpu_offload=False,
+                    full_state_dict=True,
+                )
+                critic_state = self._strategy.get_model_state_dict(
+                    self.critic_model,
+                    cpu_offload=False,
+                    full_state_dict=True,
+                )
+                one_minus_tau = 1.0 - float(self.tau)
+                mixed_state: dict[str, Any] = {}
+                for name, target_value in target_state.items():
+                    critic_value = critic_state.get(name, None)
+                    if isinstance(target_value, torch.Tensor) and isinstance(
+                        critic_value, torch.Tensor
+                    ):
+                        mixed_state[name] = (
+                            target_value * one_minus_tau
+                            + critic_value * float(self.tau)
+                        )
+                    elif critic_value is not None:
+                        mixed_state[name] = critic_value
+                    else:
+                        mixed_state[name] = target_value
+                self._strategy.load_model_with_state_dict(
+                    self.target_model,
+                    mixed_state,
+                    cpu_offload=False,
+                    full_state_dict=True,
+                )
+                return
+
             if self._critic_params and self._target_params:
                 torch._foreach_mul_(self._target_params, 1.0 - self.tau)
                 torch._foreach_add_(
@@ -434,8 +467,12 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
 
         When offline_torch_compile is true, ensure fsdp_config has use_orig_params: true.
         """
-        obs_dim = int(self.dataset.observations.shape[-1])
-        action_dim = int(self.dataset.actions.shape[-1])
+        if self._obs_dim is None or self._action_dim is None:
+            raise ValueError(
+                "actor.model.obs_dim/action_dim must be set before actor init."
+            )
+        obs_dim = int(self._obs_dim)
+        action_dim = int(self._action_dim)
 
         module = self.model_provider_func(obs_dim, action_dim, type_name="actor")
         critic_module = self.model_provider_func(
@@ -493,6 +530,11 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         ]
         self.optimizer = torch.optim.Adam(unified_params)
         self.log_info("IQL offline: using unified optimizer (1 step).")
+        if self.offline_torch_compile and self._use_fsdp_wrap:
+            self.log_warning(
+                "IQL offline: disable torch.compile when use_fsdp_wrap=True "
+            )
+            self.offline_torch_compile = False
         if self.offline_torch_compile:
             self._compiled_update_step = torch.compile(
                 self.update_step_forward,
@@ -502,8 +544,8 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             )
             self.log_info("IQL offline: torch.compile enabled (fullgraph=False).")
 
-    def setup_iql_components(self, dataset):
-        """Initialize IQL-specific offline components. dataset is partitioned by rank."""
+    def setup_iql_components(self):
+        """Initialize IQL-specific offline components."""
         # Read actor.offline_* from config (same style as fsdp_sac_policy_worker)
         actor_cfg = self.cfg.actor
         self.offline_torch_compile = bool(actor_cfg.get("offline_torch_compile", True))
@@ -526,8 +568,8 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                 self._save_dir = os.path.join(log_path, exp_name)
             else:
                 self._save_dir = "."
-        self.env = make_d4rl_env(self.cfg.env.get("env_name"), self._seed)
-        self.dataset = dataset
+        # NOTE: Offline eval is handled by env workers via runner; actor doesn't own env.
+        self.env = None
 
         torch.manual_seed(self._seed)
         np.random.seed(self._seed)
@@ -537,51 +579,39 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self.device = torch.device(self.device)
         if self.device.type == "cuda":
             torch.set_float32_matmul_precision("high")
-            self.sampling_stream = torch.cuda.Stream(device=self.device)
 
         self.discount = self.cfg.algorithm.discount
         self.tau = self.cfg.algorithm.tau
         self.expectile = self.cfg.algorithm.expectile
         self.temperature = self.cfg.algorithm.temperature
         self.batch_size = int(self.cfg.algorithm.get("batch_size", 256))
-
-        # Cache offline dataset on GPU (fallback to CPU sampling on OOM).
-        self.dataset_tensors = None
-        self.dataset_size = int(self.dataset.size)
-        try:
-            self.dataset_tensors = {
-                "observations": torch.as_tensor(
-                    self.dataset.observations, dtype=torch.float32, device=self.device
-                ),
-                "actions": torch.as_tensor(
-                    self.dataset.actions, dtype=torch.float32, device=self.device
-                ),
-                "rewards": torch.as_tensor(
-                    self.dataset.rewards, dtype=torch.float32, device=self.device
-                ),
-                "masks": torch.as_tensor(
-                    self.dataset.masks, dtype=torch.float32, device=self.device
-                ),
-                "next_observations": torch.as_tensor(
-                    self.dataset.next_observations,
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-            }
-        except RuntimeError as e:
-            self.dataset_tensors = None
-            self.log_warning(
-                "Failed to cache offline dataset on GPU, fallback to CPU sampling. "
-                f"Reason: {e}"
+        # Actor only consumes batches forwarded from dataset worker by runner.
+        model_cfg = self.cfg.actor.model
+        self._obs_dim = int(model_cfg.get("obs_dim", 0))
+        self._action_dim = int(model_cfg.get("action_dim", 0))
+        if self._obs_dim <= 0 or self._action_dim <= 0:
+            raise ValueError(
+                "actor.model.obs_dim/action_dim must be set before actor init when "
+                "using runner-forwarded dataset batches."
             )
 
     @Worker.timer("run_training")
-    def run_training(self):
-        """IQL training using offline dataset"""
-        assert self.model is not None and self.dataset is not None, (
+    def run_training(
+        self, batches: Optional[list[dict[str, np.ndarray | torch.Tensor]]] = None
+    ):
+        """IQL training using batches forwarded from dataset worker by runner."""
+        if batches is None and self._prefetched_batches is not None:
+            batches = self._prefetched_batches
+            self._prefetched_batches = None
+        assert self.model is not None, (
             "init_worker() must be called before run_training()."
         )
-        local_update_steps = max(1, int(self.cfg.runner.get("local_update_steps", 1)))
+        if batches is None:
+            raise RuntimeError(
+                "No training batches provided. Runner must prefetch and send batches "
+                "from dataset worker before actor.run_training()."
+            )
+        local_update_steps = max(1, len(batches))
         if self._global_step < 0:
             self._global_step = 0
         max_steps = int(self.cfg.runner.get("max_steps", 1))
@@ -595,56 +625,25 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
 
         summed_metrics: Optional[dict[str, torch.Tensor]] = None
         eval_metrics: dict[str, Any] = {}
-        next_batch: Optional[
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-        ] = None
-        default_stream = (
-            torch.cuda.current_stream(self.device)
-            if self.device.type == "cuda"
-            else None
-        )
-        val_check_interval = self.cfg.runner.get("val_check_interval")
-        eval_episodes = self.cfg.runner.get("eval_episodes")
+        # Evaluation is performed outside actor (env worker + runner).
 
         # Main update loop
         for i in range(local_update_steps):
-            if self.sampling_stream is not None and default_stream is not None:
-                if next_batch is not None:
-                    default_stream.wait_stream(self.sampling_stream)
-                else:
-                    next_batch = self.sample_prepared_batch_tuple(self.batch_size)
-                packed_batch = next_batch
-                if i + 1 < local_update_steps:
-                    next_batch = self.sample_prepared_batch_tuple(
-                        self.batch_size, stream=self.sampling_stream
-                    )
-                    for t in packed_batch:
-                        t.record_stream(default_stream)
-                else:
-                    next_batch = None
-            else:
-                packed_batch = self.sample_prepared_batch_tuple(self.batch_size)
+            prepared = self.prepare_batch(batches[i])
+            packed_batch = (
+                prepared["observations"],
+                prepared["actions"],
+                prepared["rewards"],
+                prepared["masks"],
+                prepared["next_observations"],
+            )
 
             update_info = self.update_one_epoch(packed_batch)
             summed_metrics = self.aggregate_update_info(summed_metrics, update_info)
 
             self._global_step += 1
 
-            if self._global_step % val_check_interval == 0:
-
-                def sample_fn(obs: np.ndarray, t: float = 0.0) -> np.ndarray:
-                    return self.sample_actions(obs, t)
-
-                eval_stats = evaluate_policy(sample_fn, self.env, eval_episodes)
-                self.eval_returns.append((self._global_step, eval_stats["return"]))
-                np.savetxt(
-                    os.path.join(self._save_dir or ".", f"{self._seed}.txt"),
-                    self.eval_returns,
-                    fmt=["%d", "%.1f"],
-                )
-                eval_metrics = {
-                    f"evaluation/average_{k}s": v for k, v in eval_stats.items()
-                }
+            # No eval here; runner may call env worker for evaluation.
 
         mean_metric_dict: dict[str, Any] = {}
         if summed_metrics is not None:
@@ -653,6 +652,25 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         mean_metric_dict.update(eval_metrics)
         mean_metric_dict["__global_step"] = int(self._global_step)
         return mean_metric_dict
+
+    def set_prefetched_batches(
+        self, batches: list[dict[str, np.ndarray | torch.Tensor]]
+    ) -> None:
+        """Cache prefetched batches from runner for next run_training call."""
+        self._prefetched_batches = batches
+
+    def recv_dataset_batches(self) -> None:
+        """Receive prefetched batches from dataset workers via Worker.recv()."""
+        dataset_world_size = int(self._component_placement.get_world_size("dataset"))
+        src_rank = self._rank % max(1, dataset_world_size)
+        batches = self.recv(
+            src_group_name=self._dataset_group_name,
+            src_rank=src_rank,
+        )
+        assert isinstance(batches, list), (
+            f"Expected list of batches, got {type(batches)}"
+        )
+        self._prefetched_batches = batches
 
     def compute_advantages_and_returns(self):
         """
