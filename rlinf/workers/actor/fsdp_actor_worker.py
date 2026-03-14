@@ -611,6 +611,7 @@ class FSDPActor(FSDPModelManager, Worker):
         input_channel: Channel,
         output_channel: Channel,
         compute_ref_logprobs: bool,
+        do_offload=False,
     ):
         """
         Compute prev/ref logprobs using the actor Model's forward.
@@ -619,7 +620,12 @@ class FSDPActor(FSDPModelManager, Worker):
             input_channel: The input channel to read from.
             output_channel: The output channel to send results to.
             compute_ref_logprobs: Whether to compute reference logprobs.
+            do_offload: Whether offload weights after inference is done
         """
+        assert not do_offload, (
+            "do_offload argument of run_inference/run_training is not supported in FSDP for now"
+        )
+
         inference_split = self.cfg.actor.get("inference_split", None)
         if inference_split is None:
             if not self.is_pipeline:
@@ -883,8 +889,14 @@ class FSDPActor(FSDPModelManager, Worker):
         )
         return batch
 
-    def run_training(self, input_channel: Channel) -> tuple[dict, list]:
+    def run_training(
+        self, input_channel: Channel, do_offload=False
+    ) -> tuple[dict, list]:
         # Get all batches for this DP
+        assert not do_offload, (
+            "do_offload argument of run_inference/run_training is not supported in FSDP for now"
+        )
+
         if self.is_pipeline:
             return self.run_training_pipeline(input_channel)
 
@@ -1075,7 +1087,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         Args:
             input_channel: The input channel to read from.
         """
-        send_num = self._component_placement.get_world_size("rollout") * self.stage_num
+        send_num = self._component_placement.get_world_size("env") * self.stage_num
         recv_num = self._component_placement.get_world_size("actor")
         split_num = compute_split_num(send_num, recv_num)
 
@@ -1210,7 +1222,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 )
             training_config_name = self.cfg.actor.config_name
             data_loader_config = get_openpi_config(
-                training_config_name, model_path=self.cfg.actor.model.model_path
+                training_config_name,
+                model_path=self.cfg.actor.model.model_path,
+                data_kwargs=getattr(self.cfg.actor, "openpi_data", None),
             )
             self.data_loader = _data.create_data_loader(
                 data_loader_config, framework="pytorch", shuffle=True
