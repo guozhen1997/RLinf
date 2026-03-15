@@ -603,6 +603,57 @@ install_d4rl_env() {
     uv pip install "cython<3.0"
     uv pip install "gym==0.23.1"
     uv pip install "d4rl @ git+${GITHUB_PREFIX}https://github.com/Dps799/D4RL@master"
+
+    # Install MuJoCo 2.1.0 native library (mujoco-py only provides Python bindings).
+    local mujoco_root="${MUJOCO_PATH:-$HOME/.mujoco}"
+    local mujoco_dir="$mujoco_root/mujoco210"
+    if [ -f "$mujoco_dir/bin/libmujoco210.so" ]; then
+        echo "[install_d4rl_env] MuJoCo 2.1.0 already installed at $mujoco_dir, skipping download."
+    else
+        echo "[install_d4rl_env] Downloading and extracting MuJoCo 2.1.0..."
+        mkdir -p "$mujoco_root"
+        local tmpdir archive url extracted
+        tmpdir=$(mktemp -d)
+        archive="$tmpdir/mujoco210.tar.gz"
+        if [ -n "$GITHUB_PREFIX" ]; then
+            url="${GITHUB_PREFIX}github.com/google-deepmind/mujoco/releases/download/2.1.0/mujoco210-linux-x86_64.tar.gz"
+        else
+            url="https://github.com/google-deepmind/mujoco/releases/download/2.1.0/mujoco210-linux-x86_64.tar.gz"
+        fi
+        echo "[install_d4rl_env] URL: $url"
+        download_ok=0
+        if command -v wget &>/dev/null; then
+            wget --progress=bar:force --timeout=120 --tries=3 -O "$archive" "$url" && download_ok=1
+        elif command -v curl &>/dev/null; then
+            curl -fSL --connect-timeout 120 --max-time 600 --retry 3 -o "$archive" "$url" && download_ok=1
+        else
+            echo "Neither wget nor curl found. Please install one to download MuJoCo." >&2
+            rm -rf "$tmpdir"
+            exit 1
+        fi
+        if [ "$download_ok" -ne 1 ]; then
+            echo "[install_d4rl_env] Download failed. Try without --use-mirror, or download manually:" >&2
+            echo "  $url" >&2
+            rm -rf "$tmpdir"
+            exit 1
+        fi
+        tar -xzf "$archive" -C "$tmpdir"
+        extracted=$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -1)
+        if [ -n "$extracted" ] && [ -d "$extracted" ]; then
+            mv "$extracted" "$mujoco_dir"
+        else
+            echo "[install_d4rl_env] Unexpected tarball layout. Expected a single top-level directory." >&2
+            ls -la "$tmpdir" >&2
+            rm -rf "$tmpdir"
+            exit 1
+        fi
+        rm -rf "$tmpdir"
+        echo "[install_d4rl_env] MuJoCo 2.1.0 installed at $mujoco_dir"
+    fi
+    if ! grep -q "mujoco210/bin" "$VENV_DIR/bin/activate" 2>/dev/null; then
+        echo "export LD_LIBRARY_PATH=\"${mujoco_dir}/bin:\$LD_LIBRARY_PATH\"" >> "$VENV_DIR/bin/activate"
+    fi
+
     uv pip install "mujoco-py==2.1.2.14"
     uv pip install "tqdm"
 }

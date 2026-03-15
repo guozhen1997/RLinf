@@ -27,6 +27,7 @@ import time
 from typing import Any
 
 import gym
+import d4rl
 import numpy as np
 import torch
 

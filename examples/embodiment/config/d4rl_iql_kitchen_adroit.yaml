@@ -34,6 +34,8 @@ runner:
   local_update_steps: 500
   eval_episodes: 10
 
+  resume_dir: null
+  
 algorithm:
   loss_type: "offline_iql"
   adv_type: null
