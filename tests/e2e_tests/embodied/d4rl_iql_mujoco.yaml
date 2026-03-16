@@ -36,6 +36,8 @@ runner:
   local_update_steps: 500
   eval_episodes: 10
 
+  resume_dir: null
+
 algorithm:
   loss_type: "offline_iql"
   adv_type: null
@@ -74,9 +76,16 @@ env:
     env_name: "halfcheetah-medium-v2"
     seed: 42
     total_num_envs: 1
+    group_size: 1
     max_steps_per_rollout_epoch: 1000
     auto_reset: true
     ignore_terminations: false
+    use_rel_reward: false
+    use_subproc_vector_env: false
+    use_fixed_reset_state_ids: false
+    use_ordered_reset_state_ids: false
+    specific_reset_id: null
+    is_eval: false
     video_cfg:
       save_video: false
   eval:
@@ -84,9 +93,16 @@ env:
     env_name: "halfcheetah-medium-v2"
     seed: 42
     total_num_envs: 1
+    group_size: 1
     max_steps_per_rollout_epoch: 1000
     auto_reset: true
     ignore_terminations: false
+    use_rel_reward: false
+    use_subproc_vector_env: false
+    use_fixed_reset_state_ids: false
+    use_ordered_reset_state_ids: true
+    specific_reset_id: null
+    is_eval: true
     video_cfg:
       save_video: false
 
@@ -100,12 +116,19 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  use_fsdp_wrap: false
+  use_fsdp_wrap: true
   seed: 42
   offline_torch_compile: true
   worker_cls: "iql"
   model:
     num_action_chunks: 1
+    iql_config:
+      type: "actor"
+      hidden_dims: ${algorithm.hidden_dims}
+      dropout_rate: ${algorithm.dropout_rate}
+      state_dependent_std: false
+      log_std_min: -5.0
+      log_std_max: 2.0
 
 reward:
   use_reward_model: false
