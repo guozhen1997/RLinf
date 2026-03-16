@@ -26,8 +26,8 @@ uses the same keys as other env implementations (for example ``final_observation
 import time
 from typing import Any
 
+import d4rl  # noqa: F401  # registers D4RL envs with gym
 import gym
-import d4rl
 import numpy as np
 import torch
 
