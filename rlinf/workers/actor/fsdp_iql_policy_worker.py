@@ -139,10 +139,14 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         actions: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         q1 = critic_module["q1"](
-            forward_type=ForwardType.IQL, observations=observations, actions=actions
+            forward_type=ForwardType.IQL_CRITIC,
+            observations=observations,
+            actions=actions,
         )
         q2 = critic_module["q2"](
-            forward_type=ForwardType.IQL, observations=observations, actions=actions
+            forward_type=ForwardType.IQL_CRITIC,
+            observations=observations,
+            actions=actions,
         )
         return q1, q2
 
@@ -165,23 +169,25 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             q_t = torch.min(q1_t, q2_t)
 
         # Value loss
-        v = self.value_model(forward_type=ForwardType.IQL, observations=obs)
+        v = self.value_model(forward_type=ForwardType.IQL_VALUE, observations=obs)
         value_loss = iql_expectile_loss(q_t - v, self.expectile).mean()
 
         # Actor loss
         with torch.no_grad():
-            new_v = self.value_model(forward_type=ForwardType.IQL, observations=obs)
+            new_v = self.value_model(
+                forward_type=ForwardType.IQL_VALUE, observations=obs
+            )
             adv = q_t - new_v
             exp_a = torch.exp(adv * self.temperature).clamp(max=100.0)
         log_probs = self.model(
-            forward_type=ForwardType.IQL, observations=obs, actions=actions
+            forward_type=ForwardType.IQL_ACTOR, observations=obs, actions=actions
         )
         actor_loss = -(exp_a * log_probs).mean()
 
         # Critic loss
         with torch.no_grad():
             next_v = self.value_model(
-                forward_type=ForwardType.IQL, observations=next_obs
+                forward_type=ForwardType.IQL_VALUE, observations=next_obs
             )
             target_q = rewards + self.discount * masks * next_v
         q1, q2 = self.forward_critic_module(self.critic_model, obs, actions)
@@ -206,30 +212,6 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                 tensor = torch.as_tensor(value, dtype=torch.float32, device=self.device)
             prepared_batch[key] = tensor
         return prepared_batch
-
-    def sample_actions(
-        self, observations: np.ndarray, temperature: float = 1.0
-    ) -> np.ndarray:
-        obs_np = np.asarray(observations, dtype=np.float32, copy=True)
-        obs = torch.as_tensor(obs_np, dtype=torch.float32, device=self.device)
-        if obs.ndim == 1:
-            obs = obs.unsqueeze(0)
-        prev_mode = self.model.training
-        self.model.eval()
-        with torch.no_grad():
-            actions = (
-                self.model(
-                    forward_type=ForwardType.IQL,
-                    observations=obs,
-                    temperature=temperature,
-                )
-                .cpu()
-                .numpy()
-            )
-        self.model.train(prev_mode)
-        if actions.shape[0] == 1:
-            actions = actions[0]
-        return np.clip(actions, -1, 1)
 
     def get_policy_state_dict(self) -> dict[str, torch.Tensor]:
         """Return actor policy state_dict on CPU for external rollout/eval workers."""

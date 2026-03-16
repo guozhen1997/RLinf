@@ -12,48 +12,52 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""D4RL environment wrapper compatible with ``EnvWorker``.
-
-The wrapper exposes the same high-level interface used by other embodied envs:
-- ``reset() -> (obs_dict, infos)``
-- ``chunk_step(chunk_actions) -> (obs_list, rewards, terminations, truncations, infos_list)``
-
-Observation schema is normalized to ``{"states": Tensor}``, and auto-reset metadata
-uses the same keys as other env implementations (for example ``final_observation``,
-``final_info``, ``_final_observation``).
-"""
-
+import copy
 import time
-from typing import Any
+from typing import Any, Optional, Union
 
 import d4rl  # noqa: F401  # registers D4RL envs with gym
 import gym
 import numpy as np
 import torch
 
+from rlinf.envs.venv.venv import DummyVectorEnv, SubprocVectorEnv
+
 __all__ = ["D4RLEnv"]
 
 
-def _compat_reset(env: gym.Env) -> np.ndarray:
-    out = env.reset()
-    if isinstance(out, tuple):
-        return out[0]
-    return out
+def _cfg_get(cfg: Any, key: str, default: Any) -> Any:
+    if hasattr(cfg, key):
+        return getattr(cfg, key)
+    if hasattr(cfg, "get"):
+        return cfg.get(key, default)
+    return default
 
 
-def _compat_step(env: gym.Env, action: np.ndarray) -> tuple:
-    out = env.step(action)
-    if len(out) == 5:
-        obs, reward, terminated, truncated, info = out
-        done = bool(terminated or truncated)
-        if truncated:
-            info = dict(info)
-            info["TimeLimit.truncated"] = True
-        return obs, reward, done, info
-    return out
+def _to_info_list(infos: Any, batch_size: int) -> list[dict[str, Any]]:
+    if isinstance(infos, list):
+        return [dict(info) if isinstance(info, dict) else {} for info in infos]
+    if isinstance(infos, tuple):
+        return [dict(info) if isinstance(info, dict) else {} for info in infos]
+    if isinstance(infos, np.ndarray):
+        return [dict(info) if isinstance(info, dict) else {} for info in infos.tolist()]
+    if isinstance(infos, dict):
+        info_list: list[dict[str, Any]] = [{} for _ in range(batch_size)]
+        for key, value in infos.items():
+            if (
+                isinstance(value, (list, tuple, np.ndarray))
+                and len(value) == batch_size
+            ):
+                for i in range(batch_size):
+                    info_list[i][key] = value[i]
+            else:
+                for i in range(batch_size):
+                    info_list[i][key] = value
+        return info_list
+    return [{} for _ in range(batch_size)]
 
 
-class D4RLEnv:
+class D4RLEnv(gym.Env):
     """D4RL env wrapper compatible with EnvWorker chunk API."""
 
     def __init__(
@@ -65,39 +69,53 @@ class D4RLEnv:
         worker_info: Any = None,
         record_metrics: bool = True,
     ):
-        _ = total_num_processes
-        _ = worker_info
+        self.total_num_processes = int(total_num_processes)
+        self.worker_info = worker_info
+        self.seed_offset = int(seed_offset)
         self.cfg = cfg
         self.num_envs = int(num_envs)
-        self._env_name = getattr(cfg, "env_name", None) or (
-            cfg.get("env_name") if hasattr(cfg, "get") else None
-        )
-        if self._env_name is None:
+        self.env_name = _cfg_get(cfg, "env_name", None)
+        if self.env_name is None:
             raise ValueError("D4RLEnv requires cfg.env_name.")
-        if hasattr(cfg, "seed"):
-            base_seed = cfg.seed
-        elif hasattr(cfg, "get"):
-            base_seed = cfg.get("seed", None)
-        else:
-            base_seed = None
-        if base_seed is None:
+        env_seed = _cfg_get(cfg, "seed", None)
+        if env_seed is None:
             raise ValueError("D4RLEnv requires cfg.seed (int).")
-        self._seed = int(base_seed) + int(seed_offset)
-        self._auto_reset = bool(getattr(cfg, "auto_reset", True))
+        self.seed = int(env_seed) + int(seed_offset)
+        self.auto_reset = bool(_cfg_get(cfg, "auto_reset", True))
+        self.ignore_terminations = bool(_cfg_get(cfg, "ignore_terminations", False))
+        self.use_rel_reward = bool(_cfg_get(cfg, "use_rel_reward", False))
+        self.video_cfg = _cfg_get(cfg, "video_cfg", None)
+        self.max_episode_steps = _cfg_get(cfg, "max_steps_per_rollout_epoch", None)
+        self.max_episode_steps = (
+            int(self.max_episode_steps) if self.max_episode_steps is not None else None
+        )
+        self.group_size = int(_cfg_get(cfg, "group_size", 1))
+        self.num_group = max(1, self.num_envs // max(1, self.group_size))
+        self.use_fixed_reset_state_ids = bool(
+            _cfg_get(cfg, "use_fixed_reset_state_ids", False)
+        )
+        self.use_ordered_reset_state_ids = bool(
+            _cfg_get(cfg, "use_ordered_reset_state_ids", False)
+        )
+        self.is_eval = bool(_cfg_get(cfg, "is_eval", False))
+        self.specific_reset_id = _cfg_get(cfg, "specific_reset_id", None)
+        self.use_subproc_vector_env = bool(
+            _cfg_get(cfg, "use_subproc_vector_env", self.num_envs > 1)
+        )
 
-        self._record_metrics = bool(record_metrics)
-        self._envs: list[gym.Env] = []
-        for i in range(self.num_envs):
-            seed = self._seed + i
-            e = gym.make(self._env_name)
-            try:
-                e.reset(seed=seed)
-            except TypeError:
-                if hasattr(e, "seed"):
-                    e.seed(seed)
-            e.action_space.seed(seed)
-            e.observation_space.seed(seed)
-            self._envs.append(e)
+        self.record_metrics = bool(record_metrics)
+        env_fns = [
+            lambda env_name=self.env_name: gym.make(env_name)
+            for _ in range(self.num_envs)
+        ]
+        if self.use_subproc_vector_env:
+            self.env = SubprocVectorEnv(env_fns)
+        else:
+            self.env = DummyVectorEnv(env_fns)
+        self._seed_list = [self.seed + i for i in range(self.num_envs)]
+        self.env.seed(self._seed_list)
+        self._generator = np.random.default_rng(seed=self.seed)
+        self.start_idx = 0
 
         self._is_start = True
         self._last_obs: np.ndarray | None = None
@@ -106,6 +124,9 @@ class D4RLEnv:
         self._episode_length = np.zeros((self.num_envs,), dtype=np.int64)
         self._start_time = np.array([time.time()] * self.num_envs, dtype=np.float64)
         self._total_timesteps = 0
+        self._elapsed_steps = np.zeros((self.num_envs,), dtype=np.int32)
+        self.prev_step_reward = np.zeros((self.num_envs,), dtype=np.float32)
+        self._init_reset_state_ids()
 
     @property
     def is_start(self) -> bool:
@@ -115,32 +136,257 @@ class D4RLEnv:
     def is_start(self, value: bool) -> None:
         self._is_start = bool(value)
 
+    @property
+    def elapsed_steps(self) -> np.ndarray:
+        return self._elapsed_steps
+
+    @property
+    def info_logging_keys(self) -> list[str]:
+        return []
+
     def close(self) -> None:
-        for e in self._envs:
-            e.close()
+        self.env.close()
+
+    def _get_random_reset_state_ids(self, num_reset_states: int) -> np.ndarray:
+        if self.specific_reset_id is not None:
+            return np.full(
+                (num_reset_states,), int(self.specific_reset_id), dtype=np.int64
+            )
+        return self._generator.integers(
+            low=0,
+            high=np.iinfo(np.int32).max,
+            size=(num_reset_states,),
+            dtype=np.int64,
+        )
+
+    def _get_ordered_reset_state_ids(self, num_reset_states: int) -> np.ndarray:
+        if self.specific_reset_id is not None:
+            return np.full(
+                (num_reset_states,), int(self.specific_reset_id), dtype=np.int64
+            )
+        reset_state_ids = np.arange(
+            self.start_idx, self.start_idx + num_reset_states, dtype=np.int64
+        )
+        self.start_idx += num_reset_states
+        return reset_state_ids
+
+    def _init_reset_state_ids(self) -> None:
+        self.update_reset_state_ids()
 
     def update_reset_state_ids(self) -> None:
-        # No-op for D4RL.
-        return None
+        if self.is_eval or self.use_ordered_reset_state_ids:
+            reset_state_ids = self._get_ordered_reset_state_ids(self.num_group)
+        else:
+            reset_state_ids = self._get_random_reset_state_ids(self.num_group)
+        self.reset_state_ids = np.repeat(reset_state_ids, self.group_size)[
+            : self.num_envs
+        ]
 
     @staticmethod
-    def _to_states_obs(obs: np.ndarray | torch.Tensor) -> dict[str, torch.Tensor]:
+    def _wrap_obs(obs: np.ndarray | torch.Tensor) -> dict[str, torch.Tensor]:
         """Convert raw state observation to EnvWorker-compatible observation dict."""
         return {"states": torch.as_tensor(obs, dtype=torch.float32)}
 
-    def reset(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Reset all env instances and return a batch observation dict."""
-        obs_list = [_compat_reset(e) for e in self._envs]
-        obs = np.stack(obs_list, axis=0).astype(np.float32)
-        self._last_obs = obs
-        # Keep the start flag semantics aligned with other envs: reset finishes
-        # initialization and the next call should be treated as in-episode step.
+    def _vector_reset(
+        self,
+        env_idx: np.ndarray | None = None,
+        reset_state_ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        if env_idx is None:
+            env_idx = np.arange(self.num_envs)
+        env_idx = np.asarray(env_idx, dtype=np.int64)
+
+        if reset_state_ids is None:
+            reset_out = self.env.reset(id=env_idx)
+            if isinstance(reset_out, tuple):
+                obs = reset_out[0]
+            else:
+                obs = reset_out
+            return np.asarray(obs, dtype=np.float32)
+
+        if len(reset_state_ids) != len(env_idx):
+            raise ValueError("reset_state_ids and env_idx length mismatch.")
+
+        obs_chunks: list[np.ndarray] = []
+        for idx, state_id in zip(env_idx, reset_state_ids):
+            reset_out = self.env.reset(
+                id=[int(idx)], seed=int(self.seed + int(state_id))
+            )
+            if isinstance(reset_out, tuple):
+                obs = reset_out[0]
+            else:
+                obs = reset_out
+            obs_chunks.append(np.asarray(obs, dtype=np.float32))
+        return np.concatenate(obs_chunks, axis=0)
+
+    def _vector_step(
+        self, actions: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]]]:
+        step_out = self.env.step(actions)
+        if len(step_out) == 5:
+            obs, rewards, terminations, truncations, infos = step_out
+            terminations = np.asarray(terminations, dtype=bool)
+            truncations = np.asarray(truncations, dtype=bool)
+        elif len(step_out) == 4:
+            obs, rewards, dones, infos = step_out
+            dones = np.asarray(dones, dtype=bool)
+            info_list = _to_info_list(infos, self.num_envs)
+            truncations = np.asarray(
+                [bool(info.get("TimeLimit.truncated", False)) for info in info_list],
+                dtype=bool,
+            )
+            terminations = np.logical_and(dones, np.logical_not(truncations))
+            infos = info_list
+        else:
+            raise RuntimeError(f"Unexpected step output length: {len(step_out)}")
+
+        info_list = _to_info_list(infos, self.num_envs)
+        return (
+            np.asarray(obs, dtype=np.float32),
+            np.asarray(rewards, dtype=np.float32),
+            terminations,
+            truncations,
+            info_list,
+        )
+
+    def _sample_reset_state_ids(self, env_idx: np.ndarray) -> np.ndarray:
+        if self.use_fixed_reset_state_ids:
+            return self.reset_state_ids[env_idx]
+        if self.is_eval or self.use_ordered_reset_state_ids:
+            return self._get_ordered_reset_state_ids(len(env_idx))
+        return self._get_random_reset_state_ids(len(env_idx))
+
+    def _build_full_obs_after_partial_reset(
+        self, env_idx: np.ndarray, partial_obs: np.ndarray
+    ) -> np.ndarray:
+        """Merge partial reset observations into a full-size observation batch."""
+        is_full_reset = len(env_idx) == self.num_envs and np.array_equal(
+            env_idx, np.arange(self.num_envs, dtype=np.int64)
+        )
+        if is_full_reset:
+            return partial_obs
+
+        if self._last_obs is None:
+            # Keep reset contract consistent: always return full batch.
+            full_env_idx = np.arange(self.num_envs, dtype=np.int64)
+            full_reset_state_ids = self._sample_reset_state_ids(full_env_idx)
+            full_obs = self._vector_reset(
+                env_idx=full_env_idx, reset_state_ids=full_reset_state_ids
+            )
+        else:
+            full_obs = self._last_obs.copy()
+        full_obs[env_idx] = partial_obs
+        return full_obs
+
+    def reset(
+        self,
+        env_idx: Optional[Union[int, list[int], np.ndarray]] = None,
+        reset_state_ids: Optional[np.ndarray] = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Reset env instances and return full-batch observations."""
+        had_last_obs = self._last_obs is not None
+        if env_idx is None:
+            env_idx_arr = np.arange(self.num_envs, dtype=np.int64)
+        else:
+            env_idx_arr = np.asarray(env_idx, dtype=np.int64)
+            if env_idx_arr.ndim == 0:
+                env_idx_arr = env_idx_arr.reshape(1)
+        if reset_state_ids is None:
+            reset_state_ids = self._sample_reset_state_ids(env_idx_arr)
+        partial_obs = self._vector_reset(
+            env_idx=env_idx_arr, reset_state_ids=reset_state_ids
+        )
+        full_obs = self._build_full_obs_after_partial_reset(env_idx_arr, partial_obs)
+        self._last_obs = full_obs
         self._is_start = False
-        if self._record_metrics:
-            self._reward_sum.fill(0.0)
-            self._episode_length.fill(0)
-            self._start_time[:] = time.time()
-        return self._to_states_obs(obs), {"final_observation": None}
+
+        reset_all_stats = (not had_last_obs) or (len(env_idx_arr) == self.num_envs)
+        stat_env_idx = (
+            np.arange(self.num_envs, dtype=np.int64) if reset_all_stats else env_idx_arr
+        )
+        if self.record_metrics:
+            self._reward_sum[stat_env_idx] = 0.0
+            self._episode_length[stat_env_idx] = 0
+            self._start_time[stat_env_idx] = time.time()
+        self._elapsed_steps[stat_env_idx] = 0
+        self.prev_step_reward[stat_env_idx] = 0.0
+        return self._wrap_obs(full_obs), {}
+
+    def step(
+        self, actions: torch.Tensor | np.ndarray, auto_reset: bool = True
+    ) -> tuple[
+        dict[str, Any], torch.Tensor, torch.Tensor, torch.Tensor, dict[str, Any]
+    ]:
+        acts_np = (
+            actions.detach().cpu().numpy()
+            if isinstance(actions, torch.Tensor)
+            else actions
+        )
+        obs, rewards, terminations, truncations, _ = self._vector_step(
+            np.asarray(acts_np)
+        )
+        self._elapsed_steps += 1
+        if self.max_episode_steps is not None and self.max_episode_steps > 0:
+            truncations = np.logical_or(
+                truncations, self._elapsed_steps >= int(self.max_episode_steps)
+            )
+
+        step_rewards = rewards.copy()
+        if self.use_rel_reward:
+            step_rewards = step_rewards - self.prev_step_reward
+            self.prev_step_reward = rewards.copy()
+
+        if self.record_metrics:
+            self._reward_sum += step_rewards
+            self._episode_length += 1
+            self._total_timesteps += int(self.num_envs)
+
+        ep_returns = np.zeros((self.num_envs,), dtype=np.float32)
+        ep_lengths = np.zeros((self.num_envs,), dtype=np.float32)
+        dones = np.logical_or(terminations, truncations)
+        if self.record_metrics and np.any(dones):
+            ep_returns[dones] = self._reward_sum[dones]
+            ep_lengths[dones] = self._episode_length[dones].astype(np.float32)
+            self._reward_sum[dones] = 0.0
+            self._episode_length[dones] = 0
+            self._start_time[dones] = time.time()
+        if np.any(dones):
+            self._elapsed_steps[dones] = 0
+            self.prev_step_reward[dones] = 0.0
+
+        infos: dict[str, Any] = {
+            "episode": {
+                "return": torch.as_tensor(ep_returns, dtype=torch.float32),
+                "episode_len": torch.as_tensor(ep_lengths, dtype=torch.float32),
+            }
+        }
+        if self.ignore_terminations:
+            infos["episode"]["terminated_at_end"] = torch.as_tensor(
+                terminations.copy(), dtype=torch.bool
+            )
+            terminations = np.zeros_like(terminations, dtype=bool)
+
+        if (
+            np.any(np.logical_or(terminations, truncations))
+            and auto_reset
+            and self.auto_reset
+        ):
+            obs_dict = self._wrap_obs(obs)
+            obs_dict, infos = self._handle_auto_reset(
+                np.logical_or(terminations, truncations), obs_dict, infos
+            )
+        else:
+            obs_dict = self._wrap_obs(obs)
+
+        self._last_obs = obs_dict["states"].cpu().numpy()
+        self._is_start = False
+        return (
+            obs_dict,
+            torch.as_tensor(step_rewards, dtype=torch.float32),
+            torch.as_tensor(terminations, dtype=torch.bool),
+            torch.as_tensor(truncations, dtype=torch.bool),
+            infos,
+        )
 
     def chunk_step(
         self, chunk_actions: torch.Tensor | np.ndarray
@@ -162,78 +408,73 @@ class D4RLEnv:
         b, k, _ = acts.shape
         assert b == self.num_envs, f"Expected batch={self.num_envs}, got {b}."
 
-        obs_dim = int(self._last_obs.shape[-1]) if self._last_obs is not None else None
-        if obs_dim is None:
+        if self._last_obs is None:
             self.reset()
-            obs_dim = int(self._last_obs.shape[-1])
+        obs_list: list[dict[str, Any]] = []
+        infos_list: list[dict[str, Any]] = []
+        chunk_rewards: list[torch.Tensor] = []
+        raw_chunk_terminations: list[torch.Tensor] = []
+        raw_chunk_truncations: list[torch.Tensor] = []
+        for i in range(k):
+            (
+                extracted_obs,
+                step_reward,
+                terminations,
+                truncations,
+                infos,
+            ) = self.step(acts[:, i], auto_reset=False)
+            obs_list.append(extracted_obs)
+            infos_list.append(infos)
+            chunk_rewards.append(step_reward)
+            raw_chunk_terminations.append(terminations)
+            raw_chunk_truncations.append(truncations)
 
-        rewards = np.zeros((b, k), dtype=np.float32)
-        terminations = np.zeros((b, k), dtype=bool)
-        truncations = np.zeros((b, k), dtype=bool)
-        next_obs_last = np.zeros((b, obs_dim), dtype=np.float32)
-        ep_returns = np.zeros((b,), dtype=np.float32)
-        ep_lengths = np.zeros((b,), dtype=np.float32)
-        done_last = np.zeros((b,), dtype=bool)
+        chunk_rewards_tensor = torch.stack(chunk_rewards, dim=1)
+        raw_chunk_terminations_tensor = torch.stack(raw_chunk_terminations, dim=1)
+        raw_chunk_truncations_tensor = torch.stack(raw_chunk_truncations, dim=1)
 
-        for t in range(k):
-            for i, e in enumerate(self._envs):
-                o, r, done, info = _compat_step(e, acts[i, t])
-                if self._record_metrics:
-                    self._reward_sum[i] += float(r)
-                    self._episode_length[i] += 1
-                    self._total_timesteps += 1
-                    info = dict(info)
-                    info["total"] = {"timesteps": self._total_timesteps}
-                rewards[i, t] = float(r)
-                is_trunc = bool(info.get("TimeLimit.truncated", False))
-                truncations[i, t] = is_trunc and done
-                terminations[i, t] = (not is_trunc) and done
-                if t == k - 1:
-                    next_obs_last[i] = np.asarray(o, dtype=np.float32)
-                    done_last[i] = bool(done)
-                if done:
-                    if self._record_metrics:
-                        ep_ret = float(self._reward_sum[i])
-                        if hasattr(e, "get_normalized_score"):
-                            try:
-                                ep_ret = float(e.get_normalized_score(ep_ret) * 100.0)
-                            except Exception:
-                                pass
-                        ep_returns[i] = ep_ret
-                        ep_lengths[i] = float(self._episode_length[i])
-                        # Reset stats for next episode after auto reset.
-                        self._reward_sum[i] = 0.0
-                        self._episode_length[i] = 0
-                        self._start_time[i] = time.time()
-                    if self._auto_reset:
-                        o_reset = _compat_reset(e)
-                        if t == k - 1:
-                            next_obs_last[i] = np.asarray(o_reset, dtype=np.float32)
+        past_terminations = raw_chunk_terminations_tensor.any(dim=1)
+        past_truncations = raw_chunk_truncations_tensor.any(dim=1)
+        past_dones = torch.logical_or(past_terminations, past_truncations)
 
-        self._last_obs = next_obs_last
-        self._is_start = False
+        if past_dones.any() and self.auto_reset:
+            obs_list[-1], infos_list[-1] = self._handle_auto_reset(
+                past_dones.cpu().numpy(), obs_list[-1], infos_list[-1]
+            )
 
-        obs_dict = self._to_states_obs(next_obs_last)
-        # Align with other envs: keep a full-batch pre-reset snapshot and
-        # use masks to indicate which envs actually finished in this chunk.
-        final_obs = obs_dict["states"].clone()
-        infos: dict[str, Any] = {"final_observation": {"states": final_obs}}
-        if bool(np.any(done_last)):
-            infos["final_info"] = {
-                "episode": {
-                    "return": torch.as_tensor(ep_returns, dtype=torch.float32),
-                    "length": torch.as_tensor(ep_lengths, dtype=torch.float32),
-                }
-            }
-            done_mask = torch.as_tensor(done_last, dtype=torch.bool)
-            infos["_final_info"] = done_mask
-            infos["_final_observation"] = done_mask
-            infos["_elapsed_steps"] = done_mask
+        if self.auto_reset or self.ignore_terminations:
+            chunk_terminations = torch.zeros_like(raw_chunk_terminations_tensor)
+            chunk_terminations[:, -1] = past_terminations
+            chunk_truncations = torch.zeros_like(raw_chunk_truncations_tensor)
+            chunk_truncations[:, -1] = past_truncations
+        else:
+            chunk_terminations = raw_chunk_terminations_tensor.clone()
+            chunk_truncations = raw_chunk_truncations_tensor.clone()
 
         return (
-            [obs_dict],
-            torch.as_tensor(rewards, dtype=torch.float32),
-            torch.as_tensor(terminations, dtype=torch.bool),
-            torch.as_tensor(truncations, dtype=torch.bool),
-            [infos],
+            obs_list,
+            chunk_rewards_tensor,
+            chunk_terminations,
+            chunk_truncations,
+            infos_list,
         )
+
+    def _handle_auto_reset(
+        self,
+        dones: np.ndarray,
+        _final_obs: dict[str, Any],
+        infos: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        final_obs = copy.deepcopy(_final_obs)
+        final_info = copy.deepcopy(infos)
+        env_idx = np.arange(self.num_envs, dtype=np.int64)[dones]
+        if self.is_eval:
+            self.update_reset_state_ids()
+        reset_state_ids = self._sample_reset_state_ids(env_idx)
+        obs, infos = self.reset(env_idx=env_idx, reset_state_ids=reset_state_ids)
+        infos["final_observation"] = final_obs
+        infos["final_info"] = final_info
+        infos["_final_info"] = dones
+        infos["_final_observation"] = dones
+        infos["_elapsed_steps"] = dones
+        return obs, infos

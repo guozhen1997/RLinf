@@ -19,7 +19,6 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from omegaconf import open_dict
 from omegaconf.dictconfig import DictConfig
 
 from rlinf.scheduler import Channel
@@ -98,23 +97,10 @@ class OfflineRunner:
         )
 
     def init_workers(self):
-        """Initialize workers and build actor model dims from dataset metadata."""
-        self.dataset.init_worker().wait()
-        obs_action_dims = self.dataset.get_obs_action_dims().wait()
-        if isinstance(obs_action_dims, list):
-            obs_action_dims = next(
-                (dims for dims in obs_action_dims if dims is not None), None
-            )
-        if not (
-            isinstance(obs_action_dims, (tuple, list)) and len(obs_action_dims) == 2
-        ):
-            raise TypeError(
-                f"DatasetWorker.get_obs_action_dims() should return (obs_dim, action_dim), got {obs_action_dims!r}."
-            )
-        obs_dim, action_dim = int(obs_action_dims[0]), int(obs_action_dims[1])
-        with open_dict(self.cfg.actor.model):
-            self.cfg.actor.model.obs_dim = obs_dim
-            self.cfg.actor.model.action_dim = action_dim
+        """
+        Dataset workers are initialized by the offline entry script before actor
+        workers are launched, so model dims are ready at actor construction time.
+        """
         self.env.init_worker().wait()
         self.rollout.init_worker().wait()
         self.actor.init_worker().wait()

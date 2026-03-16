@@ -50,7 +50,9 @@ class IQLMLPPolicy(MLPPolicy):
         hidden_dims = iql_config.get("hidden_dims", None)
         if hidden_dims is None:
             raise ValueError("hidden_dims must be provided in iql_config.")
-        self.iql_type = iql_config.get("type", iql_config.get("kind", None))
+        self.iql_type = iql_config.get("type")
+        if self.iql_type not in {"actor", "critic", "value"}:
+            raise ValueError(f"Unsupported iql_type: {self.iql_type}")
 
         self._init_iql(
             obs_dim=self.obs_dim,
@@ -129,21 +131,26 @@ class IQLMLPPolicy(MLPPolicy):
             raise ValueError(f"Unsupported iql_type: {self.iql_type}")
 
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
-        if forward_type == ForwardType.IQL:
-            return self.iql_forward(**kwargs)
+        if forward_type in {
+            ForwardType.IQL_ACTOR,
+            ForwardType.IQL_CRITIC,
+            ForwardType.IQL_VALUE,
+        }:
+            return self.iql_forward(forward_type=forward_type, **kwargs)
         return super().forward(forward_type=forward_type, **kwargs)
 
     def iql_forward(self, **kwargs) -> torch.Tensor:
         observations = kwargs.get("observations")
         if observations is None:
             raise ValueError("IQL forward expects observations.")
-        if self.iql_type == "actor":
+        forward_type = kwargs.get("forward_type", None)
+        if forward_type == ForwardType.IQL_ACTOR:
             return self.iql_forward_actor(**kwargs)
-        if self.iql_type == "critic":
+        if forward_type == ForwardType.IQL_CRITIC:
             return self.iql_forward_critic(**kwargs)
-        if self.iql_type == "value":
+        if forward_type == ForwardType.IQL_VALUE:
             return self.iql_forward_value(**kwargs)
-        raise RuntimeError(f"Unsupported iql_type: {self.iql_type}")
+        raise RuntimeError(f"Unsupported IQL forward_type: {forward_type}")
 
     def iql_forward_actor(self, **kwargs) -> torch.Tensor:
         observations = kwargs.get("observations")

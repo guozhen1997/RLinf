@@ -74,9 +74,16 @@ env:
     env_name: "pen-human-v0"
     seed: 42
     total_num_envs: 1
+    group_size: 1
     max_steps_per_rollout_epoch: 1000
     auto_reset: true
     ignore_terminations: false
+    use_rel_reward: false
+    use_subproc_vector_env: false
+    use_fixed_reset_state_ids: false
+    use_ordered_reset_state_ids: false
+    specific_reset_id: null
+    is_eval: false
     video_cfg:
       save_video: false
   eval:
@@ -84,9 +91,16 @@ env:
     env_name: "pen-human-v0"
     seed: 42
     total_num_envs: 1
+    group_size: 1
     max_steps_per_rollout_epoch: 1000
     auto_reset: true
     ignore_terminations: false
+    use_rel_reward: false
+    use_subproc_vector_env: false
+    use_fixed_reset_state_ids: false
+    use_ordered_reset_state_ids: true
+    specific_reset_id: null
+    is_eval: true
     video_cfg:
       save_video: false
   

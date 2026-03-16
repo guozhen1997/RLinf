@@ -23,7 +23,9 @@ class ForwardType(Enum):
     SAC_Q = "sac_q"
     CROSSQ = "crossq"
     CROSSQ_Q = "crossq_q"
-    IQL = "iql"
+    IQL_ACTOR = "iql_actor"
+    IQL_CRITIC = "iql_critic"
+    IQL_VALUE = "iql_value"
 
 
 class BasePolicy(ABC):

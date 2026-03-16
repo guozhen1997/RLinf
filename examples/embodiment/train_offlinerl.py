@@ -39,6 +39,7 @@ def main(cfg) -> None:
     dataset_group = DatasetWorker.create_group(cfg).launch(
         cluster, name=cfg.dataset.group_name, placement_strategy=dataset_placement
     )
+    # Build dataset once and set model dims before actor workers are created.
     dataset_group.init_worker().wait()
     obs_action_dims = dataset_group.get_obs_action_dims().wait()
     if isinstance(obs_action_dims, list):
