@@ -209,9 +209,15 @@ class D4RLEnv(gym.Env):
 
         obs_chunks: list[np.ndarray] = []
         for idx, state_id in zip(env_idx, reset_state_ids):
-            reset_out = self.env.reset(
-                id=[int(idx)], seed=int(self.seed + int(state_id))
-            )
+            try:
+                reset_out = self.env.reset(
+                    id=[int(idx)], seed=int(self.seed + int(state_id))
+                )
+            except TypeError as exc:
+                # Old Gym Mujoco reset does not accept `seed` kwarg.
+                if "unexpected keyword argument 'seed'" not in str(exc):
+                    raise
+                reset_out = self.env.reset(id=[int(idx)])
             if isinstance(reset_out, tuple):
                 obs = reset_out[0]
             else:
