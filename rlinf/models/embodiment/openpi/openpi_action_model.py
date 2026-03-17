@@ -607,7 +607,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             .contiguous(),
         }
         if forward_action is not None:
-            forward_inputs["raw_actions"] = forward_action
+            forward_inputs["action"] = forward_action
 
         if self.config.is_nft and "nft_x" in outputs:
             forward_inputs["nft_x"] = outputs["nft_x"]
