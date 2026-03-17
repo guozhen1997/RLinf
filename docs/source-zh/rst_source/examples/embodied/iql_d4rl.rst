@@ -10,7 +10,7 @@
 3. **接入 RLinf 体系**：由 DatasetWorker、IQL Actor、EnvWorker、RolloutWorker 与 OfflineRunner 协同完成；支持 PyTorch + FSDP。
 
 环境
-----
+-----------
 
 **D4RL（Datasets for Deep Data-Driven Reinforcement Learning）**
 
@@ -23,7 +23,7 @@ RLinf 使用 D4RL 基准套件，并为不同任务族提供配置：
 观测与动作空间由各 D4RL 任务定义；同一套流程通过 ``env.dataset_type: "d4rl"`` 及对应的 ``env.train.env_name`` / ``env.eval.env_name`` 在所有任务上运行。
 
 算法
-----
+-----------
 
 **核心算法组件**
 
@@ -39,7 +39,7 @@ RLinf 使用 D4RL 基准套件，并为不同任务族提供配置：
    每步：从 DatasetWorker 取 batch → 更新 Value → 更新 Actor → 更新 Critic → 软更新 target。
 
 依赖安装
-----------
+----------------------------
 
 安装带 D4RL 的 embodied 环境：
 
@@ -51,7 +51,7 @@ RLinf 使用 D4RL 基准套件，并为不同任务族提供配置：
 启动脚本默认设置 ``MUJOCO_GL=egl`` 与 ``PYOPENGL_PLATFORM=egl``，便于无头运行。
 
 运行脚本
---------
+----------------------------
 
 **1. 配置文件**
 
@@ -142,12 +142,12 @@ RLinf 为不同 D4RL 任务族提供默认 IQL 配置：
    ./examples/embodiment/run_offlinerl.sh d4rl_iql_kitchen_adroit
 
 断点续训
---------
+----------------------------
 
 将 ``runner.resume_dir`` 设为 checkpoint 目录（如 ``checkpoints/global_step_XXXXX``），再执行相同启动命令即可从该步加载权重并继续训练。
 
 可视化与结果
-------------
+----------------------------
 
 **1. TensorBoard 日志**
 
