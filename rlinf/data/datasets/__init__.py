@@ -20,12 +20,17 @@ from omegaconf import DictConfig
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-from rlinf.data.datasets.d4rl import D4RLDataset as D4RLDataset
 from rlinf.data.datasets.item import DatasetItem
 from rlinf.data.datasets.reasoning import ReasoningDataset
 from rlinf.data.datasets.rstar2 import Rstar2Dataset
 from rlinf.data.datasets.vlm import VLMDatasetRegistry
 from rlinf.data.datasets.wideseek_r1 import WideSeekR1Dataset
+
+# Optional dataset: D4RL depends on optional third-party packages
+try:
+    from rlinf.data.datasets.d4rl import D4RLDataset as D4RLDataset
+except ImportError:
+    D4RLDataset = None
 
 
 def create_rl_dataset(

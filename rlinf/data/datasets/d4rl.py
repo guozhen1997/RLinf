@@ -23,17 +23,27 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-import gym
 import numpy as np
 import tqdm
 
 try:
     import d4rl
-except ImportError as exc:  # pragma: no cover
-    raise ImportError(
-        "d4rl is required for D4RL offline datasets. Please install d4rl."
-    ) from exc
+except ImportError:  # pragma: no cover
+    d4rl = None  # type: ignore[assignment]
+
+try:
+    import gym  # type: ignore
+except ImportError:  # pragma: no cover
+    gym = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover
+    import gym as _gym
+
+    GymEnv = _gym.Env
+else:
+    GymEnv = Any
 
 
 def split_into_trajectories(
@@ -84,11 +94,22 @@ class D4RLDataset:
 
     def __init__(
         self,
-        env: gym.Env,
+        env: GymEnv,
         env_name: str,
         clip_to_eps: bool = True,
         eps: float = 1e-5,
     ):
+        if d4rl is None or gym is None:  # pragma: no cover
+            missing = []
+            if gym is None:
+                missing.append("gym")
+            if d4rl is None:
+                missing.append("d4rl")
+            raise ImportError(
+                "D4RLDataset requires optional dependencies: "
+                + ", ".join(missing)
+                + ". Please install them to use D4RL offline datasets."
+            )
         raw = d4rl.qlearning_dataset(env)
         if clip_to_eps:
             lim = 1 - eps
@@ -121,6 +142,10 @@ class D4RLDataset:
         """Default D4RL hdf5 path for an env_name."""
         # Gym can canonicalize an env id (e.g. fill default version). Note: this
         # is only about env id parsing; gym does not define any dataset path.
+        if gym is None:  # pragma: no cover
+            raise ImportError(
+                "D4RLDataset.from_path requires 'gym' (or install the embodied env deps)."
+            )
         try:
             canonical_env_id = gym.spec(env_name).id
         except Exception:
@@ -155,6 +180,17 @@ class D4RLDataset:
             if dataset_path is not None
             else cls._default_dataset_path(env_name)
         )
+        if d4rl is None or gym is None:  # pragma: no cover
+            missing = []
+            if gym is None:
+                missing.append("gym")
+            if d4rl is None:
+                missing.append("d4rl")
+            raise ImportError(
+                "D4RLDataset.from_path requires optional dependencies: "
+                + ", ".join(missing)
+                + ". Please install them to load D4RL datasets."
+            )
         try:
             import h5py  # type: ignore
         except ImportError as exc:  # pragma: no cover

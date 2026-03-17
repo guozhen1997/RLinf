@@ -70,6 +70,8 @@ jobs:
               - 'rlinf/utils/**'
               - 'rlinf/workers/actor/__init__.py'
               - 'rlinf/workers/actor/fsdp_actor_worker.py'
+              - 'rlinf/workers/dataset/*.py'
+              - 'rlinf/workers/dataset/**/*.py'
               - 'rlinf/workers/reward/*.py'
               - 'rlinf/workers/rollout/**'
               - 'rlinf/hybrid_engines/**'
