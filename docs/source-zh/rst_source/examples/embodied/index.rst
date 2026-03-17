@@ -277,6 +277,7 @@
    opensora
    wan
    gsenv
+   iql_d4rl
    pi0
    gr00t
    sac_flow

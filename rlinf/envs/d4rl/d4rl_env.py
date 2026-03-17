@@ -104,10 +104,26 @@ class D4RLEnv(gym.Env):
         )
 
         self.record_metrics = bool(record_metrics)
-        env_fns = [
-            lambda env_name=self.env_name: gym.make(env_name)
-            for _ in range(self.num_envs)
-        ]
+        _save_video = False
+        if self.video_cfg is not None:
+            if hasattr(self.video_cfg, "save_video"):
+                _save_video = bool(self.video_cfg.save_video)
+            elif hasattr(self.video_cfg, "get") and self.video_cfg.get("save_video"):
+                _save_video = True
+        _render_mode = "rgb_array" if _save_video else None
+        self._save_video = _save_video
+        _env_name = self.env_name
+
+        def _make_env() -> gym.Env:
+            if _render_mode is not None:
+                try:
+                    return gym.make(_env_name, render_mode=_render_mode)
+                except TypeError:
+                    # Older gym may not accept render_mode in make().
+                    return gym.make(_env_name)
+            return gym.make(_env_name)
+
+        env_fns = [_make_env for _ in range(self.num_envs)]
         if self.use_subproc_vector_env:
             self.env = SubprocVectorEnv(env_fns)
         else:
@@ -146,6 +162,14 @@ class D4RLEnv(gym.Env):
 
     def close(self) -> None:
         self.env.close()
+
+    def render(self, **kwargs: Any) -> Any:
+        """Render all envs; used by RecordVideo when obs has no image keys."""
+        if hasattr(self.env, "render"):
+            if not kwargs:
+                kwargs = {"mode": "rgb_array"}
+            return self.env.render(**kwargs)
+        return None
 
     def _get_random_reset_state_ids(self, num_reset_states: int) -> np.ndarray:
         if self.specific_reset_id is not None:
@@ -186,6 +210,29 @@ class D4RLEnv(gym.Env):
     def _wrap_obs(obs: np.ndarray | torch.Tensor) -> dict[str, torch.Tensor]:
         """Convert raw state observation to EnvWorker-compatible observation dict."""
         return {"states": torch.as_tensor(obs, dtype=torch.float32)}
+
+    def _inject_render_if_needed(self, obs_dict: dict[str, Any]) -> None:
+        """When save_video is True, add rendered frames to obs so RecordVideo can use them."""
+        if not self._save_video or not hasattr(self.env, "render"):
+            return
+        try:
+            result = self.env.render(mode="rgb_array")
+            if result is None:
+                return
+            if isinstance(result, np.ndarray):
+                if result.ndim == 3:
+                    result = np.expand_dims(result, axis=0)
+                frames = np.asarray(result, dtype=np.uint8)
+            elif isinstance(result, (list, tuple)):
+                frames = np.stack(
+                    [np.asarray(r, dtype=np.uint8) for r in result if r is not None]
+                )
+            else:
+                return
+            if frames.size > 0:
+                obs_dict["images"] = torch.as_tensor(frames)
+        except Exception:
+            pass
 
     def _vector_reset(
         self,
@@ -316,7 +363,9 @@ class D4RLEnv(gym.Env):
             self._start_time[stat_env_idx] = time.time()
         self._elapsed_steps[stat_env_idx] = 0
         self.prev_step_reward[stat_env_idx] = 0.0
-        return self._wrap_obs(full_obs), {}
+        obs_dict = self._wrap_obs(full_obs)
+        self._inject_render_if_needed(obs_dict)
+        return obs_dict, {}
 
     def step(
         self, actions: torch.Tensor | np.ndarray, auto_reset: bool = True
@@ -383,6 +432,7 @@ class D4RLEnv(gym.Env):
             )
         else:
             obs_dict = self._wrap_obs(obs)
+        self._inject_render_if_needed(obs_dict)
 
         self._last_obs = obs_dict["states"].cpu().numpy()
         self._is_start = False

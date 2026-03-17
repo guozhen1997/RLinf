@@ -277,6 +277,7 @@ as well as reinforcement learning training examples on real robots.
    opensora
    wan
    gsenv
+   iql_d4rl
    pi0
    gr00t
    sac_flow

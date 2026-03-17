@@ -27,8 +27,8 @@ runner:
   max_epochs: 1000000
   max_steps: 1000000
 
-  val_check_interval: 100000
-  save_interval: 100000
+  val_check_interval: 5000
+  save_interval: 5000
 
   log_interval: 1000
   local_update_steps: 500
@@ -103,6 +103,7 @@ env:
     is_eval: true
     video_cfg:
       save_video: false
+      video_base_dir: ${runner.logger.log_path}/video/eval
 
 rollout:
   group_name: "RolloutGroup"
@@ -114,7 +115,7 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  use_fsdp_wrap: true
+  use_fsdp_wrap: false
   seed: 42
   offline_torch_compile: true
   worker_cls: "iql"

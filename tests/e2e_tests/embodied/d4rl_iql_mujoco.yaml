@@ -105,7 +105,8 @@ env:
     is_eval: true
     video_cfg:
       save_video: false
-
+      video_base_dir: ${runner.logger.log_path}/video/eval
+      
 rollout:
   group_name: "RolloutGroup"
   pipeline_stage_num: 1
