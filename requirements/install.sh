@@ -548,6 +548,35 @@ install_dexbotic_model() {
 }
 
 install_lingbot_vla_model() {
+<<<<<<< HEAD
+=======
+    create_and_sync_venv
+    install_common_embodied_deps
+    local lingbotvla_dir
+    lingbotvla_dir=$(clone_or_reuse_repo LINGBOT_PATH "$VENV_DIR/lingbot-vla" ${GITHUB_PREFIX}https://github.com/RLinf/lingbot-vla.git --recurse-submodules)
+    uv pip install -e $lingbotvla_dir
+    uv pip install -r $lingbotvla_dir/requirements.txt
+    uv pip install -e $lingbotvla_dir/lingbotvla/models/vla/vision_models/lingbot-depth/ --no-deps
+    uv pip install -e $lingbotvla_dir/lingbotvla/models/vla/vision_models/MoGe --no-deps
+
+    uv pip install git+${GITHUB_PREFIX}https://github.com/huggingface/lerobot.git@0cf864870cf29f4738d3ade893e6fd13fbd7cdb5
+    uv pip install -r $SCRIPT_DIR/embodied/models/lingbotvla.txt
+
+    case "$ENV_NAME" in
+        robotwin)
+            install_robotwin_env
+            install_flash_attn
+            ;;
+        *)
+            echo "Environment '$ENV_NAME' is not supported for Lingbot-VLA model." >&2
+            exit 1
+            ;;
+    esac
+    uv pip uninstall pynvml || true
+}
+
+install_env_only() {
+>>>>>>> upstream/main
     create_and_sync_venv
     install_common_embodied_deps
     local lingbotvla_dir
