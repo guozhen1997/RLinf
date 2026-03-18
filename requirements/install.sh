@@ -548,8 +548,6 @@ install_dexbotic_model() {
 }
 
 install_lingbot_vla_model() {
-<<<<<<< HEAD
-=======
     create_and_sync_venv
     install_common_embodied_deps
     local lingbotvla_dir
@@ -576,7 +574,6 @@ install_lingbot_vla_model() {
 }
 
 install_env_only() {
->>>>>>> upstream/main
     create_and_sync_venv
     install_common_embodied_deps
     local lingbotvla_dir
