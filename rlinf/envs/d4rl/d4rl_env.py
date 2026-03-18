@@ -132,6 +132,7 @@ class D4RLEnv(gym.Env):
         self.env.seed(self._seed_list)
         self._generator = np.random.default_rng(seed=self.seed)
         self.start_idx = 0
+        self._score_env = self._build_score_env(self.env_name)
 
         self._is_start = True
         self._last_obs: np.ndarray | None = None
@@ -143,6 +144,37 @@ class D4RLEnv(gym.Env):
         self._elapsed_steps = np.zeros((self.num_envs,), dtype=np.int32)
         self.prev_step_reward = np.zeros((self.num_envs,), dtype=np.float32)
         self._init_reset_state_ids()
+
+    @staticmethod
+    def _build_score_env(env_name: str) -> gym.Env | None:
+        """Build a lightweight env handle for D4RL score normalization."""
+        try:
+            score_env = gym.make(env_name)
+        except Exception:
+            return None
+        if not hasattr(score_env, "get_normalized_score"):
+            try:
+                score_env.close()
+            except Exception:
+                pass
+            return None
+        return score_env
+
+    def _compute_normalized_scores(self, returns: np.ndarray) -> np.ndarray | None:
+        """Convert episode returns to D4RL normalized scores (0-100 scale)."""
+        if self._score_env is None:
+            return None
+        get_score = getattr(self._score_env, "get_normalized_score", None)
+        if not callable(get_score):
+            return None
+        try:
+            normalized = np.asarray(
+                [float(get_score(float(ret))) * 100.0 for ret in returns],
+                dtype=np.float32,
+            )
+        except Exception:
+            return None
+        return normalized
 
     @property
     def is_start(self) -> bool:
@@ -161,6 +193,11 @@ class D4RLEnv(gym.Env):
         return []
 
     def close(self) -> None:
+        if self._score_env is not None:
+            try:
+                self._score_env.close()
+            except Exception:
+                pass
         self.env.close()
 
     def render(self, **kwargs: Any) -> Any:
@@ -398,10 +435,15 @@ class D4RLEnv(gym.Env):
 
         ep_returns = np.zeros((self.num_envs,), dtype=np.float32)
         ep_lengths = np.zeros((self.num_envs,), dtype=np.float32)
+        ep_normalized_scores = np.zeros((self.num_envs,), dtype=np.float32)
         dones = np.logical_or(terminations, truncations)
         if self.record_metrics and np.any(dones):
             ep_returns[dones] = self._reward_sum[dones]
             ep_lengths[dones] = self._episode_length[dones].astype(np.float32)
+            done_returns = ep_returns[dones]
+            normalized_scores = self._compute_normalized_scores(done_returns)
+            if normalized_scores is not None:
+                ep_normalized_scores[dones] = normalized_scores
             self._reward_sum[dones] = 0.0
             self._episode_length[dones] = 0
             self._start_time[dones] = time.time()
@@ -411,7 +453,7 @@ class D4RLEnv(gym.Env):
 
         infos: dict[str, Any] = {
             "episode": {
-                "return": torch.as_tensor(ep_returns, dtype=torch.float32),
+                "return": torch.as_tensor(ep_normalized_scores, dtype=torch.float32),
                 "episode_len": torch.as_tensor(ep_lengths, dtype=torch.float32),
             }
         }

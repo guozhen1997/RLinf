@@ -44,6 +44,7 @@ class BasePolicy(ABC):
         - crossq_forward
         - crossq_q_forward
         - iql_forward
+        - prepare_dagger_sft_batch
     """
 
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
@@ -66,6 +67,11 @@ class BasePolicy(ABC):
 
     def iql_forward(self, **kwargs):
         raise NotImplementedError
+
+    def prepare_dagger_sft_batch(self, batch):
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support DAgger SFT training."
+        )
 
     @abstractmethod
     def default_forward(self, **kwargs): ...
