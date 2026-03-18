@@ -54,9 +54,14 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self.eval_returns: list[tuple[int, float]] = []
         self._global_step = 0
 
-        # Build model / optimizer (JAX-style functional schedule, no lr_scheduler)
+        # Build model / optimizer / lr_scheduler
         self.model = None
         self.optimizer = None
+        self.qf_optimizer = None
+        self.vf_optimizer = None
+        self.lr_scheduler = None
+        self.qf_lr_scheduler = None
+        self.vf_lr_scheduler = None
         self._compiled_update_step = None
         self._critic_params: list[torch.Tensor] = []
         self._target_params: list[torch.Tensor] = []
@@ -317,27 +322,13 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         rewards: torch.Tensor,
         masks: torch.Tensor,
         next_obs: torch.Tensor,
-        step: torch.Tensor,
-        max_steps: torch.Tensor,
-        use_cosine: torch.Tensor,
     ) -> torch.Tensor:
-        """Compiled path: one IQL step (forward + backward + schedule + step + target) then return stacked metrics."""
-        value_loss, actor_loss, critic_loss, v, q1, q2, adv = (
-            self.compute_iql_step_outputs(obs, actions, rewards, masks, next_obs)
+        """Compiled path: one IQL step (value + actor + critic + target)."""
+        v, value_loss = self.forward_value(obs, actions)
+        adv, actor_loss = self.forward_actor(obs, actions)
+        q1, q2, critic_loss = self.forward_critic(
+            obs, actions, rewards, masks, next_obs
         )
-        assert self.optimizer is not None, (
-            "setup_model_and_optimizer must be called first."
-        )
-        total_loss = value_loss + actor_loss + critic_loss
-        self.optimizer.zero_grad(set_to_none=True)
-        total_loss.backward()
-        decay = use_cosine * (
-            0.5 * (1.0 + torch.cos(torch.pi * step.float() / max_steps.float()))
-        ) + (1.0 - use_cosine)
-        for p in self.model.parameters():
-            if p.grad is not None:
-                p.grad.mul_(decay)
-        self.optimizer.step()
         self.soft_update_target_model()
         return torch.stack(
             [
@@ -352,6 +343,70 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             ]
         )
 
+    def forward_value(
+        self, obs: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert self.vf_optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
+        with torch.no_grad():
+            q1_t, q2_t = self.forward_critic_module(self.target_model, obs, actions)
+            q_t = torch.min(q1_t, q2_t)
+        v = self.value_model(forward_type=ForwardType.IQL_VALUE, observations=obs)
+        value_loss = iql_expectile_loss(q_t - v, self.expectile).mean()
+        self.vf_optimizer.zero_grad(set_to_none=True)
+        value_loss.backward()
+        self.vf_optimizer.step()
+        return v, value_loss
+
+    def forward_actor(
+        self, obs: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert self.optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
+        with torch.no_grad():
+            new_v = self.value_model(
+                forward_type=ForwardType.IQL_VALUE, observations=obs
+            )
+            q1_t, q2_t = self.forward_critic_module(self.target_model, obs, actions)
+            q_t = torch.min(q1_t, q2_t)
+            adv = q_t - new_v
+            exp_a = torch.exp(adv * self.temperature).clamp(max=100.0)
+        log_probs = self.model(
+            forward_type=ForwardType.IQL_ACTOR, observations=obs, actions=actions
+        )
+        actor_loss = -(exp_a * log_probs).mean()
+        self.optimizer.zero_grad(set_to_none=True)
+        actor_loss.backward()
+        self.optimizer.step()
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.step()
+        return adv, actor_loss
+
+    def forward_critic(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        masks: torch.Tensor,
+        next_obs: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert self.qf_optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
+        with torch.no_grad():
+            next_v = self.value_model(
+                forward_type=ForwardType.IQL_VALUE, observations=next_obs
+            )
+            target_q = rewards + self.discount * masks * next_v
+        q1, q2 = self.forward_critic_module(self.critic_model, obs, actions)
+        critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
+        self.qf_optimizer.zero_grad(set_to_none=True)
+        critic_loss.backward()
+        self.qf_optimizer.step()
+        return q1, q2, critic_loss
+
     @Worker.timer("update_one_epoch")
     def update_one_epoch(
         self,
@@ -364,19 +419,8 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self.value_model.train()
 
         obs, actions, rewards, masks, next_obs = batch
-        step_tensor = torch.tensor(
-            self._global_step, dtype=torch.float32, device=obs.device
-        )
-        max_steps_int = max(1, int(self.cfg.runner.get("max_steps", 1)))
-        max_steps_tensor = torch.tensor(
-            max_steps_int, dtype=torch.float32, device=obs.device
-        )
-        use_cosine = (
-            self.cfg.algorithm.get("opt_decay_schedule", "cosine") == "cosine"
-            and max_steps_int > 0
-        )
-        use_cosine_tensor = torch.tensor(
-            float(use_cosine), dtype=torch.float32, device=obs.device
+        assert self.lr_scheduler is not None, (
+            "setup_model_and_optimizer must be called first."
         )
         if int(obs.shape[0]) != self.batch_size:
             raise ValueError(
@@ -398,9 +442,6 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                     rewards,
                     masks,
                     next_obs,
-                    step_tensor,
-                    max_steps_tensor,
-                    use_cosine_tensor,
                 )
             except Exception as e:
                 self.log_warning(
@@ -410,7 +451,8 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                 self._compiled_update_step = None
                 use_compiled_update = False
             if use_compiled_update:
-                return {
+                metric_device = obs.device
+                result = {
                     "critic_loss": flat[0].detach(),
                     "q1": flat[1].detach(),
                     "q2": flat[2].detach(),
@@ -419,8 +461,21 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                     "actor_loss": flat[5].detach(),
                     "adv_mean": flat[6].detach(),
                     "adv_std": flat[7].detach(),
+                    "lr_actor": torch.tensor(
+                        float(self.optimizer.param_groups[0]["lr"]),
+                        device=metric_device,
+                    ),
+                    "lr_value": torch.tensor(
+                        float(self.vf_optimizer.param_groups[0]["lr"]),
+                        device=metric_device,
+                    ),
+                    "lr_critic": torch.tensor(
+                        float(self.qf_optimizer.param_groups[0]["lr"]),
+                        device=metric_device,
+                    ),
                     "use_fsdp_wrap": self._use_fsdp_wrap,
                 }
+                return result
 
         flat = self.update_step_forward(
             obs,
@@ -428,11 +483,9 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             rewards,
             masks,
             next_obs,
-            step_tensor,
-            max_steps_tensor,
-            use_cosine_tensor,
         )
-        return {
+        metric_device = obs.device
+        result = {
             "critic_loss": flat[0].detach(),
             "q1": flat[1].detach(),
             "q2": flat[2].detach(),
@@ -441,11 +494,37 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             "actor_loss": flat[5].detach(),
             "adv_mean": flat[6].detach(),
             "adv_std": flat[7].detach(),
+            "lr_actor": torch.tensor(
+                float(self.optimizer.param_groups[0]["lr"]),
+                device=metric_device,
+            ),
+            "lr_value": torch.tensor(
+                float(self.vf_optimizer.param_groups[0]["lr"]),
+                device=metric_device,
+            ),
+            "lr_critic": torch.tensor(
+                float(self.qf_optimizer.param_groups[0]["lr"]),
+                device=metric_device,
+            ),
             "use_fsdp_wrap": self._use_fsdp_wrap,
         }
+        return result
+
+    def build_lr_schedulers(self) -> None:
+        """Build IQL schedulers (actor uses cosine annealing)."""
+        assert self.optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
+        self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer,
+            T_max=max(1, int(self.cfg.runner.max_steps)),
+            eta_min=0.0,
+        )
+        self.qf_lr_scheduler = None
+        self.vf_lr_scheduler = None
 
     def setup_model_and_optimizer(self, initialize_target: bool = True) -> None:
-        """Setup model, lr_scheduler and optimizers.
+        """Setup models, optimizer and scheduler.
 
         When offline_torch_compile is true, ensure fsdp_config has use_orig_params: true.
         """
@@ -501,17 +580,17 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             self._critic_params = list(self.critic_model.parameters())
             self._target_params = list(self.target_model.parameters())
 
-        # Single unified optimizer (actor + value + critic), one backward + one step
+        # Build separated optimizers and scheduler
         actor_lr = self.cfg.algorithm.actor_lr
         value_lr = self.cfg.algorithm.value_lr
         critic_lr = self.cfg.algorithm.critic_lr
-        unified_params = [
-            {"params": list(self.model.parameters()), "lr": actor_lr},
-            {"params": list(self.value_model.parameters()), "lr": value_lr},
-            {"params": list(self.critic_model.parameters()), "lr": critic_lr},
-        ]
-        self.optimizer = torch.optim.Adam(unified_params)
-        self.log_info("IQL offline: using unified optimizer (1 step).")
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=actor_lr)
+        self.vf_optimizer = torch.optim.Adam(self.value_model.parameters(), lr=value_lr)
+        self.qf_optimizer = torch.optim.Adam(
+            self.critic_model.parameters(), lr=critic_lr
+        )
+        self.build_lr_schedulers()
+        self.log_info("IQL offline: using separated Adam optimizers.")
         if self.offline_torch_compile and self._use_fsdp_wrap:
             self.log_warning(
                 "IQL offline: disable torch.compile when use_fsdp_wrap=True "
@@ -673,21 +752,25 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self._strategy.save_checkpoint(
             model=self.model,
             optimizers=[self.optimizer] if self.optimizer is not None else [],
-            lr_schedulers=[],
+            lr_schedulers=[self.lr_scheduler] if self.lr_scheduler is not None else [],
             save_path=os.path.join(save_base_path, "actor_policy"),
             checkpoint_format="local_shard",
         )
         self._strategy.save_checkpoint(
             model=self.critic_model,
-            optimizers=[],
-            lr_schedulers=[],
+            optimizers=[self.qf_optimizer] if self.qf_optimizer is not None else [],
+            lr_schedulers=[self.qf_lr_scheduler]
+            if self.qf_lr_scheduler is not None
+            else [],
             save_path=os.path.join(save_base_path, "critic"),
             checkpoint_format="local_shard",
         )
         self._strategy.save_checkpoint(
             model=self.value_model,
-            optimizers=[],
-            lr_schedulers=[],
+            optimizers=[self.vf_optimizer] if self.vf_optimizer is not None else [],
+            lr_schedulers=[self.vf_lr_scheduler]
+            if self.vf_lr_scheduler is not None
+            else [],
             save_path=os.path.join(save_base_path, "value"),
             checkpoint_format="local_shard",
         )
@@ -724,21 +807,25 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self._strategy.load_checkpoint(
             model=self.model,
             optimizers=[self.optimizer] if self.optimizer is not None else [],
-            lr_schedulers=[],
+            lr_schedulers=[self.lr_scheduler] if self.lr_scheduler is not None else [],
             load_path=os.path.join(load_base_path, "actor_policy"),
             checkpoint_format="local_shard",
         )
         self._strategy.load_checkpoint(
             model=self.critic_model,
-            optimizers=[],
-            lr_schedulers=[],
+            optimizers=[self.qf_optimizer] if self.qf_optimizer is not None else [],
+            lr_schedulers=[self.qf_lr_scheduler]
+            if self.qf_lr_scheduler is not None
+            else [],
             load_path=os.path.join(load_base_path, "critic"),
             checkpoint_format="local_shard",
         )
         self._strategy.load_checkpoint(
             model=self.value_model,
-            optimizers=[],
-            lr_schedulers=[],
+            optimizers=[self.vf_optimizer] if self.vf_optimizer is not None else [],
+            lr_schedulers=[self.vf_lr_scheduler]
+            if self.vf_lr_scheduler is not None
+            else [],
             load_path=os.path.join(load_base_path, "value"),
             checkpoint_format="local_shard",
         )
