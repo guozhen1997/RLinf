@@ -107,6 +107,18 @@ jobs:
           pip install uv
           uv cache prune --ci
           bash requirements/install.sh embodied --env d4rl
+      - name: Install liberopro
+        run: |
+          pip install uv
+          bash requirements/install.sh embodied --model openvla-oft --env liberopro
+          rm -rf .venv
+
+      - name: Install liberoplus
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libexpat1 libfontconfig1-dev libpython3-stdlib libmagickwand-dev
+          pip install uv
+          bash requirements/install.sh embodied --model openvla-oft --env liberoplus
           rm -rf .venv
 
       - name: Install behavior-openvla-oft
