@@ -17,7 +17,6 @@ import gc
 import os
 import random
 import sys
-import uuid
 from contextlib import contextmanager
 from functools import partial, wraps
 from typing import Callable, Literal, Optional
@@ -35,6 +34,7 @@ def clear_memory(sync=True):
     if sync:
         Worker.torch_platform.synchronize()
     gc.collect()
+    Worker.torch_platform.ipc_collect()
     Worker.torch_platform.empty_cache()
 
 
@@ -53,7 +53,7 @@ cpu_dict = partial(apply_func_to_dict, partial(move_to_device_if_tensor, "cpu"))
 _UINT32_MOD = 2**32
 
 
-def seed_everything(seed: int) -> int:
+def set_seed(seed: int):
     """Seed Python, NumPy, and PyTorch RNGs."""
     normalized_seed = int(seed)
     numpy_seed = normalized_seed % _UINT32_MOD
@@ -65,8 +65,6 @@ def seed_everything(seed: int) -> int:
     if torch.cuda.is_available():
         torch.cuda.manual_seed(normalized_seed)
         torch.cuda.manual_seed_all(normalized_seed)
-
-    return normalized_seed
 
 
 def seed_dataloader_worker(worker_id: int) -> None:
@@ -509,28 +507,3 @@ def set_rng_state(rng_state: dict) -> None:
     random.setstate(rng_state["random"])
     if Worker.torch_platform.is_available() and Worker.torch_device_type in rng_state:
         Worker.torch_platform.set_rng_state(rng_state[Worker.torch_device_type])
-
-
-def get_model_weights_id(model, k=128):
-    first_p = None
-    last_p = None
-
-    for _, p in model.named_parameters():
-        if not p.is_floating_point():
-            continue
-        if first_p is None:
-            first_p = p
-        last_p = p
-
-    if first_p is None or last_p is None:
-        return None
-
-    def tensor_fingerprint(p):
-        flat = p.detach().view(-1)
-        sample = flat[:k] if flat.numel() >= k else flat
-        return sample.to(dtype=torch.float32).cpu().numpy().tobytes()
-
-    name_bytes = tensor_fingerprint(first_p) + tensor_fingerprint(last_p)
-    name_str = name_bytes.hex()
-
-    return uuid.uuid5(uuid.NAMESPACE_DNS, name_str)

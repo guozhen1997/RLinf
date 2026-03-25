@@ -50,7 +50,7 @@ from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.utils.utils import seed_dataloader_worker, seed_everything
+from rlinf.utils.utils import seed_dataloader_worker, set_seed
 from rlinf.workers.cfg.utils import (
     CFGDataLoaderImpl,
     DatasetWithAdvantage,
@@ -88,20 +88,17 @@ class DebugCFGFSDPActor(FSDPModelManager, Worker):
             return model
         return super().model_provider_func()
 
-    def _seed_worker_process(self) -> int:
-        """Seed RNG state for this actor worker process."""
+    def init_worker(self) -> None:
+        """Initialize the actor worker."""
+
         actor_seed = int(self.cfg.actor.get("seed", 42))
         worker_seed = actor_seed + int(self._rank)
-        seed_everything(worker_seed)
+        set_seed(worker_seed)
         self.log_info(
             "Initialized debug CFG actor RNG "
             f"with seed={worker_seed} (base={actor_seed}, rank={self._rank})"
         )
-        return worker_seed
 
-    def init_worker(self) -> None:
-        """Initialize the actor worker."""
-        self._worker_seed = self._seed_worker_process()
         self.setup_model_and_optimizer()
 
         if self.enable_offload:
