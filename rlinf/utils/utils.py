@@ -53,7 +53,7 @@ cpu_dict = partial(apply_func_to_dict, partial(move_to_device_if_tensor, "cpu"))
 _UINT32_MOD = 2**32
 
 
-def seed_everything(seed: int) -> int:
+def set_seed(seed: int):
     """Seed Python, NumPy, and PyTorch RNGs."""
     normalized_seed = int(seed)
     numpy_seed = normalized_seed % _UINT32_MOD
@@ -65,8 +65,6 @@ def seed_everything(seed: int) -> int:
     if torch.cuda.is_available():
         torch.cuda.manual_seed(normalized_seed)
         torch.cuda.manual_seed_all(normalized_seed)
-
-    return normalized_seed
 
 
 def seed_dataloader_worker(worker_id: int) -> None:
