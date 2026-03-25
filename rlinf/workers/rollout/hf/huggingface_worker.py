@@ -30,6 +30,7 @@ from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.comm_mapping import CommMapper
 from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.utils.utils import set_seed
 
 
 class MultiStepRolloutWorker(Worker):
@@ -85,6 +86,14 @@ class MultiStepRolloutWorker(Worker):
         self.finished_episodes = None
 
     def init_worker(self):
+        base_seed = int(self.cfg.rollout.get("seed", self.cfg.actor.get("seed", 42)))
+        worker_seed = base_seed + int(self._rank)
+        set_seed(worker_seed)
+        self.log_info(
+            "Initialized rollout RNG "
+            f"with seed={worker_seed} (base={base_seed}, rank={self._rank})"
+        )
+
         rollout_model_config = copy.deepcopy(self.cfg.actor.model)
         with open_dict(rollout_model_config):
             rollout_model_config.precision = self.cfg.rollout.model.precision
@@ -253,6 +262,7 @@ class MultiStepRolloutWorker(Worker):
             SupportedModel.MLP_POLICY,
             SupportedModel.GR00T,
             SupportedModel.CNN_POLICY,
+            SupportedModel.CFG_MODEL,
         ]:
             if self.cfg.algorithm.loss_type == "embodied_dagger":
                 kwargs = {"mode": "eval"}
