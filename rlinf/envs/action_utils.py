@@ -27,19 +27,39 @@ def prepare_actions_for_maniskill(
     policy,
     model_type=None,
 ) -> torch.Tensor:
-    # panda-droid: DreamZero DROID absolute joint position (7 joint + gripper), pass through
-    # panda-qpos: joint delta position, pass through
-    if policy and "panda" in policy:
-        # DreamZero outputs [B, chunks, 8]; ensure we extract 8D for env
-        if model_type is not None and SupportedModel(model_type) == SupportedModel.DREAMZERO:
-            chunk_actions = np.asarray(raw_chunk_actions)[..., :8].astype(np.float32)
-        else:
-            chunk_actions = raw_chunk_actions
-        if isinstance(chunk_actions, np.ndarray):
-            chunk_actions = torch.from_numpy(chunk_actions)
-            if torch.cuda.is_available():
-                chunk_actions = chunk_actions.cuda()
-        return chunk_actions
+    # 1) DREAMZERO: joint+gripper action
+    if model_type is not None and SupportedModel(model_type) == SupportedModel.DREAMZERO:
+        chunk_actions = np.asarray(raw_chunk_actions, dtype=np.float32)
+        # compatible: [H, A] -> [1, H, A]
+        if chunk_actions.ndim == 2:
+            chunk_actions = chunk_actions[None, ...]
+        # expected: [B, H, A]
+        if chunk_actions.ndim != 3:
+            raise ValueError(
+                f"[DREAMZERO] Unexpected action shape {chunk_actions.shape}, expected [B,H,A] or [H,A]."
+            )
+        # truncate to target action dimension (usually A=8)
+        if chunk_actions.shape[-1] < action_dim:
+            raise ValueError(
+                f"[DREAMZERO] Action dim mismatch: got {chunk_actions.shape[-1]} < required {action_dim}."
+            )
+        chunk_actions = chunk_actions[..., :action_dim]
+        # optional: check chunk number (do not force reshape to avoid errors)
+        if num_action_chunks is not None and chunk_actions.shape[1] != num_action_chunks:
+            # here only print a warning, do not reshape; the real chunk is determined by the model output
+            # you can also raise an error to force the configuration to be consistent
+            print(
+                f"[WARN][DREAMZERO] action horizon mismatch: "
+                f"pred={chunk_actions.shape[1]} vs cfg={num_action_chunks}"
+            )
+        # from 8D [q1..q7, g] -> 7D [q1..q6, g]  (temporary)
+        chunk_actions = np.concatenate(
+        [chunk_actions[..., :6], chunk_actions[..., 7:8]], axis=-1
+        )
+        out = torch.from_numpy(chunk_actions)
+        if torch.cuda.is_available():
+            out = out.cuda()
+        return out
     # TODO only suitable for action_dim = 7
     reshaped_actions = raw_chunk_actions.reshape(-1, action_dim)
     batch_size = reshaped_actions.shape[0]
