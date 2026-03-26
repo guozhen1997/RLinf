@@ -272,16 +272,13 @@ class EmbodiedRewardWorker(Worker):
         if isinstance(images, np.ndarray):
             images = torch.from_numpy(images)
 
-        images = images.to(self.device)
+        model_dtype = next(self.model.parameters()).dtype
+        images = images.to(device=self.device, dtype=model_dtype)
 
         with torch.no_grad():
             outputs = self.model(images)
             probs = outputs["probabilities"]
-            rewards = torch.where(
-                probs > self.reward_threshold,
-                probs,
-                torch.zeros_like(probs),
-            )
+            rewards = (probs > self.reward_threshold).to(probs.dtype)
 
         if rewards.dim() == 1:
             rewards = rewards.unsqueeze(-1)

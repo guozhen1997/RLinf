@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 import numpy as np
 import torch
+from mani_skill.utils.common import torch_clone_dict
 from omegaconf import DictConfig, OmegaConf
 
 from rlinf.data.embodied_io_struct import (
@@ -328,6 +329,7 @@ class EnvWorker(Worker):
         if isinstance(infos_list, (list, tuple)):
             infos = infos_list[-1] if infos_list else None
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
+        merged_final_obs = self._build_chunk_final_obs(obs_list, infos_list)
         if not self.cfg.env.train.auto_reset:
             if self.cfg.env.train.ignore_terminations:
                 if chunk_truncations[:, -1].any():
@@ -356,9 +358,7 @@ class EnvWorker(Worker):
 
         env_output = EnvOutput(
             obs=extracted_obs,
-            final_obs=infos["final_observation"]
-            if "final_observation" in infos
-            else None,
+            final_obs=merged_final_obs,
             rewards=chunk_rewards,
             dones=chunk_dones,
             terminations=chunk_terminations,
@@ -393,6 +393,7 @@ class EnvWorker(Worker):
         if isinstance(infos_list, (list, tuple)):
             infos = infos_list[-1] if infos_list else None
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
+        merged_final_obs = self._build_chunk_final_obs(obs_list, infos_list)
 
         if chunk_dones.any():
             if "episode" in infos:
@@ -405,11 +406,52 @@ class EnvWorker(Worker):
 
         env_output = EnvOutput(
             obs=extracted_obs,
-            final_obs=infos["final_observation"]
-            if "final_observation" in infos
-            else None,
+            final_obs=merged_final_obs,
         )
         return env_output, env_info
+
+    def _build_chunk_final_obs(self, obs_list, infos_list):
+        """Build per-env terminal observations for a whole chunk.
+
+        Matches the old wrapper semantics:
+        - default to the last rollout observation for each env
+        - if an env terminated earlier in the chunk, replace that env's observation
+          with the true `final_observation` captured at that substep
+        """
+        if not isinstance(obs_list, (list, tuple)) or len(obs_list) == 0:
+            return None
+
+        last_obs = obs_list[-1]
+        if not isinstance(last_obs, dict):
+            return None
+
+        merged_final_obs = torch_clone_dict(last_obs)
+
+        if not isinstance(infos_list, (list, tuple)):
+            return merged_final_obs
+
+        for step_infos in infos_list:
+            if not isinstance(step_infos, dict):
+                continue
+            if "final_observation" not in step_infos or "_final_observation" not in step_infos:
+                continue
+
+            final_obs = step_infos["final_observation"]
+            reset_mask = step_infos["_final_observation"]
+            if final_obs is None or reset_mask is None:
+                continue
+            if reset_mask.dim() > 1:
+                done_mask = reset_mask.any(dim=-1)
+            else:
+                done_mask = reset_mask
+            if not done_mask.any():
+                continue
+
+            for key, value in merged_final_obs.items():
+                if key in final_obs and isinstance(value, torch.Tensor):
+                    merged_final_obs[key][done_mask] = final_obs[key][done_mask]
+
+        return merged_final_obs
 
     def recv_chunk_actions(self, input_channel: Channel, mode="train") -> np.ndarray:
         """Receive and merge chunked actions for the current env worker.
@@ -504,6 +546,7 @@ class EnvWorker(Worker):
             return None
 
         if reward_model_output is not None:
+            reward_model_output = reward_model_output.to(rewards.dtype)
             rewards = (
                 self.env_reward_weight * rewards
                 + self.reward_weight * reward_model_output
@@ -642,7 +685,31 @@ class EnvWorker(Worker):
                 }
             )
         self.send_reward_input(send_channel=send_channel, reward_input=reward_input)
-        return self.recv_reward_results(recv_channel=recv_channel)
+        reward_output = self.recv_reward_results(recv_channel=recv_channel)
+        if self.reward_mode != "terminal" or reward_output is None:
+            return reward_output
+        return self._scatter_terminal_reward_output(
+            env_output=env_output, reward_output=reward_output
+        )
+
+    def _scatter_terminal_reward_output(
+        self,
+        env_output: EnvOutput,
+        reward_output: torch.Tensor,
+    ) -> torch.Tensor:
+        if env_output.rewards is None or env_output.dones is None:
+            return reward_output
+
+        done_envs = env_output.dones.any(dim=1)
+        sparse_rewards = torch.zeros_like(env_output.rewards, dtype=reward_output.dtype)
+        if not done_envs.any():
+            return sparse_rewards
+
+        done_steps = env_output.dones.to(torch.int64).argmax(dim=1)
+        sparse_rewards[done_envs, done_steps[done_envs]] = reward_output[
+            done_envs
+        ].reshape(-1).to(sparse_rewards.dtype)
+        return sparse_rewards
 
     def bootstrap_step(self) -> list[EnvOutput]:
         def get_zero_dones() -> torch.Tensor:
