@@ -25,9 +25,6 @@ def _ensure_groot_importable():
     dreamzero_root = Path(__file__).resolve().parents[5]
     print("================= dreamzero_root ==================")
     print("dreamzero_root", dreamzero_root)
-    dreamzero_root = dreamzero_root / "dreamzero"
-    print("================= dreamzero_root ==================")
-    print("dreamzero_root", dreamzero_root)
     if str(dreamzero_root) not in sys.path:
         sys.path.insert(0, str(dreamzero_root))
 
@@ -124,22 +121,25 @@ class DreamZeroPolicy(BasePolicy):
         metadata_path = exp_cfg_dir / "metadata.json"
         with open(metadata_path, "r") as f:
             metadatas = json.load(f)
-        metadata = DatasetMetadata.model_validate(metadatas["oxe_droid"])
+        embodiment_tag = next(iter(metadatas.keys()))
+        print("================= embodiment_tag ==================")
+        print(embodiment_tag)
+        metadata = DatasetMetadata.model_validate(metadatas[embodiment_tag])
 
         # 2.2. Get the eval transforms
 
         #eval_transform_cfg = train_cfg.transforms["oxe_droid"]
 
         print("================= eval_transform_cfg ==================")
-        print(train_cfg.transforms["oxe_droid"])
+        print(train_cfg.transforms[embodiment_tag])
 
-        train_cfg.transforms["oxe_droid"].transforms[-1].tokenizer_path = tokenizer_path
+        train_cfg.transforms[embodiment_tag].transforms[-1].tokenizer_path = tokenizer_path
         print("================= after tokenizer_path ==================")
         print(tokenizer_path)
-        print(train_cfg.transforms["oxe_droid"])
+        print(train_cfg.transforms[embodiment_tag])
 
 
-        eval_transform = instantiate(train_cfg.transforms["oxe_droid"])
+        eval_transform = instantiate(train_cfg.transforms[embodiment_tag])
         assert isinstance(eval_transform, ComposedModalityTransform), f"{eval_transform=}"
         eval_transform.set_metadata(metadata)
         eval_transform.eval()
@@ -179,6 +179,7 @@ class DreamZeroPolicy(BasePolicy):
         relative_action_keys = self.train_cfg.get('relative_action_keys', [])
         print("relative_action_per_horizon", relative_action_per_horizon)
         if (relative_action or relative_action_per_horizon) and relative_action_keys and obs is not None:
+            print("===========unapply relative action===============")
             for key in relative_action_keys:
                 action_key = f"action.{key}"
                 state_key = f"state.{key}"
@@ -247,8 +248,9 @@ class DreamZeroPolicy(BasePolicy):
         state_dict = {}
         safetensors_path = Path(model_path) / "model.safetensors"
         safetensors_index_path = Path(model_path) / "model.safetensors.index.json"
-
         if safetensors_index_path.exists():
+            print("===========load from safetensors_index_path===============")
+            print(safetensors_index_path)
             with open(safetensors_index_path) as f:
                 index = json.load(f)
             for shard_file in set(index["weight_map"].values()):
@@ -416,6 +418,68 @@ class DreamZeroPolicy(BasePolicy):
         }
         return converted_obs
     
+    def _libero_convert_observation(self, env_obs: dict) -> dict:
+        """Convert environment observation to model input for end-effector control"""
+        main = env_obs["main_images"]
+        wrist = env_obs.get("wrist_images", None)
+        extra_view = env_obs.get("extra_view_images", None)
+        states = env_obs.get("states", None)
+        prompts = env_obs.get("task_descriptions", None)
+        if torch.is_tensor(main):
+            main = main.detach().cpu().numpy()
+        else:
+            main = np.asarray(main)
+        B = main.shape[0]
+        if wrist is not None:
+            if torch.is_tensor(wrist):
+                wrist = wrist.detach().cpu().numpy()
+            else:
+                wrist = np.asarray(wrist)
+        import cv2
+        def _resize_bt_hwc_uint8(x, h=256, w=256):
+            # x: [B,H,W,C
+            B = x.shape[0]
+            out = np.empty((B, h, w, 3), dtype=np.uint8)
+            for b in range(B):
+                frame = x[b]
+                if frame.dtype != np.uint8:
+                    frame = frame.astype(np.uint8)
+                out[b] = cv2.resize(frame, (w, h), interpolation=cv2.INTER_AREA)
+            return out
+        main = _resize_bt_hwc_uint8(main)
+        if wrist is not None:
+            wrist = _resize_bt_hwc_uint8(wrist)
+        print("===========main.shape===============")
+        print(main.shape)
+        print("===========wrist.shape===============")
+        print(wrist.shape)
+        if states is not None:
+            if torch.is_tensor(states):
+                s_np = states.detach().cpu().numpy()
+            else:
+                s_np = np.asarray(states)
+        else:
+            s_np = np.zeros((B, 7), dtype=np.float32)
+        print("===========s_np.shape===============")
+        print(s_np.shape)
+        #s_np = s_np[:, :7]
+        print("===========s_np.shape===============")
+        print(s_np.shape)
+        prompts = prompts if prompts is not None else [""] * B
+        print("===========prompts.length===============")
+        print(len(prompts))
+        if isinstance(prompts, str):
+            prompts = [prompts] * B
+        print("===========prompts.length===============")
+        print(len(prompts))
+        converted_obs = {
+            "video.image": main,                     # [B,H,W,C]
+            "video.wrist_image": wrist,                     # [B,H,W,C]
+            "state.state": s_np,        # [B,7]
+            "annotation.language.action_text": list(prompts),        # list[str], len=B
+        }
+        return converted_obs
+    
     def _convert_action(self, action_dict: dict) -> np.ndarray:
         """Convert AR_droid action dict to roboarena action array.
         
@@ -479,8 +543,7 @@ class DreamZeroPolicy(BasePolicy):
         actions: np.ndarray [B, num_action_chunks, 8]  # 7 joint + 1 gripper
         result: dict  # compatible with rollout interface"""
         print("================= env_obs ==================")
-        print(env_obs)
-        converted_obs = self._convert_observation(env_obs)
+        converted_obs = self._libero_convert_observation(env_obs)
         batch = Batch(obs=converted_obs)
         # relative action unnormalization needs to preserve original obs
         original_obs_for_relative = {
@@ -509,25 +572,39 @@ class DreamZeroPolicy(BasePolicy):
         print("===========batch.act===============")
         print(batch.act.shape)
         print(batch.act)
+        actions = batch.act["action.actions"]
+        if isinstance(actions, torch.Tensor):
+            actions = actions.detach().cpu().numpy()
+        # if actions.ndim == 2:
+        #     actions = actions[None, ...]  # [1,H,8]
+        #actions = actions.astype(np.float32)
+        actions[..., -1] = np.where(actions[..., -1] > 0, 1.0, -1.0).astype(actions.dtype)
+        print("===========actions.shape===============")
+        print(actions.shape)
+        print(actions)
 
-        action_chunk_dict = batch.act
-        action_dict = {}
-        for k in dir(action_chunk_dict):
-            if k.startswith("action."):
-                action_dict[k] = getattr(action_chunk_dict, k)
-        actions = self._convert_action(action_dict)
 
-        forward_inputs = {
-        "action": torch.as_tensor(actions).reshape(actions.shape[0], -1).cpu()
-        if isinstance(actions, np.ndarray)
-        else actions.reshape(actions.shape[0], -1).cpu(),
-        }
+        # action_chunk_dict = batch.act
+        # action_dict = {}
+        # for k in dir(action_chunk_dict):
+        #     if k.startswith("action."):
+        #         action_dict[k] = getattr(action_chunk_dict, k)
+        # #actions = self._convert_action(action_dict)
+        # actions = action_dict
+        # forward_inputs = {
+        # "action": torch.as_tensor(actions).reshape(actions.shape[0], -1).cpu()
+        # if isinstance(actions, np.ndarray)
+        # else actions.reshape(actions.shape[0], -1).cpu(),
+        # }
+        flat = torch.as_tensor(actions, dtype=torch.float32).reshape(actions.shape[0], -1).cpu()
+        forward_inputs = {"action": flat}
         result = {
-            "prev_logprobs": torch.zeros_like(forward_inputs["action"], dtype=torch.float32),
-            "prev_values": torch.zeros((forward_inputs["action"].shape[0], 1), dtype=torch.float32),
-            "forward_inputs": forward_inputs,
+        "prev_logprobs": torch.zeros_like(flat, dtype=torch.float32),
+        "prev_values": torch.zeros((flat.shape[0], 1), dtype=torch.float32),
+        "forward_inputs": forward_inputs,
         }
         return actions, result
+
     def default_forward(
     self,
     forward_inputs: dict[str, Any],
@@ -541,17 +618,13 @@ class DreamZeroPolicy(BasePolicy):
 
         Expected output keys (same style as openpi_action_model.py):
         - logprobs: Tensor [B, num_chunks, action_dim] (float32)
-        - values:   Tensor [B, 1] 或 None
-        - entropy:  Tensor [B, num_chunks, action_dim] 或 None
-
-        Notes:
-        - rollout/huggingface_worker 当前 DreamZeroPolicy 的 forward_inputs 可能只含 "action"，
-        没有图像/状态等观测；这种情况下我们只能退化为用 action 直接构造分布（可跑但梯度可能为 0）。
+        - values:   Tensor [B, 1]
+        - entropy:  Tensor [B, num_chunks, action_dim]
         """
         device = None
 
         if forward_inputs is None or "action" not in forward_inputs:
-            # 兜底：尽量不要 crash，返回空 logprobs（shape 无法推断就按 1x1xaction_dim）
+            
             action_dim = getattr(self, "action_dim", 8)
             device = next(self.parameters()).device
             logprobs = torch.zeros((1, 1, action_dim), device=device, dtype=torch.float32)
@@ -587,9 +660,6 @@ class DreamZeroPolicy(BasePolicy):
             B = action_in.shape[0]
             action = action_in.reshape(B, num_chunks, action_dim)
 
-        # ---- 1) 估计当前策略的均值 mu ----
-        # 如果 forward_inputs 里带了观测，就用 model 预测 mu；
-        # 否则退化：mu = action（这能保证数值可用，但梯度可能为 0）
         mu = None
 
         obs_keys = ("main_images", "extra_view_images", "states", "task_descriptions")
@@ -604,28 +674,23 @@ class DreamZeroPolicy(BasePolicy):
                 "task_descriptions": forward_inputs.get("task_descriptions", None),
             }
 
-            # Convert + process (沿用你 predict_action_batch 里的工具函数)
             droid_obs = self._convert_observation(env_obs)
-            # original_obs_for_relative：用于 unapply 的相对动作反归一化
+
             original_obs_for_relative = {
                 k: (v.copy() if isinstance(v, np.ndarray) else (v.clone() if torch.is_tensor(v) else v))
                 for k, v in droid_obs.items()
             }
             # Batch -> apply/process
             batch = Batch(obs=droid_obs)
-            # 参考 predict_action_batch：unsqueeze 让 batch 维度一致
             original_obs_for_relative = unsqueeze_dict_values(original_obs_for_relative)
 
-            # 你当前实现里 _process_batch 返回 normalized_input (dict)
             normalized_input = self._process_batch(batch)
-            # 训练时需要梯度：只有 compute_values/compute_logprobs 可能为真（actor worker 里 compute_logprobs=True）
             ctx = nullcontext() if (compute_logprobs or compute_values) else torch.no_grad()
             with ctx:
                 model_pred = self.model.lazy_joint_video_action_causal(normalized_input)
 
             normalized_action = model_pred["action_pred"].float()
 
-            # unapply：把 normalized_action 转回动作空间，再走 _convert_action
             batch = self.unapply(Batch(normalized_action=normalized_action), obs=original_obs_for_relative)
             batch.act = squeeze_dict_values(batch.act)
 
@@ -649,18 +714,15 @@ class DreamZeroPolicy(BasePolicy):
                 mu = mu.reshape(action.shape[0], num_chunks, action_dim)
 
         if mu is None:
-            # 退化策略：mu = action（避免缺字段导致 crash）
             mu = action.detach() if not (compute_logprobs or compute_values) else action
 
-        # ---- 2) 固定方差的高斯分布 ----
-        std_val = 0.1  # DreamZero old 版本是 0.1
+        std_val = 0.1
         std = torch.full_like(mu, std_val)
 
         dist = torch.distributions.Normal(mu, std)
 
         out: dict[str, Any] = {}
 
-        # actor worker 里 compute_logprobs 传 True，因此这里默认算 logprobs
         logprobs = dist.log_prob(action)  # [B, num_chunks, action_dim]
         out["logprobs"] = logprobs.to(dtype=torch.float32)
 
@@ -668,8 +730,6 @@ class DreamZeroPolicy(BasePolicy):
             out["entropy"] = dist.entropy().to(dtype=torch.float32)
 
         if compute_values:
-            # 当前 DreamZeroPolicy (new) 没有 value_head；先返回 zeros，保证结构正确
-            # 如果你后续加了 value_head，这里改成 value_head(action.reshape(B, -1))
             B = action.shape[0]
             out["values"] = torch.zeros((B, 1), device=device, dtype=torch.float32)
 

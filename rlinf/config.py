@@ -785,9 +785,6 @@ def validate_embodied_cfg(cfg):
             def get_robot_control_mode(robot: str):
                 if robot == "panda-qpos":
                     return "pd_joint_delta_pos"
-                elif robot == "panda-droid":
-                    # Absolute joint position control for DreamZero DROID (7 joint + gripper)
-                    return "pd_joint_pos"
                 elif robot == "panda-ee-dpos":
                     return "pd_ee_delta_pos"
                 elif robot == "panda-ee-target-dpos":  # for GSEnv
