@@ -17,7 +17,7 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.models.embodiment.mlp_policy.iql_mlp_policy import IQLMLPPolicy
@@ -34,19 +34,16 @@ def iql_expectile_loss(diff: torch.Tensor, expectile: float) -> torch.Tensor:
 class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
-        # Hardcoded fast path: compile, minimal sync; async prefetch on by default.
         self.offline_torch_compile = True
         self.offline_compile_mode = "reduce-overhead"
         self.offline_strict_mode = True
         self.offline_metric_sync_interval = 1000
 
-        self.env = None
-        self._prefetched_batches = None
         self._obs_dim = None
         self._action_dim = None
-        self.device = None
+        self.offline_batch_provider = None
+        self._dataset_size = 0
 
-        # IQL State
         self.critic_model = None
         self.target_model = None
         self.value_model = None
@@ -54,7 +51,6 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self.eval_returns: list[tuple[int, float]] = []
         self._global_step = 0
 
-        # Build model / optimizer / lr_scheduler
         self.model = None
         self.optimizer = None
         self.qf_optimizer = None
@@ -66,55 +62,276 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self._critic_params: list[torch.Tensor] = []
         self._target_params: list[torch.Tensor] = []
 
-        self._use_fsdp_wrap = True
+        self._use_fsdp_wrap = False
 
-    def aggregate_update_info(
-        self, summed: Optional[dict[str, torch.Tensor]], update_info: dict[str, Any]
-    ) -> dict[str, torch.Tensor]:
-        """Merge update_info into summed; skip non-tensor keys like use_fsdp_wrap."""
-        if summed is None:
-            summed = {}
-            for k, v in update_info.items():
-                if k == "use_fsdp_wrap" or not isinstance(v, torch.Tensor):
-                    continue
-                summed[k] = v.detach().clone()
+    def build_offline_dataloader(self) -> None:
+        """Build actor-local offline batch provider (SFT-style single entry)."""
+        dataset_type = self.cfg.get("dataset", {}).get("dataset_type", None)
+        if dataset_type is None:
+            raise ValueError("dataset.dataset_type is required for offline IQL.")
+
+        dataset_type = str(dataset_type).lower()
+        if dataset_type == "d4rl":
+            from rlinf.data.datasets.d4rl import D4RLDataset
+
+            self.offline_batch_provider = (
+                D4RLDataset.build_offline_actor_batch_provider(
+                    self.cfg, self.batch_size
+                )
+            )
         else:
-            for k, v in update_info.items():
-                if k == "use_fsdp_wrap" or not isinstance(v, torch.Tensor):
-                    continue
-                summed[k].add_(v.detach())
-        return summed
+            raise AssertionError(
+                f"offline IQL only supports dataset_type='d4rl', got {dataset_type!r}."
+            )
+        self._obs_dim, self._action_dim = (
+            self.offline_batch_provider.get_obs_action_dims()
+        )
+        self._dataset_size = self.offline_batch_provider.get_dataset_size()
+        self.log_info(
+            "IQL offline: built async batch provider with "
+            f"{self._dataset_size} samples, batch_size={self.batch_size}."
+        )
+        if self._obs_dim <= 0 or self._action_dim <= 0:
+            raise ValueError("Failed to infer obs_dim/action_dim from offline dataset.")
+
+    def setup_iql_components(self):
+        """Initialize IQL-specific offline components (SFT-style: data lives on the actor).
+
+        Batches come from the resolved dataset class's
+        ``build_offline_actor_batch_provider``.
+        """
+        actor_cfg = self.cfg.actor
+        self.offline_torch_compile = bool(actor_cfg.get("offline_torch_compile", True))
+        self.offline_compile_mode = str(
+            actor_cfg.get("offline_compile_mode", "reduce-overhead")
+        )
+        self.offline_strict_mode = bool(actor_cfg.get("offline_strict_mode", True))
+        self.offline_metric_sync_interval = int(
+            actor_cfg.get("offline_metric_sync_interval", 1000)
+        )
+
+        self._seed = int(actor_cfg.seed)
+        self._save_dir = self.cfg.runner.get("save_dir", None)
+        if self._save_dir is None:
+            runner_logger = self.cfg.runner.get("logger", None)
+            if runner_logger is not None:
+                log_path = runner_logger.get("log_path", ".")
+                exp_name = runner_logger.get("experiment_name", "offline")
+                self._save_dir = os.path.join(log_path, exp_name)
+            else:
+                self._save_dir = "."
+        torch.manual_seed(self._seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self._seed)
+        np.random.seed(self._seed)
+        raw_device = self.device
+        if isinstance(raw_device, torch.device):
+            self.device = raw_device
+        elif isinstance(raw_device, int):
+            self.device = (
+                torch.device(f"cuda:{raw_device}")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
+        elif raw_device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(raw_device)
+        if torch.cuda.is_available():
+            torch.set_float32_matmul_precision("high")
+
+        self.discount = float(self.cfg.algorithm.gamma)
+        self.tau = float(self.cfg.algorithm.tau)
+        self.expectile = float(self.cfg.algorithm.expectile)
+        self.temperature = float(self.cfg.algorithm.temperature)
+        global_bs = int(actor_cfg.global_batch_size)
+        assert global_bs % self._world_size == 0, (
+            f"actor.global_batch_size ({global_bs}) must be divisible by world_size ({self._world_size})"
+        )
+        self.batch_size = global_bs // self._world_size
+        if int(actor_cfg.micro_batch_size) != self.batch_size:
+            raise ValueError(
+                f"actor.micro_batch_size must equal per-rank batch size (actor.global_batch_size // world_size); got micro_batch_size={actor_cfg.micro_batch_size}, expected {self.batch_size}."
+            )
+        self.build_offline_dataloader()
 
     def init_worker(self):
-        """Initialize IQL worker."""
-        dataset_cfg = getattr(self.cfg, "dataset", None)
-        self._dataset_group_name = str(
-            getattr(dataset_cfg, "group_name", "DatasetGroup")
-        )
+        """Initialize IQL worker"""
         self.setup_iql_components()
         os.makedirs(self._save_dir or ".", exist_ok=True)
         self.setup_model_and_optimizer(initialize_target=True)
-        # Setup actor->rollout rank mapping for weight sync.
+        if self.cfg.actor.get("enable_offload", False):
+            self.offload_param_and_grad()
+            self.offload_optimizer()
         self._setup_rollout_weight_dst_ranks()
+
+    def setup_model_and_optimizer(self, initialize_target: bool = True) -> None:
+        """Setup models, optimizer and scheduler.
+
+        When offline_torch_compile is true, ensure fsdp_config has use_orig_params: true.
+        """
+        if self._obs_dim is None or self._action_dim is None:
+            raise ValueError(
+                "actor.model.obs_dim/action_dim must be set before actor init."
+            )
+        obs_dim = int(self._obs_dim)
+        action_dim = int(self._action_dim)
+
+        module = self.model_provider_func(obs_dim, action_dim, type_name="actor")
+        critic_module = self.model_provider_func(
+            obs_dim, action_dim, type_name="critic"
+        )
+        value_module = self.model_provider_func(obs_dim, action_dim, type_name="value")
+
+        if initialize_target:
+            target_module = self.model_provider_func(
+                obs_dim, action_dim, type_name="critic"
+            )
+
+        use_fsdp_wrap = self.cfg.actor.get("use_fsdp_wrap", False)
+        if use_fsdp_wrap:
+            self.model = self._strategy.wrap_model(
+                model=module, device_mesh=self._device_mesh
+            )
+            self.critic_model = self._strategy.wrap_model(
+                model=critic_module, device_mesh=self._device_mesh
+            )
+            self.value_model = self._strategy.wrap_model(
+                model=value_module, device_mesh=self._device_mesh
+            )
+            if initialize_target:
+                self.target_model = self._strategy.wrap_model(
+                    model=target_module, device_mesh=self._device_mesh
+                )
+        else:
+            self.model = module
+            self.critic_model = critic_module
+            self.value_model = value_module
+            if initialize_target:
+                self.target_model = target_module
+
+        self._use_fsdp_wrap = use_fsdp_wrap
+        self.log_info(f"IQL offline: use_fsdp_wrap={use_fsdp_wrap}.")
+
+        # Initialize target model
+        if initialize_target:
+            self.target_model.load_state_dict(self.critic_model.state_dict())
+            self.target_model.eval()
+            self.target_model_initialized = True
+            for p in self.target_model.parameters():
+                p.requires_grad_(False)
+            self._critic_params = list(self.critic_model.parameters())
+            self._target_params = list(self.target_model.parameters())
+
+        actor_optim_cfg = self.cfg.actor.optim
+        critic_optim_cfg = self.cfg.actor.critic_optim
+        value_optim_cfg = self.cfg.actor.value_optim
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=float(actor_optim_cfg.lr),
+            betas=(
+                float(actor_optim_cfg.adam_beta1),
+                float(actor_optim_cfg.adam_beta2),
+            ),
+            eps=float(actor_optim_cfg.adam_eps),
+        )
+        self.vf_optimizer = torch.optim.Adam(
+            self.value_model.parameters(),
+            lr=float(value_optim_cfg.lr),
+            betas=(
+                float(value_optim_cfg.adam_beta1),
+                float(value_optim_cfg.adam_beta2),
+            ),
+            eps=float(value_optim_cfg.adam_eps),
+        )
+        self.qf_optimizer = torch.optim.Adam(
+            self.critic_model.parameters(),
+            lr=float(critic_optim_cfg.lr),
+            betas=(
+                float(critic_optim_cfg.adam_beta1),
+                float(critic_optim_cfg.adam_beta2),
+            ),
+            eps=float(critic_optim_cfg.adam_eps),
+        )
+        self.build_lr_schedulers()
+        self.log_info("IQL offline: using separated Adam optimizers.")
+        if self.offline_torch_compile and self._use_fsdp_wrap:
+            self.log_warning(
+                "IQL offline: disable torch.compile when use_fsdp_wrap=True "
+            )
+            self.offline_torch_compile = False
+        if self.offline_torch_compile:
+            self._compiled_update_step = torch.compile(
+                self.update_step_forward,
+                mode=self.offline_compile_mode,
+                dynamic=False,
+                fullgraph=False,
+            )
+            self.log_info("IQL offline: torch.compile enabled (fullgraph=False).")
+
+    def build_lr_schedulers(self) -> None:
+        """Build IQL schedulers (actor uses cosine annealing)."""
+        assert self.optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
+        self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer,
+            T_max=max(1, int(self.cfg.runner.max_steps)),
+            eta_min=0.0,
+        )
+        self.qf_lr_scheduler = None
+        self.vf_lr_scheduler = None
 
     def build_iql_module(
         self, obs_dim: int, action_dim: int, type_name: str
     ) -> torch.nn.Module:
-        hidden_dims: Sequence[int] = tuple(self.cfg.algorithm.hidden_dims)
-        iql_config = {"type": type_name, "hidden_dims": hidden_dims}
-        if type_name == "actor":
-            iql_config.update(
-                {
-                    "dropout_rate": self.cfg.algorithm.dropout_rate,
-                    "state_dependent_std": False,
-                    "log_std_min": -5.0,
-                    "log_std_max": 2.0,
-                }
+        model_cfg = self.cfg.actor.model
+        if model_cfg.get("num_action_chunks", None) is None:
+            raise ValueError(
+                "actor.model.num_action_chunks is required for IQL offline training."
             )
+        num_chunks = int(model_cfg.num_action_chunks)
+        if self.cfg.algorithm.get("hidden_dims", None) is None:
+            raise ValueError(
+                "algorithm.hidden_dims is required for IQL offline training."
+            )
+        base_hidden: Sequence[int] = tuple(self.cfg.algorithm.hidden_dims)
+        iql_config: dict[str, Any] = {"type": type_name, "hidden_dims": base_hidden}
+        if type_name == "actor":
+            if model_cfg.get("iql_config", None) is None:
+                raise ValueError("actor.model.iql_config is required for IQL actor.")
+            ic = OmegaConf.to_container(model_cfg.iql_config, resolve=True)
+            if not isinstance(ic, dict):
+                raise ValueError("actor.model.iql_config must be a mapping.")
+            required_ic = (
+                "hidden_dims",
+                "dropout_rate",
+                "state_dependent_std",
+                "log_std_min",
+                "log_std_max",
+            )
+            missing = [k for k in required_ic if k not in ic]
+            if missing:
+                raise ValueError(
+                    f"actor.model.iql_config missing required keys: {missing}"
+                )
+            iql_config = {
+                "type": type_name,
+                "hidden_dims": tuple(ic["hidden_dims"]),
+                "dropout_rate": ic["dropout_rate"],
+                "state_dependent_std": bool(ic["state_dependent_std"]),
+                "log_std_min": float(ic["log_std_min"]),
+                "log_std_max": float(ic["log_std_max"]),
+            }
+        elif (
+            "dropout_rate" in self.cfg.algorithm
+            and self.cfg.algorithm.dropout_rate is not None
+        ):
+            iql_config["dropout_rate"] = self.cfg.algorithm.dropout_rate
         model = IQLMLPPolicy(
             obs_dim,
             action_dim,
-            num_action_chunks=1,
+            num_action_chunks=num_chunks,
             add_value_head=(type_name == "actor"),
             add_q_head=False,
         )
@@ -155,41 +372,58 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         )
         return q1, q2
 
-    def compute_iql_step_outputs(
-        self,
-        obs: torch.Tensor,
-        actions: torch.Tensor,
-        rewards: torch.Tensor,
-        masks: torch.Tensor,
-        next_obs: torch.Tensor,
-    ) -> tuple[
-        torch.Tensor, ...
-    ]:  # value_loss, actor_loss, critic_loss, v, q1, q2, adv
-        """Single source of truth for IQL loss computations (value, actor, critic).
-        Returns all losses and intermediates; caller performs backward and optimizer step.
-        """
-        # Target Q from critic (no grad)
+    def forward_value(
+        self, obs: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert self.vf_optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
         with torch.no_grad():
             q1_t, q2_t = self.forward_critic_module(self.target_model, obs, actions)
             q_t = torch.min(q1_t, q2_t)
-
-        # Value loss
         v = self.value_model(forward_type=ForwardType.IQL_VALUE, observations=obs)
         value_loss = iql_expectile_loss(q_t - v, self.expectile).mean()
+        self.vf_optimizer.zero_grad(set_to_none=True)
+        value_loss.backward()
+        self.vf_optimizer.step()
+        return v, value_loss
 
-        # Actor loss
+    def forward_actor(
+        self, obs: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert self.optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
         with torch.no_grad():
             new_v = self.value_model(
                 forward_type=ForwardType.IQL_VALUE, observations=obs
             )
+            q1_t, q2_t = self.forward_critic_module(self.target_model, obs, actions)
+            q_t = torch.min(q1_t, q2_t)
             adv = q_t - new_v
             exp_a = torch.exp(adv * self.temperature).clamp(max=100.0)
         log_probs = self.model(
             forward_type=ForwardType.IQL_ACTOR, observations=obs, actions=actions
         )
         actor_loss = -(exp_a * log_probs).mean()
+        self.optimizer.zero_grad(set_to_none=True)
+        actor_loss.backward()
+        self.optimizer.step()
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.step()
+        return adv, actor_loss
 
-        # Critic loss
+    def forward_critic(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        masks: torch.Tensor,
+        next_obs: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert self.qf_optimizer is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
         with torch.no_grad():
             next_v = self.value_model(
                 forward_type=ForwardType.IQL_VALUE, observations=next_obs
@@ -197,8 +431,43 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             target_q = rewards + self.discount * masks * next_v
         q1, q2 = self.forward_critic_module(self.critic_model, obs, actions)
         critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
+        self.qf_optimizer.zero_grad(set_to_none=True)
+        critic_loss.backward()
+        self.qf_optimizer.step()
+        return q1, q2, critic_loss
 
-        return value_loss, actor_loss, critic_loss, v, q1, q2, adv
+    def update_step_forward(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        masks: torch.Tensor,
+        next_obs: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compiled path: one IQL step (value + actor + critic + target)."""
+        v, value_loss = self.forward_value(obs, actions)
+        adv, actor_loss = self.forward_actor(obs, actions)
+        q1, q2, critic_loss = self.forward_critic(
+            obs, actions, rewards, masks, next_obs
+        )
+        self.soft_update_target_model()
+        return torch.stack(
+            [
+                critic_loss.detach(),
+                q1.detach().mean(),
+                q2.detach().mean(),
+                value_loss.detach(),
+                v.detach().mean(),
+                actor_loss.detach(),
+                adv.detach().mean(),
+                adv.detach().std(),
+            ]
+        )
+
+    def _next_train_batch(self) -> dict[str, torch.Tensor]:
+        if self.offline_batch_provider is None:
+            raise RuntimeError("Offline async batch provider is not initialized.")
+        return self.offline_batch_provider.next_batch()
 
     def prepare_batch(self, batch: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
         required = ["observations", "actions", "rewards", "masks", "next_observations"]
@@ -217,6 +486,182 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                 tensor = torch.as_tensor(value, dtype=torch.float32, device=self.device)
             prepared_batch[key] = tensor
         return prepared_batch
+
+    def _pack_train_batch(
+        self, prepared: dict[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        return (
+            prepared["observations"],
+            prepared["actions"],
+            prepared["rewards"],
+            prepared["masks"],
+            prepared["next_observations"],
+        )
+
+    # Training
+    @Worker.timer("update_one_epoch")
+    def update_one_epoch(
+        self,
+        batch: tuple[
+            torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        ],
+    ) -> dict[str, Any]:
+        self.model.train()
+        self.critic_model.train()
+        self.value_model.train()
+
+        obs, actions, rewards, masks, next_obs = batch
+        assert self.lr_scheduler is not None, (
+            "setup_model_and_optimizer must be called first."
+        )
+        if int(obs.shape[0]) != self.batch_size:
+            raise ValueError(
+                f"Offline IQL requires static batch size. Got {int(obs.shape[0])}, expected {self.batch_size}. Use a fixed-size sampler (e.g., drop_last=True)."
+            )
+        use_compiled_update = bool(self.offline_torch_compile)
+        if use_compiled_update:
+            if hasattr(torch, "compiler") and hasattr(
+                torch.compiler, "cudagraph_mark_step_begin"
+            ):
+                torch.compiler.cudagraph_mark_step_begin()
+
+            try:
+                flat = self._compiled_update_step(
+                    obs,
+                    actions,
+                    rewards,
+                    masks,
+                    next_obs,
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    "torch.compile IQL update step failed; set actor.offline_torch_compile to false or fix the underlying error."
+                ) from e
+            if use_compiled_update:
+                metric_device = obs.device
+                result = {
+                    "critic_loss": flat[0].detach(),
+                    "q1": flat[1].detach(),
+                    "q2": flat[2].detach(),
+                    "value_loss": flat[3].detach(),
+                    "v": flat[4].detach(),
+                    "actor_loss": flat[5].detach(),
+                    "adv_mean": flat[6].detach(),
+                    "adv_std": flat[7].detach(),
+                    "lr_actor": torch.tensor(
+                        float(self.optimizer.param_groups[0]["lr"]),
+                        device=metric_device,
+                    ),
+                    "lr_value": torch.tensor(
+                        float(self.vf_optimizer.param_groups[0]["lr"]),
+                        device=metric_device,
+                    ),
+                    "lr_critic": torch.tensor(
+                        float(self.qf_optimizer.param_groups[0]["lr"]),
+                        device=metric_device,
+                    ),
+                    "use_fsdp_wrap": self._use_fsdp_wrap,
+                }
+                return result
+
+        flat = self.update_step_forward(
+            obs,
+            actions,
+            rewards,
+            masks,
+            next_obs,
+        )
+        metric_device = obs.device
+        result = {
+            "critic_loss": flat[0].detach(),
+            "q1": flat[1].detach(),
+            "q2": flat[2].detach(),
+            "value_loss": flat[3].detach(),
+            "v": flat[4].detach(),
+            "actor_loss": flat[5].detach(),
+            "adv_mean": flat[6].detach(),
+            "adv_std": flat[7].detach(),
+            "lr_actor": torch.tensor(
+                float(self.optimizer.param_groups[0]["lr"]),
+                device=metric_device,
+            ),
+            "lr_value": torch.tensor(
+                float(self.vf_optimizer.param_groups[0]["lr"]),
+                device=metric_device,
+            ),
+            "lr_critic": torch.tensor(
+                float(self.qf_optimizer.param_groups[0]["lr"]),
+                device=metric_device,
+            ),
+            "use_fsdp_wrap": self._use_fsdp_wrap,
+        }
+        return result
+
+    def aggregate_update_info(
+        self, summed: Optional[dict[str, torch.Tensor]], update_info: dict[str, Any]
+    ) -> dict[str, torch.Tensor]:
+        """Merge update_info into summed; skip non-tensor keys like use_fsdp_wrap."""
+        if summed is None:
+            summed = {}
+            for k, v in update_info.items():
+                if k == "use_fsdp_wrap" or not isinstance(v, torch.Tensor):
+                    continue
+                summed[k] = v.detach().clone()
+        else:
+            for k, v in update_info.items():
+                if k == "use_fsdp_wrap" or not isinstance(v, torch.Tensor):
+                    continue
+                summed[k].add_(v.detach())
+        return summed
+
+    @Worker.timer("run_training")
+    def run_training(self):
+        """IQL training with actor-local offline dataloader."""
+        assert self.model is not None, (
+            "init_worker() must be called before run_training()."
+        )
+        local_update_steps = max(1, int(self.cfg.runner.local_update_steps))
+        if self._global_step < 0:
+            self._global_step = 0
+        max_steps = int(self.cfg.runner.max_steps)
+        remaining_steps = max_steps - int(self._global_step)
+        local_update_steps = min(local_update_steps, max(1, remaining_steps))
+
+        # Ensure train mode before update loop
+        self.model.train()
+        self.critic_model.train()
+        self.value_model.train()
+
+        summed_metrics: Optional[dict[str, torch.Tensor]] = None
+
+        # Main update loop
+        for _ in range(local_update_steps):
+            prepared = self.prepare_batch(self._next_train_batch())
+            packed_batch = self._pack_train_batch(prepared)
+
+            update_info = self.update_one_epoch(packed_batch)
+            summed_metrics = self.aggregate_update_info(summed_metrics, update_info)
+
+            self._global_step += 1
+
+        # No eval here; runner may call env worker for evaluation.
+        mean_metric_dict: dict[str, Any] = {}
+        if summed_metrics is not None:
+            for k, v in summed_metrics.items():
+                mean_metric_dict[k] = float((v / local_update_steps).item())
+        mean_metric_dict["__global_step"] = int(self._global_step)
+        return mean_metric_dict
+
+    def compute_advantages_and_returns(self):
+        """
+        IQL doesn't compute rollout advantages/returns like PPO.
+        This method is kept for compatibility but returns empty metrics.
+        """
+        return {}
+
+    def set_global_step(self, step: int):
+        self._global_step = int(step)
+        return None
 
     def get_policy_state_dict(self) -> dict[str, torch.Tensor]:
         """Return actor policy state_dict on CPU for external rollout/eval workers."""
@@ -315,435 +760,6 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                 ):
                     tp.data.mul_(1.0 - self.tau).add_(self.tau * p.data)
 
-    def update_step_forward(
-        self,
-        obs: torch.Tensor,
-        actions: torch.Tensor,
-        rewards: torch.Tensor,
-        masks: torch.Tensor,
-        next_obs: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compiled path: one IQL step (value + actor + critic + target)."""
-        v, value_loss = self.forward_value(obs, actions)
-        adv, actor_loss = self.forward_actor(obs, actions)
-        q1, q2, critic_loss = self.forward_critic(
-            obs, actions, rewards, masks, next_obs
-        )
-        self.soft_update_target_model()
-        return torch.stack(
-            [
-                critic_loss.detach(),
-                q1.detach().mean(),
-                q2.detach().mean(),
-                value_loss.detach(),
-                v.detach().mean(),
-                actor_loss.detach(),
-                adv.detach().mean(),
-                adv.detach().std(),
-            ]
-        )
-
-    def forward_value(
-        self, obs: torch.Tensor, actions: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        assert self.vf_optimizer is not None, (
-            "setup_model_and_optimizer must be called first."
-        )
-        with torch.no_grad():
-            q1_t, q2_t = self.forward_critic_module(self.target_model, obs, actions)
-            q_t = torch.min(q1_t, q2_t)
-        v = self.value_model(forward_type=ForwardType.IQL_VALUE, observations=obs)
-        value_loss = iql_expectile_loss(q_t - v, self.expectile).mean()
-        self.vf_optimizer.zero_grad(set_to_none=True)
-        value_loss.backward()
-        self.vf_optimizer.step()
-        return v, value_loss
-
-    def forward_actor(
-        self, obs: torch.Tensor, actions: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        assert self.optimizer is not None, (
-            "setup_model_and_optimizer must be called first."
-        )
-        with torch.no_grad():
-            new_v = self.value_model(
-                forward_type=ForwardType.IQL_VALUE, observations=obs
-            )
-            q1_t, q2_t = self.forward_critic_module(self.target_model, obs, actions)
-            q_t = torch.min(q1_t, q2_t)
-            adv = q_t - new_v
-            exp_a = torch.exp(adv * self.temperature).clamp(max=100.0)
-        log_probs = self.model(
-            forward_type=ForwardType.IQL_ACTOR, observations=obs, actions=actions
-        )
-        actor_loss = -(exp_a * log_probs).mean()
-        self.optimizer.zero_grad(set_to_none=True)
-        actor_loss.backward()
-        self.optimizer.step()
-        if self.lr_scheduler is not None:
-            self.lr_scheduler.step()
-        return adv, actor_loss
-
-    def forward_critic(
-        self,
-        obs: torch.Tensor,
-        actions: torch.Tensor,
-        rewards: torch.Tensor,
-        masks: torch.Tensor,
-        next_obs: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        assert self.qf_optimizer is not None, (
-            "setup_model_and_optimizer must be called first."
-        )
-        with torch.no_grad():
-            next_v = self.value_model(
-                forward_type=ForwardType.IQL_VALUE, observations=next_obs
-            )
-            target_q = rewards + self.discount * masks * next_v
-        q1, q2 = self.forward_critic_module(self.critic_model, obs, actions)
-        critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
-        self.qf_optimizer.zero_grad(set_to_none=True)
-        critic_loss.backward()
-        self.qf_optimizer.step()
-        return q1, q2, critic_loss
-
-    @Worker.timer("update_one_epoch")
-    def update_one_epoch(
-        self,
-        batch: tuple[
-            torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
-        ],
-    ) -> dict[str, Any]:
-        self.model.train()
-        self.critic_model.train()
-        self.value_model.train()
-
-        obs, actions, rewards, masks, next_obs = batch
-        assert self.lr_scheduler is not None, (
-            "setup_model_and_optimizer must be called first."
-        )
-        if int(obs.shape[0]) != self.batch_size:
-            raise ValueError(
-                "Offline IQL requires static batch size. "
-                f"Got {int(obs.shape[0])}, expected {self.batch_size}. "
-                "Use a fixed-size sampler (e.g., drop_last=True)."
-            )
-        use_compiled_update = bool(self.offline_torch_compile)
-        if use_compiled_update:
-            if hasattr(torch, "compiler") and hasattr(
-                torch.compiler, "cudagraph_mark_step_begin"
-            ):
-                torch.compiler.cudagraph_mark_step_begin()
-
-            try:
-                flat = self._compiled_update_step(
-                    obs,
-                    actions,
-                    rewards,
-                    masks,
-                    next_obs,
-                )
-            except Exception as e:
-                self.log_warning(
-                    f"torch.compile update step failed ({e}); fallback to eager update."
-                )
-                self.offline_torch_compile = False
-                self._compiled_update_step = None
-                use_compiled_update = False
-            if use_compiled_update:
-                metric_device = obs.device
-                result = {
-                    "critic_loss": flat[0].detach(),
-                    "q1": flat[1].detach(),
-                    "q2": flat[2].detach(),
-                    "value_loss": flat[3].detach(),
-                    "v": flat[4].detach(),
-                    "actor_loss": flat[5].detach(),
-                    "adv_mean": flat[6].detach(),
-                    "adv_std": flat[7].detach(),
-                    "lr_actor": torch.tensor(
-                        float(self.optimizer.param_groups[0]["lr"]),
-                        device=metric_device,
-                    ),
-                    "lr_value": torch.tensor(
-                        float(self.vf_optimizer.param_groups[0]["lr"]),
-                        device=metric_device,
-                    ),
-                    "lr_critic": torch.tensor(
-                        float(self.qf_optimizer.param_groups[0]["lr"]),
-                        device=metric_device,
-                    ),
-                    "use_fsdp_wrap": self._use_fsdp_wrap,
-                }
-                return result
-
-        flat = self.update_step_forward(
-            obs,
-            actions,
-            rewards,
-            masks,
-            next_obs,
-        )
-        metric_device = obs.device
-        result = {
-            "critic_loss": flat[0].detach(),
-            "q1": flat[1].detach(),
-            "q2": flat[2].detach(),
-            "value_loss": flat[3].detach(),
-            "v": flat[4].detach(),
-            "actor_loss": flat[5].detach(),
-            "adv_mean": flat[6].detach(),
-            "adv_std": flat[7].detach(),
-            "lr_actor": torch.tensor(
-                float(self.optimizer.param_groups[0]["lr"]),
-                device=metric_device,
-            ),
-            "lr_value": torch.tensor(
-                float(self.vf_optimizer.param_groups[0]["lr"]),
-                device=metric_device,
-            ),
-            "lr_critic": torch.tensor(
-                float(self.qf_optimizer.param_groups[0]["lr"]),
-                device=metric_device,
-            ),
-            "use_fsdp_wrap": self._use_fsdp_wrap,
-        }
-        return result
-
-    def build_lr_schedulers(self) -> None:
-        """Build IQL schedulers (actor uses cosine annealing)."""
-        assert self.optimizer is not None, (
-            "setup_model_and_optimizer must be called first."
-        )
-        self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer,
-            T_max=max(1, int(self.cfg.runner.max_steps)),
-            eta_min=0.0,
-        )
-        self.qf_lr_scheduler = None
-        self.vf_lr_scheduler = None
-
-    def setup_model_and_optimizer(self, initialize_target: bool = True) -> None:
-        """Setup models, optimizer and scheduler.
-
-        When offline_torch_compile is true, ensure fsdp_config has use_orig_params: true.
-        """
-        if self._obs_dim is None or self._action_dim is None:
-            raise ValueError(
-                "actor.model.obs_dim/action_dim must be set before actor init."
-            )
-        obs_dim = int(self._obs_dim)
-        action_dim = int(self._action_dim)
-
-        module = self.model_provider_func(obs_dim, action_dim, type_name="actor")
-        critic_module = self.model_provider_func(
-            obs_dim, action_dim, type_name="critic"
-        )
-        value_module = self.model_provider_func(obs_dim, action_dim, type_name="value")
-        if initialize_target:
-            target_module = self.model_provider_func(
-                obs_dim, action_dim, type_name="critic"
-            )
-
-        use_fsdp_wrap = self.cfg.actor.get("use_fsdp_wrap", True)
-        if use_fsdp_wrap:
-            self.model = self._strategy.wrap_model(
-                model=module, device_mesh=self._device_mesh
-            )
-            self.critic_model = self._strategy.wrap_model(
-                model=critic_module, device_mesh=self._device_mesh
-            )
-            self.value_model = self._strategy.wrap_model(
-                model=value_module, device_mesh=self._device_mesh
-            )
-            if initialize_target:
-                self.target_model = self._strategy.wrap_model(
-                    model=target_module, device_mesh=self._device_mesh
-                )
-        else:
-            self.model = module
-            self.critic_model = critic_module
-            self.value_model = value_module
-            if initialize_target:
-                self.target_model = target_module
-
-        self._use_fsdp_wrap = use_fsdp_wrap
-        self.log_info(f"IQL offline: use_fsdp_wrap={use_fsdp_wrap}.")
-
-        # Initialize target model
-        if initialize_target:
-            self.target_model.load_state_dict(self.critic_model.state_dict())
-            self.target_model.eval()
-            self.target_model_initialized = True
-            for p in self.target_model.parameters():
-                p.requires_grad_(False)
-            self._critic_params = list(self.critic_model.parameters())
-            self._target_params = list(self.target_model.parameters())
-
-        # Build separated optimizers and scheduler
-        actor_lr = self.cfg.algorithm.actor_lr
-        value_lr = self.cfg.algorithm.value_lr
-        critic_lr = self.cfg.algorithm.critic_lr
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=actor_lr)
-        self.vf_optimizer = torch.optim.Adam(self.value_model.parameters(), lr=value_lr)
-        self.qf_optimizer = torch.optim.Adam(
-            self.critic_model.parameters(), lr=critic_lr
-        )
-        self.build_lr_schedulers()
-        self.log_info("IQL offline: using separated Adam optimizers.")
-        if self.offline_torch_compile and self._use_fsdp_wrap:
-            self.log_warning(
-                "IQL offline: disable torch.compile when use_fsdp_wrap=True "
-            )
-            self.offline_torch_compile = False
-        if self.offline_torch_compile:
-            self._compiled_update_step = torch.compile(
-                self.update_step_forward,
-                mode=self.offline_compile_mode,
-                dynamic=False,
-                fullgraph=False,
-            )
-            self.log_info("IQL offline: torch.compile enabled (fullgraph=False).")
-
-    def setup_iql_components(self):
-        """Initialize IQL-specific offline components."""
-        # Read actor.offline_* from config (same style as fsdp_sac_policy_worker)
-        actor_cfg = self.cfg.actor
-        self.offline_torch_compile = bool(actor_cfg.get("offline_torch_compile", True))
-        self.offline_compile_mode = str(
-            actor_cfg.get("offline_compile_mode", "reduce-overhead")
-        )
-        self.offline_strict_mode = bool(actor_cfg.get("offline_strict_mode", True))
-        self.offline_metric_sync_interval = int(
-            actor_cfg.get("offline_metric_sync_interval", 1000)
-        )
-
-        # Read runner.*, env.*, algorithm.*
-        self._seed = int(self.cfg.actor.get("seed", 42))
-        self._save_dir = self.cfg.runner.get("save_dir", None)
-        if self._save_dir is None:
-            runner_logger = self.cfg.runner.get("logger", None)
-            if runner_logger is not None:
-                log_path = runner_logger.get("log_path", ".")
-                exp_name = runner_logger.get("experiment_name", "offline")
-                self._save_dir = os.path.join(log_path, exp_name)
-            else:
-                self._save_dir = "."
-        # NOTE: Offline eval is handled by env workers via runner; actor doesn't own env.
-        self.env = None
-
-        torch.manual_seed(self._seed)
-        np.random.seed(self._seed)
-        self.device = self.cfg.actor.get("device", None)
-        if self.device is None:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = torch.device(self.device)
-        if self.device.type == "cuda":
-            torch.set_float32_matmul_precision("high")
-
-        self.discount = self.cfg.algorithm.discount
-        self.tau = self.cfg.algorithm.tau
-        self.expectile = self.cfg.algorithm.expectile
-        self.temperature = self.cfg.algorithm.temperature
-        self.batch_size = int(self.cfg.algorithm.get("batch_size", 256))
-        # Actor only consumes batches forwarded from dataset worker by runner.
-        model_cfg = self.cfg.actor.model
-        self._obs_dim = int(model_cfg.get("obs_dim", 0))
-        self._action_dim = int(model_cfg.get("action_dim", 0))
-        if self._obs_dim <= 0 or self._action_dim <= 0:
-            raise ValueError(
-                "actor.model.obs_dim/action_dim must be set before actor init when "
-                "using runner-forwarded dataset batches."
-            )
-
-    @Worker.timer("run_training")
-    def run_training(
-        self, batches: Optional[list[dict[str, np.ndarray | torch.Tensor]]] = None
-    ):
-        """IQL training using batches forwarded from dataset worker by runner."""
-        if batches is None and self._prefetched_batches is not None:
-            batches = self._prefetched_batches
-            self._prefetched_batches = None
-        assert self.model is not None, (
-            "init_worker() must be called before run_training()."
-        )
-        if batches is None:
-            raise RuntimeError(
-                "No training batches provided. Runner must prefetch and send batches "
-                "from dataset worker before actor.run_training()."
-            )
-        local_update_steps = max(1, len(batches))
-        if self._global_step < 0:
-            self._global_step = 0
-        max_steps = int(self.cfg.runner.get("max_steps", 1))
-        remaining_steps = max_steps - int(self._global_step)
-        local_update_steps = min(local_update_steps, max(1, remaining_steps))
-
-        # Ensure train mode before update loop
-        self.model.train()
-        self.critic_model.train()
-        self.value_model.train()
-
-        summed_metrics: Optional[dict[str, torch.Tensor]] = None
-        eval_metrics: dict[str, Any] = {}
-        # Evaluation is performed outside actor (env worker + runner).
-
-        # Main update loop
-        for i in range(local_update_steps):
-            prepared = self.prepare_batch(batches[i])
-            packed_batch = (
-                prepared["observations"],
-                prepared["actions"],
-                prepared["rewards"],
-                prepared["masks"],
-                prepared["next_observations"],
-            )
-
-            update_info = self.update_one_epoch(packed_batch)
-            summed_metrics = self.aggregate_update_info(summed_metrics, update_info)
-
-            self._global_step += 1
-
-            # No eval here; runner may call env worker for evaluation.
-
-        mean_metric_dict: dict[str, Any] = {}
-        if summed_metrics is not None:
-            for k, v in summed_metrics.items():
-                mean_metric_dict[k] = float((v / local_update_steps).item())
-        mean_metric_dict.update(eval_metrics)
-        mean_metric_dict["__global_step"] = int(self._global_step)
-        return mean_metric_dict
-
-    def set_prefetched_batches(
-        self, batches: list[dict[str, np.ndarray | torch.Tensor]]
-    ) -> None:
-        """Cache prefetched batches from runner for next run_training call."""
-        self._prefetched_batches = batches
-
-    def recv_dataset_batches(self) -> None:
-        """Receive prefetched batches from dataset workers via Worker.recv()."""
-        dataset_world_size = int(self._component_placement.get_world_size("dataset"))
-        src_rank = self._rank % max(1, dataset_world_size)
-        batches = self.recv(
-            src_group_name=self._dataset_group_name,
-            src_rank=src_rank,
-        )
-        assert isinstance(batches, list), (
-            f"Expected list of batches, got {type(batches)}"
-        )
-        self._prefetched_batches = batches
-
-    def compute_advantages_and_returns(self):
-        """
-        IQL doesn't compute rollout advantages/returns like PPO.
-        This method is kept for compatibility but returns empty metrics.
-        """
-        return {}
-
-    def set_global_step(self, step: int):
-        self._global_step = int(step)
-        return None
-
     def save_checkpoint(self, save_base_path, step):
         assert self.model is not None, "init_worker() must initialize self.model first."
         os.makedirs(save_base_path, exist_ok=True)
@@ -793,10 +809,18 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             target_state,
             os.path.join(components_path, "target_critic.pt"),
         )
-        # save runner state
+        # Persist D4RL dataloader cursor (epoch + offset in epoch) so resume
+        # continues from the same place in the shuffled dataset; see
+        # ``D4RLDataset.state_dict`` / ``load_state_dict`` in ``d4rl.py``.
+        assert self.offline_batch_provider is not None, (
+            "offline_batch_provider is not initialized before save_checkpoint()."
+        )
+        data_state = self.offline_batch_provider.state_dict()
         state_payload = {
             "step": int(step),
             "global_step": int(self._global_step),
+            "data_epoch": int(data_state["data_epoch"]),
+            "data_iter_offset": int(data_state["data_iter_offset"]),
         }
         torch.save(state_payload, os.path.join(components_path, "state.pt"))
 
@@ -869,6 +893,10 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         state_path = os.path.join(components_path, "state.pt")
         if os.path.exists(state_path):
             state_payload = torch.load(state_path, map_location=self.device)
-            self._global_step = int(
-                state_payload.get("global_step", state_payload.get("step", 0))
-            )
+            if "global_step" not in state_payload:
+                raise KeyError(
+                    "Checkpoint state.pt must contain key 'global_step' for offline IQL resume."
+                )
+            self._global_step = int(state_payload["global_step"])
+            if self.offline_batch_provider is not None:
+                self.offline_batch_provider.load_state_dict(state_payload)

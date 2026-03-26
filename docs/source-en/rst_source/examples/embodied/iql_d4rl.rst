@@ -7,7 +7,7 @@ The primary objective is to train a policy that:
 
 1. **Uses offline data only**: No environment interaction during training; data comes from D4RL datasets.
 2. **Follows IQL**: Value function via expectile regression, actor via AWR-style weighting, twin Q-networks with TD targets.
-3. **Fits RLinf's stack**: DatasetWorker, IQL Actor, EnvWorker, RolloutWorker, and OfflineRunner work together; PyTorch + FSDP supported.
+3. **Fits RLinf's stack**: the IQL actor owns offline data loading; EnvWorker, RolloutWorker, and OfflineRunner handle eval; PyTorch + FSDP supported.
 
 Environment
 -----------
@@ -36,7 +36,7 @@ Algorithm
 
 2. **Training flow**
 
-   Each step: get batch from DatasetWorker → update Value → update Actor → update Critic → soft-update target.
+   Each update step: the actor fetches one batch via ``rlinf.data.datasets.d4rl.D4RLDataset.build_offline_actor_batch_provider``, then runs IQL in the current implementation order: update Value → update Actor → update Critic → soft-update target critic.
 
 Installation & Dependencies
 ----------------------------

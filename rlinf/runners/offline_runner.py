@@ -31,19 +31,17 @@ from rlinf.utils.runner_utils import check_progress
 
 
 class OfflineRunner:
-    """Offline RL runner: drives dataset worker and actor; dataset worker owns data."""
+    """Offline RL runner: actor trains on local dataset, env/rollout handle eval."""
 
     def __init__(
         self,
         cfg: DictConfig,
         actor: Any,
-        dataset,
-        env,
-        rollout,
+        env: Any | None,
+        rollout: Any | None,
     ):
         self.cfg = cfg
         self.actor = actor
-        self.dataset = dataset
         self.env = env
         self.rollout = rollout
 
@@ -97,12 +95,17 @@ class OfflineRunner:
         )
 
     def init_workers(self):
-        """
-        Dataset workers are initialized by the offline entry script before actor
-        workers are launched, so model dims are ready at actor construction time.
-        """
-        self.env.init_worker().wait()
-        self.rollout.init_worker().wait()
+        """Initialize worker groups needed by offline training/evaluation."""
+        enable_eval = (
+            self.cfg.runner.val_check_interval > 0 or self.cfg.runner.only_eval
+        )
+        if enable_eval:
+            if self.env is None or self.rollout is None:
+                raise RuntimeError(
+                    "Evaluation is enabled but env/rollout worker groups are missing."
+                )
+            self.env.init_worker().wait()
+            self.rollout.init_worker().wait()
         self.actor.init_worker().wait()
 
         resume_dir = self.cfg.runner.get("resume_dir", None)
@@ -118,22 +121,17 @@ class OfflineRunner:
         self.global_step = int(resume_dir.split("global_step_")[-1])
 
     def update_rollout_weights(self):
+        if self.rollout is None:
+            raise RuntimeError("Rollout worker group is not initialized.")
         rollout_handle: Handle = self.rollout.sync_model_from_actor()
         actor_handle: Handle = self.actor.sync_model_to_rollout()
         actor_handle.wait()
         rollout_handle.wait()
 
-    def update_actor_batches(self, batch_size: int, local_update_steps: int) -> None:
-        """Sync dataset batches to actor workers via send/recv (like actor↔rollout)."""
-        dataset_handle: Handle = self.dataset.send_batches_to_actor(
-            batch_size=batch_size, num_batches=local_update_steps
-        )
-        actor_recv_handle: Handle = self.actor.recv_dataset_batches()
-        actor_recv_handle.wait()
-        dataset_handle.wait()
-
     def evaluate(self):
         """Run embodied-style evaluation and return aggregated metrics."""
+        if self.env is None or self.rollout is None:
+            raise RuntimeError("Env/Rollout worker groups are not initialized.")
         env_handle: Handle = self.env.evaluate(
             input_channel=self.rollout_channel,
             output_channel=self.env_channel,
@@ -246,14 +244,6 @@ class OfflineRunner:
         if log_interval < 1:
             raise ValueError(f"runner.log_interval must be >= 1, got {log_interval}.")
         worker_step_synced = False
-        local_update_steps = int(self.cfg.runner.local_update_steps)
-        if local_update_steps < 1:
-            raise ValueError(
-                f"runner.local_update_steps must be >= 1, got {local_update_steps}."
-            )
-        batch_size = int(self.cfg.algorithm.batch_size)
-        if batch_size < 1:
-            raise ValueError(f"algorithm.batch_size must be >= 1, got {batch_size}.")
 
         while self.global_step < self.max_steps:
             _step = self.global_step
@@ -262,8 +252,6 @@ class OfflineRunner:
                 self.actor.set_global_step(_step)
 
             with self.timer("step"):
-                self.update_actor_batches(batch_size, local_update_steps)
-
                 actor_training_handle: Handle = self.actor.run_training()
                 actor_metrics_per_rank = actor_training_handle.wait()
                 if not isinstance(actor_metrics_per_rank, list):

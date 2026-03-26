@@ -7,7 +7,7 @@
 
 1. **仅使用离线数据**：训练阶段不与环境交互，数据来自 D4RL 数据集。
 2. **遵循 IQL**：Value 用 expectile 回归、Actor 用 AWR 风格加权、双 Q 网络用 TD 目标。
-3. **接入 RLinf 体系**：由 DatasetWorker、IQL Actor、EnvWorker、RolloutWorker 与 OfflineRunner 协同完成；支持 PyTorch + FSDP。
+3. **接入 RLinf 体系**：离线数据在 IQL Actor 内加载；EnvWorker、RolloutWorker 与 OfflineRunner 负责评测等；支持 PyTorch + FSDP。
 
 环境
 -----------
@@ -36,7 +36,7 @@ RLinf 使用 D4RL 基准套件，并为不同任务族提供配置：
 
 2. **训练流程**
 
-   每步：从 DatasetWorker 取 batch → 更新 Value → 更新 Actor → 更新 Critic → 软更新 target。
+   每个 update step：Actor 通过 ``rlinf.data.datasets.d4rl.D4RLDataset.build_offline_actor_batch_provider`` 获取一个 batch，然后按当前实现顺序执行 IQL：更新 Value → 更新 Actor → 更新 Critic → 软更新目标 Critic。
 
 依赖安装
 ----------------------------

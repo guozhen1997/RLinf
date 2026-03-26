@@ -15,13 +15,13 @@
 import json
 
 import hydra
+from omegaconf import open_dict
 from omegaconf.omegaconf import OmegaConf
 
 from rlinf.config import validate_cfg
 from rlinf.runners.offline_runner import OfflineRunner
 from rlinf.scheduler import Cluster
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.workers.dataset import DatasetWorker
 from rlinf.workers.env.env_worker import EnvWorker
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
@@ -29,30 +29,23 @@ from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 @hydra.main(version_base="1.1", config_path="config", config_name="d4rl_iql_mujoco")
 def main(cfg) -> None:
     cfg = validate_cfg(cfg)
+    if (
+        cfg.algorithm.loss_type == "offline_iql"
+        and cfg.actor.model.model_type == "mlp_policy"
+    ):
+        dataset_type = str(cfg.dataset.get("dataset_type", "")).lower()
+        if dataset_type == "d4rl":
+            from rlinf.data.datasets.d4rl import D4RLDataset
+
+            env_name = str(cfg.dataset.env_name)
+            obs_dim, action_dim = D4RLDataset.infer_obs_action_dims_from_env(env_name)
+            with open_dict(cfg):
+                cfg.actor.model.obs_dim = int(obs_dim)
+                cfg.actor.model.action_dim = int(action_dim)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 
     cluster = Cluster(cluster_cfg=cfg.cluster)
     component_placement = HybridComponentPlacement(cfg, cluster)
-
-    # Create dataset worker group
-    dataset_placement = component_placement.get_strategy("dataset")
-    dataset_group = DatasetWorker.create_group(cfg).launch(
-        cluster, name=cfg.dataset.group_name, placement_strategy=dataset_placement
-    )
-    # Build dataset once and set model dims before actor workers are created.
-    dataset_group.init_worker().wait()
-    obs_action_dims = dataset_group.get_obs_action_dims().wait()
-    if isinstance(obs_action_dims, list):
-        obs_action_dims = next(
-            (dims for dims in obs_action_dims if dims is not None), None
-        )
-    if not (isinstance(obs_action_dims, (tuple, list)) and len(obs_action_dims) == 2):
-        raise TypeError(
-            "DatasetWorker.get_obs_action_dims() should return (obs_dim, action_dim), "
-            f"got {obs_action_dims!r}."
-        )
-    cfg.actor.model.obs_dim = int(obs_action_dims[0])
-    cfg.actor.model.action_dim = int(obs_action_dims[1])
 
     # Create actor worker group
     actor_placement = component_placement.get_strategy("actor")
@@ -69,22 +62,25 @@ def main(cfg) -> None:
         cluster, name=cfg.actor.group_name, placement_strategy=actor_placement
     )
 
-    # Create env worker group
-    env_placement = component_placement.get_strategy("env")
-    env_group = EnvWorker.create_group(cfg).launch(
-        cluster, name=cfg.env.group_name, placement_strategy=env_placement
-    )
+    enable_eval = cfg.runner.val_check_interval > 0 or cfg.runner.only_eval
+    env_group = None
+    rollout_group = None
+    if enable_eval:
+        # Create env worker group
+        env_placement = component_placement.get_strategy("env")
+        env_group = EnvWorker.create_group(cfg).launch(
+            cluster, name=cfg.env.group_name, placement_strategy=env_placement
+        )
 
-    # Create rollout worker group
-    rollout_placement = component_placement.get_strategy("rollout")
-    rollout_group = MultiStepRolloutWorker.create_group(cfg).launch(
-        cluster, name=cfg.rollout.group_name, placement_strategy=rollout_placement
-    )
+        # Create rollout worker group
+        rollout_placement = component_placement.get_strategy("rollout")
+        rollout_group = MultiStepRolloutWorker.create_group(cfg).launch(
+            cluster, name=cfg.rollout.group_name, placement_strategy=rollout_placement
+        )
 
     runner = OfflineRunner(
         cfg=cfg,
         actor=actor_group,
-        dataset=dataset_group,
         env=env_group,
         rollout=rollout_group,
     )
