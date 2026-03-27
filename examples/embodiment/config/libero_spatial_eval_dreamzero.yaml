@@ -80,15 +80,15 @@ env:
 
   train:
     total_num_envs: 1
-    max_episode_steps: 960
-    max_steps_per_rollout_epoch: 960
+    max_episode_steps: 480
+    max_steps_per_rollout_epoch: 480
 
   eval:
-    total_num_envs: 1
+    total_num_envs: 4
     auto_reset: True
     ignore_terminations: True
-    max_episode_steps: 960
-    max_steps_per_rollout_epoch: 960
+    max_episode_steps: 480
+    max_steps_per_rollout_epoch: 480
     group_size: 1
     is_eval: True
 
@@ -116,7 +116,6 @@ actor:
 
   model:
     model_type: "dreamzero"
-    # TODO: 改成你的 DreamZero checkpoint 路径（对应 DreamZero-DROID/experiment_cfg）
     model_path: /mnt/project_rlinf/yuanhuining/repos/dreamzero/runs/train/2026-03-20T15-38-37Z/checkpoints/checkpoint-6000
     policy_setup: "widowx_bridge"
 

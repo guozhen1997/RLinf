@@ -284,18 +284,18 @@ class DreamZeroPolicy(BasePolicy):
         return self._tokenizer
     def _process_batch(self, batch: Batch) -> Batch:
         """Process batch."""
-         # 1. check if the observation is batched
-        def _is_batched(obs: dict) -> bool:
-            for k, v in obs.items():
-                if "state" in k and len(v.shape) < 3:  # (B, Time, Dim)
-                    return False
-            return True
+        #  # 1. check if the observation is batched
+        # def _is_batched(obs: dict) -> bool:
+        #     for k, v in obs.items():
+        #         if "state" in k and len(v.shape) < 3:  # (B, Time, Dim)
+        #             return False
+        #     return True
 
-        # 2. ensure the observation has batch dimension
-        is_batched = _is_batched(batch.obs)
+        # # 2. ensure the observation has batch dimension
+        # is_batched = _is_batched(batch.obs)
 
-        if not is_batched:
-            batch.obs = unsqueeze_dict_values(batch.obs)
+        # if not is_batched:
+        #     batch.obs = unsqueeze_dict_values(batch.obs)
 
         # 3. normalize / transform
         batch = self.apply(batch)
@@ -453,18 +453,31 @@ class DreamZeroPolicy(BasePolicy):
         print(main.shape)
         print("===========wrist.shape===============")
         print(wrist.shape)
+        if main.ndim == 4:
+            main = main[:, None, ...]
+        if wrist is not None and wrist.ndim == 4:
+            wrist = wrist[:, None, ...]
+        print("===========main.shape===============")
+        print(main.shape)
+        print("===========wrist.shape===============")
+        print(wrist.shape)
         if states is not None:
             if torch.is_tensor(states):
                 s_np = states.detach().cpu().numpy()
             else:
                 s_np = np.asarray(states)
         else:
-            s_np = np.zeros((B, 7), dtype=np.float32)
+            s_np = np.zeros((B, 8), dtype=np.float32)
         print("===========s_np.shape===============")
         print(s_np.shape)
-        #s_np = s_np[:, :7]
-        print("===========s_np.shape===============")
-        print(s_np.shape)
+        if s_np.ndim == 1:
+            s_np = s_np[None, :]
+        elif s_np.ndim > 2:
+            s_np = s_np.reshape(B, -1)
+        s_np = s_np.astype(np.float32)
+        state_bt = s_np[:, None, :]
+        print("===========state_bt.shape===============")
+        print(state_bt.shape)
         prompts = prompts if prompts is not None else [""] * B
         print("===========prompts.length===============")
         print(len(prompts))
@@ -475,7 +488,7 @@ class DreamZeroPolicy(BasePolicy):
         converted_obs = {
             "video.image": main,                     # [B,H,W,C]
             "video.wrist_image": wrist,                     # [B,H,W,C]
-            "state.state": s_np,        # [B,7]
+            "state.state": state_bt,        # [B,1,8]
             "annotation.language.action_text": list(prompts),        # list[str], len=B
         }
         return converted_obs
@@ -536,22 +549,23 @@ class DreamZeroPolicy(BasePolicy):
         input:
         env_obs:
             - main_images: [B,H,W,C] uint8
-            - extra_view_images: [B,N,H,W,C] or None
+            - extra_view_images: [B,H,W,C]
             - states: [B,D]
             - task_descriptions: list[str] or None
         output:
-        actions: np.ndarray [B, num_action_chunks, 8]  # 7 joint + 1 gripper
+        actions: np.ndarray [B, num_action_chunks, 8]  # 6ee + 1 gripper
         result: dict  # compatible with rollout interface"""
         print("================= env_obs ==================")
+        B = env_obs["main_images"].shape[0]
         converted_obs = self._libero_convert_observation(env_obs)
         batch = Batch(obs=converted_obs)
         # relative action unnormalization needs to preserve original obs
-        original_obs_for_relative = {
-            k: v.copy() if isinstance(v, np.ndarray)
-            else (v.clone() if torch.is_tensor(v) else v)
-            for k, v in batch.obs.items()
-        }
-        original_obs_for_relative = unsqueeze_dict_values(original_obs_for_relative)
+        # original_obs_for_relative = {
+        #     k: v.copy() if isinstance(v, np.ndarray)
+        #     else (v.clone() if torch.is_tensor(v) else v)
+        #     for k, v in batch.obs.items()
+        # }
+        # original_obs_for_relative = unsqueeze_dict_values(original_obs_for_relative)
         
         # ---------- 2) DreamZero inference ----------
         normalized_input = self._process_batch(batch)
@@ -559,13 +573,16 @@ class DreamZeroPolicy(BasePolicy):
             model_pred = self.model.lazy_joint_video_action_causal(normalized_input)
 
         normalized_action = model_pred["action_pred"].float()
-        video_pred = model_pred["video_pred"]
+        #video_pred = model_pred["video_pred"]
 
-        self.video_across_time.append(video_pred)
+        #self.video_across_time.append(video_pred)
 
         # 4. Unnormalize actions (pass obs for relative action normalization)
-        batch = self.unapply(Batch(normalized_action=normalized_action), obs=original_obs_for_relative)
-
+        #batch = self.unapply(Batch(normalized_action=normalized_action), obs=original_obs_for_relative)
+        unnormalized_action = self.eval_transform.unapply(
+            dict(action=normalized_action.cpu())
+        )
+        batch.act = unnormalized_action
         # 5. Remove batch dimension if we added it
 
         #batch.act = squeeze_dict_values(batch.act)
