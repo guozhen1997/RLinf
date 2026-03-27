@@ -8,5 +8,5 @@ policy_setup: "widowx_bridge"
 action_dim: 7
 num_action_chunks: 16  # Action chunk size (DROID typically uses 16-32)
 
-embodiment_tag: "oxe_droid"
+embodiment_tag: "libero_sim"
 precision: "bf16"
