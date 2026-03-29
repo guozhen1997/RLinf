@@ -36,7 +36,7 @@ RLinf 使用 D4RL 基准套件，并为不同任务族提供配置：
 
 2. **训练流程**
 
-   每个 update step：Actor 通过 ``rlinf.data.datasets.d4rl.D4RLDataset.build_offline_actor_batch_provider`` 获取一个 batch，然后按当前实现顺序执行 IQL：更新 Value → 更新 Actor → 更新 Critic → 软更新目标 Critic。
+   每个 update step：Actor 从各 rank 本地的 ``DataLoader``（在 ``EmbodiedIQLFSDPPolicy.build_offline_dataloader`` 中构建）取一个 batch，然后按当前实现顺序执行 IQL：更新 Value → 更新 Actor → 更新 Critic → 软更新目标 Critic。
 
 依赖安装
 ----------------------------

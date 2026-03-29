@@ -36,7 +36,7 @@ Algorithm
 
 2. **Training flow**
 
-   Each update step: the actor fetches one batch via ``rlinf.data.datasets.d4rl.D4RLDataset.build_offline_actor_batch_provider``, then runs IQL in the current implementation order: update Value → update Actor → update Critic → soft-update target critic.
+   Each update step: the actor fetches one batch from its rank-local ``DataLoader`` (built in ``EmbodiedIQLFSDPPolicy.build_offline_dataloader``), then runs IQL in the current implementation order: update Value → update Actor → update Critic → soft-update target critic.
 
 Installation & Dependencies
 ----------------------------

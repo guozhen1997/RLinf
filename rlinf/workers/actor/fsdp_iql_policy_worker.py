@@ -17,7 +17,10 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.models.embodiment.mlp_policy.iql_mlp_policy import IQLMLPPolicy
@@ -41,7 +44,11 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
 
         self._obs_dim = None
         self._action_dim = None
-        self.offline_batch_provider = None
+        self._offline_dataset = None
+        self.offline_data_loader = None
+        self.offline_data_iter = None
+        self._data_epoch = 0
+        self._data_iter_offset = 0
         self._dataset_size = 0
 
         self.critic_model = None
@@ -65,31 +72,62 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         self._use_fsdp_wrap = False
 
     def build_offline_dataloader(self) -> None:
-        """Build actor-local offline batch provider (SFT-style single entry)."""
-        dataset_type = self.cfg.get("dataset", {}).get("dataset_type", None)
+        """Build per-rank ``DataLoader`` + ``DistributedSampler`` (SFT worker pattern)."""
+        from rlinf.data.datasets.d4rl import build_d4rl_dataset_from_cfg
+
+        dataset_cfg = self.cfg.get("dataset", {})
+        dataset_type = dataset_cfg.get("dataset_type", None)
         if dataset_type is None:
             raise ValueError("dataset.dataset_type is required for offline IQL.")
-
-        dataset_type = str(dataset_type).lower()
-        if dataset_type == "d4rl":
-            from rlinf.data.datasets.d4rl import D4RLDataset
-
-            self.offline_batch_provider = (
-                D4RLDataset.build_offline_actor_batch_provider(
-                    self.cfg, self.batch_size
-                )
-            )
-        else:
+        if str(dataset_type).lower() != "d4rl":
             raise AssertionError(
                 f"offline IQL only supports dataset_type='d4rl', got {dataset_type!r}."
             )
-        self._obs_dim, self._action_dim = (
-            self.offline_batch_provider.get_obs_action_dims()
+
+        self._offline_dataset = build_d4rl_dataset_from_cfg(self.cfg)
+        per_rank_bs = int(self.batch_size)
+
+        if dist.is_available() and dist.is_initialized():
+            sampler = DistributedSampler(
+                self._offline_dataset,
+                num_replicas=dist.get_world_size(),
+                rank=dist.get_rank(),
+                shuffle=bool(dataset_cfg.get("shuffle", True)),
+                seed=int(dataset_cfg.get("seed", 42)),
+                drop_last=True,
+            )
+        else:
+            sampler = None
+
+        nw = int(dataset_cfg.get("num_workers", 0))
+        self.offline_data_loader = DataLoader(
+            self._offline_dataset,
+            batch_size=per_rank_bs,
+            sampler=sampler,
+            shuffle=(sampler is None),
+            num_workers=nw,
+            drop_last=True,
+            pin_memory=bool(dataset_cfg.get("pin_memory", True)),
+            persistent_workers=(
+                nw > 0 and bool(dataset_cfg.get("persistent_workers", True))
+            ),
         )
-        self._dataset_size = self.offline_batch_provider.get_dataset_size()
+        if len(self._offline_dataset) < per_rank_bs:
+            raise ValueError(
+                f"Dataset size ({len(self._offline_dataset)}) must be >= batch_size ({per_rank_bs})."
+            )
+
+        self._data_epoch = 0
+        self._data_iter_offset = 0
+        if sampler is not None:
+            sampler.set_epoch(self._data_epoch)
+        self.offline_data_iter = iter(self.offline_data_loader)
+
+        self._obs_dim, self._action_dim = self._offline_dataset.get_obs_action_dims()
+        self._dataset_size = self._offline_dataset.get_dataset_size()
         self.log_info(
-            "IQL offline: built async batch provider with "
-            f"{self._dataset_size} samples, batch_size={self.batch_size}."
+            "IQL offline: DataLoader with "
+            f"{self._dataset_size} samples, per_rank_batch_size={per_rank_bs}."
         )
         if self._obs_dim <= 0 or self._action_dim <= 0:
             raise ValueError("Failed to infer obs_dim/action_dim from offline dataset.")
@@ -97,8 +135,8 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
     def setup_iql_components(self):
         """Initialize IQL-specific offline components (SFT-style: data lives on the actor).
 
-        Batches come from the resolved dataset class's
-        ``build_offline_actor_batch_provider``.
+        Batches come from the actor's ``offline_data_loader`` (see
+        ``build_offline_dataloader``).
         """
         actor_cfg = self.cfg.actor
         self.offline_torch_compile = bool(actor_cfg.get("offline_torch_compile", True))
@@ -465,9 +503,48 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
         )
 
     def _next_train_batch(self) -> dict[str, torch.Tensor]:
-        if self.offline_batch_provider is None:
-            raise RuntimeError("Offline async batch provider is not initialized.")
-        return self.offline_batch_provider.next_batch()
+        if self.offline_data_iter is None:
+            raise RuntimeError("Offline DataLoader is not initialized.")
+        try:
+            batch = next(self.offline_data_iter)
+            self._data_iter_offset += 1
+        except StopIteration:
+            self._data_epoch += 1
+            if hasattr(self.offline_data_loader, "sampler") and hasattr(
+                self.offline_data_loader.sampler, "set_epoch"
+            ):
+                self.offline_data_loader.sampler.set_epoch(self._data_epoch)
+            self.offline_data_iter = iter(self.offline_data_loader)
+            batch = next(self.offline_data_iter)
+            self._data_iter_offset = 1
+        return batch
+
+    def _load_offline_data_state(self, state_payload: dict[str, Any]) -> None:
+        """Restore dataloader position after checkpoint (aligned with SFT VLM worker)."""
+        if "data_epoch" not in state_payload or "data_iter_offset" not in state_payload:
+            return
+        self._data_epoch = int(state_payload.get("data_epoch", 0))
+        self._data_iter_offset = int(state_payload.get("data_iter_offset", 0))
+
+        if self.offline_data_loader is None:
+            return
+
+        if hasattr(self.offline_data_loader, "sampler") and hasattr(
+            self.offline_data_loader.sampler, "set_epoch"
+        ):
+            self.offline_data_loader.sampler.set_epoch(self._data_epoch)
+
+        self.offline_data_iter = iter(self.offline_data_loader)
+        for _ in range(self._data_iter_offset):
+            try:
+                next(self.offline_data_iter)
+            except StopIteration:
+                self._data_epoch += 1
+                if hasattr(self.offline_data_loader, "sampler") and hasattr(
+                    self.offline_data_loader.sampler, "set_epoch"
+                ):
+                    self.offline_data_loader.sampler.set_epoch(self._data_epoch)
+                self.offline_data_iter = iter(self.offline_data_loader)
 
     def prepare_batch(self, batch: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
         required = ["observations", "actions", "rewards", "masks", "next_observations"]
@@ -809,18 +886,11 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
             target_state,
             os.path.join(components_path, "target_critic.pt"),
         )
-        # Persist D4RL dataloader cursor (epoch + offset in epoch) so resume
-        # continues from the same place in the shuffled dataset; see
-        # ``D4RLDataset.state_dict`` / ``load_state_dict`` in ``d4rl.py``.
-        assert self.offline_batch_provider is not None, (
-            "offline_batch_provider is not initialized before save_checkpoint()."
-        )
-        data_state = self.offline_batch_provider.state_dict()
         state_payload = {
             "step": int(step),
             "global_step": int(self._global_step),
-            "data_epoch": int(data_state["data_epoch"]),
-            "data_iter_offset": int(data_state["data_iter_offset"]),
+            "data_epoch": int(self._data_epoch),
+            "data_iter_offset": int(self._data_iter_offset),
         }
         torch.save(state_payload, os.path.join(components_path, "state.pt"))
 
@@ -898,5 +968,4 @@ class EmbodiedIQLFSDPPolicy(EmbodiedFSDPActor):
                     "Checkpoint state.pt must contain key 'global_step' for offline IQL resume."
                 )
             self._global_step = int(state_payload["global_step"])
-            if self.offline_batch_provider is not None:
-                self.offline_batch_provider.load_state_dict(state_payload)
+            self._load_offline_data_state(state_payload)

@@ -12,23 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""D4RL offline RL dataset with actor-local asynchronous batch sampling."""
+"""D4RL offline RL dataset: load transitions and expose PyTorch ``Dataset`` items."""
 
 from __future__ import annotations
 
 import os
-import queue
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
-import torch.distributed as dist
 import tqdm
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader, Dataset
-from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import Dataset
 
 try:
     import d4rl
@@ -49,13 +45,10 @@ else:
 
 
 class D4RLDataset(Dataset):
-    """Single source of truth for D4RL offline loading and sampling.
+    """D4RL offline transitions as a map-style ``Dataset`` (one row per index).
 
-    This class owns:
-    - D4RL transition loading (from env or hdf5)
-    - PyTorch Dataset interface (__len__/__getitem__)
-    - DataLoader + DistributedSampler build
-    - Async prefetch queue (next_batch/state_dict/load_state_dict)
+    DataLoader construction, distributed sampling, and iteration state belong on
+    the training worker (see ``EmbodiedIQLFSDPPolicy.build_offline_dataloader``).
     """
 
     def __init__(
@@ -94,25 +87,14 @@ class D4RLDataset(Dataset):
         self.size = len(self.observations)
 
         self._apply_reward_postprocess(env_name)
-        self._init_runtime_fields()
+        self._init_tensor_cache()
 
-    def _init_runtime_fields(self) -> None:
+    def _init_tensor_cache(self) -> None:
         self._torch_observations: torch.Tensor | None = None
         self._torch_actions: torch.Tensor | None = None
         self._torch_rewards: torch.Tensor | None = None
         self._torch_masks: torch.Tensor | None = None
         self._torch_next_observations: torch.Tensor | None = None
-
-        self._dataloader: DataLoader | None = None
-        self.prefetch_batches: int = 2
-        self._queue: queue.Queue | None = None
-        self._stop_event: threading.Event | None = None
-        self._thread: threading.Thread | None = None
-        self._iterator = None
-        self._epoch = 0
-        self._produced_in_epoch = 0
-        self._consumed_in_epoch = 0
-        self._lock = threading.Lock()
 
     def _ensure_torch_cache(self) -> None:
         if self._torch_observations is None:
@@ -285,188 +267,8 @@ class D4RLDataset(Dataset):
         self.dones_float = dones_float
         self.next_observations = next_observations
         self.size = len(observations)
-        self._init_runtime_fields()
+        self._init_tensor_cache()
         return self
-
-    @classmethod
-    def build_offline_actor_batch_provider(
-        cls,
-        cfg: Any,
-        per_rank_batch_size: int,
-    ) -> D4RLDataset:
-        dataset_cfg = cfg.get("dataset", {})
-        dataset_type = str(
-            dataset_cfg.get("dataset_type", cfg.env.get("dataset_type", "d4rl"))
-        ).lower()
-        if dataset_type != "d4rl":
-            raise NotImplementedError(
-                f"Offline IQL currently only supports dataset_type='d4rl', got {dataset_type!r}."
-            )
-
-        dataset_env_name = dataset_cfg.get(
-            "env_name",
-            cfg.env.eval.get("env_name", cfg.env.get("env_name", None)),
-        )
-        if not dataset_env_name:
-            raise ValueError("Offline dataset requires dataset.env_name.")
-        dataset_path = dataset_cfg.get(
-            "dataset_path", cfg.env.get("dataset_path", None)
-        )
-
-        dataset_init_kwargs_cfg = dataset_cfg.get("dataset_init_kwargs", {})
-        if OmegaConf.is_config(dataset_init_kwargs_cfg):
-            dataset_init_kwargs = OmegaConf.to_container(
-                dataset_init_kwargs_cfg, resolve=True
-            )
-        else:
-            dataset_init_kwargs = dict(dataset_init_kwargs_cfg)
-        dataset_init_kwargs.setdefault("dataset_path", dataset_path)
-        dataset_init_kwargs.setdefault("env_name", str(dataset_env_name))
-
-        dataset = cls.from_path(**dataset_init_kwargs)
-        dataset._init_dataloader_and_prefetch(
-            per_rank_batch_size=int(per_rank_batch_size),
-            dataset_cfg=dataset_cfg,
-        )
-        return dataset
-
-    def _init_dataloader_and_prefetch(
-        self,
-        per_rank_batch_size: int,
-        dataset_cfg: Any,
-    ) -> None:
-        if dist.is_available() and dist.is_initialized():
-            sampler = DistributedSampler(
-                self,
-                num_replicas=dist.get_world_size(),
-                rank=dist.get_rank(),
-                shuffle=bool(dataset_cfg.get("shuffle", True)),
-                seed=int(dataset_cfg.get("seed", 42)),
-                drop_last=True,
-            )
-        else:
-            sampler = None
-
-        self._dataloader = DataLoader(
-            self,
-            batch_size=int(per_rank_batch_size),
-            sampler=sampler,
-            shuffle=(sampler is None),
-            num_workers=int(dataset_cfg.get("num_workers", 0)),
-            drop_last=True,
-            pin_memory=bool(dataset_cfg.get("pin_memory", True)),
-            persistent_workers=(
-                int(dataset_cfg.get("num_workers", 0)) > 0
-                and bool(dataset_cfg.get("persistent_workers", True))
-            ),
-        )
-        if len(self) < int(per_rank_batch_size):
-            raise ValueError(
-                "Dataset size "
-                f"({len(self)}) must be >= batch_size ({int(per_rank_batch_size)})."
-            )
-
-        self.prefetch_batches = int(dataset_cfg.get("prefetch_batches", 2))
-        self._queue = queue.Queue(maxsize=max(1, self.prefetch_batches))
-        self._stop_event = threading.Event()
-        self._iterator = None
-        self._epoch = 0
-        self._produced_in_epoch = 0
-        self._consumed_in_epoch = 0
-        self._start_prefetch_thread()
-
-    def _set_sampler_epoch(self, epoch: int) -> None:
-        assert self._dataloader is not None
-        sampler = getattr(self._dataloader, "sampler", None)
-        if sampler is not None and hasattr(sampler, "set_epoch"):
-            sampler.set_epoch(int(epoch))
-
-    def _build_iterator(self, epoch: int) -> None:
-        assert self._dataloader is not None
-        self._set_sampler_epoch(epoch)
-        self._iterator = iter(self._dataloader)
-        self._produced_in_epoch = 0
-
-    def _next_with_metadata(self) -> tuple[int, int, dict[str, torch.Tensor]]:
-        if self._iterator is None:
-            self._build_iterator(self._epoch)
-        assert self._iterator is not None
-        try:
-            batch = next(self._iterator)
-        except StopIteration:
-            self._epoch += 1
-            self._build_iterator(self._epoch)
-            batch = next(self._iterator)
-        self._produced_in_epoch += 1
-        return self._epoch, self._produced_in_epoch, batch
-
-    def _prefetch_loop(self) -> None:
-        assert self._queue is not None
-        assert self._stop_event is not None
-        while not self._stop_event.is_set():
-            try:
-                payload = self._next_with_metadata()
-                self._queue.put(payload, timeout=0.1)
-            except queue.Full:
-                continue
-            except Exception as exc:
-                self._queue.put(exc)
-                return
-
-    def _start_prefetch_thread(self) -> None:
-        self._thread = threading.Thread(target=self._prefetch_loop, daemon=True)
-        self._thread.start()
-
-    def _stop_prefetch_thread(self) -> None:
-        if self._stop_event is not None:
-            self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-            self._thread = None
-
-    def next_batch(self) -> dict[str, torch.Tensor]:
-        if self._queue is None:
-            raise RuntimeError("D4RLDataset provider is not initialized.")
-        item = self._queue.get()
-        if isinstance(item, Exception):
-            raise RuntimeError("Async batch prefetch failed.") from item
-        epoch, consumed_in_epoch, batch = item
-        with self._lock:
-            self._epoch = int(epoch)
-            self._consumed_in_epoch = int(consumed_in_epoch)
-        return batch
-
-    def state_dict(self) -> dict[str, int]:
-        with self._lock:
-            return {
-                "data_epoch": int(self._epoch),
-                "data_iter_offset": int(self._consumed_in_epoch),
-            }
-
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        if self._dataloader is None:
-            raise RuntimeError("D4RLDataset provider is not initialized.")
-
-        target_epoch = int(state.get("data_epoch", 0))
-        target_offset = int(state.get("data_iter_offset", 0))
-        self._stop_prefetch_thread()
-
-        self._queue = queue.Queue(maxsize=max(1, int(self.prefetch_batches)))
-        self._stop_event = threading.Event()
-        self._epoch = max(0, target_epoch)
-        self._consumed_in_epoch = 0
-        self._build_iterator(self._epoch)
-        for _ in range(max(0, target_offset)):
-            try:
-                next(self._iterator)
-                self._produced_in_epoch += 1
-            except StopIteration:
-                self._epoch += 1
-                self._build_iterator(self._epoch)
-                next(self._iterator)
-                self._produced_in_epoch += 1
-        self._consumed_in_epoch = max(0, target_offset)
-        self._start_prefetch_thread()
 
     def get_obs_action_dims(self) -> tuple[int, int]:
         return int(self.observations.shape[-1]), int(self.actions.shape[-1])
@@ -518,3 +320,35 @@ class D4RLDataset(Dataset):
             if dones_float[i] == 1.0 and i + 1 < len(observations):
                 trajs.append([])
         return trajs
+
+
+def build_d4rl_dataset_from_cfg(cfg: Any) -> D4RLDataset:
+    """Resolve ``cfg.dataset`` / ``cfg.env`` and return a ``D4RLDataset`` instance."""
+    dataset_cfg = cfg.get("dataset", {})
+    dataset_type = str(
+        dataset_cfg.get("dataset_type", cfg.env.get("dataset_type", "d4rl"))
+    ).lower()
+    if dataset_type != "d4rl":
+        raise NotImplementedError(
+            f"Offline IQL currently only supports dataset_type='d4rl', got {dataset_type!r}."
+        )
+
+    fallback_env = OmegaConf.select(cfg, "env.eval.env_name", default=None)
+    if fallback_env is None:
+        fallback_env = OmegaConf.select(cfg, "env.env_name", default=None)
+    dataset_env_name = dataset_cfg.get("env_name", fallback_env)
+    if not dataset_env_name:
+        raise ValueError("Offline dataset requires dataset.env_name.")
+    dataset_path = dataset_cfg.get("dataset_path", cfg.env.get("dataset_path", None))
+
+    dataset_init_kwargs_cfg = dataset_cfg.get("dataset_init_kwargs", {})
+    if OmegaConf.is_config(dataset_init_kwargs_cfg):
+        dataset_init_kwargs = OmegaConf.to_container(
+            dataset_init_kwargs_cfg, resolve=True
+        )
+    else:
+        dataset_init_kwargs = dict(dataset_init_kwargs_cfg)
+    dataset_init_kwargs.setdefault("dataset_path", dataset_path)
+    dataset_init_kwargs.setdefault("env_name", str(dataset_env_name))
+
+    return D4RLDataset.from_path(**dataset_init_kwargs)
