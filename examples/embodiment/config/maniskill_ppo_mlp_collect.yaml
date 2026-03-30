@@ -27,7 +27,7 @@ runner:
     experiment_name: "maniskill_ppo_mlp_collect"
     logger_backends: ["tensorboard"]
 
-  max_epochs: 200
+  max_epochs: 100
   max_steps: -1
 
   only_eval: False
@@ -91,7 +91,7 @@ env:
     max_steps_per_rollout_epoch: 50
     is_eval: False
     init_params:
-      obs_mode: "rgb"
+      obs_mode: "state"
       sensor_configs:
         shader_pack: "default"
         width: 224
@@ -99,7 +99,7 @@ env:
 
     # ── pickle format ───────────────────────────────────────────────
     data_collection:
-      enabled: True
+      enabled: False
       save_dir: ${runner.logger.log_path}/collected_data
       export_format: "pickle"
       only_success: True       # set True to discard failed episodes
@@ -127,7 +127,7 @@ env:
 
     # ── pickle format ───────────────────────────────────────────────
     data_collection:
-      enabled: False
+      enabled: True
       save_dir: ${runner.logger.log_path}/collected_data
       export_format: "pickle"
       only_success: True       # set True to discard failed episodes
