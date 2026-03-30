@@ -488,7 +488,12 @@ class DreamZeroPolicy(BasePolicy):
         else:
             raise NotImplementedError
 
-    def default_forward(self, **kwargs) -> Batch:
+    def default_forward(
+        self,
+        forward_inputs: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> dict[str, Any]:
+
         """Default forward pass."""
         raise NotImplementedError
 
