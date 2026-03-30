@@ -31,10 +31,11 @@ class DreamZeroPolicy(BasePolicy):
         self,
         model_path: str,
         device: str | int = "cuda",
-        eval_bf16: bool = True,
+        precision: str = "bf16",
         force_identity_backbone: bool = True,
         tokenizer_path: str = "google/umt5-xxl",
         max_seq_len: int = 512,
+        original_config: DictConfig = None,
     ):
         _ensure_groot_importable()
 
@@ -44,13 +45,11 @@ class DreamZeroPolicy(BasePolicy):
 
         self.model_path = Path(model_path)
         self.device = torch.device(device if isinstance(device, str) else f"cuda:{device}")
-        self.eval_bf16 = eval_bf16
-        self._tokenizer = None
+        self.precision = precision
         exp_cfg_dir = self.model_path / "experiment_cfg"
         train_cfg_path = exp_cfg_dir / "conf.yaml"
         train_cfg = OmegaConf.load(train_cfg_path)
         self.train_cfg = train_cfg
-        self.eval_bf16 = self.train_cfg.get("eval_bf16", False)
 
         # Load config
         config_path = self.model_path / "config.json"
@@ -79,7 +78,7 @@ class DreamZeroPolicy(BasePolicy):
         else:
             self.model = VLA.from_pretrained(str(self.model_path))
 
-        if eval_bf16:
+        if precision == "bf16":
             self.model = self.model.to(dtype=torch.bfloat16)
         self.model = self.model.to(device=self.device)
 
@@ -91,6 +90,8 @@ class DreamZeroPolicy(BasePolicy):
 
         self.action_horizon = self.model.action_horizon
         self.action_dim = self.model.action_dim
+        self.original_model_config = original_config
+        self.model_action_dim = self.original_model_config.get("action_dim", 7)
 
 
         # 2. Load the action, video, and state transforms
@@ -229,16 +230,6 @@ class DreamZeroPolicy(BasePolicy):
         model.load_state_dict(state_dict, strict=False)
         return model
 
-    @property
-    def tokenizer(self):
-        if self._tokenizer is None:
-            from groot.vla.model.dreamzero.transform.dreamzero_cotrain import HuggingfaceTokenizer
-            self._tokenizer = HuggingfaceTokenizer(
-                name=self.tokenizer_path,
-                seq_len=self.max_seq_len,
-                clean="whitespace",
-            )
-        return self._tokenizer
     def _process_batch(self, batch: Batch) -> Batch:
         """Process batch."""
         # Normalize / transform
@@ -249,7 +240,7 @@ class DreamZeroPolicy(BasePolicy):
             normalized_input = normalized_input.__getstate__()
         # Do bf16 cast if needed
         for k, v in normalized_input.items():
-            if torch.is_tensor(v) and v.dtype == torch.float32 and self.eval_bf16:
+            if torch.is_tensor(v) and v.dtype == torch.float32 and self.precision == "bf16":
                 normalized_input[k] = v.to(dtype=torch.bfloat16)
         return normalized_input
     
@@ -472,6 +463,8 @@ class DreamZeroPolicy(BasePolicy):
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().numpy()
         actions[..., -1] = np.where(actions[..., -1] > 0, 1.0, -1.0).astype(actions.dtype)
+
+        assert actions.shape[-1] == self.model_action_dim, f"Action shape mismatch: {actions.shape} != {self.model_action_dim}"
 
         flat = torch.as_tensor(actions, dtype=torch.float32).reshape(actions.shape[0], -1).cpu()
         forward_inputs = {"action": flat}

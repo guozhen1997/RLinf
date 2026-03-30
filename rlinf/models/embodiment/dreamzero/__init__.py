@@ -31,11 +31,15 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     max_seq_len = cfg.get("max_seq_len", 512)
     device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
 
+    precision = cfg.get("precision", "bf16")
+
     model = DreamZeroPolicy(
         model_path=model_path,
         device=device,
+        precision=precision,
         tokenizer_path=tokenizer_path,
         max_seq_len=max_seq_len,
+        original_config=cfg,
     )
 
     return model

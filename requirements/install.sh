@@ -872,6 +872,9 @@ main() {
                 dexbotic)
                     install_dexbotic_model
                     ;;
+                dreamzero)
+                    install_dreamzero_model
+                    ;;
                 "")
                     install_env_only
                     ;;
