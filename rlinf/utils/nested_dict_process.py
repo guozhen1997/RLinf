@@ -31,6 +31,9 @@ def update_nested_cfg(base_cfg, override_cfg):
 
 
 def copy_dict_tensor(next_extracted_obs: dict):
+    """
+    Recursively clones all torch tensors in a dict.
+    """
     ret = {}
     for key, value in next_extracted_obs.items():
         if isinstance(value, torch.Tensor):
@@ -38,7 +41,7 @@ def copy_dict_tensor(next_extracted_obs: dict):
         elif isinstance(value, dict):
             ret[key] = copy_dict_tensor(value)
         else:
-            raise ValueError(f"{key=}, {type(value)} is not supported.")
+            ret[key] = value
     return ret
 
 

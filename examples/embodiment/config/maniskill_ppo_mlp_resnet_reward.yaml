@@ -40,7 +40,7 @@ runner:
   val_check_interval: 50
   save_interval: 100
 
-  resume_dir: "logs/20260327-09:53:23-maniskill_ppo_mlp_collect/maniskill_ppo_mlp_collect/checkpoints/global_step_100"
+  resume_dir: null  # Set to checkpoint path to resume training
 
 algorithm:
   update_epoch: 8
@@ -174,7 +174,7 @@ actor:
     value_lr: 3.0e-4
     adam_beta1: 0.9
     adam_beta2: 0.999
-    adam_eps: 1.0e-05
+    adam_eps: 1.0e-08
     weight_decay: 0.01
     clip_grad: 0.5
 
@@ -189,22 +189,27 @@ actor:
 reward:
   use_reward_model: True
   group_name: "RewardGroup"
+  
+  # Reward mode:
+  # - "per_step": Compute reward for every frame (default, prone to reward hacking)
+  # - "terminal": Only compute reward at episode end (last frame), prevents reward hacking
   reward_mode: "terminal"
-  success_reward: 1.0
-  fail_reward: 0.0
-  reward_threshold: 0.5
-  combine_mode: "replace"
+
+  reward_threshold: 0.5 # Probability threshold for success/fail classification
+  
+  # How to combine learned rewards with environment rewards:
+  # Weighted sum (reward = env_reward_weight * env_reward + reward_weight * reward_model_reward)
   reward_weight: 1.0
   env_reward_weight: 0.0
   
   model:
-    model_path: "logs/reward_model/checkpoints/best_model/actor/model_state_dict/full_weights.pt"
+    model_path: null
     model_type: "resnet"
-    pretrained: False
+    pretrained: False # if pretrained is set to True, rlinf will automatically download pretrained weights.
     arch: "resnet18"
     hidden_dim: 256
     dropout: 0
-    image_size: [3, 224, 224]
+    image_size: [3, 128, 128]
     normalize: true
     precision: "bf16"
 

@@ -18,7 +18,6 @@ from typing import Any, Literal
 
 import numpy as np
 import torch
-from mani_skill.utils.common import torch_clone_dict
 from omegaconf import DictConfig, OmegaConf
 
 from rlinf.data.embodied_io_struct import (
@@ -34,7 +33,11 @@ from rlinf.envs.wrappers import RecordVideo
 from rlinf.scheduler import Channel, Cluster, Worker
 from rlinf.utils.comm_mapping import CommMapper
 from rlinf.utils.metric_utils import compute_split_num
-from rlinf.utils.nested_dict_process import split_dict, update_nested_cfg
+from rlinf.utils.nested_dict_process import (
+    copy_dict_tensor,
+    split_dict,
+    update_nested_cfg,
+)
 from rlinf.utils.placement import HybridComponentPlacement
 
 
@@ -425,7 +428,7 @@ class EnvWorker(Worker):
         if not isinstance(last_obs, dict):
             return None
 
-        merged_final_obs = torch_clone_dict(last_obs)
+        merged_final_obs = copy_dict_tensor(last_obs)
 
         if not isinstance(infos_list, (list, tuple)):
             return merged_final_obs
@@ -433,7 +436,10 @@ class EnvWorker(Worker):
         for step_infos in infos_list:
             if not isinstance(step_infos, dict):
                 continue
-            if "final_observation" not in step_infos or "_final_observation" not in step_infos:
+            if (
+                "final_observation" not in step_infos
+                or "_final_observation" not in step_infos
+            ):
                 continue
 
             final_obs = step_infos["final_observation"]
@@ -706,9 +712,9 @@ class EnvWorker(Worker):
             return sparse_rewards
 
         done_steps = env_output.dones.to(torch.int64).argmax(dim=1)
-        sparse_rewards[done_envs, done_steps[done_envs]] = reward_output[
-            done_envs
-        ].reshape(-1).to(sparse_rewards.dtype)
+        sparse_rewards[done_envs, done_steps[done_envs]] = (
+            reward_output[done_envs].reshape(-1).to(sparse_rewards.dtype)
+        )
         return sparse_rewards
 
     def bootstrap_step(self) -> list[EnvOutput]:

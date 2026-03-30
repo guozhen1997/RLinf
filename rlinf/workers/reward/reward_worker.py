@@ -21,13 +21,11 @@ import torch
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, DistributedSampler
 
-from rlinf.algorithms.rewards import get_rule_based_reward_class
 from rlinf.config import torch_dtype_from_precision
 from rlinf.data.datasets.reward_model import RewardBinaryDataset
 from rlinf.data.io_struct import RolloutResult
 from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
-from rlinf.models.embodiment.reward import get_reward_model_class
 from rlinf.scheduler import Channel, Cluster, Worker
 from rlinf.utils.comm_mapping import CommMapper
 from rlinf.utils.distributed import all_reduce_dict
@@ -64,9 +62,12 @@ class RewardWorker(Worker):
 
         if self.cfg.reward.use_reward_model:
             raise NotImplementedError
-        self.rule_based_reward = get_rule_based_reward_class(
-            self.cfg.reward.reward_type
-        )(self.cfg.reward)
+        else:
+            from rlinf.algorithms.rewards import get_rule_based_reward_class
+
+            self.rule_based_reward = get_rule_based_reward_class(
+                self.cfg.reward.reward_type
+            )(self.cfg.reward)
 
         if self.cfg.reward.get("tokenizer", None) is not None:
             self.tokenizer = hf_tokenizer(self.cfg.reward.tokenizer.tokenizer_model)
@@ -166,6 +167,8 @@ class EmbodiedRewardWorker(Worker):
         self.reward_threshold = self.cfg.reward.get("reward_threshold", 0.6)
 
     def model_provider_func(self):
+        from rlinf.models.embodiment.reward import get_reward_model_class
+
         reward_cls = get_reward_model_class(self.cfg.reward.model.model_type)
 
         model_cfg = self.cfg.reward.model
@@ -385,6 +388,8 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         self._training_step = 0
 
     def model_provider_func(self):
+        from rlinf.models.embodiment.reward import get_reward_model_class
+
         reward_cls = get_reward_model_class(self.cfg.actor.model.model_type)
 
         model_cfg = self.cfg.actor.model
@@ -415,14 +420,14 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         """Build dataloaders from preprocessed train/val dataset files."""
         data_cfg = self.cfg.get("data", {})
         train_data_paths = data_cfg.get("train_data_paths")
-        val_data_paths = data_cfg.get("val_data_paths")
+        eval_data_paths = data_cfg.get("eval_data_paths")
 
         self.logger.info(
             f"Loading preprocessed reward datasets from "
-            f"{train_data_paths} and {val_data_paths}"
+            f"{train_data_paths} and {eval_data_paths}"
         )
         train_dataset = RewardBinaryDataset(train_data_paths)
-        val_dataset = RewardBinaryDataset(val_data_paths)
+        val_dataset = RewardBinaryDataset(eval_data_paths)
 
         if len(train_dataset) == 0:
             self.logger.warning("Training dataset is empty")
