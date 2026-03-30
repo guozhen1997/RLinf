@@ -92,6 +92,10 @@ env:
     is_eval: False
     init_params:
       obs_mode: "rgb"
+      sensor_configs:
+        shader_pack: "default"
+        width: 224
+        height: 224
 
     # ── pickle format ───────────────────────────────────────────────
     data_collection:
@@ -113,6 +117,10 @@ env:
     is_eval: True
     init_params:
       obs_mode: "rgb"
+      sensor_configs:
+        shader_pack: "default"
+        width: 224
+        height: 224
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval

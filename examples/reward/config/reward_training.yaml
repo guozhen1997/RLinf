@@ -57,7 +57,7 @@ actor:
     pretrained: False
     hidden_dim: 256
     dropout: 0.1
-    image_size: [3, 128, 128]
+    image_size: [3, 224, 224]
     normalize: true
     precision: "fp32"
 
@@ -99,4 +99,3 @@ critic:
 
 algorithm:
   adv_type: gae
-
