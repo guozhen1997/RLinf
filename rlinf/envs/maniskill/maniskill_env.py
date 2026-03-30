@@ -79,6 +79,7 @@ class ManiskillEnv(gym.Env):
         self._is_start = True
         self._init_reset_state_ids()
         self.info_logging_keys = ["is_src_obj_grasped", "consecutive_grasp", "success"]
+        self._show_goal_site_visual()
         if self.record_metrics:
             self._init_metrics()
 
@@ -129,6 +130,18 @@ class ManiskillEnv(gym.Env):
         self.reset_state_ids = reset_state_ids.repeat_interleave(
             repeats=self.group_size
         ).to(self.device)
+
+    def _show_goal_site_visual(self):
+        """Keep ManiSkill goal-site visualization visible for reward-model RGB input."""
+        if not hasattr(self.env.unwrapped, "goal_site"):
+            return
+
+        goal_site = self.env.unwrapped.goal_site
+        if hasattr(self.env.unwrapped, "_hidden_objects"):
+            while goal_site in self.env.unwrapped._hidden_objects:
+                self.env.unwrapped._hidden_objects.remove(goal_site)
+        if hasattr(goal_site, "show_visual"):
+            goal_site.show_visual()
 
     def _wrap_obs(self, raw_obs, infos=None):
         wrap_obs_mode = getattr(self.cfg, "wrap_obs_mode", "default")
@@ -269,6 +282,7 @@ class ManiskillEnv(gym.Env):
                 else {}
             )
         raw_obs, infos = self.env.reset(seed=seed, options=options)
+        self._show_goal_site_visual()
         extracted_obs = self._wrap_obs(raw_obs, infos=infos)
         if "env_idx" in options:
             env_idx = options["env_idx"]
