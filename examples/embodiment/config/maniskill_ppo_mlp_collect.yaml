@@ -54,6 +54,7 @@ algorithm:
   adv_type: gae
   loss_type: actor_critic
   loss_agg_func: "token-mean"
+  bootstrap_type: always
   kl_beta: 0.0
   entropy_bonus: 0
   clip_ratio_high: 0.2
@@ -80,7 +81,6 @@ algorithm:
 
 env:
   group_name: "EnvGroup"
-
   train:
     total_num_envs: 1024
     wrap_obs_mode: simple
@@ -106,11 +106,11 @@ env:
       only_success: True       # set True to discard failed episodes
 
   eval:
-    total_num_envs: 128
+    total_num_envs: 32
     wrap_obs_mode: simple
     use_full_state: True
     auto_reset: True
-    ignore_terminations: False
+    ignore_terminations: True
     max_episode_steps: 50
     max_steps_per_rollout_epoch: 50
     use_fixed_reset_state_ids: True
@@ -154,6 +154,9 @@ rollout:
     model_path: ""
     precision: ${actor.model.precision}
 
+  enable_torch_compile: True
+  enable_cuda_graph: True
+
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
@@ -172,7 +175,7 @@ actor:
     value_lr: 3.0e-4
     adam_beta1: 0.9
     adam_beta2: 0.999
-    adam_eps: 1.0e-05
+    adam_eps: 1.0e-08
     weight_decay: 0.01
     clip_grad: 0.5
 
