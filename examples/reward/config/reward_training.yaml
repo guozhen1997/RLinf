@@ -34,11 +34,11 @@ runner:
 data:
   # Paths to preprocessed split datasets.
   # Generate them first with:
-  #   python examples/reward/preprocess_reward_dataset.py \
-  #       --raw-data-path /path/to/collected_data \
-  #       --output-dir /path/to/processed_reward_data
-  train_data_paths: "logs/processed_reward_data/train.pt"
-  val_data_paths: "logs/processed_reward_data/val.pt"
+    # python examples/reward/preprocess_reward_dataset.py \
+    #     --raw-data-path logs/20260330-18:25:38-maniskill_ppo_mlp_collect/collected_data \
+    #     --output-dir logs/20260330-18:25:38-maniskill_ppo_mlp_collect/processed_reward_data
+  train_data_paths: "logs/20260330-18:25:38-maniskill_ppo_mlp_collect/processed_reward_data/train.pt"
+  val_data_paths: "logs/20260330-18:25:38-maniskill_ppo_mlp_collect/processed_reward_data/val.pt"
   num_workers: 4
 
 actor:
@@ -54,7 +54,7 @@ actor:
     model_type: "resnet"
     model_path: null
     arch: "resnet18"
-    pretrained: False
+    pretrained: True
     hidden_dim: 256
     dropout: 0.1
     image_size: [3, 224, 224]

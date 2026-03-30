@@ -27,13 +27,13 @@ runner:
     experiment_name: "maniskill_ppo_mlp_collect"
     logger_backends: ["tensorboard"]
 
-  max_epochs: 200
+  max_epochs: 300
   max_steps: -1
 
   only_eval: False
   eval_policy_path: null # Optional: .pt file or None, if None, will use the checkpoint in rollout.model.model_path
-  val_check_interval: 50
-  save_interval: -1
+  val_check_interval: 10
+  save_interval: 10
 
   resume_dir: null
   ckpt_path: null
@@ -132,7 +132,7 @@ env:
       enabled: True
       save_dir: ${runner.logger.log_path}/collected_data
       export_format: "pickle"
-      only_success: True       # set True to discard failed episodes
+      only_success: False       # set True to discard failed episodes
 
     # ── lerobot format ───────────────────────────────────────
     # data_collection:

@@ -40,7 +40,7 @@ runner:
   val_check_interval: 50
   save_interval: 100
 
-  resume_dir: "logs/20260327-09:53:23-maniskill_ppo_mlp_collect/maniskill_ppo_mlp_collect/checkpoints/global_step_100"
+  resume_dir: "logs/20260330-17:10:52-maniskill_ppo_mlp_collect/maniskill_ppo_mlp_collect/checkpoints/global_step_80"
 
 algorithm:
   update_epoch: 8
@@ -200,13 +200,13 @@ reward:
   model:
     model_path: "logs/reward_model/checkpoints/best_model/actor/model_state_dict/full_weights.pt"
     model_type: "resnet"
-    pretrained: False
+    pretrained: True
     arch: "resnet18"
     hidden_dim: 256
     dropout: 0
     image_size: [3, 224, 224]
     normalize: true
-    precision: "bf16"
+    precision: "fp32"
 
 critic:
   use_critic_model: False
