@@ -381,7 +381,6 @@ def _override_with_data_kwargs(config: TrainConfig, data_kwargs: dict) -> TrainC
 def get_openpi_config(
     config_name: str,
     model_path: Optional[str] = None,
-    data_kwargs: Optional[dict] = None,
     batch_size: Optional[int] = None,
     repo_id: Optional[str] = None,
 ) -> TrainConfig:

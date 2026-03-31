@@ -50,9 +50,77 @@ from rlinf.datasets.lerobot.transforms import (
 )
 
 from .config import RLDataConfig, create_rl_config
-from .value_transforms import ReturnDiscretizer
+from .value_transforms import ReturnNormalizer
 
 logger = logging.getLogger(__name__)
+
+
+def load_return_stats_from_dataset(
+    dataset_path: str | Path,
+) -> tuple[float | None, float | None]:
+    """Load return min/max from dataset's stats.json.
+
+    Args:
+        dataset_path: Path to LeRobot dataset
+
+    Returns:
+        Tuple of (return_min, return_max), or (None, None) if not found
+    """
+    import json
+
+    stats_path = Path(dataset_path) / "meta" / "stats.json"
+    if not stats_path.exists():
+        return None, None
+
+    try:
+        with open(stats_path, "r") as f:
+            stats = json.load(f)
+        return_stats = stats.get("return", {})
+        return return_stats.get("min"), return_stats.get("max")
+    except (json.JSONDecodeError, KeyError):
+        return None, None
+
+
+def load_returns_sidecar(
+    dataset_path: str | Path,
+    returns_tag: str | None = None,
+) -> dict[int, dict[str, np.ndarray]] | None:
+    """Load ``meta/returns_{tag}.parquet`` sidecar written by compute_returns.py.
+
+    Falls back to ``meta/returns.parquet`` when *returns_tag* is None.
+
+    Returns:
+        ``{episode_index: {"return": np.array, "reward": np.array}}``
+        or None if sidecar does not exist.
+    """
+    import pyarrow.parquet as pq
+
+    dataset_path = Path(dataset_path)
+    sidecar_filename = (
+        f"returns_{returns_tag}.parquet" if returns_tag else "returns.parquet"
+    )
+    sidecar_path = dataset_path / "meta" / sidecar_filename
+    if not sidecar_path.exists():
+        return None
+
+    table = pq.read_table(str(sidecar_path))
+    ep_col = table.column("episode_index").to_numpy()
+    frame_col = table.column("frame_index").to_numpy()
+    ret_col = table.column("return").to_numpy()
+    rew_col = table.column("reward").to_numpy()
+
+    sidecar: dict[int, dict[str, np.ndarray]] = {}
+    for ep in np.unique(ep_col):
+        mask = ep_col == ep
+        frames = frame_col[mask]
+        order = np.argsort(frames)
+        sidecar[int(ep)] = {
+            "return": ret_col[mask][order].astype(np.float32),
+            "reward": rew_col[mask][order].astype(np.float32),
+        }
+
+    logger.info(f"Loaded returns sidecar: {sidecar_path} ({len(sidecar)} episodes)")
+    return sidecar
 
 
 class LeRobotRLDataset(LeRobotPyTorchDataset):
@@ -154,20 +222,15 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
         self.max_samples = max_samples
         self.split = split
 
-        # Sidecar tag
         self.tag = tag
-
-        # Episode filtering
         self.episode_percentage = episode_percentage
         self.shuffle_episodes = shuffle_episodes
         self.episode_seed = episode_seed
         self._episode_indices = None
         self._sample_indices = None
 
-        # Check local vs remote
         self.is_local = self._is_local_path(self.repo_id)
 
-        # Load metadata first (needed for auto-detecting history keys)
         if self.is_local:
             local_path = Path(self.repo_id).resolve()
             folder_name = local_path.name
@@ -175,7 +238,6 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
         else:
             self.dataset_meta = LeRobotDatasetMetadata(self.repo_id)
 
-        # Use provided rl_config or create default
         if rl_config is not None:
             self.rl_config = rl_config
             logger.info("Using provided rl_config")
@@ -185,13 +247,11 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
             )
             logger.info("Created default rl_config with auto-detected history_keys")
 
-        # Auto-detect history keys if not provided in rl_config
         if self.rl_config.history_keys is None:
             detected_keys = self._auto_detect_history_keys()
             self.rl_config = replace(self.rl_config, history_keys=tuple(detected_keys))
             logger.info(f"Auto-detected history_keys: {detected_keys}")
 
-        # Create data config for transforms
         self.data_config = self._create_data_config(
             data_config_factory=data_config_factory,
             config=config,
@@ -205,34 +265,23 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
             action_norm_skip_dims=action_norm_skip_dims,
         )
 
-        # Generate delta_timestamps for temporal data
         delta_timestamps = self.rl_config.get_delta_timestamps(self.dataset_meta.fps)
 
         # Load sidecar returns.parquet if it exists (written by compute_returns.py).
-        # When loaded, remove return/reward from delta_timestamps so that LeRobot
+        # When loaded, remove return/reward from delta_timestamps so LeRobot
         # does not try to read these (possibly absent) columns from episode parquets.
-        self._returns_sidecar = (
-            None  # {ep_idx: {"return": np.array, "reward": np.array}}
-        )
+        self._returns_sidecar = None
         if self.is_local:
-            sidecar_filename = (
-                f"returns_{self.tag}.parquet" if self.tag else "returns.parquet"
+            self._returns_sidecar = load_returns_sidecar(
+                Path(self.repo_id).resolve(), self.tag
             )
-            sidecar_path = Path(self.repo_id).resolve() / "meta" / sidecar_filename
-            if sidecar_path.exists():
-                self._returns_sidecar = self._load_returns_sidecar(sidecar_path)
-                # Remove return and reward from delta_timestamps so LeRobot skips them
+            if self._returns_sidecar is not None:
                 delta_timestamps.pop(self.rl_config.return_key, None)
                 for rk in self.rl_config.reward_keys:
                     delta_timestamps.pop(rk, None)
-                logger.info(
-                    f"Loaded returns sidecar ({len(self._returns_sidecar)} episodes) "
-                    f"— return/reward will be injected from sidecar"
-                )
 
         logger.info(f"RL Delta timestamps: {delta_timestamps}")
 
-        # Create base LeRobot dataset with temporal structure
         if self.is_local:
             local_path = Path(self.repo_id).resolve()
             folder_name = local_path.name
@@ -249,28 +298,18 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                 download_videos=False,
             )
 
-        # Compute episode filtering
         self._compute_episode_filtering()
-
-        # Add prompt transform
         self._add_prompt_transform()
 
-        # Store VLA transforms to apply AFTER restructuring in __getitem__
-        # This is critical because RL datasets have temporal structure (history + future)
-        # and VLA transforms (like FrankaInputs) expect single-timestep data
+        # VLA transforms are applied AFTER restructuring in __getitem__ because RL
+        # datasets have temporal structure and VLA transforms expect single-timestep data
         transforms = self._create_transform_list()
         self._vla_transform = compose(transforms) if transforms else None
 
-        # Apply return discretization if enabled
-        self.return_discretizer = None
-        if self.rl_config.discretize_return:
-            self.return_discretizer = self._create_return_discretizer()
-            if self.return_discretizer:
-                logger.info(
-                    f"Return discretization enabled: {self.rl_config.num_return_bins} bins"
-                )
+        self.return_normalizer = None
+        if self.rl_config.normalize_return:
+            self.return_normalizer = self._create_return_normalizer()
 
-        # Log dataset info
         self._log_dataset_info()
 
     def _auto_detect_history_keys(self):
@@ -313,8 +352,6 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                 asset_id=asset_id,
                 action_norm_skip_dims=action_norm_skip_dims,
             )
-            # For value training, normalization is required for state discretization
-            # Only skip norm_stats if no norm_stats_dir is provided
             skip_norm = norm_stats_dir is None
             return factory.create(
                 action_dim=action_dim or 32, skip_norm_stats=skip_norm
@@ -322,7 +359,6 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
         return None
 
     def _add_prompt_transform(self):
-        """Add prompt extraction transform if needed."""
         if self.data_config and getattr(self.data_config, "prompt_from_task", True):
             tasks = None
             if self.is_local:
@@ -342,16 +378,14 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                 )
 
     def _create_transform_list(self) -> list[DataTransformFn]:
-        """Create transform list following OpenPI's transform_dataset logic.
+        """Create transform list for RL datasets.
 
-        For RL datasets, repack transforms are modified to pass through unmapped keys
-        since RL restructuring creates additional keys like action_chunk, reward_chunk, etc.
+        Repack transforms use passthrough_unmapped=True so RL-specific keys
+        (action_chunk, reward_chunk, etc.) are preserved through the pipeline.
         """
         transforms = []
 
         if self.data_config is not None:
-            # Add repack transforms with passthrough_unmapped=True for RL
-            # This ensures RL-specific keys (action_chunk, reward_chunk, etc.) are preserved
             for transform in self.data_config.repack_transforms.inputs:
                 if isinstance(transform, RepackTransform):
                     transforms.append(
@@ -360,15 +394,13 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                 else:
                     transforms.append(transform)
 
-            # Add data transforms
             transforms.extend(self.data_config.data_transforms.inputs)
 
-            # Add normalization (following OpenPI pattern)
-            # Exclude 'return' from normalization since ReturnDiscretizer handles its own normalization
+            # Exclude 'return' from normalization since ReturnNormalizer handles its own
             if self.data_config.norm_stats is not None:
                 norm_stats = self.data_config.norm_stats
                 if (
-                    self.rl_config.discretize_return
+                    self.rl_config.normalize_return
                     and self.rl_config.return_key in norm_stats
                 ):
                     norm_stats = {
@@ -384,80 +416,42 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                     )
                 )
 
-            # Add model transforms
             transforms.extend(self.data_config.model_transforms.inputs)
 
         return transforms
 
-    def _create_return_discretizer(self) -> Optional[ReturnDiscretizer]:
-        """Create return discretizer if enabled."""
-        if not self.rl_config.discretize_return:
+    def _create_return_normalizer(self) -> Optional[ReturnNormalizer]:
+        if not self.rl_config.normalize_return:
             return None
 
-        # Common kwargs for discretizer
         common_kwargs = {
-            "num_bins": self.rl_config.num_return_bins,
             "return_key": self.rl_config.return_key,
-            "output_key": self.rl_config.return_token_key,
             "keep_continuous": self.rl_config.keep_continuous_return,
             "normalize_to_minus_one_zero": self.rl_config.normalize_to_minus_one_zero,
         }
 
-        # Determine min/max values
         if (
             self.rl_config.return_min is not None
             and self.rl_config.return_max is not None
         ):
-            return ReturnDiscretizer(
+            return ReturnNormalizer(
                 return_min=self.rl_config.return_min,
                 return_max=self.rl_config.return_max,
                 **common_kwargs,
             )
         elif self.rl_config.return_norm_stats_path:
-            return ReturnDiscretizer(
+            return ReturnNormalizer(
                 norm_stats_path=Path(self.rl_config.return_norm_stats_path),
                 **common_kwargs,
             )
         else:
             logger.warning(
-                "Return discretization enabled but no min/max or norm_stats_path provided. "
-                "Discretization will be skipped."
+                "Return normalization enabled but no min/max or norm_stats_path "
+                "provided. Normalization will be skipped."
             )
             return None
 
-    @staticmethod
-    def _load_returns_sidecar(
-        sidecar_path: Path,
-    ) -> dict[int, dict[str, np.ndarray]]:
-        """Load returns sidecar parquet into per-episode numpy arrays.
-
-        Returns:
-            ``{episode_index: {"return": np.array, "reward": np.array}}``
-            where arrays are indexed by frame_index within the episode.
-        """
-        import pyarrow.parquet as pq
-
-        table = pq.read_table(str(sidecar_path))
-        ep_col = table.column("episode_index").to_numpy()
-        frame_col = table.column("frame_index").to_numpy()
-        ret_col = table.column("return").to_numpy()
-        rew_col = table.column("reward").to_numpy()
-
-        sidecar: dict[int, dict[str, np.ndarray]] = {}
-        # Group by episode (data is sorted by file, episodes are contiguous)
-        unique_eps = np.unique(ep_col)
-        for ep in unique_eps:
-            mask = ep_col == ep
-            frames = frame_col[mask]
-            order = np.argsort(frames)
-            sidecar[int(ep)] = {
-                "return": ret_col[mask][order].astype(np.float32),
-                "reward": rew_col[mask][order].astype(np.float32),
-            }
-        return sidecar
-
     def _log_dataset_info(self):
-        """Log dataset information."""
         num_episodes = (
             len(self._episode_indices)
             if self._episode_indices
@@ -492,35 +486,25 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                 f"Index {idx} out of range for dataset of size {len(self)}"
             )
 
-        # Map through valid sample indices
         if self._sample_indices is not None:
             idx = self._sample_indices[idx]
 
-        # Get raw sample from LeRobot (with temporal structure from delta_timestamps)
         raw_sample = self.base_dataset[idx]
-
-        # Restructure for RL: extract current obs, history, action chunks, etc.
-        # This stores next obs in 'next_observation_raw' with same key structure
         rl_sample = self._restructure_sample(raw_sample)
 
-        # Extract next obs before applying transforms (will process separately)
         next_obs_raw = rl_sample.pop("next_observation_raw", None)
         next_obs_is_pad = rl_sample.pop("next_observation_is_pad", False)
 
-        # Apply VLA transforms to current observation
         if self._vla_transform is not None:
             rl_sample = self._vla_transform(rl_sample)
 
-            # Apply same transforms to next observation
             if next_obs_raw is not None:
-                # Add metadata needed by transforms
                 if "prompt" in rl_sample:
                     next_obs_raw["prompt"] = rl_sample["prompt"]
 
                 try:
                     processed_next = self._vla_transform(next_obs_raw)
 
-                    # Store with same structure as current observation
                     rl_sample["next_observation"] = {
                         "images": processed_next.get(
                             "image", processed_next.get("images", {})
@@ -534,9 +518,8 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                         self._logged_next_obs_warning = True
                     rl_sample["next_observation"] = {"is_pad": True}
 
-        # Apply return discretization if enabled
-        if self.return_discretizer is not None:
-            rl_sample = self.return_discretizer(rl_sample)
+        if self.return_normalizer is not None:
+            rl_sample = self.return_normalizer(rl_sample)
 
         return rl_sample
 
@@ -557,7 +540,6 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
         N = self.rl_config.history_length
         H = self.rl_config.action_horizon
 
-        # Metadata keys to pass through directly (no padding)
         metadata_keys = {
             "prompt",
             "task",
@@ -568,22 +550,17 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
             "task_index",
         }
 
-        # Process each feature based on its role
         for key, value in sample.items():
-            # Skip padding masks - they are handled alongside their data keys
             if key.endswith("_is_pad"):
                 continue
 
-            # Pass through metadata keys directly
             if key in metadata_keys:
                 rl_sample[key] = value
                 continue
 
-            # Get corresponding padding mask if exists
             pad_key = f"{key}_is_pad"
             is_pad = sample.get(pad_key, None)
 
-            # Handle temporal features (tensors with at least 1 dimension)
             if isinstance(value, torch.Tensor) and value.dim() >= 1:
                 if key in self.rl_config.action_keys:
                     self._extract_action_chunk(rl_sample, key, value, is_pad, N, H)
@@ -592,7 +569,6 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                 elif key == self.rl_config.done_key:
                     self._extract_done(rl_sample, key, value, is_pad)
                 elif key == self.rl_config.return_key:
-                    # Return is at current timestep only - preserve original key name
                     rl_sample[key] = value.squeeze() if value.dim() > 0 else value
                     if is_pad is not None:
                         rl_sample[f"{key}_is_pad"] = (
@@ -601,27 +577,22 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                 elif key in (self.rl_config.history_keys or []):
                     self._extract_obs_with_history(rl_sample, key, value, is_pad, N, H)
                 else:
-                    # Pass through other temporal features with their padding masks
                     rl_sample[key] = value
                     if is_pad is not None:
                         rl_sample[f"{key}_is_pad"] = is_pad
             else:
-                # Non-tensor or scalar values pass through directly
                 rl_sample[key] = value
 
-        # Inject return and reward from sidecar (written by compute_returns.py)
         if self._returns_sidecar is not None:
             ep_idx = int(rl_sample.get("episode_index", -1))
             frame_idx = int(rl_sample.get("frame_index", -1))
             if ep_idx in self._returns_sidecar:
                 ep_data = self._returns_sidecar[ep_idx]
 
-                # Return at current timestep (scalar)
                 rl_sample[self.rl_config.return_key] = torch.tensor(
                     ep_data["return"][frame_idx], dtype=torch.float32
                 )
 
-                # Reward chunk: H future timesteps with padding at episode boundary
                 ep_rewards = ep_data["reward"]
                 ep_len = len(ep_rewards)
                 for rk in self.rl_config.reward_keys:
@@ -648,16 +619,11 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
         N: int,
         H: int,
     ):
-        """Extract action chunk from temporal tensor.
-
-        Preserves the original key name so VLA transforms (repack) can find it.
-        """
+        """Extract action chunk, preserving the original key name for VLA transforms."""
         if self.rl_config.include_history_actions:
-            # value has shape (N + H, action_dim)
-            # History: [:N], Future: [N:]
             if value.dim() >= 2 and value.shape[0] >= N + H:
                 rl_sample[f"history_{key}"] = value[:N]
-                rl_sample[key] = value[N : N + H]  # Preserve original key name
+                rl_sample[key] = value[N : N + H]
                 if is_pad is not None:
                     rl_sample[f"history_{key}_is_pad"] = is_pad[:N]
                     rl_sample[f"{key}_is_pad"] = is_pad[N : N + H]
@@ -668,7 +634,6 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
                         is_pad[:H] if is_pad.shape[0] >= H else is_pad
                     )
         else:
-            # value has shape (H, action_dim)
             rl_sample[key] = value[:H] if value.dim() >= 2 else value
             if is_pad is not None:
                 rl_sample[f"{key}_is_pad"] = is_pad[:H] if is_pad.dim() >= 1 else is_pad
@@ -681,10 +646,6 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
         is_pad: Optional[torch.Tensor],
         H: int,
     ):
-        """Extract reward chunk from temporal tensor.
-
-        Preserves the original key name.
-        """
         rl_sample[key] = (
             value[:H] if value.dim() >= 1 and value.shape[0] >= H else value
         )
@@ -698,13 +659,7 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
         value: torch.Tensor,
         is_pad: Optional[torch.Tensor],
     ):
-        """Extract terminal done flag at t+H.
-
-        For offline datasets, we only fetch done at the action horizon end (t+H).
-        This indicates whether the episode terminates within the action chunk.
-        Preserves the original key name.
-        """
-        # Done is a single value at t+H
+        """Extract terminal done flag at t+H (episode terminates within action chunk)."""
         if value.dim() >= 1:
             rl_sample[key] = value[0] if value.shape[0] >= 1 else value
         else:
@@ -729,47 +684,34 @@ class LeRobotRLDataset(LeRobotPyTorchDataset):
     ):
         """Extract observation with history and next_obs.
 
-        For current observation, preserves the original key name so that
-        VLA transforms (repack, robot-specific) can find the data.
-
-        For next observation (include_next_obs=True), stores data in a nested
-        'next_observation_raw' dict with the SAME key structure as current obs.
-        This allows applying the same VLA transforms to next obs.
-
-        For history, uses modified key names with 'history_' prefix.
+        Current obs preserves the original key name for VLA transforms.
+        Next obs is stored in 'next_observation_raw' with the same key structure
+        so the same VLA transforms can be applied. History uses 'history_' prefix.
         """
-        # Expected shape: (N + 1 + 1, ...) = (history + current + next_obs, ...)
         total_steps = N + 1 + (1 if self.rl_config.include_next_obs else 0)
 
         if value.dim() < 1:
             rl_sample[key] = value
             return
 
-        # Clean key name for history output
         clean_key = key.replace("observation.", "").replace(".", "_")
 
         if value.shape[0] >= total_steps:
-            # History: [:N]
             if N > 0:
                 rl_sample[f"history_{clean_key}"] = value[:N]
                 if is_pad is not None:
                     rl_sample[f"history_{clean_key}_is_pad"] = is_pad[:N]
 
-            # Current: [N] - preserve original key name for VLA transforms
             rl_sample[key] = value[N]
 
-            # Next obs: [N+1] - store in nested dict with SAME key structure
-            # This allows applying the same VLA transforms to next obs
             if self.rl_config.include_next_obs:
                 if "next_observation_raw" not in rl_sample:
                     rl_sample["next_observation_raw"] = {}
                     rl_sample["next_observation_is_pad"] = False
 
-                # Use same key as current obs so VLA transforms work identically
                 rl_sample["next_observation_raw"][key] = value[N + 1]
 
                 if is_pad is not None and is_pad[N + 1]:
                     rl_sample["next_observation_is_pad"] = True
         else:
-            # Fallback: just use as-is (preserve original key)
             rl_sample[key] = value

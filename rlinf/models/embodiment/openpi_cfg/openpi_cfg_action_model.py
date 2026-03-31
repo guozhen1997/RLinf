@@ -108,7 +108,6 @@ def compute_cfg_routing_masks(
     *,
     positive_only_conditional: bool,
     unconditional_prob: float,
-    positive_unconditional_prob: float,
     random_values: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Compute sample routing masks for CFG training.
@@ -117,10 +116,9 @@ def compute_cfg_routing_masks(
         advantage: Boolean tensor where True marks positive samples.
         positive_only_conditional: Route only positive samples to the
             conditional branch when True.
-        unconditional_prob: Dropout probability for the legacy CFG training
-            mode that routes both positive and negative samples conditionally.
-        positive_unconditional_prob: Dropout probability applied only to
-            positive samples when ``positive_only_conditional`` is enabled.
+        unconditional_prob: Dropout probability for unconditional routing.
+            When ``positive_only_conditional`` is True, applies only to
+            positive samples; otherwise applies to all samples.
         random_values: Optional pre-sampled uniform noise in ``[0, 1)`` used to
             make routing deterministic in tests.
 
@@ -141,7 +139,7 @@ def compute_cfg_routing_masks(
 
     if positive_only_conditional:
         positive_conditional_mask = positive_mask & (
-            random_values > positive_unconditional_prob
+            random_values > unconditional_prob
         )
         negative_conditional_mask = torch.zeros_like(positive_mask)
     else:
@@ -166,24 +164,17 @@ def compute_cfg_routing_masks(
 
 @dataclass(frozen=True)
 class OpenPi0Config(Pi0Config):
-    # config for rl
-    config_name: str = (
-        "pi0_libero"  # pi0_libero, pi05_libero, pi0_metaworld, pi05_metaworld
-    )
-    num_images_in_input: int = 2  # number of images in input
-    # hyper-parameters
-    action_chunk: int = 5  # action chunk
-    action_env_dim: int = 7  # for environment action dim
-    num_steps: int = 10  # denoise steps
-    # training config
+    config_name: str = "pi0_libero"
+    num_images_in_input: int = 2
+    action_chunk: int = 5
+    action_env_dim: int = 7
+    num_steps: int = 10
     train_expert_only: bool = False
 
     cfgrl_guidance_scale: float = 1.0
     unconditional_prob: float = 0.3
-    guidance_type: str = "positive"  # "positive", "negative", "no_guide"
+    guidance_type: str = "positive"
     positive_only_conditional: bool = False
-    positive_unconditional_prob: float = 0.0
-    positive_probe_diagnostics: bool = False
 
     def __post_init__(self):
         if self.guidance_type not in _VALID_GUIDANCE_TYPES:
@@ -194,11 +185,6 @@ class OpenPi0Config(Pi0Config):
         if not 0.0 <= self.unconditional_prob <= 1.0:
             raise ValueError(
                 f"unconditional_prob must be in [0, 1], got {self.unconditional_prob}"
-            )
-        if not 0.0 <= self.positive_unconditional_prob <= 1.0:
-            raise ValueError(
-                "positive_unconditional_prob must be in [0, 1], "
-                f"got {self.positive_unconditional_prob}"
             )
         if not isinstance(self.num_steps, int) or self.num_steps <= 0:
             raise ValueError(
@@ -258,7 +244,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         self.sample_actions = sample_actions_func
         self.global_step = 0
         for name, module in self.named_modules():
-            # Set _fsdp_wrap_name to the last part of the path (e.g., "model.action_in_proj" -> "action_in_proj")
             path_parts = name.split(".")
             setattr(module, "_fsdp_wrap_name", path_parts[-1] if path_parts else name)
 
@@ -288,7 +273,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
 
     def input_transform(self, obs: dict, transpose=True):
         inputs = jax.tree.map(lambda x: x, obs)
-        # process input
         first_process = "prompt" in inputs.keys()
         if first_process:
             inputs.pop("prompt")
@@ -296,16 +280,13 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             inputs.pop("negative_guidance_prompt")
         else:
             inputs = {key: inputs[key] for key in inputs.keys() if "/" in key}
-        # tensor -> numpy
         inputs = jax.tree.map(
             lambda x: np.asarray(x.detach().cpu()) if torch.is_tensor(x) else x, inputs
         )
         batch_size = next(v.shape[0] for v in inputs.values() if hasattr(v, "shape"))
-        # split & transform
         transformed_samples = []
         for i in range(batch_size):
             sample = jax.tree.map(lambda x: x[i], inputs)
-            # convert from [3,256,256] -> [256,256,3]
             if transpose:
                 sample = jax.tree.map(
                     lambda x: x.transpose(1, 2, 0) if len(x.shape) == 3 else x,
@@ -342,7 +323,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
                     }
                 )
             transformed_samples.append(transformed_sample)
-        # recombine
         inputs = jax.tree.map(
             lambda *torch_arr: torch.from_numpy(np.asarray(torch_arr).copy()),
             *transformed_samples,
@@ -365,14 +345,12 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         return inputs
 
     def output_transform(self, outputs):
-        # split & transform
         batch_size = outputs["actions"].shape[0]
         transformed_samples = []
         for i in range(batch_size):
             sample = jax.tree.map(lambda x: np.asarray(x[i].detach().cpu()), outputs)
             sample = self._output_transform(sample)
             transformed_samples.append(sample)
-        # recombine
         outputs = jax.tree.map(
             lambda *torch_arr: torch.from_numpy(np.asarray(torch_arr).copy()),
             *transformed_samples,
@@ -485,12 +463,10 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         1. SFT mode: data contains "observation" and "actions"
         2. CFGRL mode: data contains "dones", "advantages", "raw_actions", etc.
         """
-        # Determine whether this is SFT mode or CFGRL mode
         is_sft_mode = "observation" in data and "actions" in data
 
-        # ========== 1. Get observation and actions ==========
         if is_sft_mode:
-            observation = data["observation"]  # Already a CFGObservation object
+            observation = data["observation"]
             actions = data["actions"]
             device = actions.device
         else:
@@ -499,7 +475,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             observation = Observation.from_dict(observation)
             actions = data["raw_actions"]
 
-        # ========== 2. Unified observation preprocessing ==========
         (
             images,
             img_masks,
@@ -512,7 +487,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             state,
         ) = self._preprocess_observation(observation, train=True)
 
-        # ========== 3. Select guidance tokens ==========
         if "advantage" in data:
             advantage = data["advantage"].to(device)
         elif "advantages" in data:
@@ -528,7 +502,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             advantage,
             positive_only_conditional=self.config.positive_only_conditional,
             unconditional_prob=self.config.unconditional_prob,
-            positive_unconditional_prob=self.config.positive_unconditional_prob,
         )
         positive_mask = routing["positive_mask"]
         negative_mask = routing["negative_mask"]
@@ -571,7 +544,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
                 lang_masks,
             )
 
-        # ========== 4. Compute selected-route loss ==========
         actions = actions.to(device, dtype=torch.float32)
         if kwargs.get("time", None) is not None:
             time = kwargs.get("time")
@@ -627,64 +599,10 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
                 per_sample_loss, negative_unconditional_mask
             ),
         }
-        # TODO: zhihao: remove this future
-        if (
-            self.config.positive_only_conditional
-            and self.config.positive_probe_diagnostics
-            and positive_label_count > 0
-        ):
-            probe_images = [img[positive_mask] for img in images]
-            probe_img_masks = [img_mask[positive_mask] for img_mask in img_masks]
-            probe_state = state[positive_mask]
-            probe_actions = actions[positive_mask]
-            probe_time = time[positive_mask]
-            probe_noise = noise[positive_mask]
-            probe_positive_tokens = positive_guidance_lang_tokens[positive_mask]
-            probe_positive_masks = positive_guidance_lang_masks[positive_mask]
-            probe_uncond_tokens = lang_tokens[positive_mask]
-            probe_uncond_masks = lang_masks[positive_mask]
-
-            checkpointing_enabled = self.gradient_checkpointing_enabled
-            self.gradient_checkpointing_enabled = False
-            try:
-                with torch.no_grad():
-                    _, probe_positive_cond_loss = self._compute_flow_losses(
-                        images=probe_images,
-                        img_masks=probe_img_masks,
-                        state=probe_state,
-                        actions=probe_actions,
-                        lang_tokens=probe_positive_tokens,
-                        lang_masks=probe_positive_masks,
-                        device=device,
-                        time=probe_time,
-                        noise=probe_noise,
-                    )
-                    _, probe_positive_uncond_loss = self._compute_flow_losses(
-                        images=probe_images,
-                        img_masks=probe_img_masks,
-                        state=probe_state,
-                        actions=probe_actions,
-                        lang_tokens=probe_uncond_tokens,
-                        lang_masks=probe_uncond_masks,
-                        device=device,
-                        time=probe_time,
-                        noise=probe_noise,
-                    )
-            finally:
-                self.gradient_checkpointing_enabled = checkpointing_enabled
-
-            metrics.update(
-                {
-                    "positive_probe_count": positive_label_count,
-                    "positive_probe_conditional_loss_sum": probe_positive_cond_loss.sum().item(),
-                    "positive_probe_unconditional_loss_sum": probe_positive_uncond_loss.sum().item(),
-                }
-            )
 
         return flow_loss, metrics
 
     def obs_processor(self, env_obs):
-        # base observation
         processed_obs = {
             "observation/image": env_obs["main_images"],
             "prompt": env_obs["task_descriptions"],
@@ -697,7 +615,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         ]
         processed_obs["positive_guidance_prompt"] = positive_guidance_prompt
         processed_obs["negative_guidance_prompt"] = negative_guidance_prompt
-        # state observation
         if "calvin" in self.config.config_name:
             state = env_obs["states"]
             processed_obs["observation/state_ee_pos"] = state[:, :3]
@@ -708,10 +625,8 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             if torch.is_tensor(state):
                 state = state.to(dtype=torch.float32)
             processed_obs["observation/state"] = state
-        # wrist image observation
         if env_obs["wrist_images"] is not None:
             processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
-        # store used keys
         return processed_obs
 
     def precision_processor(self, processed_obs):
@@ -740,13 +655,9 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         compute_values=True,
         return_obs=True,
     ) -> tuple[np.ndarray, dict[str, Any]]:
-        to_process_obs = self.obs_processor(env_obs)  # env obs -> policy input obs
-        processed_obs = self.input_transform(
-            to_process_obs, transpose=False
-        )  # policy input obs -> model input obs
-        processed_obs = self.precision_processor(
-            processed_obs
-        )  # obs precision processor
+        to_process_obs = self.obs_processor(env_obs)
+        processed_obs = self.input_transform(to_process_obs, transpose=False)
+        processed_obs = self.precision_processor(processed_obs)
         observation = Observation.from_dict(processed_obs)
         outputs = self.sample_actions(
             observation,
@@ -755,9 +666,7 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             {"actions": outputs["actions"], "state": observation.state}
         )["actions"].numpy()
         forward_inputs = {
-            "raw_actions": outputs[
-                "actions"
-            ],  # raw_actions refers to actions not yet processed by output_transform
+            "raw_actions": outputs["actions"],
             "tokenized_prompt": processed_obs["tokenized_prompt"],
             "tokenized_prompt_mask": processed_obs["tokenized_prompt_mask"],
             "tokenized_positive_guidance_prompt": processed_obs[
@@ -801,9 +710,7 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         bsize = observation.state.shape[0]
         device = observation.state.device
         num_steps = self.config.num_steps
-        if (
-            noise is None
-        ):  # action horizon limits the maximum step count. To exceed 10 (default), SFT must be re-run
+        if noise is None:
             actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
             noise = self.sample_noise(actions_shape, device)
 
@@ -840,7 +747,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             use_cache=True,
         )
 
-        # Only compute conditional when guidance_type is not "no_guide"
         if guidance_type != "no_guide":
             if guidance_type == "positive":
                 guidance_lang_tokens = positive_guidance_lang_tokens
@@ -873,7 +779,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
                 use_cache=True,
             )
         else:
-            # When guidance_type == "no_guide", no need to compute conditional
             prefix_pad_masks_cond = None
             past_key_values_cond = None
 
@@ -893,10 +798,8 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             )
 
             if guidance_type == "no_guide":
-                # Use unconditional only
                 v_t = v_t_uncond
             else:
-                # Use conditional guidance
                 v_t_cond = self.denoise_step(
                     state,
                     prefix_pad_masks_cond,
@@ -908,7 +811,7 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
                     1 - self.config.cfgrl_guidance_scale
                 ) * v_t_uncond + self.config.cfgrl_guidance_scale * v_t_cond
 
-            # Euler step - use new tensor assignment instead of in-place operation
+            # New tensor assignment avoids autograd in-place mutation errors
             x_t = x_t + dt * v_t
             time += dt
 
@@ -942,7 +845,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
         position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
 
-        # Prepare attention masks
         full_att_2d_masks_4d = self._prepare_attention_masks_4d(full_att_2d_masks)
         self.paligemma_with_expert.gemma_expert.model.config._attn_implementation = (
             "eager"  # noqa: SLF001
@@ -996,7 +898,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
             "tokenized_negative_guidance_prompt_mask",
             observation.tokenized_negative_guidance_prompt_mask,
         )
-        # Return tuple consistent with parent class interface, but including positive and negative guidance tokens
         return (
             list(part_observation.images.values()),
             list(part_observation.image_masks.values()),

@@ -33,42 +33,25 @@ except ImportError:
 import dataclasses
 from typing import Any, Iterator
 
-# ============================================================================
-# Config
-# ============================================================================
 from rlinf.datasets.config import (  # noqa: E402
     RLDataConfig,
     create_rl_config,
-    load_return_range_from_norm_stats,
 )
-
-# ============================================================================
-# Datasets
-# ============================================================================
 from rlinf.datasets.mixture_datasets import (  # noqa: E402
-    AdvantageMixtureDataset,
+    CfgMixtureDataset,
     ValueMixtureDataset,
 )
-from rlinf.datasets.rl_dataset import LeRobotRLDataset  # noqa: E402
+from rlinf.datasets.rl_dataset import (  # noqa: E402
+    LeRobotRLDataset,
+    load_return_stats_from_dataset,
+    load_returns_sidecar,
+)
 from rlinf.datasets.value_dataset import ValueDataset  # noqa: E402
-
-# ============================================================================
-# Value transforms & tokens
-# ============================================================================
 from rlinf.datasets.value_transforms import (  # noqa: E402
-    ReturnDiscretizer,
     ReturnNormalizer,
-    add_value_tokens_to_tokenizer,
-    create_return_discretizer,
-    get_all_value_tokens,
-    get_value_token,
-    parse_value_token,
 )
 
 
-# ============================================================================
-# DataLoader implementations (inlined)
-# ============================================================================
 class ValueDataLoaderImpl:
     """Lightweight wrapper that yields batches and exposes data_config().
 
@@ -95,9 +78,6 @@ class ValueDataLoaderImpl:
         yield from self._data_loader
 
 
-# ============================================================================
-# Transforms (inlined)
-# ============================================================================
 @dataclasses.dataclass(frozen=True)
 class TokenizePromptWithGuidance:
     """Tokenize both original prompt and guidance prompts for CFG models.
@@ -147,28 +127,15 @@ class TokenizePromptWithGuidance:
 
 
 __all__ = [
-    # Config
     "RLDataConfig",
     "create_rl_config",
-    "load_return_range_from_norm_stats",
-    # RL Dataset
+    "load_return_stats_from_dataset",
+    "load_returns_sidecar",
     "LeRobotRLDataset",
-    # Value Dataset
     "ValueDataset",
-    # Mixture Datasets
-    "AdvantageMixtureDataset",
+    "CfgMixtureDataset",
     "ValueMixtureDataset",
-    # DataLoaders
     "ValueDataLoaderImpl",
-    # Transforms
     "TokenizePromptWithGuidance",
-    # Value transforms
-    "ReturnDiscretizer",
     "ReturnNormalizer",
-    "create_return_discretizer",
-    # Value tokens
-    "get_value_token",
-    "get_all_value_tokens",
-    "parse_value_token",
-    "add_value_tokens_to_tokenizer",
 ]

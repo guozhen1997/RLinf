@@ -29,10 +29,6 @@ from transformers import PretrainedConfig
 ForwardMode = Literal["vla", "vlm", "vlm_vla"]
 
 
-# =============================================================================
-# Gemma Expert Variant Configs
-# =============================================================================
-#
 # Einsum axis naming convention:
 #   B: batch, T: query length, S: k/v length, N: num query heads,
 #   K: num k/v heads, G: num query heads per k/v head, H: head dim,
@@ -160,11 +156,6 @@ def get_config(variant: Variant) -> Config:
     raise ValueError(f"Unknown variant: {variant}")
 
 
-# =============================================================================
-# PI0.5 Model Configs
-# =============================================================================
-
-
 class VLMBaseConfig(PretrainedConfig):
     """Base configuration for VLM-based value models."""
 
@@ -194,11 +185,11 @@ class VLMBaseConfig(PretrainedConfig):
         super().__init__(**kwargs)
 
         if dtype is not None:
-            self.dtype = dtype
+            self.precision = dtype
         elif precision is not None:
-            self.dtype = precision
+            self.precision = precision
         else:
-            self.dtype = "bfloat16"
+            self.precision = "bfloat16"
 
         self.action_dim = action_dim
         self.action_horizon = action_horizon
@@ -225,8 +216,8 @@ class VLMBaseConfig(PretrainedConfig):
         output = super().to_dict()
         output.update(
             {
-                "dtype": self.dtype,
-                "precision": self.dtype,
+                "dtype": self.precision,
+                "precision": self.precision,
                 "action_dim": self.action_dim,
                 "action_horizon": self.action_horizon,
                 "max_token_len": self.max_token_len,

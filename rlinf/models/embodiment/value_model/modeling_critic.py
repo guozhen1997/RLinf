@@ -18,35 +18,21 @@ Value Critic Models for Value Prediction.
 Uses expert forward mode: Gemma expert + [CLS] -> categorical value prediction.
 """
 
-import glob
-import json
 import logging
 import math
-import os
 from dataclasses import dataclass
 from typing import Optional
 
 import torch
 import torch.nn.functional as F  # noqa: N812
-from safetensors import safe_open
-from safetensors.torch import load_file
 from torch import Tensor, nn
-from transformers import PreTrainedModel
 from transformers.modeling_outputs import ModelOutput
 
-from .configuration import ValueCriticConfig, VLMBaseConfig, get_config
-from .paligemma_with_multi_expert import (
-    PaliGemmaWithMultiExpertModel,
-    _requires_uniform_dtype,
-)
+from .configuration import ValueCriticConfig, get_config
+from .paligemma_with_multi_expert import PaliGemmaWithMultiExpertModel
 from .siglip_gemma3_with_multi_expert import SiglipGemma3WithMultiExpert
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Free Functions (from openpi/modeling_pi0.py)
-# =============================================================================
 
 
 def make_att_2d_masks(pad_masks, att_masks):
@@ -66,265 +52,6 @@ def make_att_2d_masks(pad_masks, att_masks):
     return att_2d_masks & pad_2d_masks
 
 
-# =============================================================================
-# VLMPreTrainedModel (HF integration for from_pretrained)
-# =============================================================================
-
-
-class VLMPreTrainedModel(PreTrainedModel):
-    """Base pretrained model with smart loading for VLM-based checkpoints."""
-
-    config_class = VLMBaseConfig
-    base_model_prefix = "model"
-    main_input_name = "input_ids"
-    supports_gradient_checkpointing = True
-    _no_split_modules = []
-    _skip_keys_device_placement = "past_key_values"
-    _supports_flash_attn_2 = False
-    _supports_sdpa = False
-    _supports_cache_class = True
-    _tied_weights_keys = []
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-
-    def _set_gradient_checkpointing(
-        self, enable: bool = True, gradient_checkpointing_func=None
-    ):
-        if gradient_checkpointing_func is None:
-            gradient_checkpointing_func = torch.utils.checkpoint.checkpoint
-        if hasattr(self, "model"):
-            if enable:
-                self.model.gradient_checkpointing_enable()
-            else:
-                self.model.gradient_checkpointing_disable()
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
-        """Override from_pretrained to handle problematic safetensors files."""
-        logger.info(
-            f"VLM from_pretrained: Loading from {pretrained_model_name_or_path}"
-        )
-
-        single_file_path = os.path.join(
-            pretrained_model_name_or_path, "model.safetensors"
-        )
-        index_file_path = os.path.join(
-            pretrained_model_name_or_path, "model.safetensors.index.json"
-        )
-        sharded_pattern = os.path.join(
-            pretrained_model_name_or_path, "model-*.safetensors"
-        )
-        has_single_file = os.path.exists(single_file_path)
-        has_index_file = os.path.exists(index_file_path)
-        sharded_parts = glob.glob(sharded_pattern)
-        has_sharded_files = len(sharded_parts) > 0
-
-        if has_single_file:
-            try:
-                with safe_open(single_file_path, framework="pt") as f:
-                    metadata = f.metadata()
-                invalid_metadata = (
-                    not metadata
-                    or "format" not in metadata
-                    or metadata.get("format") is None
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to read single model.safetensors metadata (%s) - attempting manual loading",
-                    exc,
-                )
-                return cls._load_from_safetensors(
-                    pretrained_model_name_or_path, **kwargs
-                )
-
-            if invalid_metadata:
-                logger.warning(
-                    "Single model.safetensors has invalid metadata - attempting manual loading"
-                )
-                return cls._load_from_safetensors(
-                    pretrained_model_name_or_path, **kwargs
-                )
-        elif has_index_file or has_sharded_files:
-            logger.info(
-                "Detected HF-sharded checkpoint - will rely on HuggingFace loader"
-            )
-        else:
-            logger.warning(
-                "No model.safetensors file detected; attempting standard HuggingFace loading."
-            )
-
-        safe_kwargs = kwargs.copy()
-        original_device_map = kwargs.get("device_map")
-
-        is_distributed = (
-            os.environ.get("WORLD_SIZE") is not None
-            or os.environ.get("LOCAL_RANK") is not None
-            or os.environ.get("RANK") is not None
-        )
-
-        if is_distributed:
-            logger.info(
-                "Detected distributed training - letting Accelerate handle device placement"
-            )
-            safe_kwargs.update(
-                {
-                    "device_map": None,
-                    "low_cpu_mem_usage": False,
-                    "torch_dtype": kwargs.get("torch_dtype", torch.float32),
-                }
-            )
-        else:
-            if original_device_map is not None:
-                logger.info(
-                    f"Single GPU/inference mode - using device_map: {original_device_map}"
-                )
-                safe_kwargs.update(
-                    {
-                        "torch_dtype": kwargs.get("torch_dtype", torch.float32),
-                    }
-                )
-            else:
-                logger.info("No device_map specified - using default CPU loading")
-                safe_kwargs.update(
-                    {
-                        "device_map": None,
-                        "low_cpu_mem_usage": False,
-                        "torch_dtype": kwargs.get("torch_dtype", torch.float32),
-                    }
-                )
-
-        if "config" not in safe_kwargs or safe_kwargs["config"] is None:
-            config_path = os.path.join(pretrained_model_name_or_path, "config.json")
-            if os.path.exists(config_path):
-                with open(config_path) as cfg_file:
-                    config_dict = json.load(cfg_file)
-                safe_kwargs["config"] = cls.config_class.from_dict(config_dict)
-            else:
-                loaded_config, _ = cls.config_class.from_pretrained(
-                    pretrained_model_name_or_path,
-                    return_unused_kwargs=True,
-                    trust_remote_code=kwargs.get("trust_remote_code", True),
-                )
-                safe_kwargs["config"] = loaded_config
-
-        model = super().from_pretrained(pretrained_model_name_or_path, **safe_kwargs)
-        logger.info("Successfully loaded model using HuggingFace infrastructure")
-
-        torch_dtype = kwargs.get("torch_dtype", torch.float32)
-        if torch_dtype == torch.bfloat16 and not _requires_uniform_dtype():
-            cls._apply_mixed_precision(model)
-        elif _requires_uniform_dtype():
-            logger.info(
-                "Parameter sharding detected (FSDP/Zero-3): using uniform dtype"
-            )
-
-        return model
-
-    @classmethod
-    def _apply_mixed_precision(cls, model):
-        """Keep action projection layers in float32 for flow matching compatibility."""
-        action_proj_patterns = [
-            "action_in_proj",
-            "action_out_proj",
-            "time_mlp_in",
-            "time_mlp_out",
-            "state_proj",
-            "action_time_mlp_in",
-            "action_time_mlp_out",
-        ]
-        for name, param in model.named_parameters():
-            if any(pattern in name for pattern in action_proj_patterns):
-                param.data = param.data.to(dtype=torch.float32)
-                logger.debug(f"Kept {name} in float32 for flow matching compatibility")
-        logger.info("Applied mixed precision: action projection layers kept in float32")
-
-    @classmethod
-    def _load_from_safetensors(cls, pretrained_model_name_or_path, **kwargs):
-        """Manual loading from a single safetensors file with potentially corrupted metadata."""
-        logger.info("Attempting manual loading from single safetensors file")
-
-        config = kwargs.get("config")
-        if config is None:
-            config_path = os.path.join(pretrained_model_name_or_path, "config.json")
-            if os.path.exists(config_path):
-                with open(config_path) as f:
-                    config_dict = json.load(f)
-                config = cls.config_class.from_dict(config_dict)
-            else:
-                raise ValueError(
-                    f"No config.json found in {pretrained_model_name_or_path} and no config provided"
-                )
-
-        model = cls(config)
-
-        safetensors_path = os.path.join(
-            pretrained_model_name_or_path, "model.safetensors"
-        )
-        logger.info(f"Manually loading state dict from {safetensors_path}")
-
-        try:
-            state_dict = load_file(safetensors_path, device="cpu")
-            logger.info(
-                f"Successfully loaded {len(state_dict)} tensors from safetensors file"
-            )
-
-            sample_key = next(iter(state_dict.keys())) if state_dict else ""
-            if sample_key.startswith("model."):
-                missing_keys, unexpected_keys = model.load_state_dict(
-                    state_dict, strict=False
-                )
-            else:
-                missing_keys, unexpected_keys = model.model.load_state_dict(
-                    state_dict, strict=False
-                )
-
-            if missing_keys:
-                logger.warning(f"Missing keys when loading state dict: {missing_keys}")
-            if unexpected_keys:
-                logger.warning(
-                    f"Unexpected keys when loading state dict: {unexpected_keys}"
-                )
-
-            logger.info("Successfully loaded model from single safetensors file")
-
-            torch_dtype = kwargs.get("torch_dtype", torch.float32)
-            if _requires_uniform_dtype():
-                if torch_dtype == torch.bfloat16:
-                    model.to(dtype=torch.bfloat16)
-                else:
-                    model.to(dtype=torch.float32)
-            else:
-                if torch_dtype == torch.bfloat16:
-                    model.model.paligemma_with_expert.to_bfloat16_for_selected_params(
-                        "bfloat16"
-                    )
-                elif torch_dtype == torch.float32:
-                    model.model.paligemma_with_expert.to_bfloat16_for_selected_params(
-                        "float32"
-                    )
-
-            return model
-        except Exception as e:
-            logger.error(f"Failed to manually load from safetensors file: {e}")
-            raise ValueError(
-                f"Could not load model from {pretrained_model_name_or_path}: {e}"
-            )
-
-
-class CriticPreTrainedModel(VLMPreTrainedModel):
-    config_class = VLMBaseConfig
-
-
-# =============================================================================
-# Output Dataclasses
-# =============================================================================
-
 
 @dataclass
 class CriticOutput(ModelOutput):
@@ -340,11 +67,6 @@ class CriticOutput(ModelOutput):
     cat_acc_best: Optional[torch.FloatTensor] = None
     cat_acc_neighbor: Optional[torch.FloatTensor] = None
     cat_mae: Optional[torch.FloatTensor] = None
-
-
-# =============================================================================
-# VLMObservationEncoder (base class providing observation processing/embedding)
-# =============================================================================
 
 
 class VLMObservationEncoder(nn.Module):
@@ -393,12 +115,6 @@ class VLMObservationEncoder(nn.Module):
         batch_size, seq_len = tokenized_prompt.shape
         device = tokenized_prompt.device
 
-        token_ar_mask = observation.get("token_ar_mask")
-        if token_ar_mask is None:
-            token_ar_mask = torch.zeros(
-                (batch_size, seq_len), dtype=torch.long, device=device
-            )
-
         token_loss_mask = observation.get("token_loss_mask")
         if token_loss_mask is None:
             token_loss_mask = torch.zeros(
@@ -421,18 +137,14 @@ class VLMObservationEncoder(nn.Module):
             img_mask_list,
             tokenized_prompt,
             tokenized_prompt_mask,
-            token_ar_mask,
             token_loss_mask,
             token_kv_cache_mask,
         )
 
-    def embed_prefix(
-        self, images, img_masks, lang_tokens, lang_masks, token_ar_mask=None
-    ):
-        """Embed images and language tokens (with token_ar_mask)."""
-        embs, pad_masks, ar_masks = [], [], []
+    def embed_prefix(self, images, img_masks, lang_tokens, lang_masks):
+        """Embed images and language tokens into prefix embeddings."""
+        embs, pad_masks = [], []
         bsize = lang_tokens.shape[0]
-        device = lang_tokens.device
 
         for img, img_mask in zip(images, img_masks, strict=True):
             img_emb = self._apply_checkpoint(
@@ -441,9 +153,6 @@ class VLMObservationEncoder(nn.Module):
             num_img_embs = img_emb.shape[1]
             embs.append(img_emb)
             pad_masks.append(img_mask[:, None].expand(bsize, num_img_embs))
-            ar_masks.append(
-                torch.zeros(bsize, num_img_embs, dtype=torch.long, device=device)
-            )
 
         def embed_lang(tokens):
             emb = self.paligemma_with_expert.embed_language_tokens(tokens)
@@ -453,22 +162,7 @@ class VLMObservationEncoder(nn.Module):
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
 
-        if token_ar_mask is None:
-            token_ar_mask = torch.zeros(
-                bsize, lang_masks.shape[1], dtype=torch.long, device=device
-            )
-        ar_masks.append(token_ar_mask)
-
-        return (
-            torch.cat(embs, dim=1),
-            torch.cat(pad_masks, dim=1),
-            torch.cat(ar_masks, dim=1),
-        )
-
-
-# =============================================================================
-# Value Head
-# =============================================================================
+        return torch.cat(embs, dim=1), torch.cat(pad_masks, dim=1)
 
 
 class ValueHead(nn.Module):
@@ -515,11 +209,6 @@ class ValueHead(nn.Module):
         return self.value_proj(hidden_states)
 
 
-# =============================================================================
-# ValueCriticModel (FSDP-enhanced, from top-level modeling_critic.py)
-# =============================================================================
-
-
 class ValueCriticModel(VLMObservationEncoder):
     """Value function V(s) with VLM observation encoding.
 
@@ -535,7 +224,7 @@ class ValueCriticModel(VLMObservationEncoder):
         expert_config = get_config(config.critic_expert_variant)
 
         logger.info(
-            f"Creating ValueCritic: expert={config.critic_expert_variant}, "
+            f"Creating ValueCriticModel: expert={config.critic_expert_variant}, "
             f"backbone={self.backbone_variant}"
         )
 
@@ -554,7 +243,7 @@ class ValueCriticModel(VLMObservationEncoder):
                 expert_configs=expert_configs,
                 siglip_path=siglip_path,
                 gemma3_path=gemma3_path,
-                precision=config.dtype,
+                precision=config.precision,
                 freeze_vision_encoder=getattr(config, "freeze_vision_encoder", False),
                 freeze_vlm=getattr(config, "freeze_vlm", False),
             )
@@ -565,7 +254,7 @@ class ValueCriticModel(VLMObservationEncoder):
                 vlm_config=paligemma_config,
                 expert_configs=expert_configs,
                 use_adarms=use_adarms,
-                precision=config.dtype,
+                precision=config.precision,
                 freeze_vision_encoder=getattr(config, "freeze_vision_encoder", False),
                 freeze_vlm=getattr(config, "freeze_vlm", False),
             )
@@ -628,7 +317,7 @@ class ValueCriticModel(VLMObservationEncoder):
             )
         for expert in self.paligemma_with_expert.experts.values():
             expert.model.gradient_checkpointing = True
-        logger.info("Enabled gradient checkpointing for ValueCritic")
+        logger.info("Enabled gradient checkpointing for ValueCriticModel")
 
     def gradient_checkpointing_disable(self):
         self.gradient_checkpointing_enabled = False
@@ -642,7 +331,7 @@ class ValueCriticModel(VLMObservationEncoder):
             )
         for expert in self.paligemma_with_expert.experts.values():
             expert.model.gradient_checkpointing = False
-        logger.info("Disabled gradient checkpointing for ValueCritic")
+        logger.info("Disabled gradient checkpointing for ValueCriticModel")
 
     def get_cls_embedding(self, batch_size: int) -> Tensor:
         return self.value_head.get_cls_embedding(batch_size)
@@ -661,15 +350,14 @@ class ValueCriticModel(VLMObservationEncoder):
             img_masks,
             lang_tokens,
             lang_masks,
-            token_ar_mask,
             _,
             _,
         ) = self._preprocess_observation(observation)
 
         batch_size = lang_tokens.shape[0]
 
-        prefix_embs, prefix_pad_masks, prefix_ar_masks = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, token_ar_mask
+        prefix_embs, prefix_pad_masks = self.embed_prefix(
+            images, img_masks, lang_tokens, lang_masks
         )
         suffix_embs, suffix_pad_masks, suffix_ar_masks = self.embed_suffix(batch_size)
 
@@ -677,7 +365,6 @@ class ValueCriticModel(VLMObservationEncoder):
         values, hidden_states, logits, probs, backward_anchor = self._forward_expert(
             prefix_embs,
             prefix_pad_masks,
-            prefix_ar_masks,
             suffix_embs,
             suffix_pad_masks,
             suffix_ar_masks,
@@ -712,7 +399,6 @@ class ValueCriticModel(VLMObservationEncoder):
         self,
         prefix_embs,
         prefix_pad_masks,
-        prefix_ar_masks,
         suffix_embs,
         suffix_pad_masks,
         suffix_ar_masks,
@@ -734,7 +420,6 @@ class ValueCriticModel(VLMObservationEncoder):
             prefix_out, suffix_out = self._forward_expert_two_stage(
                 prefix_embs=prefix_embs,
                 prefix_pad_masks=prefix_pad_masks,
-                prefix_ar_masks=prefix_ar_masks,
                 suffix_embs=suffix_embs,
                 suffix_pad_masks=suffix_pad_masks,
                 suffix_ar_masks=suffix_ar_masks,
@@ -750,8 +435,12 @@ class ValueCriticModel(VLMObservationEncoder):
             return values, cls_hidden, logits, probs, backward_anchor
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
-        ar_masks = torch.cat([prefix_ar_masks, suffix_ar_masks], dim=1)
-        attn_mask = make_att_2d_masks(pad_masks, ar_masks)
+        # Prefix tokens are bidirectional (0), suffix ar_masks carry CLS causal mask.
+        att_masks = torch.cat([
+            torch.zeros_like(prefix_pad_masks, dtype=torch.long),
+            suffix_ar_masks,
+        ], dim=1)
+        attn_mask = make_att_2d_masks(pad_masks, att_masks)
         attn_mask_4d = self._prepare_attention_masks_4d(attn_mask)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
 
@@ -806,7 +495,6 @@ class ValueCriticModel(VLMObservationEncoder):
         self,
         prefix_embs,
         prefix_pad_masks,
-        prefix_ar_masks,
         suffix_embs,
         suffix_pad_masks,
         suffix_ar_masks,
@@ -814,7 +502,8 @@ class ValueCriticModel(VLMObservationEncoder):
     ) -> tuple[Tensor, Tensor]:
         """Two-stage expert forward with KV cache (for frozen VLM under FSDP)."""
         # Phase 1: prefill frozen VLM to get KV cache.
-        prefix_attn = make_att_2d_masks(prefix_pad_masks, prefix_ar_masks)
+        # Prefix is fully bidirectional, so attention = pad_mask outer product.
+        prefix_attn = prefix_pad_masks[:, None, :] * prefix_pad_masks[:, :, None]
         prefix_attn_4d = self._prepare_attention_masks_4d(prefix_attn)
         prefix_pos = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
@@ -923,18 +612,18 @@ class ValueCriticModel(VLMObservationEncoder):
     @torch.no_grad()
     def predict(self, observation) -> CriticOutput:
         """Inference with KV cache."""
-        (images, img_masks, lang_tokens, lang_masks, token_ar_mask, _, _) = (
+        (images, img_masks, lang_tokens, lang_masks, _, _) = (
             self._preprocess_observation(observation)
         )
         batch_size = lang_tokens.shape[0]
 
-        prefix_embs, prefix_pad_masks, prefix_ar_masks = self.embed_prefix(
-            images, img_masks, lang_tokens, lang_masks, token_ar_mask
+        prefix_embs, prefix_pad_masks = self.embed_prefix(
+            images, img_masks, lang_tokens, lang_masks
         )
         suffix_embs, suffix_pad_masks, suffix_ar_masks = self.embed_suffix(batch_size)
 
-        # Phase 1: Prefill VLM
-        prefix_attn = make_att_2d_masks(prefix_pad_masks, prefix_ar_masks)
+        # Prefix is fully bidirectional, so attention = pad_mask outer product.
+        prefix_attn = prefix_pad_masks[:, None, :] * prefix_pad_masks[:, :, None]
         prefix_attn_4d = self._prepare_attention_masks_4d(prefix_attn)
         prefix_pos = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
@@ -946,7 +635,6 @@ class ValueCriticModel(VLMObservationEncoder):
             use_cache=True,
         )
 
-        # Phase 2: Expert with cache
         prefix_len, suffix_len = prefix_pad_masks.shape[1], suffix_pad_masks.shape[1]
         prefix_2d = prefix_pad_masks[:, None, :].expand(
             batch_size, suffix_len, prefix_len
@@ -981,119 +669,16 @@ class ValueCriticModel(VLMObservationEncoder):
             hidden_states=cls_hidden,
         )
 
-
-# =============================================================================
-# ValueCritic (HF wrapper for training and inference via from_pretrained)
-# =============================================================================
-
-
-class ValueCritic(CriticPreTrainedModel):
-    """Value Critic V(s) for RL fine-tuning."""
-
-    config_class = ValueCriticConfig
-    _no_split_modules = []
-
-    def __init__(self, config: ValueCriticConfig):
-        super().__init__(config)
-        config.critic_expert_variant = getattr(
-            config, "critic_expert_variant", "gemma_100m"
-        )
-        self.model = ValueCriticModel(config)
-        self.post_init()
-
-    def get_input_embeddings(self):
-        if self.model.backbone_variant == "siglip_gemma3":
-            return self.model.paligemma_with_expert.gemma3.get_input_embeddings()
-        return self.model.paligemma_with_expert.paligemma.language_model.get_input_embeddings()
-
-    def set_input_embeddings(self, value):
-        if self.model.backbone_variant == "siglip_gemma3":
-            self.model.paligemma_with_expert.gemma3.set_input_embeddings(value)
-        else:
-            self.model.paligemma_with_expert.paligemma.language_model.set_input_embeddings(
-                value
-            )
-
-    def get_output_embeddings(self):
-        if self.model.backbone_variant == "siglip_gemma3":
-            return self.model.paligemma_with_expert.gemma3.lm_head
-        return self.model.paligemma_with_expert.paligemma.lm_head
-
-    def set_output_embeddings(self, new_embeddings):
-        if self.model.backbone_variant == "siglip_gemma3":
-            self.model.paligemma_with_expert.gemma3.lm_head = new_embeddings
-        else:
-            self.model.paligemma_with_expert.paligemma.lm_head = new_embeddings
-
-    def resize_token_embeddings(
-        self, new_num_tokens, pad_to_multiple_of=None, mean_resizing=True
-    ):
-        if pad_to_multiple_of is not None:
-            new_num_tokens = (
-                (new_num_tokens + pad_to_multiple_of - 1) // pad_to_multiple_of
-            ) * pad_to_multiple_of
-
-        if self.model.backbone_variant == "siglip_gemma3":
-            self.model.paligemma_with_expert.gemma3.resize_token_embeddings(
-                new_num_tokens, pad_to_multiple_of, mean_resizing
-            )
-        else:
-            lm = self.model.paligemma_with_expert.paligemma.language_model
-            lm.resize_token_embeddings(
-                new_num_tokens, pad_to_multiple_of, mean_resizing
-            )
-
-            old_lm_head = self.model.paligemma_with_expert.paligemma.lm_head
-            old_num_tokens = old_lm_head.weight.shape[0]
-
-            if old_num_tokens != new_num_tokens:
-                new_lm_head = nn.Linear(
-                    old_lm_head.in_features,
-                    new_num_tokens,
-                    bias=old_lm_head.bias is not None,
-                    device=old_lm_head.weight.device,
-                    dtype=old_lm_head.weight.dtype,
-                )
-                num_tokens_to_copy = min(old_num_tokens, new_num_tokens)
-                new_lm_head.weight.data[:num_tokens_to_copy] = old_lm_head.weight.data[
-                    :num_tokens_to_copy
-                ]
-                if old_lm_head.bias is not None:
-                    new_lm_head.bias.data[:num_tokens_to_copy] = old_lm_head.bias.data[
-                        :num_tokens_to_copy
-                    ]
-                if new_num_tokens > old_num_tokens:
-                    nn.init.normal_(
-                        new_lm_head.weight.data[old_num_tokens:], mean=0.0, std=0.02
-                    )
-                    if old_lm_head.bias is not None:
-                        new_lm_head.bias.data[old_num_tokens:].zero_()
-                self.model.paligemma_with_expert.paligemma.lm_head = new_lm_head
-
-        self.config.vocab_size = new_num_tokens
-        return self.get_input_embeddings()
-
-    def forward(self, observation, target_values=None, **kwargs) -> CriticOutput:
-        return self.model.forward(
-            observation,
-            target_values=target_values,
-            **kwargs,
-        )
-
     @torch.no_grad()
     def predict_value(self, observation) -> Tensor:
         """Predict value for given observation. Returns scalar value."""
-        return self.model.predict(observation).predicted_values
+        return self.predict(observation).predicted_values
 
     @torch.no_grad()
     def predict_distribution(self, observation) -> tuple[Tensor, Tensor, Tensor]:
         """Predict value distribution. Returns (values, probs, atoms)."""
-        out = self.model.predict(observation)
+        out = self.predict(observation)
         return out.predicted_values, out.probs, out.atoms
-
-    # =========================================================================
-    # Inference API (from_checkpoint / infer / infer_batch)
-    # =========================================================================
 
     @classmethod
     def from_checkpoint(
@@ -1116,7 +701,7 @@ class ValueCritic(CriticPreTrainedModel):
         gemma3_path=None,
         **kwargs,
     ):
-        """Create a ValueCritic from a trained checkpoint, ready for inference.
+        """Create a ValueCriticModel from a trained checkpoint, ready for inference.
 
         Args:
             checkpoint_dir: Path to checkpoint directory.
@@ -1137,7 +722,7 @@ class ValueCritic(CriticPreTrainedModel):
             gemma3_path: Path to Gemma3 pretrained weights (siglip_gemma3 only).
 
         Returns:
-            ValueCritic instance with transforms and processor attached.
+            ValueCriticModel instance with transforms and processor attached.
         """
         import pathlib
 
@@ -1172,7 +757,7 @@ class ValueCritic(CriticPreTrainedModel):
             )
         processor = ValueProcessor(tokenizer=tokenizer, max_token_len=200)
 
-        # Build config and load model
+        # Build config and model
         critic_config = ValueCriticConfig(
             critic_expert_variant=critic_expert_variant,
             num_bins=num_return_bins,
@@ -1183,47 +768,34 @@ class ValueCritic(CriticPreTrainedModel):
             gemma3_path=gemma3_path,
         )
 
-        try:
-            model = cls.from_pretrained(
-                str(checkpoint_dir),
-                config=critic_config,
-                torch_dtype=torch.bfloat16,
-                device_map=None,
-                trust_remote_code=True,
-                ignore_mismatched_sizes=True,
-            )
-            logger.info("  Loaded model using from_pretrained")
-        except (OSError, ValueError, AttributeError) as e:
-            logger.info(
-                f"  from_pretrained failed ({type(e).__name__}: {e}), "
-                "loading state dict directly"
-            )
-            model = cls(critic_config)
-            state_dict = load_state_dict_from_checkpoint(checkpoint_dir)
+        model = cls(critic_config)
 
-            # Handle key prefix mismatch (checkpoint may lack "model." prefix)
-            model_keys = set(model.state_dict().keys())
-            ckpt_keys = set(state_dict.keys())
+        # Load checkpoint weights
+        state_dict = load_state_dict_from_checkpoint(checkpoint_dir)
 
-            if len(model_keys & ckpt_keys) == 0:
-                remapped = {}
-                for k, v in state_dict.items():
-                    new_key = f"model.{k}"
-                    remapped[new_key if new_key in model_keys else k] = v
+        # Handle key prefix mismatch: checkpoints saved from a wrapper class
+        # may have a "model." prefix that doesn't exist in ValueCriticModel.
+        model_keys = set(model.state_dict().keys())
+        ckpt_keys = set(state_dict.keys())
 
-                if len(set(remapped.keys()) & model_keys) > len(ckpt_keys & model_keys):
-                    logger.info("  Remapped checkpoint keys: added 'model.' prefix")
-                    state_dict = remapped
+        if len(model_keys & ckpt_keys) == 0:
+            # Try stripping "model." prefix
+            stripped = {
+                k.removeprefix("model."): v
+                for k, v in state_dict.items()
+                if k.startswith("model.")
+            }
+            if len(set(stripped.keys()) & model_keys) > 0:
+                logger.info("  Stripped 'model.' prefix from checkpoint keys")
+                state_dict = stripped
 
-            missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            logger.info(
-                f"  Loaded state dict (missing={len(missing)}, "
-                f"unexpected={len(unexpected)})"
-            )
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        logger.info(
+            f"  Loaded state dict (missing={len(missing)}, "
+            f"unexpected={len(unexpected)})"
+        )
 
-        # Attach processor
-        object.__setattr__(model, "processor", processor)
-
+        model.processor = processor
         model = model.to(device)
         model.eval()
 
@@ -1238,7 +810,6 @@ class ValueCritic(CriticPreTrainedModel):
                     "proceeding without normalization"
                 )
 
-        # Exclude 'return' from normalization
         if norm_stats and "return" in norm_stats:
             norm_stats = {k: v for k, v in norm_stats.items() if k != "return"}
 
@@ -1254,13 +825,12 @@ class ValueCritic(CriticPreTrainedModel):
             action_norm_skip_dims=action_norm_skip_dims,
         )
 
-        # Attach transforms and device for inference
         from rlinf.datasets.lerobot.transforms import compose
 
-        object.__setattr__(model, "_input_transform", compose(transforms))
-        object.__setattr__(model, "_device", device)
+        model._input_transform = compose(transforms)
+        model._device = device
 
-        logger.info("ValueCritic.from_checkpoint ready for inference")
+        logger.info("ValueCriticModel.from_checkpoint ready for inference")
         return model
 
     @staticmethod
@@ -1276,11 +846,10 @@ class ValueCritic(CriticPreTrainedModel):
             processor: ValueProcessor instance.
 
         Returns:
-            Dict with CPU tensors: pixel_values, image_masks, tokens, mask, ar_mask.
+            Dict with CPU tensors: pixel_values, image_masks, tokens, mask.
         """
         import numpy as np
 
-        # Get images
         if "image" in inputs and isinstance(inputs["image"], dict):
             images_dict = inputs["image"]
         elif "images" in inputs and isinstance(inputs["images"], dict):
@@ -1301,33 +870,26 @@ class ValueCritic(CriticPreTrainedModel):
                         img_key = img_key.replace(prefix, "")
                     images_dict[img_key] = inputs[key]
 
-        # Get prompt
         prompt = inputs.get("prompt", "perform the task")
         if isinstance(prompt, np.ndarray):
             prompt = str(prompt.item()) if prompt.size == 1 else "perform the task"
         elif not isinstance(prompt, str):
             prompt = "perform the task"
 
-        # Convert to BHWC for image_processor (handles both CHW and HWC input)
         images_bhwc = {}
         for cam_name, img in images_dict.items():
             if isinstance(img, np.ndarray):
                 img = torch.from_numpy(img)
             if img.dim() == 3:
                 if img.shape[0] == 3:
-                    # CHW (3, H, W) -> BHWC (1, H, W, 3)
-                    img = img.unsqueeze(0).permute(0, 2, 3, 1)
+                    img = img.unsqueeze(0).permute(0, 2, 3, 1)  # CHW -> BHWC
                 else:
-                    # HWC (H, W, 3) -> BHWC (1, H, W, 3)
-                    img = img.unsqueeze(0)
+                    img = img.unsqueeze(0)  # HWC -> BHWC
             elif img.dim() == 4:
                 if img.shape[1] == 3:
-                    # BCHW -> BHWC
-                    img = img.permute(0, 2, 3, 1)
-                # else: already BHWC
+                    img = img.permute(0, 2, 3, 1)  # BCHW -> BHWC
             images_bhwc[cam_name] = img
 
-        # Image masks
         input_masks = inputs.get("image_mask", inputs.get("image_masks", {}))
         image_masks_batch = {}
         for cam_name in images_bhwc:
@@ -1344,7 +906,6 @@ class ValueCritic(CriticPreTrainedModel):
             else:
                 image_masks_batch[cam_name] = torch.tensor([True], dtype=torch.bool)
 
-        # Process images (CPU)
         processed_img = processor.image_processor(
             images=images_bhwc,
             image_masks=image_masks_batch if image_masks_batch else None,
@@ -1352,7 +913,6 @@ class ValueCritic(CriticPreTrainedModel):
             train=False,
         )
 
-        # Tokenize prompt (CPU)
         cleaned_prompt = processor._clean_text(prompt)
         cleaned_prompt = processor._strip_trailing_punctuation(cleaned_prompt)
         prefix_text = f"Task: {cleaned_prompt}."
@@ -1364,11 +924,9 @@ class ValueCritic(CriticPreTrainedModel):
             padding_len = max_length - seq_len
             tok_mask = [True] * seq_len + [False] * padding_len
             tokens = tokens + [0] * padding_len
-            ar_mask = [0] * max_length
         else:
             tokens = tokens[:max_length]
             tok_mask = [True] * max_length
-            ar_mask = [0] * max_length
 
         # Return CPU tensors only (no .to(device))
         return {
@@ -1376,13 +934,13 @@ class ValueCritic(CriticPreTrainedModel):
             "image_masks": processed_img["image_masks"],
             "tokenized_prompt": torch.tensor([tokens], dtype=torch.long),
             "tokenized_prompt_mask": torch.tensor([tok_mask], dtype=torch.bool),
-            "token_ar_mask": torch.tensor([ar_mask], dtype=torch.long),
         }
 
     def _prepare_observation(self, inputs: dict) -> dict:
         """Prepare observation dict for model forward.
 
         Tokenizes "Task: {prompt}." (matching training template).
+        Returns dict with images, image_masks, tokenized_prompt, tokenized_prompt_mask.
         """
         import numpy as np
 
@@ -1394,7 +952,6 @@ class ValueCritic(CriticPreTrainedModel):
 
         device = getattr(self, "_device", "cuda")
 
-        # Get images
         if "image" in inputs and isinstance(inputs["image"], dict):
             images_dict = inputs["image"]
         elif "images" in inputs and isinstance(inputs["images"], dict):
@@ -1415,7 +972,6 @@ class ValueCritic(CriticPreTrainedModel):
                         img_key = img_key.replace(prefix, "")
                     images_dict[img_key] = inputs[key]
 
-        # Get prompt
         prompt = inputs.get("prompt", "perform the task")
         if isinstance(prompt, np.ndarray):
             prompt = str(prompt.item()) if prompt.size == 1 else "perform the task"
@@ -1441,7 +997,6 @@ class ValueCritic(CriticPreTrainedModel):
                 # else: already BHWC
             images_bhwc[cam_name] = img
 
-        # Image masks
         input_masks = inputs.get("image_mask", inputs.get("image_masks", {}))
         image_masks_batch = {}
         for cam_name in images_bhwc:
@@ -1458,7 +1013,6 @@ class ValueCritic(CriticPreTrainedModel):
             else:
                 image_masks_batch[cam_name] = torch.tensor([True], dtype=torch.bool)
 
-        # Process images
         processed_img = processor.image_processor(
             images=images_bhwc,
             image_masks=image_masks_batch if image_masks_batch else None,
@@ -1466,7 +1020,6 @@ class ValueCritic(CriticPreTrainedModel):
             train=False,
         )
 
-        # Tokenize prompt
         cleaned_prompt = processor._clean_text(prompt)
         cleaned_prompt = processor._strip_trailing_punctuation(cleaned_prompt)
         prefix_text = f"Task: {cleaned_prompt}."
@@ -1479,13 +1032,10 @@ class ValueCritic(CriticPreTrainedModel):
             padding_len = max_length - seq_len
             mask = [True] * seq_len + [False] * padding_len
             tokens = tokens + [0] * padding_len
-            ar_mask = [0] * max_length
         else:
             tokens = tokens[:max_length]
             mask = [True] * max_length
-            ar_mask = [0] * max_length
 
-        # Build observation dict
         pixel_values = processed_img["pixel_values"]
         image_masks = processed_img["image_masks"]
 
@@ -1506,7 +1056,6 @@ class ValueCritic(CriticPreTrainedModel):
             "tokenized_prompt_mask": torch.tensor(
                 [mask], dtype=torch.bool, device=device
             ),
-            "token_ar_mask": torch.tensor([ar_mask], dtype=torch.long, device=device),
         }
 
     def _prepare_observation_batch(self, inputs_list: list[dict]) -> dict:
@@ -1515,7 +1064,6 @@ class ValueCritic(CriticPreTrainedModel):
         all_image_masks = []
         all_tokens = []
         all_masks = []
-        all_ar_masks = []
 
         for inputs in inputs_list:
             single_obs = self._prepare_observation(inputs)
@@ -1523,7 +1071,6 @@ class ValueCritic(CriticPreTrainedModel):
             all_image_masks.append(single_obs["image_masks"])
             all_tokens.append(single_obs["tokenized_prompt"])
             all_masks.append(single_obs["tokenized_prompt_mask"])
-            all_ar_masks.append(single_obs["token_ar_mask"])
 
         if isinstance(all_images[0], dict):
             batched_images = {
@@ -1543,7 +1090,6 @@ class ValueCritic(CriticPreTrainedModel):
             "image_masks": batched_masks,
             "tokenized_prompt": torch.cat(all_tokens, dim=0),
             "tokenized_prompt_mask": torch.cat(all_masks, dim=0),
-            "token_ar_mask": torch.cat(all_ar_masks, dim=0),
         }
 
     @torch.no_grad()
@@ -1637,9 +1183,6 @@ class ValueCritic(CriticPreTrainedModel):
                     "tokenized_prompt_mask": torch.cat(
                         [obs["tokenized_prompt_mask"] for obs in batch_obs], dim=0
                     ).to(device),
-                    "token_ar_mask": torch.cat(
-                        [obs["token_ar_mask"] for obs in batch_obs], dim=0
-                    ).to(device),
                 }
             else:
                 inputs_list = []
@@ -1664,11 +1207,8 @@ class ValueCritic(CriticPreTrainedModel):
 
 __all__ = [
     "make_att_2d_masks",
-    "VLMPreTrainedModel",
-    "CriticPreTrainedModel",
     "VLMObservationEncoder",
     "ValueHead",
     "CriticOutput",
     "ValueCriticModel",
-    "ValueCritic",
 ]

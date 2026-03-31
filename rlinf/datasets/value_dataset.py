@@ -16,7 +16,7 @@
 Value Dataset for return prediction.
 
 This module provides a dataset that extends LeRobotRLDataset to format samples
-for training a value model to predict discretized returns.
+for training a value model to predict normalized returns.
 
 Inheritance chain:
     ValueDataset -> LeRobotRLDataset -> LeRobotPyTorchDataset -> Dataset
@@ -48,7 +48,7 @@ class ValueDataset(LeRobotRLDataset):
     """Dataset for value prediction training.
 
     Extends LeRobotRLDataset with VLM-mode sample formatting for training
-    models to predict discretized return tokens.
+    models to predict normalized return values.
 
     Inheritance chain:
         ValueDataset -> LeRobotRLDataset -> LeRobotPyTorchDataset -> Dataset
@@ -72,7 +72,6 @@ class ValueDataset(LeRobotRLDataset):
         action_horizon: int = 10,
         gamma: float = 0.99,
         include_next_obs: bool = False,  # Set True for distributional RL
-        num_return_bins: int = 201,
         return_norm_stats_path: Optional[str] = None,
         return_min: Optional[float] = None,
         return_max: Optional[float] = None,
@@ -107,11 +106,9 @@ class ValueDataset(LeRobotRLDataset):
             history_keys: Keys to include in history
             action_horizon: Number of future actions/rewards
             gamma: Discount factor
-            num_return_bins: Number of bins for discretization (paper uses 201)
             return_norm_stats_path: Path to norm_stats.json for min/max
             return_min: Override minimum return value
             return_max: Override maximum return value
-            normalize_to_minus_one_zero: Normalize returns to (-1, 0) range
             split: Dataset split
             data_config_factory: Factory for transforms
             action_dim: Action dimension
@@ -127,7 +124,6 @@ class ValueDataset(LeRobotRLDataset):
             shuffle_episodes: Random episode selection
             episode_seed: Seed for reproducibility
         """
-        # Build rl_config from individual params if not provided
         if rl_config is None:
             rl_config = create_rl_config(
                 history_length=history_length,
@@ -137,20 +133,16 @@ class ValueDataset(LeRobotRLDataset):
                 include_return=True,  # Required for value training
                 include_done=False,  # Not needed for offline value training
                 gamma=gamma,
-                discretize_return=True,  # Required for value training
-                num_return_bins=num_return_bins,
+                normalize_return=True,
                 return_norm_stats_path=return_norm_stats_path,
                 return_min=return_min,
                 return_max=return_max,
                 normalize_to_minus_one_zero=normalize_to_minus_one_zero,
             )
-        elif not rl_config.discretize_return:
+        elif not rl_config.normalize_return or not rl_config.include_return:
             raise ValueError(
-                "ValueDataset requires discretize_return=True in rl_config. "
-                "Value training predicts discretized return tokens."
+                "ValueDataset requires normalize_return=True and include_return=True."
             )
-
-        # Initialize parent LeRobotRLDataset with only rl_config
         super().__init__(
             dataset_path=dataset_path,
             repo_id=repo_id,
@@ -191,7 +183,6 @@ class ValueDataset(LeRobotRLDataset):
         # Get RL sample from parent
         rl_sample = super().__getitem__(idx)
 
-        # Get target value (normalized return)
         if "return_normalized" in rl_sample:
             ret_norm = rl_sample["return_normalized"]
             target_value = (
@@ -207,10 +198,9 @@ class ValueDataset(LeRobotRLDataset):
 
         sample = {
             "target_values": target_value,
-            "actions": None,  # Explicitly None to trigger VLM mode
+            "actions": None,  # None triggers VLM-only forward pass
         }
 
-        # Copy prompt
         if "prompt" in rl_sample:
             sample["prompt"] = rl_sample["prompt"]
         elif "task" in rl_sample:
@@ -218,7 +208,6 @@ class ValueDataset(LeRobotRLDataset):
         else:
             sample["prompt"] = "perform the task"
 
-        # Extract images
         images = {}
         image_masks = {}
 
@@ -246,7 +235,6 @@ class ValueDataset(LeRobotRLDataset):
         if image_masks:
             sample["image_masks"] = image_masks
 
-        # Pass through raw return values for debugging and metrics
         if "return" in rl_sample:
             ret_val = rl_sample["return"]
             sample["return_raw"] = (
@@ -254,16 +242,7 @@ class ValueDataset(LeRobotRLDataset):
             )
         if "return_normalized" in rl_sample:
             sample["return_normalized"] = rl_sample["return_normalized"]
-        if "return_bin_id" in rl_sample:
-            sample["return_bin_id"] = rl_sample["return_bin_id"]
 
-        # =====================================================================
-        # Additional RL fields (next observation, rewards)
-        # =====================================================================
-
-        # Next observation (for computing V(s_{t+H}))
-        # RL dataset applies the same VLA transforms to next obs, storing result
-        # in 'next_observation' with same structure as current obs
         next_obs = rl_sample.get("next_observation", {})
         if next_obs:
             if not getattr(self, "_logged_next_keys", False):
@@ -276,8 +255,6 @@ class ValueDataset(LeRobotRLDataset):
                 sample["next_state"] = next_obs["state"]
             sample["next_state_is_pad"] = next_obs.get("is_pad", False)
 
-        # Reward chunk (for n-step TD target)
-        # RL dataset preserves original key name (e.g., 'reward' not 'reward_chunk')
         reward_key = "reward"
         if reward_key in rl_sample:
             reward_chunk = rl_sample[reward_key]
@@ -297,7 +274,6 @@ class ValueDataset(LeRobotRLDataset):
                     [gamma**i for i in range(n)], dtype=reward_chunk.dtype
                 )
 
-                # Compute raw discounted reward sum
                 if reward_is_pad is not None:
                     valid_mask = ~reward_is_pad.bool()
                     masked_rewards = reward_chunk * valid_mask.float()
@@ -307,10 +283,9 @@ class ValueDataset(LeRobotRLDataset):
                     reward_sum_raw = (reward_chunk * gamma_powers).sum().item()
                     sample["num_valid_rewards"] = n
 
-                # Normalize reward_sum to match value range [-1, 0]
-                # Use same normalization as returns: normalized = raw / |raw_return_min|
-                if self.return_discretizer is not None:
-                    sample["reward_sum"] = self.return_discretizer.normalize_value(
+                # Normalize reward_sum using same scale as returns
+                if self.return_normalizer is not None:
+                    sample["reward_sum"] = self.return_normalizer.normalize_value(
                         reward_sum_raw
                     )
                 else:
@@ -328,8 +303,3 @@ class ValueDataset(LeRobotRLDataset):
             sample["dones"] = False
 
         return sample
-
-    def get_source_name(self) -> str:
-        """Get a readable source name for this dataset."""
-        base_name = self.repo_id.replace("/", "_").replace("-", "_").lower()
-        return f"value_{base_name}"
