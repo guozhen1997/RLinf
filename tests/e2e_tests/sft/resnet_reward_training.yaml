@@ -9,7 +9,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor,env,rollout: 0-0
+    actor: 0-0
 
 runner:
   task_type: sft  # Use SFT runner for reward training
@@ -90,12 +90,3 @@ actor:
       param_dtype: null
       reduce_dtype: null
       buffer_dtype: null
-
-reward:
-  use_reward_model: false
-
-critic:
-  use_critic_model: false
-
-algorithm:
-  adv_type: gae

@@ -81,7 +81,7 @@ def main(cfg) -> None:
     reward_group = None
     if cfg.get("reward", {}).get("use_reward_model", False):
         # Create reward worker group
-        reward_placement = component_placement.get_strategy("rollout")
+        reward_placement = component_placement.get_strategy("reward")
         reward_group = EmbodiedRewardWorker.create_group(cfg).launch(
             cluster, name=cfg.reward.group_name, placement_strategy=reward_placement
         )
