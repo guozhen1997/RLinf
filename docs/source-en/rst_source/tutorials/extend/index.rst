@@ -27,7 +27,7 @@ this section gives you the tools to plug directly into RLinf’s modular design.
    :maxdepth: 2
 
    new_env
-   reward_model
    new_model_fsdp
    new_model_megatron
    new_model_sft
+   reward_model

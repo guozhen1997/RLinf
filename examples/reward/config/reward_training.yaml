@@ -38,7 +38,7 @@ data:
   #       --raw-data-path /path/to/collected_data \
   #       --output-dir /path/to/processed_reward_data
   train_data_paths: "logs/processed_reward_data/train.pt"
-  eval_data_paths: "logs/processed_reward_data/val.pt"
+  val_data_paths: "logs/processed_reward_data/val.pt"
   num_workers: 4
 
 actor:

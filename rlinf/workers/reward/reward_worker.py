@@ -420,14 +420,14 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         """Build dataloaders from preprocessed train/val dataset files."""
         data_cfg = self.cfg.get("data", {})
         train_data_paths = data_cfg.get("train_data_paths")
-        eval_data_paths = data_cfg.get("eval_data_paths")
+        val_data_paths = data_cfg.get("val_data_paths")
 
         self.logger.info(
             f"Loading preprocessed reward datasets from "
-            f"{train_data_paths} and {eval_data_paths}"
+            f"{train_data_paths} and {val_data_paths}"
         )
         train_dataset = RewardBinaryDataset(train_data_paths)
-        val_dataset = RewardBinaryDataset(eval_data_paths)
+        val_dataset = RewardBinaryDataset(val_data_paths)
 
         if len(train_dataset) == 0:
             self.logger.warning("Training dataset is empty")
