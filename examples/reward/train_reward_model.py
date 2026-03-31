@@ -40,10 +40,6 @@ mp.set_start_method("spawn", force=True)
 
 @hydra.main(version_base="1.1", config_path="config", config_name="reward_training")
 def main(cfg) -> None:
-    print("=" * 60)
-    print("ResNet Reward Model Training")
-    print("=" * 60)
-
     # Validate config
     cfg = validate_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))

@@ -1,7 +1,3 @@
-# ManiSkill PPO with State training + RGB Reward Model
-# Policy uses state observations, Reward model uses RGB images
-# Based on maniskill_ppo_mlp.yaml
-
 defaults:
   - env/maniskill_pick_cube@env.train
   - env/maniskill_pick_cube@env.eval
@@ -14,7 +10,7 @@ hydra:
     dir: .
   output_subdir: null
   searchpath:
-    - file://${oc.env:EMBODIED_PATH}/config/
+    - file://${oc.env:REPO_PATH}/examples/embodiment/config
 
 cluster:
   num_nodes: 1
@@ -27,18 +23,18 @@ cluster:
 runner:
   task_type: embodied
   logger:
-    log_path: "../results"
+    log_path: "/workspace/results/maniskill_ppo_mlp_resnet_reward"
     project_name: rlinf
-    experiment_name: "maniskill_ppo_rgb_reward"
+    experiment_name: "ci-test"
     logger_backends: ["tensorboard"]
 
-  max_epochs: 1000
+  max_epochs: 3
   max_steps: -1
 
   only_eval: False
   eval_policy_path: null
-  val_check_interval: 50
-  save_interval: 100
+  val_check_interval: -1
+  save_interval: -1
 
   resume_dir: null  # Set to checkpoint path to resume training
 
@@ -92,6 +88,7 @@ env:
     auto_reset: True
     ignore_terminations: False
     use_rel_reward: False
+    reward_mode: raw
     seed: 0
     group_size: 1
     use_fixed_reset_state_ids: False
@@ -208,9 +205,9 @@ reward:
     arch: "resnet18"
     hidden_dim: 256
     dropout: 0
-    image_size: [3, 224, 224]
+    image_size: [3, 128, 128]
     normalize: true
-    precision: "fp32"
+    precision: "bf16"
 
 critic:
   use_critic_model: False
