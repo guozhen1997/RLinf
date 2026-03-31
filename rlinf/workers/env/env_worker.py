@@ -332,7 +332,13 @@ class EnvWorker(Worker):
         if isinstance(infos_list, (list, tuple)):
             infos = infos_list[-1] if infos_list else None
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
-        merged_final_obs = self._build_chunk_final_obs(obs_list, infos_list)
+        final_obs = (
+            self._build_chunk_final_obs(obs_list, infos_list)
+            if self.cfg.get("reward", {}).get("use_reward_model", False)
+            else infos["final_observation"]
+            if isinstance(infos, dict) and "final_observation" in infos
+            else None
+        )
         if not self.cfg.env.train.auto_reset:
             if self.cfg.env.train.ignore_terminations:
                 if chunk_truncations[:, -1].any():
@@ -361,7 +367,7 @@ class EnvWorker(Worker):
 
         env_output = EnvOutput(
             obs=extracted_obs,
-            final_obs=merged_final_obs,
+            final_obs=final_obs,
             rewards=chunk_rewards,
             dones=chunk_dones,
             terminations=chunk_terminations,
@@ -396,7 +402,13 @@ class EnvWorker(Worker):
         if isinstance(infos_list, (list, tuple)):
             infos = infos_list[-1] if infos_list else None
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
-        merged_final_obs = self._build_chunk_final_obs(obs_list, infos_list)
+        final_obs = (
+            self._build_chunk_final_obs(obs_list, infos_list)
+            if self.cfg.get("reward", {}).get("use_reward_model", False)
+            else infos["final_observation"]
+            if isinstance(infos, dict) and "final_observation" in infos
+            else None
+        )
 
         if chunk_dones.any():
             if "episode" in infos:
@@ -409,7 +421,7 @@ class EnvWorker(Worker):
 
         env_output = EnvOutput(
             obs=extracted_obs,
-            final_obs=merged_final_obs,
+            final_obs=final_obs,
         )
         return env_output, env_info
 
@@ -446,16 +458,34 @@ class EnvWorker(Worker):
             reset_mask = step_infos["_final_observation"]
             if final_obs is None or reset_mask is None:
                 continue
-            if reset_mask.dim() > 1:
-                done_mask = reset_mask.any(dim=-1)
-            else:
-                done_mask = reset_mask
+            reset_mask = (
+                reset_mask.detach().cpu().numpy()
+                if isinstance(reset_mask, torch.Tensor)
+                else np.asarray(reset_mask)
+            )
+            done_mask = (
+                reset_mask.any(axis=-1)
+                if reset_mask.ndim > 1
+                else reset_mask.astype(bool)
+            )
             if not done_mask.any():
                 continue
 
             for key, value in merged_final_obs.items():
-                if key in final_obs and isinstance(value, torch.Tensor):
-                    merged_final_obs[key][done_mask] = final_obs[key][done_mask]
+                if key not in final_obs:
+                    continue
+
+                final_value = final_obs[key]
+                if isinstance(value, torch.Tensor) and isinstance(
+                    final_value, torch.Tensor
+                ):
+                    dst_mask = torch.as_tensor(done_mask, device=value.device)
+                    src_mask = dst_mask.to(device=final_value.device)
+                    merged_final_obs[key][dst_mask] = final_value[src_mask]
+                elif isinstance(value, np.ndarray) and isinstance(
+                    final_value, np.ndarray
+                ):
+                    merged_final_obs[key][done_mask] = final_value[done_mask]
 
         return merged_final_obs
 
