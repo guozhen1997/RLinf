@@ -10,17 +10,9 @@ from tianshou.data import Batch
 from omegaconf import OmegaConf, DictConfig
 import os
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-# Ensure groot is importable (dreamzero repo structure)
-def _ensure_groot_importable():
-    if "groot" in sys.modules:
-        return
-    dreamzero_root = Path(__file__).resolve().parents[5]
-    dreamzero_root = dreamzero_root / "DreamZero"
-    if str(dreamzero_root) not in sys.path:
-        sys.path.insert(0, str(dreamzero_root))
-
-
-class DreamZeroPolicy(BasePolicy):
+import torch.nn as nn
+            
+class DreamZeroPolicy(BasePolicy, nn.Module):
     """Lightweight DreamZero action model: IdentityBackbone + WANPolicyHead.
 
     - predict_action_batch: for eval (inference)
@@ -29,99 +21,18 @@ class DreamZeroPolicy(BasePolicy):
 
     def __init__(
         self,
-        model_path: str,
-        device: str | int = "cuda",
-        precision: str = "bf16",
-        force_identity_backbone: bool = True,
-        tokenizer_path: str = "google/umt5-xxl",
-        max_seq_len: int = 512,
-        original_config: DictConfig = None,
+        model: nn.Module,
+        eval_transform: Any,
+        train_cfg: Any,
+        cfg: DictConfig,
     ):
-        _ensure_groot_importable()
-
-        from groot.vla.model.dreamzero.base_vla import VLA, VLAConfig
-        from groot.vla.data.schema import DatasetMetadata
-        from groot.vla.data.transform import ComposedModalityTransform
-
-        self.model_path = Path(model_path)
-        self.device = torch.device(device if isinstance(device, str) else f"cuda:{device}")
-        self.precision = precision
-        exp_cfg_dir = self.model_path / "experiment_cfg"
-        train_cfg_path = exp_cfg_dir / "conf.yaml"
-        train_cfg = OmegaConf.load(train_cfg_path)
-        self.train_cfg = train_cfg
-
-        # Load config
-        config_path = self.model_path / "config.json"
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config not found: {config_path}")
-
-        with open(config_path) as f:
-            config_dict = json.load(f)
-
-        # Force IdentityBackbone for lightweight structure
-        if force_identity_backbone:
-            config_dict["backbone_cfg"] = {
-                "_target_": "groot.vla.model.dreamzero.backbone.identity.IdentityBackbone"
-            }
-
-        config = VLAConfig(**config_dict)
-
-        # Disable defer_lora_injection for immediate loading
-        if "config" in config.action_head_cfg and isinstance(config.action_head_cfg["config"], dict):
-            config.action_head_cfg["config"]["defer_lora_injection"] = False
-            config.action_head_cfg["config"]["skip_component_loading"] = True
-
-        # Load model: use custom loading when forcing IdentityBackbone (from_pretrained ignores config)
-        if force_identity_backbone:
-            self.model = self._load_model_with_config(str(self.model_path), config)
-        else:
-            self.model = VLA.from_pretrained(str(self.model_path))
-
-        if precision == "bf16":
-            self.model = self.model.to(dtype=torch.bfloat16)
-        self.model = self.model.to(device=self.device)
-
-        if hasattr(self.model, "post_initialize"):
-            try:
-                self.model.post_initialize()
-            except Exception as e:
-                print(f"post_initialize skipped: {e}")
-
-        self.action_horizon = self.model.action_horizon
-        self.action_dim = self.model.action_dim
-        self.original_model_config = original_config
-        self.model_action_dim = self.original_model_config.get("action_dim", 7)
-
-
-        # 2. Load the action, video, and state transforms
-        # 2.1. Load the metadata for normalization stats
-        metadata_path = exp_cfg_dir / "metadata.json"
-        with open(metadata_path, "r") as f:
-            metadatas = json.load(f)
-        embodiment_tag = next(iter(metadatas.keys()))
-        metadata = DatasetMetadata.model_validate(metadatas[embodiment_tag])
-
-        # 2.2. Get the eval transforms
-
-        train_cfg.transforms[embodiment_tag].transforms[-1].tokenizer_path = tokenizer_path
-        eval_transform = instantiate(train_cfg.transforms[embodiment_tag])
-        assert isinstance(eval_transform, ComposedModalityTransform), f"{eval_transform=}"
-        eval_transform.set_metadata(metadata)
-        eval_transform.eval()
+        super().__init__()
+        self.model = model
         self.eval_transform = eval_transform
-
-    def eval(self):
-        self.model.eval()
-        return self
-    
-    def cuda(self):
-        self.model = self.model.cuda()
-        return self
-
-    def to(self, device: str | int):
-        self.model = self.model.to(device)
-        return self 
+        self.train_cfg = train_cfg
+        self.cfg = cfg
+        self.precision = cfg.get("precision", "bf16")
+        self.action_dim = cfg.get("action_dim", 7)
 
     def apply(self, batch: Batch, **kwargs) -> Batch:
         """Normalize inputs"""
@@ -464,7 +375,7 @@ class DreamZeroPolicy(BasePolicy):
             actions = actions.detach().cpu().numpy()
         actions[..., -1] = np.where(actions[..., -1] > 0, 1.0, -1.0).astype(actions.dtype)
 
-        assert actions.shape[-1] == self.model_action_dim, f"Action shape mismatch: {actions.shape} != {self.model_action_dim}"
+        assert actions.shape[-1] == self.action_dim, f"Action shape mismatch: {actions.shape} != {self.action_dim}"
 
         flat = torch.as_tensor(actions, dtype=torch.float32).reshape(actions.shape[0], -1).cpu()
         forward_inputs = {"action": flat}
@@ -489,27 +400,3 @@ class DreamZeroPolicy(BasePolicy):
 
         """Default forward pass."""
         raise NotImplementedError
-
-def get_model(cfg: DictConfig, torch_dtype=None):
-    """Load DreamZero policy from checkpoint.
-    """
-    model_path = cfg.actor.model.get("model_path")
-    if not model_path or not os.path.exists(model_path):
-        raise FileNotFoundError(
-            f"DreamZero model_path does not exist: {model_path}. "
-            "Please provide a valid checkpoint directory."
-        )
-
-    tokenizer_path = cfg.actor.model.get("tokenizer_path", "google/umt5-xxl")
-    print("tokenizer_path", tokenizer_path)
-    max_seq_len = cfg.actor.model.get("max_seq_len", 512)
-    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-
-    model = DreamZeroPolicy(
-        model_path=model_path,
-        device=device,
-        tokenizer_path=tokenizer_path,
-        max_seq_len=max_seq_len,
-    )
-
-    return model
