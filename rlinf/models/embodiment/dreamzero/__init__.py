@@ -15,11 +15,15 @@
 import os
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
-from rlinf.models.embodiment.dreamzero.dreamzero_policy import DreamZeroPolicy
 import sys
 from pathlib import Path
 import json
 import torch
+from rlinf.models.embodiment.dreamzero.dreamzero_policy import DreamZeroPolicy, DreamZeroConfig
+from safetensors.torch import load_file
+from groot.vla.data.schema import DatasetMetadata
+from groot.vla.data.transform import ComposedModalityTransform
+
 
 def get_model(cfg: DictConfig ,torch_dtype=None):
     """Load DreamZero policy from checkpoint.
@@ -32,9 +36,6 @@ def get_model(cfg: DictConfig ,torch_dtype=None):
     tokenizer_path = cfg.get("tokenizer_path","google/umt5-xxl")
     precision = cfg.get("precision", "bf16")
     action_dim = cfg.get("action_dim", 7)
-
-    from rlinf.models.embodiment.dreamzero.dreamzero_policy import DreamZeroConfig
-    from safetensors.torch import load_file
 
     config_path = model_path / "config.json"
     if not config_path.exists():
@@ -52,8 +53,6 @@ def get_model(cfg: DictConfig ,torch_dtype=None):
     dreamzero_config.env_action_dim = action_dim
     dreamzero_config.precision = precision
     
-    from groot.vla.data.schema import DatasetMetadata
-    from groot.vla.data.transform import ComposedModalityTransform
     exp_cfg_dir = model_path / "experiment_cfg"
     metadata_path = exp_cfg_dir / "metadata.json"
     with open(metadata_path, "r") as f:
@@ -95,8 +94,7 @@ def get_model(cfg: DictConfig ,torch_dtype=None):
     model.load_state_dict(state_dict, strict=False)
     if hasattr(model, "post_initialize"):
         model.post_initialize()
-    if precision == "bf16":
-        model = model.to(dtype=torch.bfloat16)
-    model = model.to(device="cuda")
+
+    model = model.to(dtype=torch_dtype)
 
     return model

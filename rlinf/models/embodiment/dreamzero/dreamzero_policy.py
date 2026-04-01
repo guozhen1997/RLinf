@@ -1,3 +1,17 @@
+# Copyright 2026 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import json
 import sys
 from pathlib import Path
@@ -10,7 +24,6 @@ from tianshou.data import Batch
 from omegaconf import OmegaConf, DictConfig
 import os
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-import torch.nn as nn
 from groot.vla.model.dreamzero.base_vla import VLAConfig, VLA
 from transformers.configuration_utils import PretrainedConfig
 from dataclasses import dataclass, field
@@ -46,7 +59,7 @@ class DreamZeroConfig(VLAConfig):
         for key, value in kwargs.items():
             setattr(self, key, value)
             
-class DreamZeroPolicy(VLA, nn.Module):
+class DreamZeroPolicy(VLA, BasePolicy):
     config: DreamZeroConfig
     """Lightweight DreamZero action model: IdentityBackbone + WANPolicyHead.
 
@@ -362,7 +375,6 @@ class DreamZeroPolicy(VLA, nn.Module):
         normalized_action = model_pred["action_pred"].float()
 
         # Unnormalize actions (pass obs for relative action normalization)
-        #batch = self.unapply(Batch(normalized_action=normalized_action), obs=original_obs_for_relative)
         unnormalized_action = self.eval_transform.unapply(
             dict(action=normalized_action.cpu())
         )
