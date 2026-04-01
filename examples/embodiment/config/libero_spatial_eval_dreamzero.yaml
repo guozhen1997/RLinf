@@ -128,7 +128,7 @@ actor:
     tokenizer_path: path/to/your/tokenizer
     max_seq_len: 512
     add_value_head: True
-
+    precision: bf16
 
   fsdp_config:
     strategy: "fsdp"

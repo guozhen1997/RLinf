@@ -34,7 +34,6 @@ def get_model(cfg: DictConfig ,torch_dtype=None):
       raise FileNotFoundError(f"DreamZero model_path does not exist: {model_path}")
 
     tokenizer_path = cfg.get("tokenizer_path","google/umt5-xxl")
-    precision = cfg.get("precision", "bf16")
     action_dim = cfg.get("action_dim", 7)
 
     config_path = model_path / "config.json"
@@ -51,7 +50,6 @@ def get_model(cfg: DictConfig ,torch_dtype=None):
         dreamzero_config.action_head_cfg["config"]["skip_component_loading"] = True
 
     dreamzero_config.env_action_dim = action_dim
-    dreamzero_config.precision = precision
     
     exp_cfg_dir = model_path / "experiment_cfg"
     metadata_path = exp_cfg_dir / "metadata.json"
@@ -63,10 +61,10 @@ def get_model(cfg: DictConfig ,torch_dtype=None):
 
     train_cfg = OmegaConf.load(exp_cfg_dir / "conf.yaml")
     train_cfg.transforms[embodiment_tag].transforms[-1].tokenizer_path = tokenizer_path
-    eval_transform = instantiate(train_cfg.transforms[embodiment_tag])
-    assert isinstance(eval_transform, ComposedModalityTransform), f"{eval_transform=}"
-    eval_transform.set_metadata(metadata)
-    eval_transform.eval()
+    _transforms = instantiate(train_cfg.transforms[embodiment_tag])
+    assert isinstance(_transforms, ComposedModalityTransform), f"{_transforms=}"
+    _transforms.set_metadata(metadata)
+    _transforms.eval()
 
     dreamzero_config.relative_action = train_cfg.get("relative_action", False)
     dreamzero_config.relative_action_per_horizon = train_cfg.get("relative_action_per_horizon", False)
@@ -74,7 +72,7 @@ def get_model(cfg: DictConfig ,torch_dtype=None):
 
     model = DreamZeroPolicy(
         config=dreamzero_config,
-        eval_transform=eval_transform,
+        _transforms=_transforms,
     )
     #  load safetensors (support index shard)
     state_dict = {}
