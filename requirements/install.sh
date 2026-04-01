@@ -337,7 +337,6 @@ clone_or_reuse_repo() {
 }
 
 #=======================EMBODIED INSTALLERS=======================
-
 install_common_embodied_deps() {
     uv sync --extra embodied --active $NO_INSTALL_RLINF_CMD
     uv pip install -r $SCRIPT_DIR/embodied/envs/common.txt
@@ -389,6 +388,20 @@ install_openvla_oft_model() {
             install_flash_attn
             uv pip install git+${GITHUB_PREFIX}https://github.com/moojink/openvla-oft.git  --no-build-isolation
             ;;
+        metaworld)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_flash_attn
+            install_metaworld_env
+            uv pip install git+${GITHUB_PREFIX}https://github.com/moojink/openvla-oft.git  --no-build-isolation
+            ;;
+        calvin)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_flash_attn
+            install_calvin_env
+            uv pip install git+${GITHUB_PREFIX}https://github.com/moojink/openvla-oft.git  --no-build-isolation
+            ;;
         robotwin)
             create_and_sync_venv
             install_common_embodied_deps
@@ -411,6 +424,20 @@ install_openvla_oft_model() {
             install_wan_world_model
             install_flash_attn
             uv pip install git+${GITHUB_PREFIX}https://github.com/moojink/openvla-oft.git
+            ;;
+        liberopro)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_liberopro_env
+            install_flash_attn
+            uv pip install git+${GITHUB_PREFIX}https://github.com/moojink/openvla-oft.git  --no-build-isolation
+            ;;
+        liberoplus)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_liberoplus_env
+            install_flash_attn
+            uv pip install git+${GITHUB_PREFIX}https://github.com/moojink/openvla-oft.git  --no-build-isolation
             ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for OpenVLA-OFT model." >&2
@@ -464,6 +491,15 @@ install_openpi_model() {
             uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
             install_flash_attn
             install_robotwin_env
+            ;;
+        isaaclab)
+            create_and_sync_venv
+            install_common_embodied_deps
+            uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            install_isaaclab_env
+            # Torch is modified in Isaac Lab, install flash-attn afterwards
+            install_flash_attn
+            uv pip install numpydantic==1.7.0 pydantic==2.11.7 numpy==1.26.0
             ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for OpenPI model." >&2
@@ -586,6 +622,10 @@ install_env_only() {
                 install_franka_env
             fi
             ;;
+        xsquare_turtle2)
+            uv sync --extra xsquare_turtle2 --active $NO_INSTALL_RLINF_CMD
+            install_xsquare_turtle2_env
+            ;;
         habitat)
             install_common_embodied_deps
             install_habitat_env
@@ -612,6 +652,28 @@ install_maniskill_libero_env() {
     bash $SCRIPT_DIR/embodied/download_assets.sh --assets maniskill
 }
 
+install_liberopro_env() {
+    # Base LIBERO + ManiSkill required for LIBERO-Pro.
+    local libero_dir
+    libero_dir=$(clone_or_reuse_repo LIBERO_PATH "$VENV_DIR/libero" https://github.com/RLinf/LIBERO.git)
+    uv pip install -e "$libero_dir"
+
+    local libero_pro_dir
+    libero_pro_dir=$(clone_or_reuse_repo LIBERO_PRO_PATH "$VENV_DIR/libero_pro" https://github.com/RLinf/LIBERO-PRO.git)
+    uv pip install -e "$libero_pro_dir"
+}
+
+install_liberoplus_env() {
+    local libero_dir
+    libero_dir=$(clone_or_reuse_repo LIBERO_PATH "$VENV_DIR/libero" https://github.com/RLinf/LIBERO.git)
+    uv pip install -e "$libero_dir"
+
+    local libero_plus_dir
+    libero_plus_dir=$(clone_or_reuse_repo LIBERO_PLUS_PATH "$VENV_DIR/libero_plus" https://github.com/RLinf/LIBERO-plus.git)
+    uv pip install -r $libero_plus_dir/extra_requirements.txt
+    uv pip install -e "$libero_plus_dir"
+}
+
 install_behavior_env() {
     # Prefer an existing checkout if BEHAVIOR_PATH is provided; otherwise clone into the venv.
     local behavior_dir
@@ -619,6 +681,9 @@ install_behavior_env() {
 
     pushd "$behavior_dir" >/dev/null
     UV_LINK_MODE=hardlink ./setup.sh --omnigibson --bddl --joylo --confirm-no-conda --accept-nvidia-eula --use-uv
+    # OmniGibson's eval deps need another commit of lerobot, which is in conflict with which rlinf needs.
+    # We actually does not use OmniGibson's lerobot deps, so just install other deps in OmniGibson's eval deps. 
+    uv pip install "dm_tree>=0.1.9" "hydra-core>=1.3.2" "websockets>=15.0.1" "msgpack>=1.1.0" "gspread>=6.2.1" "open3d>=0.19.0" av "numpy<2"
     popd >/dev/null
     uv pip uninstall flash-attn || true
     uv pip install ml_dtypes==0.5.3 protobuf==3.20.3
@@ -653,6 +718,11 @@ install_isaaclab_env() {
     pushd ~ >/dev/null
     uv pip install "flatdict==4.0.1" --no-build-isolation
     uv pip install "cuda-toolkit[nvcc]==12.8.0"
+
+    # Force CMake < 4 for egl-probe / robomimic native build compatibility
+    uv pip uninstall -y cmake || true
+    uv pip install "cmake<4"
+
     $isaaclab_dir/isaaclab.sh --install
     popd >/dev/null
 }
@@ -706,7 +776,7 @@ install_franka_env() {
     export CMAKE_PREFIX_PATH=$ROS_CATKIN_PATH/libfranka/build:$CMAKE_PREFIX_PATH
 
     # Then franka_ros
-    catkin_make -DCMAKE_BUILD_TYPE=Release -DFranka_DIR:PATH=$ROS_CATKIN_PATH/libfranka/build --pkg franka_ros
+    catkin_make -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DFranka_DIR:PATH=$ROS_CATKIN_PATH/libfranka/build
 
     # Finally serl_franka_controllers
     catkin_make -DCMAKE_CXX_STANDARD=17 --pkg serl_franka_controllers
@@ -716,6 +786,10 @@ install_franka_env() {
     echo "export CMAKE_PREFIX_PATH=$ROS_CATKIN_PATH/libfranka/build:\$CMAKE_PREFIX_PATH" >> "$VENV_DIR/bin/activate"
     echo "source /opt/ros/noetic/setup.bash" >> "$VENV_DIR/bin/activate"
     echo "source $ROS_CATKIN_PATH/devel/setup.bash" >> "$VENV_DIR/bin/activate"
+}
+
+install_xsquare_turtle2_env() {
+    uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/xsquare_turtle_basics.git
 }
 
 install_robotwin_env() {
@@ -740,8 +814,8 @@ install_robotwin_env() {
 
     uv pip install mplib==0.2.1 gymnasium==0.29.1 av open3d zarr openai
 
-    uv pip install git+${GITHUB_PREFIX}https://github.com/facebookresearch/pytorch3d.git  --no-build-isolation
-    uv pip install warp-lang
+    uv pip install git+${GITHUB_PREFIX}https://github.com/facebookresearch/pytorch3d.git@v0.7.9  --no-build-isolation
+    uv pip install warp-lang==1.11.1
     uv pip install git+${GITHUB_PREFIX}https://github.com/NVlabs/curobo.git  --no-build-isolation
 
     # patch sapien and mplib for robotwin
