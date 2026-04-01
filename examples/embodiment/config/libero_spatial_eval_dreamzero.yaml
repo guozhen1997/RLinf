@@ -121,6 +121,7 @@ actor:
 
     action_dim: 7
     num_action_chunks: 16
+    embodiment_tag: "libero_sim"
 
     is_lora: False
     #TODO：change to your tokenizer path

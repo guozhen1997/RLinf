@@ -11,8 +11,43 @@ from omegaconf import OmegaConf, DictConfig
 import os
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
 import torch.nn as nn
+from groot.vla.model.dreamzero.base_vla import VLAConfig, VLA
+from transformers.configuration_utils import PretrainedConfig
+from dataclasses import dataclass, field
+
+@dataclass
+class DreamZeroConfig(VLAConfig):
+    model_type = "dreamzero"
+    backbone_cfg: PretrainedConfig = field(
+        default=None, metadata={"help": "Backbone configuration."}
+    )
+
+    action_head_cfg: PretrainedConfig = field(
+        default=None, metadata={"help": "Action head configuration."}
+    )
+
+    action_horizon: int = field(default=None, metadata={"help": "Action horizon."})
+
+    action_dim: int = field(default=None, metadata={"help": "Action dimension."})
+    compute_dtype: str = field(default="float32", metadata={"help": "Compute dtype."})
+
+    env_action_dim: int = field(default=None, metadata={"help": "Environment action dimension."})
+
+    precision: str = field(default="bf16", metadata={"help": "Precision."})
+    num_action_chunks: int = field(default=16, metadata={"help": "Number of action chunks."})
+
+    relative_action: bool = field(default=False, metadata={"help": "Relative action."})
+    relative_action_per_horizon: bool = field(default=False, metadata={"help": "Relative action per horizon."})
+    relative_action_keys: list = field(default_factory=list, metadata={"help": "Relative action keys."})
+
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        for key, value in kwargs.items():
+            setattr(self, key, value)
             
-class DreamZeroPolicy(BasePolicy, nn.Module):
+class DreamZeroPolicy(VLA, nn.Module):
+    config: DreamZeroConfig
     """Lightweight DreamZero action model: IdentityBackbone + WANPolicyHead.
 
     - predict_action_batch: for eval (inference)
@@ -21,18 +56,12 @@ class DreamZeroPolicy(BasePolicy, nn.Module):
 
     def __init__(
         self,
-        model: nn.Module,
+        config: DreamZeroConfig,
         eval_transform: Any,
-        train_cfg: Any,
-        cfg: DictConfig,
     ):
-        super().__init__()
-        self.model = model
+        super().__init__(config)
+        self.config = config
         self.eval_transform = eval_transform
-        self.train_cfg = train_cfg
-        self.cfg = cfg
-        self.precision = cfg.get("precision", "bf16")
-        self.action_dim = cfg.get("action_dim", 7)
 
     def apply(self, batch: Batch, **kwargs) -> Batch:
         """Normalize inputs"""
@@ -48,9 +77,9 @@ class DreamZeroPolicy(BasePolicy, nn.Module):
         )
         
         # Check if relative_action is enabled and convert relative to absolute
-        relative_action = self.train_cfg.get('relative_action', False)
-        relative_action_per_horizon = self.train_cfg.get('relative_action_per_horizon', False)
-        relative_action_keys = self.train_cfg.get('relative_action_keys', [])
+        relative_action = self.config.relative_action
+        relative_action_per_horizon = self.config.relative_action_per_horizon
+        relative_action_keys = self.config.relative_action_keys
         if (relative_action or relative_action_per_horizon) and relative_action_keys and obs is not None:
             for key in relative_action_keys:
                 action_key = f"action.{key}"
@@ -110,37 +139,6 @@ class DreamZeroPolicy(BasePolicy, nn.Module):
         batch.act = unnormalized_action
         return batch
 
-    def _load_model_with_config(self, model_path: str, config) -> "VLA":
-        """Load VLA with custom config (e.g. IdentityBackbone) and weights."""
-        from safetensors.torch import load_file
-
-        from groot.vla.model.dreamzero.base_vla import VLA
-
-        state_dict = {}
-        safetensors_path = Path(model_path) / "model.safetensors"
-        safetensors_index_path = Path(model_path) / "model.safetensors.index.json"
-        if safetensors_index_path.exists():
-            with open(safetensors_index_path) as f:
-                index = json.load(f)
-            for shard_file in set(index["weight_map"].values()):
-                shard_path = Path(model_path) / shard_file
-                state_dict.update(load_file(str(shard_path)))
-        elif safetensors_path.exists():
-            state_dict.update(load_file(str(safetensors_path)))
-        else:
-            raise FileNotFoundError(f"No weights at {model_path}")
-
-        model = VLA(config)
-        if hasattr(model, "post_initialize"):
-            model.post_initialize()
-
-        has_base_layer = any(".base_layer." in k for k in state_dict)
-        if has_base_layer:
-            state_dict = {k.replace(".base_layer.", "."): v for k, v in state_dict.items()}
-
-        model.load_state_dict(state_dict, strict=False)
-        return model
-
     def _process_batch(self, batch: Batch) -> Batch:
         """Process batch."""
         # Normalize / transform
@@ -151,7 +149,7 @@ class DreamZeroPolicy(BasePolicy, nn.Module):
             normalized_input = normalized_input.__getstate__()
         # Do bf16 cast if needed
         for k, v in normalized_input.items():
-            if torch.is_tensor(v) and v.dtype == torch.float32 and self.precision == "bf16":
+            if torch.is_tensor(v) and v.dtype == torch.float32 and self.config.precision == "bf16":
                 normalized_input[k] = v.to(dtype=torch.bfloat16)
         return normalized_input
     
@@ -359,7 +357,7 @@ class DreamZeroPolicy(BasePolicy, nn.Module):
         # ---------- DreamZero inference ----------
         normalized_input = self._process_batch(batch)
         with torch.no_grad():
-            model_pred = self.model.lazy_joint_video_action_causal(normalized_input)
+            model_pred = self.lazy_joint_video_action_causal(normalized_input)
 
         normalized_action = model_pred["action_pred"].float()
 
@@ -375,7 +373,7 @@ class DreamZeroPolicy(BasePolicy, nn.Module):
             actions = actions.detach().cpu().numpy()
         actions[..., -1] = np.where(actions[..., -1] > 0, 1.0, -1.0).astype(actions.dtype)
 
-        assert actions.shape[-1] == self.action_dim, f"Action shape mismatch: {actions.shape} != {self.action_dim}"
+        assert actions.shape[-1] == self.config.env_action_dim, f"Action shape mismatch: {actions.shape} != {self.config.env_action_dim}"
 
         flat = torch.as_tensor(actions, dtype=torch.float32).reshape(actions.shape[0], -1).cpu()
         forward_inputs = {"action": flat}
