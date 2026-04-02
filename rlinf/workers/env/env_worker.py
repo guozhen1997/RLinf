@@ -63,7 +63,16 @@ class EnvWorker(Worker):
         self.stage_num = self.cfg.rollout.pipeline_stage_num
 
         self.reward_mode = self.cfg.get("reward", {}).get("reward_mode", "per_step")
-        if self.cfg.get("reward", {}).get("use_reward_model", False):
+        self.use_reward_model = self.cfg.get("reward", {}).get(
+            "use_reward_model", False
+        )
+        self.use_realworld_reward = self.cfg.get("reward", {}).get(
+            "standalone_realworld", False
+        )
+        self.use_external_reward_model = (
+            self.use_reward_model and not self.use_realworld_reward
+        )
+        if self.use_external_reward_model:
             self.reward_weight = self.cfg.reward.get("reward_weight", 1.0)
             self.env_reward_weight = self.cfg.reward.get("env_reward_weight", 0.0)
 
@@ -144,6 +153,7 @@ class EnvWorker(Worker):
             base_cfg = update_nested_cfg(base_cfg, general_train_override_cfg)
             base_cfg = update_nested_cfg(base_cfg, override_cfg)
             setattr(self.cfg.env.train, "override_cfg", OmegaConf.create(base_cfg))
+        self._inject_realworld_reward_cfg(self.cfg.env.train)
 
         eval_override_cfgs = self.cfg.env.eval.get("override_cfgs", None)
         if eval_override_cfgs is not None:
@@ -161,6 +171,38 @@ class EnvWorker(Worker):
             base_eval_cfg = update_nested_cfg(base_eval_cfg, general_eval_override_cfg)
             base_eval_cfg = update_nested_cfg(base_eval_cfg, eval_override_cfg)
             setattr(self.cfg.env.eval, "override_cfg", OmegaConf.create(base_eval_cfg))
+        self._inject_realworld_reward_cfg(self.cfg.env.eval)
+
+    def _inject_realworld_reward_cfg(self, env_cfg: DictConfig):
+        if not (self.use_reward_model and self.use_realworld_reward):
+            return
+        if env_cfg.env_type != "realworld":
+            return
+
+        reward_placements = self._component_placement.get_strategy(
+            "reward"
+        ).get_placement(Cluster())
+        assert len(reward_placements) > 0, (
+            "Reward placement must contain at least one worker."
+        )
+        reward_placement = reward_placements[0]
+        reward_hardware_ranks = self._component_placement.get_hardware_ranks("reward")
+        assert len(reward_hardware_ranks) > 0, (
+            "Reward placement must contain at least one hardware rank."
+        )
+
+        override_cfg = OmegaConf.to_container(
+            env_cfg.get("override_cfg", {}), resolve=True
+        )
+        override_cfg["use_reward_model"] = True
+        override_cfg["reward_worker_cfg"] = OmegaConf.to_container(
+            self.cfg.reward, resolve=True
+        )
+        override_cfg["reward_worker_hardware_rank"] = reward_hardware_ranks[0]
+        override_cfg["reward_worker_node_rank"] = reward_placement.cluster_node_rank
+        override_cfg["reward_worker_node_group"] = reward_placement.node_group_label
+        override_cfg["reward_image_key"] = env_cfg.main_image_key
+        setattr(env_cfg, "override_cfg", OmegaConf.create(override_cfg))
 
     def _setup_env_and_wrappers(self, env_cls, env_cfg, num_envs_per_stage: int):
         env_list = []
@@ -222,7 +264,7 @@ class EnvWorker(Worker):
                 src_rank=self._rank,
             ),
         }
-        if self.cfg.get("reward", {}).get("use_reward_model", False):
+        if self.use_external_reward_model:
             dst_rank_map.update(
                 {
                     "reward_train": CommMapper.get_dst_ranks(
@@ -269,7 +311,7 @@ class EnvWorker(Worker):
                 dst_rank=self._rank,
             ),
         }
-        if self.cfg.get("reward", {}).get("use_reward_model", False):
+        if self.use_external_reward_model:
             src_rank_map.update(
                 {
                     "reward_train": CommMapper.get_src_ranks(
@@ -334,7 +376,7 @@ class EnvWorker(Worker):
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         final_obs = (
             self._build_chunk_final_obs(obs_list, infos_list)
-            if self.cfg.get("reward", {}).get("use_reward_model", False)
+            if self.use_external_reward_model
             else infos["final_observation"]
             if isinstance(infos, dict) and "final_observation" in infos
             else None
@@ -404,7 +446,7 @@ class EnvWorker(Worker):
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         final_obs = (
             self._build_chunk_final_obs(obs_list, infos_list)
-            if self.cfg.get("reward", {}).get("use_reward_model", False)
+            if self.use_external_reward_model
             else infos["final_observation"]
             if isinstance(infos, dict) and "final_observation" in infos
             else None
