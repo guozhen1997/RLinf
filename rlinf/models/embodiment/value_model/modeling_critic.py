@@ -52,7 +52,6 @@ def make_att_2d_masks(pad_masks, att_masks):
     return att_2d_masks & pad_2d_masks
 
 
-
 @dataclass
 class CriticOutput(ModelOutput):
     """Output for critic models."""
@@ -66,7 +65,7 @@ class CriticOutput(ModelOutput):
     hidden_states: Optional[torch.FloatTensor] = None
     cat_acc_best: Optional[torch.FloatTensor] = None
     cat_acc_neighbor: Optional[torch.FloatTensor] = None
-    cat_mae: Optional[torch.FloatTensor] = None
+    mae: Optional[torch.FloatTensor] = None
 
 
 class VLMObservationEncoder(nn.Module):
@@ -392,7 +391,7 @@ class ValueCriticModel(VLMObservationEncoder):
             hidden_states=hidden_states,
             cat_acc_best=cat_metrics["acc_best"] if cat_metrics else None,
             cat_acc_neighbor=cat_metrics["acc_neighbor"] if cat_metrics else None,
-            cat_mae=cat_metrics["mae"] if cat_metrics else None,
+            mae=cat_metrics["mae"] if cat_metrics else None,
         )
 
     def _forward_expert(
@@ -436,10 +435,13 @@ class ValueCriticModel(VLMObservationEncoder):
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         # Prefix tokens are bidirectional (0), suffix ar_masks carry CLS causal mask.
-        att_masks = torch.cat([
-            torch.zeros_like(prefix_pad_masks, dtype=torch.long),
-            suffix_ar_masks,
-        ], dim=1)
+        att_masks = torch.cat(
+            [
+                torch.zeros_like(prefix_pad_masks, dtype=torch.long),
+                suffix_ar_masks,
+            ],
+            dim=1,
+        )
         attn_mask = make_att_2d_masks(pad_masks, att_masks)
         attn_mask_4d = self._prepare_attention_masks_4d(attn_mask)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
@@ -825,7 +827,7 @@ class ValueCriticModel(VLMObservationEncoder):
             action_norm_skip_dims=action_norm_skip_dims,
         )
 
-        from rlinf.datasets.lerobot.transforms import compose
+        from rlinf.data.datasets.cfg.lerobot.transforms import compose
 
         model._input_transform = compose(transforms)
         model._device = device

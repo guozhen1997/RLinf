@@ -50,7 +50,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from rlinf.datasets.rl_dataset import (
+from rlinf.data.datasets.cfg.return_loaders import (
     load_return_stats_from_dataset,
     load_returns_sidecar,
 )
@@ -299,9 +299,7 @@ def _parse_value_model_kwargs(cfg: DictConfig) -> dict:
         "num_return_bins": model_cfg.get("num_bins", 201),
         "return_min": model_cfg.get("v_min", -1.0),
         "return_max": model_cfg.get("v_max", 0.0),
-        "critic_expert_variant": model_cfg.get(
-            "critic_expert_variant", "gemma_100m"
-        ),
+        "critic_expert_variant": model_cfg.get("critic_expert_variant", "gemma_100m"),
         "tokenizer_path": model_cfg.get("tokenizer_path", None),
         "backbone_variant": model_cfg.get("backbone_variant", "paligemma"),
         "siglip_path": model_cfg.get("siglip_path", None),
@@ -603,7 +601,10 @@ def compute_advantages_for_dataset(
             f"  [Rank {rank}] Extended inference range: {shard_start} to {extended_end} ({extended_size} samples)"
         )
 
-    num_dataloader_workers = cfg.advantage.get("num_dataloader_workers", 8)
+    num_dataloader_workers_per_gpu = cfg.advantage.get(
+        "num_dataloader_workers_per_gpu",
+        cfg.advantage.get("num_dataloader_workers", 8),
+    )
     prefetch_factor = cfg.advantage.get("prefetch_factor", 2)
 
     # Periodically flushed to disk to prevent OOM
@@ -664,11 +665,11 @@ def compute_advantages_for_dataset(
         value_model.__class__._prepare_observation_cpu, processor=processor
     )
 
-    cpu_prep_in_workers = num_dataloader_workers > 0
+    cpu_prep_in_workers = num_dataloader_workers_per_gpu > 0
 
     if rank == 0:
         logger.info(
-            f"  Using DataLoader: workers={num_dataloader_workers}, "
+            f"  Using DataLoader: workers_per_gpu={num_dataloader_workers_per_gpu}, "
             f"prefetch_factor={prefetch_factor}, batch_size={batch_size}, "
             f"cpu_prep_in_workers={cpu_prep_in_workers}"
         )
@@ -687,9 +688,9 @@ def compute_advantages_for_dataset(
     dataloader = torch.utils.data.DataLoader(
         extended_dataset,
         batch_size=batch_size,
-        num_workers=num_dataloader_workers,
-        prefetch_factor=prefetch_factor if num_dataloader_workers > 0 else None,
-        persistent_workers=num_dataloader_workers > 0,
+        num_workers=num_dataloader_workers_per_gpu,
+        prefetch_factor=prefetch_factor if num_dataloader_workers_per_gpu > 0 else None,
+        persistent_workers=num_dataloader_workers_per_gpu > 0,
         collate_fn=advantage_collate_fn,
         shuffle=False,
         pin_memory=True,
