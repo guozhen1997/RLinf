@@ -130,6 +130,8 @@ env:
   
   eval:
     total_num_envs: 1
+    override_cfg:
+      is_dummy: False
 
 rollout:
   group_name: "RolloutGroup"
@@ -186,12 +188,13 @@ reward:
   use_reward_model: True
   group_name: "RewardGroup"
   
+  standalone_realworld: True
   # Reward mode:
   # - "per_step": Compute reward for every frame (default, prone to reward hacking)
   # - "terminal": Only compute reward at episode end (last frame), prevents reward hacking
-  reward_mode: "terminal"
+  reward_mode: "per_step"
 
-  reward_threshold: 0.5 # Probability threshold for success/fail classification
+  reward_threshold: 0.8 # Probability threshold for success/fail classification
   
   # How to combine learned rewards with environment rewards:
   # Weighted sum (reward = env_reward_weight * env_reward + reward_weight * reward_model_reward)
