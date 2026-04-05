@@ -106,8 +106,6 @@ class EnvWorker(Worker):
         self.src_rank_map = self._setup_src_rank_map()
         self.log_info(f"Env worker initialized with dst_rank_map: {self.dst_rank_map}")
         self.log_info(f"Env worker initialized with src_rank_map: {self.src_rank_map}")
-        train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train)
-        eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
 
         # This is a barrier to ensure all envs' initial setup upon import is done
         # Essential for RealWorld env to ensure initial ROS node setup is done
