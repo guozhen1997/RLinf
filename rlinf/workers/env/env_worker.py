@@ -89,6 +89,8 @@ class EnvWorker(Worker):
         )
         self.actor_split_num = self.get_actor_split_num()
 
+        self._prev_dones: list[torch.Tensor | None] = [None] * self.stage_num
+
     def init_worker(self):
         self.dst_rank_map = self._setup_dst_rank_map()
         self.src_rank_map = self._setup_src_rank_map()
@@ -410,14 +412,22 @@ class EnvWorker(Worker):
             else None
         )
 
-        if chunk_dones.any():
-            if "episode" in infos:
-                for key in infos["episode"]:
-                    env_info[key] = infos["episode"][key].cpu()
+        current_dones = chunk_dones[:, -1]  # [num_envs] bool
+        prev = self._prev_dones[stage_id]
+        if prev is None:
+            prev = torch.zeros_like(current_dones)
+        newly_done = current_dones & ~prev
+        self._prev_dones[stage_id] = current_dones.clone()
+
+        if newly_done.any():
             if "final_info" in infos:
                 final_info = infos["final_info"]
                 for key in final_info["episode"]:
-                    env_info[key] = final_info["episode"][key][chunk_dones[:, -1]].cpu()
+                    env_info[key] = final_info["episode"][key][newly_done].cpu()
+            elif "episode" in infos:
+                for key in infos["episode"]:
+                    env_info[key] = infos["episode"][key][newly_done].cpu()
+            env_info["num_completed"] = torch.tensor([newly_done.sum().item()])
 
         env_output = EnvOutput(
             obs=extracted_obs,
@@ -1012,6 +1022,7 @@ class EnvWorker(Worker):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
                 for stage_id in range(self.stage_num):
                     self.eval_env_list[stage_id].is_start = True
+                    self._prev_dones[stage_id] = None
                     extracted_obs, infos = self.eval_env_list[stage_id].reset()
                     env_output = EnvOutput(
                         obs=extracted_obs,
