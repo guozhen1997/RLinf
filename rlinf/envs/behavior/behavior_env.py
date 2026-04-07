@@ -421,7 +421,9 @@ class BehaviorEnv(gym.Env):
                 "episode_length": info.get("episode_length", 0),
             }
             self.returns[env_idx] += reward
-            done_dict = info.get("done", {}) if isinstance(info.get("done"), dict) else {}
+            done_dict = (
+                info.get("done", {}) if isinstance(info.get("done"), dict) else {}
+            )
             step_success = done_dict.get("success", False) or info.get("success", False)
             self.success_once[env_idx] = self.success_once[env_idx] | step_success
             episode_info["success_once"] = self.success_once[env_idx].clone()
