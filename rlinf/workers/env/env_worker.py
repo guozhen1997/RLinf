@@ -89,7 +89,14 @@ class EnvWorker(Worker):
         )
         self.actor_split_num = self.get_actor_split_num()
 
-        self._prev_dones: list[torch.Tensor | None] = [None] * self.stage_num
+        self.train_prev_done: list[torch.Tensor] = [
+            torch.zeros(self.train_num_envs_per_stage, dtype=torch.bool)
+            for _ in range(self.stage_num)
+        ]
+        self.eval_prev_done: list[torch.Tensor] = [
+            torch.zeros(self.eval_num_envs_per_stage, dtype=torch.bool)
+            for _ in range(self.stage_num)
+        ]
 
     def init_worker(self):
         self.dst_rank_map = self._setup_dst_rank_map()
@@ -413,11 +420,9 @@ class EnvWorker(Worker):
         )
 
         current_dones = chunk_dones[:, -1]  # [num_envs] bool
-        prev = self._prev_dones[stage_id]
-        if prev is None:
-            prev = torch.zeros_like(current_dones)
+        prev = self.eval_prev_done[stage_id]
         newly_done = current_dones & ~prev
-        self._prev_dones[stage_id] = current_dones.clone()
+        self.eval_prev_done[stage_id] = current_dones.clone()
 
         if newly_done.any():
             if "final_info" in infos:
@@ -1022,7 +1027,9 @@ class EnvWorker(Worker):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
                 for stage_id in range(self.stage_num):
                     self.eval_env_list[stage_id].is_start = True
-                    self._prev_dones[stage_id] = None
+                    self.eval_prev_done[stage_id] = torch.zeros(
+                        self.eval_num_envs_per_stage, dtype=torch.bool
+                    )
                     extracted_obs, infos = self.eval_env_list[stage_id].reset()
                     env_output = EnvOutput(
                         obs=extracted_obs,
