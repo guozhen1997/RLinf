@@ -432,7 +432,6 @@ class EnvWorker(Worker):
             elif "episode" in infos:
                 for key in infos["episode"]:
                     env_info[key] = infos["episode"][key][newly_done].cpu()
-            env_info["num_completed"] = torch.tensor([newly_done.sum().item()])
 
         env_output = EnvOutput(
             obs=extracted_obs,
