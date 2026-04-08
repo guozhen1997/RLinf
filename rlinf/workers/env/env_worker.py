@@ -89,14 +89,16 @@ class EnvWorker(Worker):
         )
         self.actor_split_num = self.get_actor_split_num()
 
-        self.train_prev_done: list[torch.Tensor] = [
-            torch.zeros(self.train_num_envs_per_stage, dtype=torch.bool)
-            for _ in range(self.stage_num)
-        ]
-        self.eval_prev_done: list[torch.Tensor] = [
-            torch.zeros(self.eval_num_envs_per_stage, dtype=torch.bool)
-            for _ in range(self.stage_num)
-        ]
+        if not self.only_eval:
+            self.train_prev_done: list[torch.Tensor] = [
+                torch.zeros(self.train_num_envs_per_stage, dtype=torch.bool)
+                for _ in range(self.stage_num)
+            ]
+        if self.enable_eval:
+            self.eval_prev_done: list[torch.Tensor] = [
+                torch.zeros(self.eval_num_envs_per_stage, dtype=torch.bool)
+                for _ in range(self.stage_num)
+            ]
 
     def init_worker(self):
         self.dst_rank_map = self._setup_dst_rank_map()

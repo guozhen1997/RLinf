@@ -441,27 +441,8 @@ class BehaviorEnv(gym.Env):
 
     @staticmethod
     def _extract_info_done(info: dict) -> bool:
-        done_val = info.get("done")
-        if done_val is None:
-            return False
-        if isinstance(done_val, bool):
-            return done_val
-        if isinstance(done_val, dict):
-            assert "termination_conditions" in done_val or "success" in done_val, (
-                f"Unexpected info['done'] dict structure: keys={list(done_val.keys())}. "
-                f"Expected 'termination_conditions' or 'success' key."
-            )
-            # Check termination_conditions → any {"done": True}.
-            tc = done_val.get("termination_conditions", {})
-            if tc:
-                return any(
-                    v.get("done", False) if isinstance(v, dict) else bool(v)
-                    for v in tc.values()
-                )
-            # Fallback: check top-level "success" (True → episode done).
-            return bool(done_val.get("success", False))
-        # Unknown type — coerce to bool as a last resort.
-        return bool(done_val)
+        tc = info["done"]["termination_conditions"]
+        return any(v["done"] for v in tc.values())
 
     def _handle_auto_reset(self, dones, extracted_obs, infos):
         final_obs = extracted_obs.copy()
