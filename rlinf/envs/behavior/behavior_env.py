@@ -151,8 +151,6 @@ class BehaviorEnv(gym.Env):
         self.logger = get_logger()
 
         self.auto_reset = cfg.auto_reset
-        self.max_episode_steps = cfg.max_episode_steps
-        self._step_count = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         if self.record_metrics:
             self._init_metrics()
         self._init_env()
@@ -254,7 +252,6 @@ class BehaviorEnv(gym.Env):
         rewards = torch.zeros(self.num_envs, dtype=bool)
         infos = self._record_metrics(rewards, infos)
         self._reset_metrics()
-        self._step_count[:] = 0
         return obs, infos
 
     def step(
@@ -304,13 +301,6 @@ class BehaviorEnv(gym.Env):
                 raw_terminations_list[i] = torch.zeros_like(raw_terminations_list[i])
             obs_list.append(self._wrap_obs(raw_obs_list[i]))
             infos_list.append(infos)
-
-        self._step_count += chunk_size
-        forced_truncation = (self._step_count >= self.max_episode_steps).cpu()
-        if forced_truncation.any():
-            raw_truncations_list[-1] = torch.logical_or(
-                raw_truncations_list[-1], forced_truncation
-            )
 
         chunk_rewards = torch.stack(raw_rewards_list, dim=1)  # [num_envs, chunk_steps]
         raw_terminations = torch.stack(
@@ -371,7 +361,7 @@ class BehaviorEnv(gym.Env):
 
     @property
     def elapsed_steps(self):
-        return self._step_count
+        return torch.tensor(self.cfg.max_episode_steps)
 
     @property
     def is_start(self):
