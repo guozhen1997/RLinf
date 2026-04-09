@@ -90,10 +90,26 @@ class EnvWorker(Worker):
         self.actor_split_num = self.get_actor_split_num()
 
     def init_worker(self):
-        self.dst_rank_map = self._setup_dst_rank_map()
-        self.src_rank_map = self._setup_src_rank_map()
-        self.log_info(f"Env worker initialized with dst_rank_map: {self.dst_rank_map}")
-        self.log_info(f"Env worker initialized with src_rank_map: {self.src_rank_map}")
+        # check env mode
+        env_mode = self.cfg.env.train.get("env_mode", None)
+        assert env_mode in ["async", None], f"{env_mode} is not supported"
+        self.env_async_mode = env_mode == "async"
+        if self.env_async_mode:
+            self.log_info("Env worker initialized with async mode")
+            self.batch_size_map = self._setup_async_env_mode_batch_size()
+            self.log_info(
+                f"Async model env worker initialized with batch_size_map: {self.batch_size_map}"
+            )
+        else:
+            self.dst_rank_map = self._setup_dst_rank_map()
+            self.src_rank_map = self._setup_src_rank_map()
+            self.log_info(
+                f"Env worker initialized with dst_rank_map: {self.dst_rank_map}"
+            )
+            self.log_info(
+                f"Env worker initialized with src_rank_map: {self.src_rank_map}"
+            )
+
         train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train)
         eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
 
@@ -202,6 +218,27 @@ class EnvWorker(Worker):
                 )
             env_list.append(env)
         return env_list
+
+    def _setup_async_env_mode_batch_size(self) -> dict[str, list[int]]:
+        """Compute batch_size for this env worker in async mode.
+
+        This mapping supports both one-to-many and many-to-one env/rollout/reward layouts.
+        get the async mode batch size index for this env worker
+        env outputs and receiving results from rollout and reward workers.
+
+        Returns:
+            Destination batch_size for this env worker.
+            The key is the channel name (e.g. "rollout_train", "reward_train", "rollout_eval"), and the value is a ordered list batch_size.
+        """
+
+        batch_size_map = {
+            "rollout_train": CommMapper.async_get_batch_index(
+                self.cfg.env.train.total_num_envs // self.stage_num,
+                self._component_placement.get_world_size("env"),
+                self._component_placement.get_world_size("rollout"),
+            ),
+        }
+        return batch_size_map
 
     def _setup_dst_rank_map(self) -> dict[str, list[tuple[int, int]]]:
         """Compute destination rank map for this env worker.
@@ -528,6 +565,55 @@ class EnvWorker(Worker):
         )
         return chunk_action
 
+    def _infer_rollout_batch_size(self, rollout_result: RolloutResult) -> int:
+        for field_name in (
+            "actions",
+            "prev_logprobs",
+            "prev_values",
+            "bootstrap_values",
+            "versions",
+        ):
+            value = getattr(rollout_result, field_name, None)
+            if isinstance(value, torch.Tensor):
+                return value.shape[0]
+        if rollout_result.forward_inputs:
+            first_tensor = next(iter(rollout_result.forward_inputs.values()))
+            if isinstance(first_tensor, torch.Tensor):
+                return first_tensor.shape[0]
+        raise ValueError("Cannot infer batch size from rollout result.")
+
+    @Worker.timer("recv_rollout_results_without_rankmap")
+    def recv_rollout_results_without_rankmap(
+        self, input_channel: Channel, mode="train"
+    ) -> RolloutResult:
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
+        batch_size_map = self.batch_size_map[f"rollout_{mode}"]
+        rollout_results: list[RolloutResult] = []
+        idx_rollout_results = []
+
+        for i, expected_size in enumerate(batch_size_map):
+            item = input_channel.get(
+                key=CommMapper.build_channel_key(
+                    self._rank, None, extra=f"{mode}_rollout_results"
+                ),
+            )
+            batch_index = item["batch_index"]
+            rollout_result = item["batch"]
+            _, rollout_result_idx, _, _ = batch_index.split("_", 3)
+            rollout_result_idx = int(rollout_result_idx)
+
+            actual_size = self._infer_rollout_batch_size(rollout_result)
+            assert actual_size == expected_size, (
+                f"Expected rollout result size {expected_size} get the batch index {i}, "
+                f"got {actual_size}."
+            )
+            idx_rollout_results.append((rollout_result_idx, rollout_result))
+
+        idx_rollout_results.sort(key=lambda x: x[0])
+        rollout_results = [x[1] for x in idx_rollout_results]
+
+        return RolloutResult.merge_rollout_results(rollout_results)
+
     @Worker.timer("recv_rollout_results")
     def recv_rollout_results(
         self, input_channel: Channel, mode="train"
@@ -536,23 +622,6 @@ class EnvWorker(Worker):
         src_ranks_and_sizes = self.src_rank_map[f"rollout_{mode}"]
         rollout_results: list[RolloutResult] = []
 
-        def _infer_rollout_batch_size(rollout_result: RolloutResult) -> int:
-            for field_name in (
-                "actions",
-                "prev_logprobs",
-                "prev_values",
-                "bootstrap_values",
-                "versions",
-            ):
-                value = getattr(rollout_result, field_name, None)
-                if isinstance(value, torch.Tensor):
-                    return value.shape[0]
-            if rollout_result.forward_inputs:
-                first_tensor = next(iter(rollout_result.forward_inputs.values()))
-                if isinstance(first_tensor, torch.Tensor):
-                    return first_tensor.shape[0]
-            raise ValueError("Cannot infer batch size from rollout result.")
-
         for src_rank, expected_size in src_ranks_and_sizes:
             rollout_result = input_channel.get(
                 key=CommMapper.build_channel_key(
@@ -560,7 +629,7 @@ class EnvWorker(Worker):
                 ),
             )
 
-            actual_size = _infer_rollout_batch_size(rollout_result)
+            actual_size = self._infer_rollout_batch_size(rollout_result)
             assert actual_size == expected_size, (
                 f"Expected rollout result size {expected_size} from rollout rank {src_rank}, "
                 f"got batch size {actual_size}."
@@ -654,6 +723,44 @@ class EnvWorker(Worker):
             rollout_channel.put(
                 item=env_batch_i,
                 key=CommMapper.build_channel_key(self._rank, rank, extra=f"{mode}_obs"),
+            )
+
+    def send_env_batch_without_rankmap(
+        self,
+        rollout_channel: Channel,
+        env_batch: dict[str, Any],
+        mode: Literal["train", "eval"] = "train",
+    ) -> None:
+        """Send split env batches to one of the rollout worker.
+
+        Env worker splits the data and sends it to a specific rollout worker.
+        Rollout worker processes the data in a stateless manner and
+        returns the corresponding rollout results in the following format.
+
+        the send information format:
+
+        {
+            "batch_index": f"{self._rank}_{index}_{mode}_obs"
+            "batch": batch,
+        }
+
+        batch_index: The unique identifier of this data.
+        batch: The data to send.
+
+        Args:
+            rollout_channel: Channel carrying env->rollout outputs.
+            env_batch: Env output dictionary for one pipeline stage.
+            mode: Rollout mode, either ``"train"`` or ``"eval"``.
+        """
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
+        split_sizes = self.batch_size_map[f"rollout_{mode}"]
+        env_batches = split_dict(env_batch, split_sizes)
+        for index, batch in enumerate(env_batches):
+            rollout_channel.put(
+                item={
+                    "batch_index": f"{self._rank}_{index}_{mode}_obs",
+                    "batch": batch,
+                },
             )
 
     def send_reward_input(
@@ -849,13 +956,22 @@ class EnvWorker(Worker):
             for stage_id in range(self.stage_num):
                 env_output: EnvOutput = env_outputs[stage_id]
                 env_batch = env_output.to_dict()
-                self.send_env_batch(
-                    rollout_channel,
-                    {
-                        "obs": env_batch["obs"],
-                        "final_obs": env_batch["final_obs"],
-                    },
-                )
+                if self.env_async_mode:
+                    self.send_env_batch_without_rankmap(
+                        rollout_channel,
+                        {
+                            "obs": env_batch["obs"],
+                            "final_obs": env_batch["final_obs"],
+                        },
+                    )
+                else:
+                    self.send_env_batch(
+                        rollout_channel,
+                        {
+                            "obs": env_batch["obs"],
+                            "final_obs": env_batch["final_obs"],
+                        },
+                    )
 
             for chunk_step_idx in range(self.n_train_chunk_steps):
                 for stage_id in range(self.stage_num):
@@ -882,9 +998,14 @@ class EnvWorker(Worker):
                                 reward_model_output.detach().float().reshape(-1).cpu()
                             )
 
-                    rollout_result = self.recv_rollout_results(
-                        input_channel, mode="train"
-                    )
+                    if self.env_async_mode:
+                        rollout_result = self.recv_rollout_results_without_rankmap(
+                            input_channel, mode="train"
+                        )
+                    else:
+                        rollout_result = self.recv_rollout_results(
+                            input_channel, mode="train"
+                        )
                     rewards = self.compute_bootstrap_rewards(
                         env_output, rollout_result.bootstrap_values, reward_model_output
                     )
@@ -913,13 +1034,22 @@ class EnvWorker(Worker):
                         rollout_result.actions, stage_id
                     )
                     env_batch = env_output.to_dict()
-                    self.send_env_batch(
-                        rollout_channel,
-                        {
-                            "obs": env_batch["obs"],
-                            "final_obs": env_batch["final_obs"],
-                        },
-                    )
+                    if self.env_async_mode:
+                        self.send_env_batch_without_rankmap(
+                            rollout_channel,
+                            {
+                                "obs": env_batch["obs"],
+                                "final_obs": env_batch["final_obs"],
+                            },
+                        )
+                    else:
+                        self.send_env_batch(
+                            rollout_channel,
+                            {
+                                "obs": env_batch["obs"],
+                                "final_obs": env_batch["final_obs"],
+                            },
+                        )
                     if self.collect_transitions:
                         next_obs = (
                             env_output.final_obs
@@ -954,7 +1084,14 @@ class EnvWorker(Worker):
                         env_metrics["reward_model_output"].append(
                             reward_model_output.detach().float().reshape(-1).cpu()
                         )
-                rollout_result = self.recv_rollout_results(input_channel, mode="train")
+                if self.env_async_mode:
+                    rollout_result = self.recv_rollout_results_without_rankmap(
+                        input_channel, mode="train"
+                    )
+                else:
+                    rollout_result = self.recv_rollout_results(
+                        input_channel, mode="train"
+                    )
                 rewards = self.compute_bootstrap_rewards(
                     env_output, rollout_result.bootstrap_values, reward_model_output
                 )

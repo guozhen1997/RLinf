@@ -124,26 +124,47 @@ class MultiStepRolloutWorker(Worker):
                 eval_batch_size=self.eval_batch_size,
             )
 
-        self.dst_ranks = {
-            "train": self._setup_dst_ranks(
-                self.total_num_train_envs // self.num_pipeline_stages
-            ),
-        }
-        self.src_ranks = {
-            "train": self._setup_src_ranks(
-                self.total_num_train_envs // self.num_pipeline_stages
-            ),
-        }
-        if self.enable_eval:
-            self.dst_ranks["eval"] = self._setup_dst_ranks(
-                self.total_num_eval_envs // self.num_pipeline_stages
+        env_mode = self.cfg.env.train.get("env_mode", None)
+        assert env_mode in ["async", None], f"{env_mode} is not supported"
+        self.env_async_mode = env_mode == "async"
+        if self.env_async_mode:
+            self.batch_size_map = {
+                "train": self._async_env_mode_setup_batch_size(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            self.log_info(
+                f"Async model rollout worker initialized with batch_size_map: {self.batch_size_map}"
             )
-            self.src_ranks["eval"] = self._setup_src_ranks(
-                self.total_num_eval_envs // self.num_pipeline_stages
-            )
+            self.batch_index_map = {
+                "train": [],
+                "eval": [],
+            }
+        else:
+            self.dst_ranks = {
+                "train": self._setup_dst_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            self.src_ranks = {
+                "train": self._setup_src_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            if self.enable_eval:
+                self.dst_ranks["eval"] = self._setup_dst_ranks(
+                    self.total_num_eval_envs // self.num_pipeline_stages
+                )
+                self.src_ranks["eval"] = self._setup_src_ranks(
+                    self.total_num_eval_envs // self.num_pipeline_stages
+                )
 
-        self.log_info(f"Rollout worker initialized with dst_ranks: {self.dst_ranks}")
-        self.log_info(f"Rollout worker initialized with src_ranks: {self.src_ranks}")
+            self.log_info(
+                f"Rollout worker initialized with dst_ranks: {self.dst_ranks}"
+            )
+            self.log_info(
+                f"Rollout worker initialized with src_ranks: {self.src_ranks}"
+            )
         self.setup_sample_params()
         if self.enable_offload:
             self.offload_model()
@@ -203,6 +224,14 @@ class MultiStepRolloutWorker(Worker):
             raise NotImplementedError(
                 f"Beta schedule {self._dagger_sampling_params['beta_schedule']} is not implemented"
             )
+
+    def _async_env_mode_setup_batch_size(self, batch_size: int) -> dict[str, list[int]]:
+        """Compute batch_size for this rollout worker in async mode."""
+        return CommMapper.async_get_batch_index(
+            batch_size=batch_size,
+            src_world_size=self.placement.get_world_size("rollout"),
+            dst_world_size=self.placement.get_world_size("env"),
+        )
 
     def _setup_dst_ranks(self, batch_size: int) -> list[tuple[int, int]]:
         """Compute env peer ranks for this rollout worker.
@@ -353,7 +382,12 @@ class MultiStepRolloutWorker(Worker):
         self.update_dagger_beta()
         for _ in range(self.n_train_chunk_steps):
             for _ in range(self.num_pipeline_stages):
-                env_output = await self.recv_env_output(input_channel)
+                if self.env_async_mode:
+                    env_output = await self.recv_env_output_without_rankmap(
+                        input_channel
+                    )
+                else:
+                    env_output = await self.recv_env_output(input_channel)
                 actions, result = self.predict(env_output["obs"])
 
                 save_flags = None
@@ -383,9 +417,19 @@ class MultiStepRolloutWorker(Worker):
                         dtype=torch.float32,
                     ),
                 )
-                self.send_rollout_result(output_channel, rollout_result, mode="train")
+                if self.env_async_mode:
+                    self.send_rollout_result_without_rankmap(
+                        output_channel, rollout_result, mode="train"
+                    )
+                else:
+                    self.send_rollout_result(
+                        output_channel, rollout_result, mode="train"
+                    )
         for _ in range(self.num_pipeline_stages):
-            env_output = await self.recv_env_output(input_channel)
+            if self.env_async_mode:
+                env_output = await self.recv_env_output_without_rankmap(input_channel)
+            else:
+                env_output = await self.recv_env_output(input_channel)
             actions, result = self.predict(env_output["obs"])
 
             rollout_result = RolloutResult(
@@ -395,7 +439,12 @@ class MultiStepRolloutWorker(Worker):
                     env_output.get("final_obs", None)
                 ),
             )
-            self.send_rollout_result(output_channel, rollout_result, mode="train")
+            if self.env_async_mode:
+                self.send_rollout_result_without_rankmap(
+                    output_channel, rollout_result, mode="train"
+                )
+            else:
+                self.send_rollout_result(output_channel, rollout_result, mode="train")
 
     async def generate(
         self,
@@ -475,6 +524,43 @@ class MultiStepRolloutWorker(Worker):
                 f"got {actual_size}."
             )
             obs_batches.append(obs_batch)
+        return self._merge_obs_batches(obs_batches)
+
+    async def recv_env_output_without_rankmap(
+        self, input_channel: Channel, mode: Literal["train", "eval"] = "train"
+    ) -> dict[str, Any]:
+        """Receive env outputs from mapped env ranks and merge if needed.
+
+        Args:
+            input_channel: Channel carrying env->rollout outputs.
+            mode: Rollout mode, either ``"train"`` or ``"eval"``.
+
+        Returns:
+            A single env output dict. When multiple env ranks are mapped to this
+            rollout worker, outputs are merged on batch dimension.
+        """
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
+
+        batch_size_map = self.batch_size_map[mode]
+        batch_index_map = self.batch_index_map[mode]
+        assert len(batch_index_map) == 0, (
+            f"batch_index_map must be empty, but got batch_index_map {batch_index_map}."
+        )
+
+        obs_batches = []
+        for expected_size in batch_size_map:
+            obs_batch = await input_channel.get(
+                async_op=True,
+            ).async_wait()
+            batch_index = obs_batch["batch_index"]
+            batch_index_map.append(batch_index)
+            actual_size = self._infer_env_batch_size(obs_batch["batch"])
+
+            assert actual_size == expected_size, (
+                f"Expected env output batch size {expected_size} get the batch_index {batch_index}, "
+                f"got {actual_size}."
+            )
+            obs_batches.append(obs_batch["batch"])
         return self._merge_obs_batches(obs_batches)
 
     def _split_actions(
@@ -618,6 +704,43 @@ class MultiStepRolloutWorker(Worker):
             )
             for idx in range(len(sizes))
         ]
+
+    def send_rollout_result_without_rankmap(
+        self,
+        output_channel: Channel,
+        rollout_result: RolloutResult,
+        mode: Literal["train", "eval"] = "train",
+    ):
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
+        batch_size_map = self.batch_size_map[mode]
+        batch_index_map = self.batch_index_map[mode]
+        assert len(batch_index_map) == len(batch_size_map), (
+            f"batch_index_map and batch_size_map must have the same length, but got {len(batch_index_map)} and {len(batch_size_map)}."
+        )
+        split_rollout_results = self._split_rollout_result(
+            rollout_result, batch_size_map
+        )
+        for i, rollout_result_i in enumerate(split_rollout_results):
+            batch_index = batch_index_map[i]
+            get_env_rank, batch_idx, _, _ = batch_index.split("_", 3)
+            get_env_rank = int(get_env_rank)
+            batch_idx = int(batch_idx)
+
+            item = {
+                "batch_index": f"{get_env_rank}_{batch_idx}_{mode}_rollout_results",
+                "batch": rollout_result_i,
+            }
+
+            output_channel.put(
+                item=item,
+                key=CommMapper.build_channel_key(
+                    get_env_rank, None, extra=f"{mode}_rollout_results"
+                ),
+                async_op=True,
+            )
+        # delete the batch index map
+        self.batch_index_map[mode] = []
+        return
 
     def send_rollout_result(
         self,
