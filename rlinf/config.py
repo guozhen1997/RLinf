@@ -58,6 +58,7 @@ class SupportedModel(Enum):
     CNN_POLICY = ("cnn_policy", "embodied")
     FLOW_POLICY = ("flow_policy", "embodied")
     CMA_POLICY = ("cma", "embodied")
+    LINGBOTVLA = ("lingbotvla", "embodied")
     CFG_MODEL = ("cfg_model", "embodied")
     VALUE_MODEL = ("value_model", "embodied")
 

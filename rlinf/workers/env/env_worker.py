@@ -32,6 +32,7 @@ from rlinf.envs.action_utils import prepare_actions
 from rlinf.envs.wrappers import RecordVideo
 from rlinf.scheduler import Channel, Cluster, Worker
 from rlinf.utils.comm_mapping import CommMapper
+from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.nested_dict_process import update_nested_cfg
 from rlinf.utils.placement import HybridComponentPlacement
 
@@ -873,3 +874,9 @@ class EnvWorker(Worker):
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
 
         return eval_metrics
+
+    def get_actor_split_num(self):
+        send_num = self._component_placement.get_world_size("env") * self.stage_num
+        recv_num = self._component_placement.get_world_size("actor")
+        split_num = compute_split_num(recv_num, send_num)
+        return split_num
