@@ -396,13 +396,13 @@ class BehaviorEnv(gym.Env):
     def _record_metrics(self, rewards, infos):
         info_lists = []
         for env_idx, (reward, info) in enumerate(zip(rewards, infos)):
-            done_dict = info["done"]
+            done_dict = info.get("done", {})
             episode_info = {
-                "success": done_dict["success"],
+                "success": done_dict.get("success", False),
                 "episode_length": info.get("episode_length", 0),
             }
             self.returns[env_idx] += reward
-            self.success_once[env_idx] = self.success_once[env_idx] | done_dict["success"]
+            self.success_once[env_idx] = self.success_once[env_idx] | done_dict.get("success", False)
             episode_info["success_once"] = self.success_once[env_idx].clone()
 
             episode_info["return"] = self.returns[env_idx].clone()
