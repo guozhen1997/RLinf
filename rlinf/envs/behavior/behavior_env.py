@@ -375,9 +375,6 @@ class BehaviorEnv(gym.Env):
         self.success_once = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.bool
         )
-        self.fail_once = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.bool
-        )
         self.returns = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.float32
         )
@@ -394,28 +391,20 @@ class BehaviorEnv(gym.Env):
         self.prev_step_reward[mask] = 0.0
         if self.record_metrics:
             self.success_once[mask] = False
-            self.fail_once[mask] = False
             self.returns[mask] = 0
 
     def _record_metrics(self, rewards, infos):
         info_lists = []
         for env_idx, (reward, info) in enumerate(zip(rewards, infos)):
+            done_dict = info["done"]
             episode_info = {
-                "success": info.get("done", {}).get("success", False),
+                "success": done_dict["success"],
                 "episode_length": info.get("episode_length", 0),
             }
             self.returns[env_idx] += reward
-            done_dict = (
-                info.get("done", {}) if isinstance(info.get("done"), dict) else {}
-            )
-            step_success = done_dict.get("success", False) or info.get("success", False)
-            self.success_once[env_idx] = self.success_once[env_idx] | step_success
+            self.success_once[env_idx] = self.success_once[env_idx] | done_dict["success"]
             episode_info["success_once"] = self.success_once[env_idx].clone()
 
-            step_fail = done_dict.get("fail", False) or info.get("fail", False)
-            if step_fail:
-                self.fail_once[env_idx] = self.fail_once[env_idx] | step_fail
-                episode_info["fail_once"] = self.fail_once[env_idx].clone()
             episode_info["return"] = self.returns[env_idx].clone()
             episode_info["episode_len"] = self.elapsed_steps.clone()
             episode_info["reward"] = (
