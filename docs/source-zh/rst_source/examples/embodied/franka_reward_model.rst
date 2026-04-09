@@ -20,9 +20,14 @@ Franka真机强化学习（基于 Reward Model ）
 
 数据采集
 -----------------------
-本步骤同 :doc:`franka` 中 ``运行实验`` 的 ``数据采集`` 小节。
-特别的，在修改配置文件 ``examples/embodiment/config/realworld_collect_data.yaml``时，
-需要将配置中的 ``env`` 部分的 ``data_collection`` 开启：
+
+专家轨迹数据采集
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+在数据采集方面，首先需要采集专家轨迹数据。
+该数据会在训练中事先存储在样本缓冲区（ demo buffer ）中，
+具体步骤同 :doc:`franka` 中 ``运行实验`` 的 ``数据采集`` 小节。
+注意确认，配置文件 ``examples/embodiment/config/realworld_collect_data.yaml``中 ``env`` 部分的 ``data_collection`` 已开启：
 
 .. code-block:: yaml
 
@@ -32,6 +37,15 @@ Franka真机强化学习（基于 Reward Model ）
        save_dir: ${runner.logger.log_path}/collected_data
        export_format: "pickle"
        only_success: True
+
+启动数据采集脚本后，环境会自动将 episode 保存到 ``save_dir``。当 ``export_format="pickle"`` 时，
+每个 episode 会被写入一个独立的 ``.pkl`` 文件，便于后续离线预处理。
+
+reward model 训练和评估数据采集
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+为了得到高质量的 reward model ，需要采集更多的数据用来训练和评估 reward model。
+在 :doc:`franka` 中 ``运行实验`` 的 ``数据采集`` 小节的基础上，进一步对采集脚本做以下修改。
 
 将配置中的 ``success_hold_steps`` 字段增大，以便在有限的采集轮次内得到更多的成功数据。
 机械臂末端在到达目标位姿后不会立刻判定为成功并重置，
@@ -45,9 +59,11 @@ Franka真机强化学习（基于 Reward Model ）
        override_cfg:
          success_hold_steps: 20
 
-启动训练或评估后，环境会自动将 episode 保存到 ``save_dir``。当 ``export_format="pickle"`` 时，
+启动数据采集脚本后，环境会自动将 episode 保存到 ``save_dir``。当 ``export_format="pickle"`` 时，
 每个 episode 会被写入一个独立的 ``.pkl`` 文件，便于后续离线预处理。
 
+在采集过程中，请尽量缓慢移动，以便获得更多样的失败样本。
+在到达目标位姿时，在保持目标位姿的前提下进行小范围移动，以便获得更多样的成功样本。
 
 预处理为 reward dataset
 -----------------------
@@ -67,6 +83,14 @@ Reward Model 训练
 -----------------------
 本步骤同 :doc:`../../tutorials/extend/reward_model` 中的 ``2. Reward Model 训练`` 部分。
 
+特别的，在真实世界场景中，建议降低 ``early_stop`` 的 ``min_delta``，例如：
+
+.. code-block:: bash
+
+  runner:
+    early_stop
+      min_delta: 1e-6
+          
 集群配置
 -----------------------
 本步骤同 :doc:`franka` 中的 ``运行实验`` 下的 ``集群配置`` 部分。

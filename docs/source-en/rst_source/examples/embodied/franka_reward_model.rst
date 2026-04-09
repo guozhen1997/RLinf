@@ -22,9 +22,13 @@ Follow all steps in the :doc:`franka` document up to and including **Data Collec
 Data Collection
 -----------------------
 
-This step is identical to the **Data Collection** section under **Running the Experiment** in :doc:`franka`.
+Expert Trajectory Data Collection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When modifying ``examples/embodiment/config/realworld_collect_data.yaml``, enable ``data_collection`` under the ``env`` section:
+For data collection, expert trajectory data needs to be collected first.
+This data will be stored in the demo buffer during training.
+Specifically, follow the steps in the **Data Collection** section under **Running the Experiment** in :doc:`franka`.
+Make sure that in ``examples/embodiment/config/realworld_collect_data.yaml``, ``data_collection`` under the ``env`` section is enabled:
 
 .. code-block:: yaml
 
@@ -34,6 +38,15 @@ When modifying ``examples/embodiment/config/realworld_collect_data.yaml``, enabl
        save_dir: ${runner.logger.log_path}/collected_data
        export_format: "pickle"
        only_success: True
+
+After launching the data collection script, episodes are automatically saved to ``save_dir``.
+When ``export_format="pickle"``, each episode is written to a separate ``.pkl`` file, which is convenient for subsequent offline preprocessing.
+
+Reward Model Training and Evaluation Data Collection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To obtain a high-quality reward model, more data needs to be collected for training and evaluation.
+Building on the **Data Collection** section in :doc:`franka`, make the following modifications to the collection script.
 
 Increase the ``success_hold_steps`` field to obtain more successful data within a limited number of collection episodes.
 When the robot arm end-effector reaches the target pose, success is not declared immediately — the arm must maintain the target pose for a certain number of steps (``success_hold_steps``) before being marked as successful.
@@ -46,8 +59,11 @@ If the arm exits the target zone mid-hold, the counter resets.
        override_cfg:
          success_hold_steps: 20
 
-After launching training or evaluation, episodes are automatically saved to ``save_dir``.
+After launching the data collection script, episodes are automatically saved to ``save_dir``.
 When ``export_format="pickle"``, each episode is written to a separate ``.pkl`` file, which is convenient for subsequent offline preprocessing.
+
+During collection, move the robot arm slowly to obtain more diverse failure samples.
+When reaching the target pose, make small-range movements while maintaining the target pose to obtain more diverse successful samples.
 
 
 Preprocessing into a Reward Dataset
@@ -69,6 +85,14 @@ Reward Model Training
 -----------------------
 
 This step is identical to **Section 2 — Reward Model Training** in :doc:`../../tutorials/extend/reward_model`.
+
+In particular, for real-world scenarios, it is recommended to lower the ``min_delta`` of ``early_stop``, for example:
+
+.. code-block:: bash
+
+  runner:
+    early_stop:
+      min_delta: 1e-6
 
 Cluster Configuration
 -----------------------
