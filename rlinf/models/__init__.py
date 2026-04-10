@@ -26,8 +26,12 @@ def get_model(cfg: DictConfig):
         from rlinf.models.embodiment.openvla_oft import get_model
     elif model_type == SupportedModel.OPENPI:
         from rlinf.models.embodiment.openpi import get_model
+    elif model_type == SupportedModel.STARVLA:
+        from rlinf.models.embodiment.starvla import get_model
     elif model_type == SupportedModel.DEXBOTIC_PI:
         from rlinf.models.embodiment.dexbotic_pi import get_model
+    elif model_type == SupportedModel.DREAMZERO:
+        from rlinf.models.embodiment.dreamzero import get_model
     elif model_type == SupportedModel.CFG_MODEL:
         from rlinf.models.embodiment.openpi_cfg import get_model
     elif model_type == SupportedModel.VALUE_MODEL:

@@ -41,17 +41,6 @@ as well as reinforcement learning training examples on real robots.
          Support LIBERO-Pro / LIBERO-Plus + OpenVLA-OFT / π₀ / π₀.₅ + PPO/GRPO training
        </p>
      </div>
-     
-     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/RLinf/misc/raw/main/pic/pi0_icon.jpg"
-            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-        <a href="pi0.html" style="text-decoration: underline; color: blue;">
-          <b>RL on π₀ and π₀.₅ Models</b>
-         </a><br>
-         Significant improvement in RL training on π₀ and π₀.₅
-       </p>
-     </div>
    </div>
 
    <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
@@ -317,6 +306,17 @@ as well as reinforcement learning training examples on real robots.
          Guide online imitation learning with expert relabeling and replay-buffer updates
        </p>
      </div>
+
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/recap.png"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="recap.html" style="text-decoration: underline; color: blue;">
+           <b>RECAP: Offline Advantage-Based Policy Optimization</b>
+         </a><br>
+         Offline policy optimization via advantage-guided classifier-free guidance
+       </p>
+     </div>
    </div>
 
    <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
@@ -331,29 +331,41 @@ as well as reinforcement learning training examples on real robots.
        </p>
      </div>
 
-     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
-            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-         <a href="franka.html" style="text-decoration: underline; color: blue;">
-           <b>Real-World RL with Franka</b>
-         </a><br>
-         RLinf worker seamlessly integrates with the Franka robotic arm
-       </p>
-     </div>
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="franka.html" style="text-decoration: underline; color: blue;">
+          <b>Real-World RL with Franka</b>
+        </a><br>
+        RLinf worker seamlessly integrates with the Franka robotic arm
+      </p>
+    </div>
 
-     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <!-- TODO(thumbnail): replace placeholder cover image URL for franka_zed_robotiq -->
-       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
-            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-         <a href="franka_zed_robotiq.html" style="text-decoration: underline; color: blue;">
-           <b>Real-World Franka with ZED Cameras and Robotiq Gripper</b>
-         </a><br>
-         ZED camera, Robotiq gripper, and data-collection setup for Franka
-       </p>
-     </div>
-   </div>
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <!-- TODO(thumbnail): replace placeholder cover image URL for franka_reward_model -->
+      <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="franka_reward_model.html" style="text-decoration: underline; color: blue;">
+          <b>Real-World RL with Franka (Reward Model)</b>
+        </a><br>
+        Use a reward model to assist robotic manipulation tasks
+      </p>
+    </div>
+
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <!-- TODO(thumbnail): replace placeholder cover image URL for franka_zed_robotiq -->
+      <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="franka_zed_robotiq.html" style="text-decoration: underline; color: blue;">
+          <b>Real-World Franka with ZED Cameras and Robotiq Gripper</b>
+        </a><br>
+        ZED camera, Robotiq gripper, and data-collection setup for Franka
+      </p>
+    </div>
+  </div>
 
    <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
@@ -389,17 +401,6 @@ as well as reinforcement learning training examples on real robots.
          SAC + CNN policy on the XSquare Turtle2 dual-arm robot
        </p>
      </div>
-
-     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-      <img src="https://github.com/RLinf/misc/raw/main/pic/recap.png"
-          style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-        <a href="recap.html" style="text-decoration: underline; color: blue;">
-          <b>RECAP: Offline Advantage-Based Policy Optimization</b>
-        </a><br>
-        Offline policy optimization via advantage-guided classifier-free guidance
-      </p>
-    </div>
    </div>
 
 
@@ -435,6 +436,7 @@ as well as reinforcement learning training examples on real robots.
    recap
    co_training
    franka
+   franka_reward_model
    franka_zed_robotiq
    franka_gello
    hg-dagger
