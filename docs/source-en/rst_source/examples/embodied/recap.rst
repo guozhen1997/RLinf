@@ -88,11 +88,9 @@ Dependency Installation
       --network host \
       --name rlinf \
       -v .:/workspace/RLinf \
-      <DOCKER_IMAGE_PLACEHOLDER>
-
-.. warning::
-
-   The Docker image name is to be determined. Replace ``<DOCKER_IMAGE_PLACEHOLDER>`` above with the actual image address.
+      rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
+      # For mainland China users, you can use the following for better download speed:
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
 
 Please switch to the OpenPI virtual environment via the built-in ``switch_env`` utility:
 
@@ -100,13 +98,27 @@ Please switch to the OpenPI virtual environment via the built-in ``switch_env`` 
 
    source switch_env openpi
 
+.. note::
+
+   Since the RECAP pipeline requires extra dependencies (``lerobot``, ``scikit-learn``) not included in the base image, install them after switching the environment:
+
+   .. code:: bash
+
+      uv pip install scikit-learn lerobot==0.3.3
+
+   Additionally, install the required system packages:
+
+   .. code:: bash
+
+      sudo apt-get install -y ffmpeg liblapack3 libopenblas-base
+
 **Option 2: Custom Environment**
 
 .. code:: bash
 
    # For mainland China users, you can add the `--use-mirror` flag to the install.sh command for better download speed.
 
-   bash requirements/install.sh embodied --model openpi --env maniskill_libero
+   bash requirements/install.sh embodied --model openpi_cfg --env maniskill_libero
    source .venv/bin/activate
 
 

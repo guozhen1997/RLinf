@@ -84,11 +84,9 @@ RECAP 包含四个顺序执行的阶段：
       --network host \
       --name rlinf \
       -v .:/workspace/RLinf \
-      <DOCKER_IMAGE_PLACEHOLDER>
-
-.. warning::
-
-   Docker 镜像名称待确定，请替换上方 ``<DOCKER_IMAGE_PLACEHOLDER>`` 为实际镜像地址。
+      rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
+      # 为提高国内下载速度，可以使用：
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
 
 进入容器后，切换到 OpenPI 虚拟环境：
 
@@ -96,13 +94,27 @@ RECAP 包含四个顺序执行的阶段：
 
    source switch_env openpi
 
+.. note::
+
+   由于 RECAP 流水线需要基础镜像未包含的额外依赖（``lerobot``、``scikit-learn``），切换环境后需安装：
+
+   .. code:: bash
+
+      uv pip install scikit-learn lerobot==0.3.3
+
+   此外，还需安装系统依赖：
+
+   .. code:: bash
+
+      sudo apt-get install -y ffmpeg liblapack3 libopenblas-base
+
 **方式二：自建环境**
 
 .. code:: bash
 
    # 为提高国内依赖安装速度，可以添加`--use-mirror`到下面的install.sh命令
 
-   bash requirements/install.sh embodied --model openpi --env maniskill_libero
+   bash requirements/install.sh embodied --model openpi_cfg --env maniskill_libero
    source .venv/bin/activate
 
 

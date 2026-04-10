@@ -17,7 +17,7 @@ GITHUB_PREFIX=""
 NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
 SUPPORTED_TARGETS=("embodied" "agentic" "docs")
-SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic" "starvla" "lingbotvla" "dreamzero")
+SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "openpi_cfg" "gr00t" "dexbotic" "starvla" "lingbotvla" "dreamzero")
 SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "liberopro" "liberoplus")
 
 #=======================Utility Functions=======================
@@ -336,6 +336,35 @@ clone_or_reuse_repo() {
     printf '%s\n' "$(realpath "$target_dir")"
 }
 
+install_lerobot_compat_shim() {
+    # Create compatibility shim for lerobot 0.3.x
+    # openpi uses lerobot.common.datasets (old API), but lerobot 0.3.x uses lerobot.datasets (new API)
+    local lerobot_path
+    lerobot_path=$(python -c "import lerobot; import os; print(os.path.dirname(lerobot.__file__))")
+    echo "Creating lerobot.common compatibility shim at: $lerobot_path/common"
+
+    mkdir -p "$lerobot_path/common/datasets"
+
+    cat > "$lerobot_path/common/__init__.py" << 'EOF'
+# Compatibility shim for lerobot 0.3.x
+# Redirects lerobot.common.* to lerobot.*
+EOF
+
+    cat > "$lerobot_path/common/datasets/__init__.py" << 'EOF'
+# Compatibility shim for lerobot 0.3.x
+# Redirects lerobot.common.datasets.* to lerobot.datasets.*
+from lerobot.datasets import *
+EOF
+
+    cat > "$lerobot_path/common/datasets/lerobot_dataset.py" << 'EOF'
+# Compatibility shim for lerobot 0.3.x
+# Redirects lerobot.common.datasets.lerobot_dataset to lerobot.datasets.lerobot_dataset
+from lerobot.datasets.lerobot_dataset import *
+EOF
+
+    echo "lerobot.common compatibility shim created successfully"
+}
+
 #=======================EMBODIED INSTALLERS=======================
 install_common_embodied_deps() {
     uv sync --extra embodied --active $NO_INSTALL_RLINF_CMD
@@ -519,6 +548,19 @@ EOF
     
     bash $SCRIPT_DIR/embodied/download_assets.sh --assets openpi
     uv pip uninstall pynvml || true
+}
+
+install_openpi_cfg_model() {
+    install_openpi_model
+
+    # Extra deps for openpi_cfg
+    uv pip install scikit-learn lerobot==0.3.3
+    install_lerobot_compat_shim
+
+    if [ "$NO_ROOT" -eq 0 ]; then
+        sudo apt-get update -y
+        sudo apt-get install -y --no-install-recommends ffmpeg liblapack3 libopenblas-base
+    fi
 }
 
 install_starvla_model() {
@@ -1003,6 +1045,9 @@ main() {
                     ;;
                 openpi)
                     install_openpi_model
+                    ;;
+                openpi_cfg)
+                    install_openpi_cfg_model
                     ;;
                 starvla)
                     install_starvla_model
