@@ -599,6 +599,7 @@ class EnvWorker(Worker):
             )
             batch_index = item["batch_index"]
             rollout_result = item["batch"]
+            # "batch_index": f"{get_env_rank}_{batch_idx}_{mode}_rollout_results"
             _, rollout_result_idx, _, _ = batch_index.split("_", 3)
             rollout_result_idx = int(rollout_result_idx)
 
@@ -730,6 +731,7 @@ class EnvWorker(Worker):
         rollout_channel: Channel,
         env_batch: dict[str, Any],
         mode: Literal["train", "eval"] = "train",
+        last_run: bool = False,
     ) -> None:
         """Send split env batches to one of the rollout worker.
 
@@ -758,7 +760,7 @@ class EnvWorker(Worker):
         for index, batch in enumerate(env_batches):
             rollout_channel.put(
                 item={
-                    "batch_index": f"{self._rank}_{index}_{mode}_obs",
+                    "batch_index": f"{self._rank}_{index}_{mode}_{last_run}_obs",
                     "batch": batch,
                 },
             )
@@ -1035,12 +1037,19 @@ class EnvWorker(Worker):
                     )
                     env_batch = env_output.to_dict()
                     if self.env_async_mode:
+                        last_env_batch = False
+                        if (
+                            chunk_step_idx == self.n_train_chunk_steps - 1
+                            and stage_id == self.stage_num - 1
+                        ):
+                            last_env_batch = True
                         self.send_env_batch_without_rankmap(
                             rollout_channel,
                             {
                                 "obs": env_batch["obs"],
                                 "final_obs": env_batch["final_obs"],
                             },
+                            last_run=last_env_batch,
                         )
                     else:
                         self.send_env_batch(
