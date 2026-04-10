@@ -329,6 +329,18 @@
        </p>
      </div>
 
+      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <!-- TODO(thumbnail): replace placeholder cover image URL for franka_reward_model -->
+       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="franka_reward_model.html" style="text-decoration: underline; color: blue;">
+           <b>Franka真机强化学习（基于 Reward Model ）</b>
+         </a><br>
+         使用 reward model 辅助完成机器人操作任务
+       </p>
+      </div>
+
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <!-- TODO(thumbnail): replace placeholder cover image URL for franka_zed_robotiq -->
        <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
@@ -367,6 +379,17 @@
      </div>
 
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/recap.png"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="recap.html" style="text-decoration: underline; color: blue;">
+           <b>RECAP：离线优势条件策略优化</b>
+         </a><br>
+         基于优势引导的离线策略优化
+       </p>
+     </div>
+
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <img src="https://github.com/RLinf/misc/raw/main/pic/xsquare_turtle2_arm_small.jpg"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
@@ -374,18 +397,6 @@
            <b>XSquare Turtle2 真机强化学习</b>
          </a><br>
          SAC + CNN 策略在 XSquare Turtle2 双臂机器人上的真机训练
-       </p>
-     </div>
-
-     <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
-      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/RLinf/misc/raw/main/pic/recap.png"
-            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-        <a href="recap.html" style="text-decoration: underline; color: blue;">
-          <b>RECAP：离线优势条件策略优化</b>
-        </a><br>
-        基于优势引导的离线策略优化
        </p>
      </div>
    </div>
@@ -423,6 +434,7 @@
    recap
    co_training
    franka
+   franka_reward_model
    franka_zed_robotiq
    franka_gello
    hg-dagger
