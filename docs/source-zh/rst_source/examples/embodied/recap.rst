@@ -108,6 +108,22 @@ RECAP 包含四个顺序执行的阶段：
 
       sudo apt-get install -y ffmpeg liblapack3 libopenblas-base
 
+   ``lerobot 0.3.x`` 将 ``lerobot.common.datasets`` 重命名为 ``lerobot.datasets``，导致 OpenPI 使用的旧 API 无法正常工作。需要创建兼容性 shim 来修复：
+
+   .. code:: bash
+
+      LEROBOT_PATH=$(python -c "import lerobot; import os; print(os.path.dirname(lerobot.__file__))")
+      mkdir -p "$LEROBOT_PATH/common/datasets"
+      cat > "$LEROBOT_PATH/common/__init__.py" << 'EOF'
+      # Compatibility shim for lerobot 0.3.x
+      EOF
+      cat > "$LEROBOT_PATH/common/datasets/__init__.py" << 'EOF'
+      from lerobot.datasets import *
+      EOF
+      cat > "$LEROBOT_PATH/common/datasets/lerobot_dataset.py" << 'EOF'
+      from lerobot.datasets.lerobot_dataset import *
+      EOF
+
 **方式二：自建环境**
 
 .. code:: bash

@@ -112,6 +112,22 @@ Please switch to the OpenPI virtual environment via the built-in ``switch_env`` 
 
       sudo apt-get install -y ffmpeg liblapack3 libopenblas-base
 
+   ``lerobot 0.3.x`` renamed ``lerobot.common.datasets`` to ``lerobot.datasets``, which breaks the old API used by OpenPI. Create a compatibility shim to fix this:
+
+   .. code:: bash
+
+      LEROBOT_PATH=$(python -c "import lerobot; import os; print(os.path.dirname(lerobot.__file__))")
+      mkdir -p "$LEROBOT_PATH/common/datasets"
+      cat > "$LEROBOT_PATH/common/__init__.py" << 'EOF'
+      # Compatibility shim for lerobot 0.3.x
+      EOF
+      cat > "$LEROBOT_PATH/common/datasets/__init__.py" << 'EOF'
+      from lerobot.datasets import *
+      EOF
+      cat > "$LEROBOT_PATH/common/datasets/lerobot_dataset.py" << 'EOF'
+      from lerobot.datasets.lerobot_dataset import *
+      EOF
+
 **Option 2: Custom Environment**
 
 .. code:: bash
