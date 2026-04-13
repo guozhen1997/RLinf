@@ -47,6 +47,30 @@
 - 让 ``model_type`` 通过 RLinf 的配置校验
 - 让 ``rlinf.models.get_model(cfg)`` 能正确构建你的模型
 
+作为依赖库使用时的分布式注册（``RLINF_EXT_MODULE``）
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+当 RLinf 以第三方依赖形式集成到你的工程里、并由 **Ray** 拉起分布式 Worker 时，
+仅在主进程（driver）里执行 ``register_model(...)`` 等注册代码，**不会**自动同步到
+各个 Worker 进程：Worker 是独立的 Python 进程，不会重复执行你在入口脚本里的注册逻辑。
+因此，在 rollout、训练等实际跑在 Worker 上的路径里，模型可能仍未注册，导致构建或
+查找失败。
+
+为此，请通过环境变量 ``RLINF_EXT_MODULE`` 指定一个 **扩展模块** 的 import 路径。
+RLinf 在 **每个 Worker 初始化时** 会自动 ``import`` 该模块，并在存在时调用其
+``register()``，从而在 Worker 侧完成与主进程一致的模型（或其它扩展）注册，无需改
+RLinf 源码。
+
+扩展模块需实现 ``register()``，在其中调用 ``register_model`` 等逻辑。环境变量写法与
+说明见 ``rlinf/scheduler/cluster/cluster.py`` 中 ``ClusterEnvVar.EXT_MODULE`` 的文档字符串，
+例如：
+
+.. code-block:: bash
+
+   export RLINF_EXT_MODULE=rlinf_ext
+   # 或使用完整包路径，例如：
+   export RLINF_EXT_MODULE=workflows.scripts.rlinf_ext
+
 2. 模型实现
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

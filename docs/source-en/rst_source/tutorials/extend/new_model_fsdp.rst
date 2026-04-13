@@ -52,6 +52,32 @@ This single registration does two things:
 - Makes ``model_type`` pass RLinf config validation.
 - Makes ``rlinf.models.get_model(cfg)`` build your model correctly.
 
+Distributed registration when RLinf is a dependency (``RLINF_EXT_MODULE``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When RLinf is pulled in as a third-party dependency and **Ray** launches
+distributed workers, calling ``register_model(...)`` only in the main (driver)
+process **does not** carry over to worker processes: workers are separate Python
+processes and will not re-execute the registration code from your entry script.
+As a result, code paths that actually run on workers (rollout, training, etc.)
+may still see an unregistered model and fail to build or resolve it.
+
+Set the environment variable ``RLINF_EXT_MODULE`` to the import path of an
+**extension module**. On **each worker initialization**, RLinf imports that module
+and, when defined, invokes its ``register()`` so workers perform the same model
+(or other extension) registration as the driver, without patching RLinf.
+
+The extension module should implement ``register()`` and call ``register_model``
+and any other needed hooks there. For the exact env var format and examples, see
+the docstring of ``ClusterEnvVar.EXT_MODULE`` in
+``rlinf/scheduler/cluster/cluster.py``, e.g.:
+
+.. code-block:: bash
+
+   export RLINF_EXT_MODULE=rlinf_ext
+   # or a fully qualified package path, e.g.:
+   export RLINF_EXT_MODULE=workflows.scripts.rlinf_ext
+
 2. Model Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
