@@ -39,6 +39,7 @@ from rlinf.utils.nested_dict_process import (
     update_nested_cfg,
 )
 from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.utils.utils import _build_channel_message, _split_channel_message
 
 
 class EnvWorker(Worker):
@@ -649,8 +650,8 @@ class EnvWorker(Worker):
                 return first_tensor.shape[0]
         raise ValueError("Cannot infer batch size from rollout result.")
 
-    @Worker.timer("recv_rollout_results_without_rankmap")
-    def recv_rollout_results_without_rankmap(
+    @Worker.timer("recv_rollout_results_from_channel")
+    def recv_rollout_results_from_channel(
         self, input_channel: Channel, mode="train"
     ) -> RolloutResult:
         assert mode in ["train", "eval"], f"{mode=} is not supported"
@@ -666,9 +667,7 @@ class EnvWorker(Worker):
             )
             batch_index = item["batch_index"]
             rollout_result = item["batch"]
-            # "batch_index": f"{get_env_rank}_{batch_idx}_{mode}_rollout_results"
-            _, rollout_result_idx, _, _ = batch_index.split("_", 3)
-            rollout_result_idx = int(rollout_result_idx)
+            _, rollout_result_idx, _, _ = _split_channel_message(batch_index)
 
             actual_size = self._infer_rollout_batch_size(rollout_result)
             assert actual_size == expected_size, (
@@ -793,7 +792,7 @@ class EnvWorker(Worker):
                 key=CommMapper.build_channel_key(self._rank, rank, extra=f"{mode}_obs"),
             )
 
-    def send_env_batch_without_rankmap(
+    def send_env_batch_to_channel(
         self,
         rollout_channel: Channel,
         env_batch: dict[str, Any],
@@ -827,7 +826,9 @@ class EnvWorker(Worker):
         for index, batch in enumerate(env_batches):
             rollout_channel.put(
                 item={
-                    "batch_index": f"{self._rank}_{index}_{mode}_{last_run}_obs",
+                    "batch_index": _build_channel_message(
+                        self._rank, index, mode, last_run, "obs"
+                    ),
                     "batch": batch,
                 },
             )
@@ -1026,7 +1027,7 @@ class EnvWorker(Worker):
                 env_output: EnvOutput = env_outputs[stage_id]
                 env_batch = env_output.to_dict()
                 if self.env_async_mode:
-                    self.send_env_batch_without_rankmap(
+                    self.send_env_batch_to_channel(
                         rollout_channel,
                         {
                             "obs": env_batch["obs"],
@@ -1068,7 +1069,7 @@ class EnvWorker(Worker):
                             )
 
                     if self.env_async_mode:
-                        rollout_result = self.recv_rollout_results_without_rankmap(
+                        rollout_result = self.recv_rollout_results_from_channel(
                             input_channel, mode="train"
                         )
                     else:
@@ -1110,7 +1111,7 @@ class EnvWorker(Worker):
                             and stage_id == self.stage_num - 1
                         ):
                             last_env_batch = True
-                        self.send_env_batch_without_rankmap(
+                        self.send_env_batch_to_channel(
                             rollout_channel,
                             {
                                 "obs": env_batch["obs"],
@@ -1161,7 +1162,7 @@ class EnvWorker(Worker):
                             reward_model_output.detach().float().reshape(-1).cpu()
                         )
                 if self.env_async_mode:
-                    rollout_result = self.recv_rollout_results_without_rankmap(
+                    rollout_result = self.recv_rollout_results_from_channel(
                         input_channel, mode="train"
                     )
                 else:

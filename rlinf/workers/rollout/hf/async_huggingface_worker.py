@@ -24,6 +24,7 @@ from rlinf.data.embodied_io_struct import (
 )
 from rlinf.scheduler import Channel
 from rlinf.utils.comm_mapping import CommMapper
+from rlinf.utils.utils import _build_channel_message, _split_channel_message
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
@@ -166,21 +167,21 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         self._weight_sync_requested = True
         self._start_background_weight_sync_if_needed()
 
-    def _split_rollout_result_with_last_run_index(
+    def _split_rollout_result_by_last_run(
         self,
         rollout_result: RolloutResult,
         sizes: list[int],
-        last_run_index: list[bool],
+        is_last_run: list[bool],
     ) -> list[RolloutResult]:
-        """This func according the last_run_index to get the return_result
-        if the last_run_index is True:
+        """This func according the is_last_run to get the return_result
+        if the is_last_run is True:
             the return result:
             RolloutResult(
                 actions,
                 prev_values,
                 bootstrap_values,
             )
-        else the last_run_index is False:
+        else the is_last_run is False:
             the return result:
             RolloutResult(
                 actions,
@@ -193,8 +194,8 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             )
         the return results is a list of RolloutResult
         """
-        assert len(last_run_index) == len(sizes), (
-            f"last_run_index and sizes must have the same length, but got {len(last_run_index)} and {len(sizes)}."
+        assert len(is_last_run) == len(sizes), (
+            f"is_last_run and sizes must have the same length, but got {len(is_last_run)} and {len(sizes)}."
         )
 
         def _split_optional_tensor(
@@ -224,7 +225,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
 
         return_results = []
         for idx in range(len(sizes)):
-            if last_run_index[idx]:
+            if is_last_run[idx]:
                 return_results.append(
                     RolloutResult(
                         actions=split_actions[idx],
@@ -246,7 +247,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 )
         return return_results
 
-    def send_rollout_result_without_rankmap(
+    def send_rollout_result_to_channel(
         self,
         output_channel: Channel,
         rollout_result: RolloutResult,
@@ -259,33 +260,33 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             f"batch_index_map and batch_size_map must have the same length, but got {len(batch_index_map)} and {len(batch_size_map)}."
         )
 
-        last_run_index = []
+        is_last_run = []
         for i in range(len(batch_size_map)):
             batch_index = batch_index_map[i]
-            # batch_index: f"{self._rank}_{index}_{mode}_{last_run}_obs"
-            _, _, _, last_run, _ = batch_index.split("_", 4)
+            _, _, _, last_run = _split_channel_message(batch_index)
             last_run = last_run == "True"
-            last_run_index.append(last_run)
+            is_last_run.append(last_run)
 
-        split_rollout_results = self._split_rollout_result_with_last_run_index(
-            rollout_result, batch_size_map, last_run_index
+        split_rollout_results = self._split_rollout_result_by_last_run(
+            rollout_result, batch_size_map, is_last_run
         )
-        for i, rollout_result_i in enumerate(split_rollout_results):
+        for i, shard_result in enumerate(split_rollout_results):
             batch_index = batch_index_map[i]
-            # batch_index: f"{self._rank}_{index}_{mode}_{last_run}_obs"
-            get_env_rank, batch_idx, _, _, _ = batch_index.split("_", 4)
-            get_env_rank = int(get_env_rank)
+            env_rank, batch_idx, _, last_run = _split_channel_message(batch_index)
+            env_rank = int(env_rank)
             batch_idx = int(batch_idx)
 
             item = {
-                "batch_index": f"{get_env_rank}_{batch_idx}_{mode}_rollout_results",
-                "batch": rollout_result_i,
+                "batch_index": _build_channel_message(
+                    env_rank, batch_idx, mode, last_run, "rollout_results"
+                ),
+                "batch": shard_result,
             }
 
             output_channel.put(
                 item=item,
                 key=CommMapper.build_channel_key(
-                    get_env_rank, None, extra=f"{mode}_rollout_results"
+                    env_rank, None, extra=f"{mode}_rollout_results"
                 ),
                 async_op=True,
             )
@@ -293,7 +294,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         self.batch_index_map[mode] = []
         return
 
-    async def recv_env_output_without_rankmap(
+    async def recv_env_output_from_channel(
         self, input_channel: Channel, mode: Literal["train", "eval"] = "train"
     ) -> dict[str, Any]:
         """Receive env outputs from mapped env ranks and merge if needed.
@@ -335,7 +336,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
     ):
         self.update_dagger_beta()
         while True:
-            env_output = await self.recv_env_output_without_rankmap(input_channel)
+            env_output = await self.recv_env_output_from_channel(input_channel)
             actions, result = self.predict(env_output["obs"])
             save_flags = None
             if result.get("expert_label_flag", False):
@@ -362,6 +363,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     dtype=torch.float32,
                 ),
             )
-            self.send_rollout_result_without_rankmap(
+            self.send_rollout_result_to_channel(
                 output_channel, rollout_result, mode="train"
             )
