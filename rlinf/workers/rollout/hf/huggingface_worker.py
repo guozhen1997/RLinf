@@ -136,6 +136,28 @@ class MultiStepRolloutWorker(Worker):
             self.log_info(
                 f"Async model rollout worker initialized with batch_size_map: {self.batch_size_map}"
             )
+        else:
+            self.dst_ranks = {}
+            self.src_ranks = {}
+
+        if not self.cfg.runner.only_eval:
+            self.dst_ranks = {
+                "train": self._setup_dst_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            self.src_ranks = {
+                "train": self._setup_src_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+        if self.enable_eval:
+            self.dst_ranks["eval"] = self._setup_dst_ranks(
+                self.total_num_eval_envs // self.num_pipeline_stages
+            )
+            self.src_ranks["eval"] = self._setup_src_ranks(
+                self.total_num_eval_envs // self.num_pipeline_stages
+            )
             self.batch_index_map = {
                 "train": [],
                 "eval": [],
