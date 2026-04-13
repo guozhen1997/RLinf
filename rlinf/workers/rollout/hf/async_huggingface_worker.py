@@ -286,7 +286,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             output_channel.put(
                 item=item,
                 key=CommMapper.build_channel_key(
-                    env_rank, None, extra=f"{mode}_rollout_results"
+                    None, env_rank, extra=f"{mode}_rollout_results"
                 ),
                 async_op=True,
             )

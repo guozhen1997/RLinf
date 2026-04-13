@@ -133,6 +133,11 @@ class MultiStepRolloutWorker(Worker):
                     self.total_num_train_envs // self.num_pipeline_stages
                 ),
             }
+            # save the run-time imformation in communicate channel for async mode
+            self.batch_index_map = {
+                "train": [],
+                "eval": [],
+            }
             self.log_info(
                 f"Async model rollout worker initialized with batch_size_map: {self.batch_size_map}"
             )
@@ -158,10 +163,6 @@ class MultiStepRolloutWorker(Worker):
             self.src_ranks["eval"] = self._setup_src_ranks(
                 self.total_num_eval_envs // self.num_pipeline_stages
             )
-            self.batch_index_map = {
-                "train": [],
-                "eval": [],
-            }
         else:
             self.dst_ranks = {
                 "train": self._setup_dst_ranks(

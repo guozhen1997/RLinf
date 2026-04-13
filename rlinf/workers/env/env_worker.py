@@ -283,14 +283,25 @@ class EnvWorker(Worker):
             Destination batch_size for this env worker.
             The key is the channel name (e.g. "rollout_train", "reward_train", "rollout_eval"), and the value is a ordered list batch_size.
         """
+        if not self.only_eval:
+            batch_size_map = {
+                "rollout_train": CommMapper.async_get_batch_index(
+                    self.cfg.env.train.total_num_envs // self.stage_num,
+                    self._component_placement.get_world_size("env"),
+                    self._component_placement.get_world_size("rollout"),
+                ),
+            }
+            if self.cfg.get("reward", {}).get("use_reward_model", False):
+                batch_size_map.update(
+                    {
+                        "reward_train": CommMapper.async_get_batch_index(
+                            self.cfg.env.train.total_num_envs // self.stage_num,
+                            self._component_placement.get_world_size("env"),
+                            self._component_placement.get_world_size("reward"),
+                        ),
+                    }
+                )
 
-        batch_size_map = {
-            "rollout_train": CommMapper.async_get_batch_index(
-                self.cfg.env.train.total_num_envs // self.stage_num,
-                self._component_placement.get_world_size("env"),
-                self._component_placement.get_world_size("rollout"),
-            ),
-        }
         return batch_size_map
 
     def _setup_dst_rank_map(self) -> dict[str, list[tuple[int, int]]]:
@@ -662,7 +673,7 @@ class EnvWorker(Worker):
         for i, expected_size in enumerate(batch_size_map):
             item = input_channel.get(
                 key=CommMapper.build_channel_key(
-                    self._rank, None, extra=f"{mode}_rollout_results"
+                    None, self._rank, extra=f"{mode}_rollout_results"
                 ),
             )
             batch_index = item["batch_index"]
@@ -851,6 +862,52 @@ class EnvWorker(Worker):
                 async_op=True,
             )
 
+    def send_reward_input_to_channel(
+        self,
+        send_channel: Channel,
+        reward_input: dict[str, torch.Tensor],
+        mode: Literal["train", "eval"] = "train",
+    ):
+        """Send split env batches to one of the reward worker.
+
+        Env worker splits the data and sends it to a specific reward worker.
+        Rollout worker processes the data in a stateless manner and
+        returns the corresponding reward results in the following format.
+
+        the send information format:
+
+        {
+            "batch_index": f"{self._rank}_{index}_{mode}_reward_input"
+            "batch": batch,
+        }
+
+        batch_index: The unique identifier of this data.
+        batch: The data to send.
+
+        Args:
+            send_channel: Channel carrying env->reward outputs.
+            reward_input: Env output dictionary for one pipeline stage.
+            mode: Rollout mode, either ``"train"`` or ``"eval"``.
+        """
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
+        split_sizes = self.batch_size_map[f"reward_{mode}"]
+        reward_input_batches = split_dict(reward_input, split_sizes)
+
+        last_run = False
+
+        if reward_input.get("last_run", None) is not None:
+            last_run = True
+        for index, reward_input in enumerate(reward_input_batches):
+            send_channel.put(
+                item={
+                    "batch_index": _build_channel_message(
+                        self._rank, index, mode, last_run, "reward_input"
+                    ),
+                    "batch": reward_input,
+                },
+                async_op=True,
+            )
+
     @Worker.timer("recv_reward_results")
     def recv_reward_results(self, recv_channel: Channel) -> torch.Tensor:
         reward_results: list[torch.Tensor] = []
@@ -867,6 +924,34 @@ class EnvWorker(Worker):
                 f"got batch size {actual_size}."
             )
             reward_results.append(rewards)
+        return torch.cat(reward_results, dim=0)
+
+    @Worker.timer("recv_reward_results_from_channel")
+    def recv_reward_results_from_channel(self, recv_channel: Channel) -> torch.Tensor:
+        reward_results: list[torch.Tensor] = []
+        batch_size_map = self.batch_size_map["reward_train"]
+        idx_reward_results = []
+
+        for i, expected_size in enumerate(batch_size_map):
+            item = recv_channel.get(
+                key=CommMapper.build_channel_key(
+                    None, self._rank, extra="reward_output"
+                ),
+            )
+            batch_index = item["batch_index"]
+            rewards = item["batch"]
+            _, rewards_idx, _, _ = _split_channel_message(batch_index)
+
+            actual_size = rewards.shape[0]
+            assert actual_size == expected_size, (
+                f"Expected rollout result size {expected_size} get the batch index {i}, "
+                f"got {actual_size}."
+            )
+            idx_reward_results.append((rewards_idx, rewards))
+
+        idx_reward_results.sort(key=lambda x: x[0])
+        reward_results = [x[1] for x in idx_reward_results]
+
         return torch.cat(reward_results, dim=0)
 
     @Worker.timer("get_reward_model_output")
@@ -897,8 +982,16 @@ class EnvWorker(Worker):
                     )
                 }
             )
-        self.send_reward_input(send_channel=send_channel, reward_input=reward_input)
-        reward_output = self.recv_reward_results(recv_channel=recv_channel)
+        if self.env_async_mode:
+            self.send_reward_input_to_channel(
+                send_channel=send_channel, reward_input=reward_input
+            )
+            reward_output = self.recv_reward_results_from_channel(
+                recv_channel=recv_channel
+            )
+        else:
+            self.send_reward_input(send_channel=send_channel, reward_input=reward_input)
+            reward_output = self.recv_reward_results(recv_channel=recv_channel)
         if self.reward_mode != "terminal" or reward_output is None:
             return reward_output
         return self._scatter_terminal_reward_output(
