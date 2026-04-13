@@ -92,12 +92,12 @@ def _register_builtin_models():
         from rlinf.models.embodiment.lingbotvla import get_model
 
         return get_model(cfg, torch_dtype)
-    
+
     def _build_starvla(cfg: DictConfig, torch_dtype):
         from rlinf.models.embodiment.starvla import get_model
 
         return get_model(cfg, torch_dtype)
-    
+
     def _build_dreamzero(cfg: DictConfig, torch_dtype):
         from rlinf.models.embodiment.dreamzero import get_model
 

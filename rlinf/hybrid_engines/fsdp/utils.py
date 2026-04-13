@@ -114,7 +114,10 @@ def _resolve_module_classes_to_wrap(module, module_classes_to_wrap):
                 raise Exception("Could not find the module class to wrap in the model.")
             resolved_module_classes.add(resolved_class)
         else:
-            resolved_module_classes.add(module_class)
+            raise TypeError(
+                "module_classes_to_wrap entries must be class name strings; "
+                f"got {type(module_class).__name__!r}"
+            )
     return resolved_module_classes
 
 
@@ -166,10 +169,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
             )
 
         fsdp_transformer_layer_cls_to_wrap = _normalize_wrap_targets(
-            wrap_policy_config.get(
-                "transformer_layer_cls_to_wrap",
-                default_transformer_cls_names_to_wrap,
-            )
+            default_transformer_cls_names_to_wrap
         )
         module_classes_to_wrap = None
         no_split_names = getattr(module, "_no_split_names", None)
@@ -374,10 +374,7 @@ def apply_fsdp2_to_model(
                 module, "_no_split_modules", None
             )
         fsdp_transformer_layer_cls_to_wrap = _normalize_wrap_targets(
-            wrap_policy_config.get(
-                "transformer_layer_cls_to_wrap",
-                default_transformer_cls_names_to_wrap,
-            )
+            default_transformer_cls_names_to_wrap
         )
         module_classes_to_wrap = None
         no_split_names = None
