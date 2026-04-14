@@ -132,6 +132,9 @@ class MultiStepRolloutWorker(Worker):
                 "train": self._async_env_mode_setup_batch_size(
                     self.total_num_train_envs // self.num_pipeline_stages
                 ),
+                "eval": self._async_env_mode_setup_batch_size(
+                    self.total_num_eval_envs // self.num_pipeline_stages
+                ),
             }
             # save the run-time imformation in communicate channel for async mode
             self.batch_index_map = {
@@ -475,11 +478,24 @@ class MultiStepRolloutWorker(Worker):
             desc="Evaluating Rollout Epochs",
             disable=(self._rank != 0),
         ):
-            for _ in range(self.n_eval_chunk_steps):
-                for _ in range(self.num_pipeline_stages):
-                    env_output = await self.recv_env_output(input_channel, mode="eval")
-                    actions, _ = self.predict(env_output["obs"], mode="eval")
-                    self.send_chunk_actions(output_channel, actions, mode="eval")
+            if self.env_async_mode:
+                for _ in range(self.n_eval_chunk_steps):
+                    for _ in range(self.num_pipeline_stages):
+                        env_output = await self.recv_env_output_from_channel(
+                            input_channel, mode="eval"
+                        )
+                        actions, _ = self.predict(env_output["obs"], mode="eval")
+                        self.send_chunk_actions_to_channel(
+                            output_channel, actions, mode="eval"
+                        )
+            else:
+                for _ in range(self.n_eval_chunk_steps):
+                    for _ in range(self.num_pipeline_stages):
+                        env_output = await self.recv_env_output(
+                            input_channel, mode="eval"
+                        )
+                        actions, _ = self.predict(env_output["obs"], mode="eval")
+                        self.send_chunk_actions(output_channel, actions, mode="eval")
 
         if self.enable_offload:
             self.offload_model()

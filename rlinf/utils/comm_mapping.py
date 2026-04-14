@@ -58,17 +58,10 @@ class CommMapper:
             # the dst_world_size > src_world_size
             # for example, src_world_size = 2, dst_world_size = 8, batch_size = 32
             # the rank 0 [4, 4, 4, 4] rank1 [4, 4, 4, 4]
-            if src_world_size == 1:
-                # Note: To avoid excessive data buffer growth caused by a deadlock in one of the workers under src_world_size == 1,
-                # it is necessary to reduce the size of batch_index by half in src_world_size == 1.
-                return [
-                    batch_size // dst_world_size for _ in range(dst_world_size // 2)
-                ]
-            else:
-                return [
-                    batch_size // dst_world_size
-                    for _ in range(dst_world_size // src_world_size)
-                ]
+            return [
+                batch_size // dst_world_size
+                for _ in range(dst_world_size // src_world_size)
+            ]
 
     @staticmethod
     def get_dst_ranks(

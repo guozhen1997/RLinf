@@ -291,13 +291,35 @@ class EnvWorker(Worker):
                     self._component_placement.get_world_size("rollout"),
                 ),
             }
+
             if self.cfg.get("reward", {}).get("use_reward_model", False):
                 batch_size_map.update(
                     {
                         "reward_train": CommMapper.async_get_batch_index(
-                            self.cfg.env.train.total_num_envs // self.stage_num,
-                            self._component_placement.get_world_size("env"),
-                            self._component_placement.get_world_size("reward"),
+                            batch_size=self.cfg.env.train.total_num_envs
+                            // self.stage_num,
+                            src_world_size=self._component_placement.get_world_size(
+                                "env"
+                            ),
+                            dst_world_size=self._component_placement.get_world_size(
+                                "reward"
+                            ),
+                        ),
+                    }
+                )
+
+            if self.enable_eval:
+                batch_size_map.update(
+                    {
+                        "rollout_eval": CommMapper.async_get_batch_index(
+                            batch_size=self.cfg.env.eval.total_num_envs
+                            // self.stage_num,
+                            src_world_size=self._component_placement.get_world_size(
+                                "env"
+                            ),
+                            dst_world_size=self._component_placement.get_world_size(
+                                "rollout"
+                            ),
                         ),
                     }
                 )
@@ -644,6 +666,54 @@ class EnvWorker(Worker):
         )
         return chunk_action
 
+    def recv_chunk_actions_from_channel(
+        self, input_channel: Channel, mode="train"
+    ) -> np.ndarray:
+        """Receive and merge chunked actions for the current env worker.
+
+        The method fetches one action shard from one of the rollout workers
+        under a deterministic channel key pattern and concatenates them on the
+        batch dimension.
+
+        Args:
+            input_channel: Channel carrying rollout->env action chunks.
+            mode: Rollout mode, either ``"train"`` or ``"eval"``.
+
+        Returns:
+            Concatenated action chunk array with shape ``[num_envs_per_stage, ...]``.
+        """
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
+        batch_size_map = self.batch_size_map[f"rollout_{mode}"]
+        chunk_action_idx = []
+        for i, expected_size in enumerate(batch_size_map):
+            item = input_channel.get(
+                key=CommMapper.build_channel_key(
+                    None, self._rank, extra=f"{mode}_actions"
+                ),
+            )
+            batch_index = item["batch_index"]
+            action_i = item["batch"]
+            _, action_idx, _, _ = _split_channel_message(batch_index)
+            if isinstance(action_i, torch.Tensor):
+                action_i = action_i.detach().cpu().numpy()
+            else:
+                action_i = np.asarray(action_i)
+            assert action_i.shape[0] == expected_size, (
+                f"Expected action shard size {expected_size} get the batch index {i}, "
+                f"got shape {action_i.shape}."
+            )
+            chunk_action_idx.append((action_idx, action_i))
+
+        chunk_action_idx.sort(key=lambda x: x[0])
+        chunk_action = [x[1] for x in chunk_action_idx]
+
+        chunk_action = np.concatenate(chunk_action, axis=0)
+        expected_total_size = sum(size for size in batch_size_map)
+        assert chunk_action.shape[0] == expected_total_size, (
+            f"Expected concatenated action size {expected_total_size}, got {chunk_action.shape[0]}."
+        )
+        return chunk_action
+
     def _infer_rollout_batch_size(self, rollout_result: RolloutResult) -> int:
         for field_name in (
             "actions",
@@ -842,6 +912,7 @@ class EnvWorker(Worker):
                     ),
                     "batch": batch,
                 },
+                key=CommMapper.build_channel_key(None, None, extra=f"{mode}_obs"),
             )
 
     def send_reward_input(
@@ -1330,20 +1401,35 @@ class EnvWorker(Worker):
                         else None,
                     )
                     env_batch = env_output.to_dict()
-                    self.send_env_batch(
-                        rollout_channel,
-                        {
-                            "obs": env_batch["obs"],
-                            "final_obs": env_batch["final_obs"],
-                        },
-                        mode="eval",
-                    )
+                    if self.env_async_mode:
+                        self.send_env_batch_to_channel(
+                            rollout_channel,
+                            {
+                                "obs": env_batch["obs"],
+                                "final_obs": env_batch["final_obs"],
+                            },
+                            mode="eval",
+                        )
+                    else:
+                        self.send_env_batch(
+                            rollout_channel,
+                            {
+                                "obs": env_batch["obs"],
+                                "final_obs": env_batch["final_obs"],
+                            },
+                            mode="eval",
+                        )
 
             for eval_step in range(self.n_eval_chunk_steps):
                 for stage_id in range(self.stage_num):
-                    raw_chunk_actions = self.recv_chunk_actions(
-                        input_channel, mode="eval"
-                    )
+                    if self.env_async_mode:
+                        raw_chunk_actions = self.recv_chunk_actions_from_channel(
+                            input_channel, mode="eval"
+                        )
+                    else:
+                        raw_chunk_actions = self.recv_chunk_actions(
+                            input_channel, mode="eval"
+                        )
                     env_output, env_info = self.env_evaluate_step(
                         raw_chunk_actions, stage_id
                     )
@@ -1362,14 +1448,24 @@ class EnvWorker(Worker):
                         if eval_step == self.n_eval_chunk_steps - 1:
                             continue
                     env_batch = env_output.to_dict()
-                    self.send_env_batch(
-                        rollout_channel,
-                        {
-                            "obs": env_batch["obs"],
-                            "final_obs": env_batch["final_obs"],
-                        },
-                        mode="eval",
-                    )
+                    if self.env_async_mode:
+                        self.send_env_batch_to_channel(
+                            rollout_channel,
+                            {
+                                "obs": env_batch["obs"],
+                                "final_obs": env_batch["final_obs"],
+                            },
+                            mode="eval",
+                        )
+                    else:
+                        self.send_env_batch(
+                            rollout_channel,
+                            {
+                                "obs": env_batch["obs"],
+                                "final_obs": env_batch["final_obs"],
+                            },
+                            mode="eval",
+                        )
 
             self.finish_rollout(mode="eval")
         for stage_id in range(self.stage_num):

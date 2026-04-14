@@ -16,6 +16,7 @@ import asyncio
 import gc
 from typing import Any, Literal
 
+import numpy as np
 import torch
 from omegaconf.omegaconf import DictConfig
 
@@ -273,8 +274,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         for i, shard_result in enumerate(split_rollout_results):
             batch_index = batch_index_map[i]
             env_rank, batch_idx, _, last_run = _split_channel_message(batch_index)
-            env_rank = int(env_rank)
-            batch_idx = int(batch_idx)
 
             item = {
                 "batch_index": _build_channel_message(
@@ -318,6 +317,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         obs_batches = []
         for expected_size in batch_size_map:
             obs_batch = await input_channel.get(
+                key=CommMapper.build_channel_key(None, None, extra=f"{mode}_obs"),
                 async_op=True,
             ).async_wait()
             batch_index = obs_batch["batch_index"]
@@ -366,3 +366,51 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             self.send_rollout_result_to_channel(
                 output_channel, rollout_result, mode="train"
             )
+
+    def send_chunk_actions_to_channel(
+        self,
+        output_channel: Channel,
+        chunk_actions: torch.Tensor | np.ndarray,
+        mode: Literal["train", "eval"] = "train",
+    ):
+        """Send action shards to one of the env ranks.
+
+        Args:
+            output_channel: Channel carrying rollout->env action chunks.
+            chunk_actions: Predicted action chunk batch (tensor or ndarray).
+            mode: Rollout mode, either ``"train"`` or ``"eval"``.
+        """
+        assert mode in ["train", "eval"], f"{mode=} is not supported"
+        batch_size_map = self.batch_size_map[mode]
+        batch_index_map = self.batch_index_map[mode]
+        assert len(batch_index_map) == len(batch_size_map), (
+            f"batch_index_map and batch_size_map must have the same length, but got {len(batch_index_map)} and {len(batch_size_map)}."
+        )
+        chunk_actions_split = self._split_actions(chunk_actions, batch_size_map)
+        for i, chunk_action_i in enumerate(chunk_actions_split):
+            if isinstance(chunk_action_i, torch.Tensor):
+                chunk_action_i = (
+                    chunk_action_i.detach().cpu().contiguous()
+                )  # for evaluation
+
+            batch_index = batch_index_map[i]
+            env_rank, batch_idx, _, _ = _split_channel_message(batch_index)
+
+            item = {
+                "batch_index": _build_channel_message(
+                    env_rank, batch_idx, mode, False, "actions"
+                ),
+                "batch": chunk_action_i,
+            }
+
+            output_channel.put(
+                item,
+                key=CommMapper.build_channel_key(
+                    None, env_rank, extra=f"{mode}_actions"
+                ),
+                async_op=True,
+            )
+
+        # delete the batch index map
+        self.batch_index_map[mode] = []
+        return
