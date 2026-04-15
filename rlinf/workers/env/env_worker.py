@@ -156,13 +156,8 @@ class EnvWorker(Worker):
             self._init_env()
 
     def update_env_cfg(self):
-<<<<<<< HEAD
-        # train env
-        if self.cfg.env.get("train", None) is not None:
-=======
         if not self.only_eval:
             # train env
->>>>>>> upstream/main
             train_override_cfgs = self.cfg.env.train.get("override_cfgs", None)
             if train_override_cfgs is not None:
                 assert len(train_override_cfgs) > self._rank, (
@@ -175,14 +170,6 @@ class EnvWorker(Worker):
                 override_cfg = OmegaConf.to_container(
                     train_override_cfgs[self._rank], resolve=True
                 ).copy()
-<<<<<<< HEAD
-
-                base_cfg = {}
-                base_cfg = update_nested_cfg(base_cfg, general_train_override_cfg)
-                base_cfg = update_nested_cfg(base_cfg, override_cfg)
-                setattr(self.cfg.env.train, "override_cfg", OmegaConf.create(base_cfg))
-=======
->>>>>>> upstream/main
 
                 base_cfg = {}
                 base_cfg = update_nested_cfg(base_cfg, general_train_override_cfg)
