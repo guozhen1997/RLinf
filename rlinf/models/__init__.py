@@ -176,10 +176,7 @@ def get_model(cfg: DictConfig):
     model_type = str(cfg.model_type)
     model_builder = _MODEL_REGISTRY.get(model_type)
     if model_builder is None:
-        supported_models = sorted(_MODEL_REGISTRY.keys())
-        raise NotImplementedError(
-            f"Model Type: {model_type} not supported. Supported models: {supported_models}"
-        )
+        return None
 
     torch_dtype = torch_dtype_from_precision(cfg.precision)
     model = model_builder(cfg, torch_dtype)
