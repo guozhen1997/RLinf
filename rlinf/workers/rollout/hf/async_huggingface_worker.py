@@ -265,7 +265,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         for i in range(len(batch_size_map)):
             batch_index = batch_index_map[i]
             _, _, _, last_run = _split_channel_message(batch_index)
-            last_run = last_run == "True"
             is_last_run.append(last_run)
 
         split_rollout_results = self._split_rollout_result_by_last_run(
