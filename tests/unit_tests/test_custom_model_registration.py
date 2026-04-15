@@ -57,7 +57,7 @@ def test_custom_model_registration_smoke():
 
     register_model(model_type, _builder, category="embodied")
 
-    supported_model = SupportedModel.get(model_type)
+    supported_model = SupportedModel(model_type)
     assert supported_model.value == model_type
 
     cfg = OmegaConf.create(

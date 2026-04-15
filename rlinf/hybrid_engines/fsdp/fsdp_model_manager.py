@@ -225,9 +225,7 @@ class FSDPModelManager:
                 for model_type, apply_fn in _liger_func_by_model.items()
             }
 
-            model_type = SupportedModel.get(
-                self._cfg.model.get("model_type", "").lower()
-            )
+            model_type = SupportedModel(self._cfg.model.get("model_type", "").lower())
             if model_type in MODEL_LIGER_KERNEL_APPLY_FUNC:
                 apply_func, apply_kwargs = MODEL_LIGER_KERNEL_APPLY_FUNC[model_type]
                 apply_func(

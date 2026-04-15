@@ -42,7 +42,7 @@ def register_model(
     _MODEL_REGISTRY[model_type] = model_builder
     SupportedModel.register(model_type, force=force)
     if category == "embodied":
-        EMBODIED_MODEL.add(SupportedModel.get(model_type))
+        EMBODIED_MODEL.add(SupportedModel(model_type))
 
 
 def _register_builtin_models():

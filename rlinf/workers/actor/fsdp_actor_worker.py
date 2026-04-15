@@ -1236,9 +1236,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         return rollout_metrics
 
     def _build_sft_data_loader(self):
-        if SupportedModel.get(self.cfg.actor.model.model_type) in [
-            SupportedModel.OPENPI
-        ]:
+        if SupportedModel(self.cfg.actor.model.model_type) in [SupportedModel.OPENPI]:
             # NOTE: This must be set before importing openpi.training.data_loader
             if self.cfg.actor.get("sft_data_path", None):
                 os.environ["HF_LEROBOT_HOME"] = self.cfg.actor.sft_data_path
@@ -1411,7 +1409,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     forward_inputs = batch.get("forward_inputs", None)
 
                     kwargs = {}
-                    if SupportedModel.get(self.cfg.actor.model.model_type) in [
+                    if SupportedModel(self.cfg.actor.model.model_type) in [
                         SupportedModel.OPENVLA,
                         SupportedModel.OPENVLA_OFT,
                     ]:
@@ -1420,7 +1418,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         )
                         kwargs["top_k"] = self.cfg.algorithm.sampling_params.top_k
                     elif (
-                        SupportedModel.get(self.cfg.actor.model.model_type)
+                        SupportedModel(self.cfg.actor.model.model_type)
                         == SupportedModel.GR00T
                     ):
                         kwargs["prev_logprobs"] = prev_logprobs
@@ -1440,7 +1438,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         )
 
                     if (
-                        SupportedModel.get(self.cfg.actor.model.model_type)
+                        SupportedModel(self.cfg.actor.model.model_type)
                         == SupportedModel.GR00T
                     ):
                         prev_logprobs = output_dict["prev_logprobs"]

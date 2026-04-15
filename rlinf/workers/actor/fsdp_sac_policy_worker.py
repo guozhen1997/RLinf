@@ -362,7 +362,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
 
         with torch.no_grad():
             kwargs = {}
-            if SupportedModel.get(self.cfg.actor.model.model_type) in [
+            if SupportedModel(self.cfg.actor.model.model_type) in [
                 SupportedModel.OPENVLA,
                 SupportedModel.OPENVLA_OFT,
             ]:

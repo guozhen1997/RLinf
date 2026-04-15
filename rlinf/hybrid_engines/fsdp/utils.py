@@ -177,7 +177,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
     # Build policies list
     policies = []
 
-    if SupportedModel.get(model_type) in [
+    if SupportedModel(model_type) in [
         SupportedModel.CNN_POLICY,
         SupportedModel.FLOW_POLICY,
     ]:
@@ -189,7 +189,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
         policies.append(resnet_policy)
 
     # Add vision transformer policies for OpenVLA models
-    if SupportedModel.get(model_type) in [
+    if SupportedModel(model_type) in [
         SupportedModel.OPENVLA,
         SupportedModel.OPENVLA_OFT,
     ]:
@@ -215,7 +215,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
         policies.append(prismatic_fsdp_wrapping_policy)
 
     if (
-        SupportedModel.get(model_type) == SupportedModel.CNN_POLICY
+        SupportedModel(model_type) == SupportedModel.CNN_POLICY
         and not config.use_orig_params
     ):
         from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy

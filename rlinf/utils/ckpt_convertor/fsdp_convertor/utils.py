@@ -24,7 +24,7 @@ from rlinf.config import SupportedModel
 
 
 def get_model_save_helper(model_type: str):
-    model_type = SupportedModel.get(model_type)
+    model_type = SupportedModel(model_type)
 
     _MODEL_SAVE_HELPER_REGISTRY = {
         SupportedModel.OPENVLA_OFT: openvla_oft_save_helper,

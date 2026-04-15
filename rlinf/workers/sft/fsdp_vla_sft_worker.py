@@ -28,9 +28,7 @@ class FSDPVlaSftWorker(FSDPSftWorker):
         super().__init__(cfg)
 
     def build_dataloader(self, data_paths: list[str], eval_dataset: bool = False):
-        if SupportedModel.get(self.cfg.actor.model.model_type) in [
-            SupportedModel.OPENPI
-        ]:
+        if SupportedModel(self.cfg.actor.model.model_type) in [SupportedModel.OPENPI]:
             import openpi.training.data_loader as openpi_data_loader
 
             from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
@@ -45,7 +43,7 @@ class FSDPVlaSftWorker(FSDPSftWorker):
                 config, framework="pytorch", shuffle=True
             )
             return data_loader, data_loader.data_config()
-        elif SupportedModel.get(self.cfg.actor.model.model_type) in [
+        elif SupportedModel(self.cfg.actor.model.model_type) in [
             SupportedModel.LINGBOTVLA
         ]:
             from rlinf.models.embodiment.lingbotvla.sft_builder import (
@@ -65,7 +63,7 @@ class FSDPVlaSftWorker(FSDPSftWorker):
         raise NotImplementedError("eval is not supported for embodied sft right now.")
 
     def get_train_model_output(self, batch: dict[str, Any]):
-        if SupportedModel.get(self.cfg.actor.model.model_type) in [
+        if SupportedModel(self.cfg.actor.model.model_type) in [
             SupportedModel.LINGBOTVLA
         ]:
             batch_data = _pytree.tree_map(

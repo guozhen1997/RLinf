@@ -238,7 +238,7 @@ def activation_to_func(
 
 
 def validate_rollout_cfg(cfg, algorithm_cfg):
-    assert SupportedModel.get(cfg.model.model_type)
+    SupportedModel(cfg.model.model_type)  # To validate model_type is supported
 
     def validate_sglang_cfg(cfg):
         assert cfg is not None, (
@@ -781,7 +781,7 @@ def validate_megatron_cfg(cfg: DictConfig) -> DictConfig:
 
 
 def validate_embodied_cfg(cfg):
-    model_type = SupportedModel.get(cfg.actor.model.model_type)
+    model_type = SupportedModel(cfg.actor.model.model_type)
     assert model_type in EMBODIED_MODEL, (
         f"Model type: '{cfg.actor.model.model_type}' is not an embodied model. "
         f"Supported embodied models: {sorted([x.value for x in EMBODIED_MODEL])}."
@@ -1000,7 +1000,7 @@ def validate_reasoning_eval_cfg(cfg: DictConfig) -> DictConfig:
 
 
 def validate_coding_online_rl_cfg(cfg: DictConfig) -> DictConfig:
-    assert SupportedModel.get(cfg.rollout.model.model_type) == SupportedModel.QWEN2_5, (
+    assert SupportedModel(cfg.rollout.model.model_type) == SupportedModel.QWEN2_5, (
         f"Model type {cfg.rollout.model.model_type} is not supported"
     )
 

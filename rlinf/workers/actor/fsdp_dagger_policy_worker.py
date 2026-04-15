@@ -100,7 +100,7 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
         if not isinstance(loss, torch.Tensor):
             loss = torch.as_tensor(loss, device=self.device)
 
-        if SupportedModel.get(self.cfg.actor.model.model_type) == SupportedModel.OPENPI:
+        if SupportedModel(self.cfg.actor.model.model_type) == SupportedModel.OPENPI:
             action_chunk = self.model.config.action_chunk
             action_dim = self.model.config.action_env_dim
             loss = loss[:, :action_chunk, :action_dim]

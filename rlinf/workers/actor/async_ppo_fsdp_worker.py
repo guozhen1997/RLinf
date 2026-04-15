@@ -119,7 +119,7 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                 )
 
             model_kwargs = {}
-            if SupportedModel.get(self.cfg.actor.model.model_type) in [
+            if SupportedModel(self.cfg.actor.model.model_type) in [
                 SupportedModel.OPENVLA,
                 SupportedModel.OPENVLA_OFT,
             ]:
@@ -128,8 +128,7 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                 )
                 model_kwargs["top_k"] = self.cfg.algorithm.sampling_params.top_k
             elif (
-                SupportedModel.get(self.cfg.actor.model.model_type)
-                == SupportedModel.GR00T
+                SupportedModel(self.cfg.actor.model.model_type) == SupportedModel.GR00T
             ):
                 model_kwargs["prev_logprobs"] = micro_batch["prev_logprobs"]
 
@@ -253,7 +252,7 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                         )
 
                     model_kwargs = {}
-                    if SupportedModel.get(self.cfg.actor.model.model_type) in [
+                    if SupportedModel(self.cfg.actor.model.model_type) in [
                         SupportedModel.OPENVLA,
                         SupportedModel.OPENVLA_OFT,
                     ]:
@@ -262,7 +261,7 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                         )
                         model_kwargs["top_k"] = self.cfg.algorithm.sampling_params.top_k
                     elif (
-                        SupportedModel.get(self.cfg.actor.model.model_type)
+                        SupportedModel(self.cfg.actor.model.model_type)
                         == SupportedModel.GR00T
                     ):
                         model_kwargs["prev_logprobs"] = old_logprobs
@@ -280,7 +279,7 @@ class AsyncPPOEmbodiedFSDPActor(EmbodiedFSDPActor):
                         )
 
                     if (
-                        SupportedModel.get(self.cfg.actor.model.model_type)
+                        SupportedModel(self.cfg.actor.model.model_type)
                         == SupportedModel.GR00T
                     ):
                         old_logprobs = out["prev_logprobs"]

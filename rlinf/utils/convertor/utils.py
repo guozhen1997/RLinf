@@ -630,7 +630,7 @@ _MG2HF_CONVERTOR_REGISTRY = {
 
 
 def get_mg2hf_convertor(model_type: str, config, strict: bool = False) -> BaseConvertor:
-    model_type = SupportedModel.get(model_type)
+    model_type = SupportedModel(model_type)
     if model_type not in _MG2HF_CONVERTOR_REGISTRY:
         raise ValueError(f"No converter registered for {model_type.value}")
     convertor_cls = _MG2HF_CONVERTOR_REGISTRY[model_type]
