@@ -40,7 +40,7 @@ from torch.distributed.fsdp.wrap import (
 from torch.optim import Optimizer
 from transformers.trainer_pt_utils import get_module_class_from_name
 
-from rlinf.config import SupportedModel, get_supported_model
+from rlinf.config import SupportedModel
 from rlinf.hybrid_engines.fsdp import (
     FSDP,
     BackwardPrefetch,
@@ -183,7 +183,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
     policies.append(resnet_policy)
 
     # Add vision transformer policies for OpenVLA models
-    if get_supported_model(model_type) in [
+    if SupportedModel.get(model_type) in [
         SupportedModel.OPENVLA,
         SupportedModel.OPENVLA_OFT,
     ]:
@@ -209,7 +209,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
         policies.append(prismatic_fsdp_wrapping_policy)
 
     if (
-        get_supported_model(model_type) == SupportedModel.CNN_POLICY
+        SupportedModel.get(model_type) == SupportedModel.CNN_POLICY
         and not config.use_orig_params
     ):
         from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy

@@ -16,11 +16,7 @@ from typing import Callable, Optional
 
 from omegaconf import DictConfig
 
-from rlinf.config import (
-    SupportedModel,
-    register_supported_model,
-    torch_dtype_from_precision,
-)
+from rlinf.config import EMBODIED_MODEL, SupportedModel, torch_dtype_from_precision
 from rlinf.scheduler import Worker
 
 ModelBuilder = Callable[[DictConfig, Optional[object]], object]
@@ -44,7 +40,9 @@ def register_model(
             "Set force=True to override it."
         )
     _MODEL_REGISTRY[model_type] = model_builder
-    register_supported_model(model_type, category=category, force=force)
+    SupportedModel.register(model_type, force=force)
+    if category == "embodied":
+        EMBODIED_MODEL.add(SupportedModel.get(model_type))
 
 
 def _register_builtin_models():
@@ -103,17 +101,72 @@ def _register_builtin_models():
 
         return get_model(cfg, torch_dtype)
 
-    register_model(SupportedModel.OPENVLA.value, _build_openvla, force=True)
-    register_model(SupportedModel.OPENVLA_OFT.value, _build_openvla_oft, force=True)
-    register_model(SupportedModel.OPENPI.value, _build_openpi, force=True)
-    register_model(SupportedModel.DEXBOTIC_PI.value, _build_dexbotic_pi, force=True)
-    register_model(SupportedModel.MLP_POLICY.value, _build_mlp_policy, force=True)
-    register_model(SupportedModel.GR00T.value, _build_gr00t, force=True)
-    register_model(SupportedModel.CNN_POLICY.value, _build_cnn_policy, force=True)
-    register_model(SupportedModel.FLOW_POLICY.value, _build_flow_policy, force=True)
-    register_model(SupportedModel.LINGBOTVLA.value, _build_lingbotvla, force=True)
-    register_model(SupportedModel.STARVLA.value, _build_starvla, force=True)
-    register_model(SupportedModel.DREAMZERO.value, _build_dreamzero, force=True)
+    register_model(
+        SupportedModel.OPENVLA.value,
+        _build_openvla,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.OPENVLA_OFT.value,
+        _build_openvla_oft,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.OPENPI.value,
+        _build_openpi,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.DEXBOTIC_PI.value,
+        _build_dexbotic_pi,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.MLP_POLICY.value,
+        _build_mlp_policy,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.GR00T.value,
+        _build_gr00t,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.CNN_POLICY.value,
+        _build_cnn_policy,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.FLOW_POLICY.value,
+        _build_flow_policy,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.LINGBOTVLA.value,
+        _build_lingbotvla,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.STARVLA.value,
+        _build_starvla,
+        category="embodied",
+        force=True,
+    )
+    register_model(
+        SupportedModel.DREAMZERO.value,
+        _build_dreamzero,
+        category="embodied",
+        force=True,
+    )
 
 
 _register_builtin_models()

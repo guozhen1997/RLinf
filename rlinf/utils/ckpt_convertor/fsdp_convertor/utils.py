@@ -20,11 +20,11 @@ import shutil
 import torch
 from safetensors.torch import save_file
 
-from rlinf.config import SupportedModel, get_supported_model
+from rlinf.config import SupportedModel
 
 
 def get_model_save_helper(model_type: str):
-    model_type = get_supported_model(model_type)
+    model_type = SupportedModel.get(model_type)
 
     _MODEL_SAVE_HELPER_REGISTRY = {
         SupportedModel.OPENVLA_OFT: openvla_oft_save_helper,
