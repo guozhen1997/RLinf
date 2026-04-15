@@ -7,12 +7,13 @@
 #     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed on an "AS IS" BASIS,
+# distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.agents.mas_search.mas_search_agent_loop import MasSearchAgentLoopWorker
-from rlinf.agents.searchr1.search_tool_worker import SearchToolWorker
+"""Action-head handlers for the RLinf starVLA wrapper.
 
-__all__ = ["MasSearchAgentLoopWorker", "SearchToolWorker"]
+This package contains action-head specific rollout/default_forward handlers,
+including OFT, FAST, adapter, and flowmatching implementations.
+"""
