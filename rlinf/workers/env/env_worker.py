@@ -748,6 +748,10 @@ class EnvWorker(Worker):
             )
             batch_index = item["batch_index"]
             rollout_result = item["batch"]
+
+            # the bug, in frankasim, the actions is a tensor with requires_grad=True
+            rollout_result.actions.requires_grad = False
+
             _, rollout_result_idx, _, _ = _split_channel_message(batch_index)
 
             actual_size = self._infer_rollout_batch_size(rollout_result)
