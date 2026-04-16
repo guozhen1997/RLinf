@@ -14,7 +14,7 @@
 
 import copy
 import gc
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -30,7 +30,6 @@ from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
 from rlinf.utils.comm_mapping import CommMapper
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.utils.utils import seed_everything
 
 
 class MultiStepRolloutWorker(Worker):
@@ -88,24 +87,7 @@ class MultiStepRolloutWorker(Worker):
         self.version = 0
         self.finished_episodes = None
 
-    def _seed_worker_process(self) -> Optional[int]:
-        """Seed RNG state when a seed is explicitly configured; otherwise no-op."""
-        seed_val = self.cfg.rollout.get("seed", None)
-        if seed_val is None:
-            seed_val = self.cfg.actor.get("seed", None)
-        if seed_val is None:
-            return None
-        base_seed = int(seed_val)
-        worker_seed = base_seed + int(self._rank)
-        seed_everything(worker_seed)
-        self.log_info(
-            "Initialized rollout RNG "
-            f"with seed={worker_seed} (base={base_seed}, rank={self._rank})"
-        )
-        return worker_seed
-
     def init_worker(self):
-        self._worker_seed = self._seed_worker_process()
         rollout_model_config = copy.deepcopy(self.cfg.actor.model)
         with open_dict(rollout_model_config):
             rollout_model_config.precision = self.cfg.rollout.model.precision

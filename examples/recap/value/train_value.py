@@ -20,24 +20,17 @@ Usage:
 """
 
 import json
-import logging
 import os
 
-# Suppress libdav1d/ffmpeg verbose logging (must be before imports that trigger av)
-os.environ["LIBAV_LOG_LEVEL"] = "quiet"
-os.environ["OPENCV_LOG_LEVEL"] = "OFF"
-logging.getLogger("libav").setLevel(logging.ERROR)
-logging.getLogger("av").setLevel(logging.ERROR)
+import hydra
+import torch.multiprocessing as mp
+from omegaconf import OmegaConf
 
-import hydra  # noqa: E402
-import torch.multiprocessing as mp  # noqa: E402
-from omegaconf import OmegaConf  # noqa: E402
-
-from rlinf.config import validate_cfg  # noqa: E402
-from rlinf.runners.sft_runner import SFTRunner  # noqa: E402
-from rlinf.scheduler import Cluster  # noqa: E402
-from rlinf.utils.placement import HybridComponentPlacement  # noqa: E402
-from rlinf.workers.value_sft.fsdp_value_sft_worker import (  # noqa: E402
+from rlinf.config import validate_cfg
+from rlinf.runners.sft_runner import SFTRunner
+from rlinf.scheduler import Cluster
+from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.workers.sft.fsdp_value_sft_worker import (
     FSDPValueSftWorker,
 )
 

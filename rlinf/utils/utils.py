@@ -69,16 +69,6 @@ def seed_everything(seed: int) -> int:
     return normalized_seed
 
 
-def seed_dataloader_worker(worker_id: int) -> None:
-    """Seed NumPy, Python, and Torch RNGs inside a DataLoader worker."""
-    del worker_id
-
-    worker_seed = torch.initial_seed() % _UINT32_MOD
-    random.seed(worker_seed)
-    np.random.seed(worker_seed)
-    torch.manual_seed(worker_seed)
-
-
 def retrieve_model_state_dict_in_cpu(model, offloaded_buffer=None):
     """get a copy of the model states in CPU"""
     if offloaded_buffer is None:

@@ -19,6 +19,7 @@ export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 # Suppress libdav1d/ffmpeg verbose logging
 export AV_LOG_FORCE_NOCOLOR=1
 export LIBAV_LOG_LEVEL=quiet
+export OPENCV_LOG_LEVEL=off
 export FFREPORT=""
 
 export PYTHONPATH="${REPO_PATH}:${LIBERO_REPO_PATH}:$PYTHONPATH"
