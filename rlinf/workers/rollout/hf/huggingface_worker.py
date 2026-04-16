@@ -139,26 +139,27 @@ class MultiStepRolloutWorker(Worker):
             # save the run-time imformation in communicate channel for async mode
             self.batch_index_map = {
                 "train": [],
-                "eval": [],
             }
             self.log_info(
                 f"Async model rollout worker initialized with batch_size_map: {self.batch_size_map}"
             )
-        else:
+
+            # use for evaluation
             self.dst_ranks = {}
             self.src_ranks = {}
+        else:
+            if not self.cfg.runner.only_eval:
+                self.dst_ranks = {
+                    "train": self._setup_dst_ranks(
+                        self.total_num_train_envs // self.num_pipeline_stages
+                    ),
+                }
+                self.src_ranks = {
+                    "train": self._setup_src_ranks(
+                        self.total_num_train_envs // self.num_pipeline_stages
+                    ),
+                }
 
-        if not self.cfg.runner.only_eval:
-            self.dst_ranks = {
-                "train": self._setup_dst_ranks(
-                    self.total_num_train_envs // self.num_pipeline_stages
-                ),
-            }
-            self.src_ranks = {
-                "train": self._setup_src_ranks(
-                    self.total_num_train_envs // self.num_pipeline_stages
-                ),
-            }
         if self.enable_eval:
             self.dst_ranks["eval"] = self._setup_dst_ranks(
                 self.total_num_eval_envs // self.num_pipeline_stages
@@ -166,31 +167,10 @@ class MultiStepRolloutWorker(Worker):
             self.src_ranks["eval"] = self._setup_src_ranks(
                 self.total_num_eval_envs // self.num_pipeline_stages
             )
-        else:
-            self.dst_ranks = {
-                "train": self._setup_dst_ranks(
-                    self.total_num_train_envs // self.num_pipeline_stages
-                ),
-            }
-            self.src_ranks = {
-                "train": self._setup_src_ranks(
-                    self.total_num_train_envs // self.num_pipeline_stages
-                ),
-            }
-            if self.enable_eval:
-                self.dst_ranks["eval"] = self._setup_dst_ranks(
-                    self.total_num_eval_envs // self.num_pipeline_stages
-                )
-                self.src_ranks["eval"] = self._setup_src_ranks(
-                    self.total_num_eval_envs // self.num_pipeline_stages
-                )
 
-            self.log_info(
-                f"Rollout worker initialized with dst_ranks: {self.dst_ranks}"
-            )
-            self.log_info(
-                f"Rollout worker initialized with src_ranks: {self.src_ranks}"
-            )
+        self.log_info(f"Rollout worker initialized with dst_ranks: {self.dst_ranks}")
+        self.log_info(f"Rollout worker initialized with src_ranks: {self.src_ranks}")
+
         self.setup_sample_params()
         if self.enable_offload:
             self.offload_model()
@@ -478,24 +458,11 @@ class MultiStepRolloutWorker(Worker):
             desc="Evaluating Rollout Epochs",
             disable=(self._rank != 0),
         ):
-            if self.env_async_mode:
-                for _ in range(self.n_eval_chunk_steps):
-                    for _ in range(self.num_pipeline_stages):
-                        env_output = await self.recv_env_output_from_channel(
-                            input_channel, mode="eval"
-                        )
-                        actions, _ = self.predict(env_output["obs"], mode="eval")
-                        self.send_chunk_actions_to_channel(
-                            output_channel, actions, mode="eval"
-                        )
-            else:
-                for _ in range(self.n_eval_chunk_steps):
-                    for _ in range(self.num_pipeline_stages):
-                        env_output = await self.recv_env_output(
-                            input_channel, mode="eval"
-                        )
-                        actions, _ = self.predict(env_output["obs"], mode="eval")
-                        self.send_chunk_actions(output_channel, actions, mode="eval")
+            for _ in range(self.n_eval_chunk_steps):
+                for _ in range(self.num_pipeline_stages):
+                    env_output = await self.recv_env_output(input_channel, mode="eval")
+                    actions, _ = self.predict(env_output["obs"], mode="eval")
+                    self.send_chunk_actions(output_channel, actions, mode="eval")
 
         if self.enable_offload:
             self.offload_model()

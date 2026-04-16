@@ -230,8 +230,12 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 return_results.append(
                     RolloutResult(
                         actions=split_actions[idx],
+                        prev_logprobs=None,
                         prev_values=split_prev_values[idx],
                         bootstrap_values=split_bootstrap_values[idx],
+                        save_flags=None,
+                        forward_inputs=None,
+                        versions=None,
                     )
                 )
             else:
@@ -255,6 +259,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         mode: Literal["train", "eval"] = "train",
     ):
         assert mode in ["train", "eval"], f"{mode=} is not supported"
+        assert mode == "train", "Now eval mode is not supported in env async mode"
         batch_size_map = self.batch_size_map[mode]
         batch_index_map = self.batch_index_map[mode]
         assert len(batch_index_map) == len(batch_size_map), (
@@ -306,6 +311,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             rollout worker, outputs are merged on batch dimension.
         """
         assert mode in ["train", "eval"], f"{mode=} is not supported"
+        assert mode == "train", "Now eval mode is not supported in env async mode"
 
         batch_size_map = self.batch_size_map[mode]
         batch_index_map = self.batch_index_map[mode]
