@@ -21,31 +21,24 @@ via supervised fine-tuning with FSDP.
 This module is self-contained and does NOT share code with fsdp_sft_worker.py.
 """
 
-import logging
 import os
 from pathlib import Path
 
 import numpy as np
+import torch
+from omegaconf import DictConfig
 
-os.environ["LIBAV_LOG_LEVEL"] = "quiet"
-os.environ["OPENCV_LOG_LEVEL"] = "OFF"
-logging.getLogger("libav").setLevel(logging.ERROR)
-logging.getLogger("av").setLevel(logging.ERROR)
-
-logger = logging.getLogger(__name__)
-
-import torch  # noqa: E402
-from omegaconf import DictConfig  # noqa: E402
-
-from rlinf.data.datasets.cfg import (  # noqa: E402
-    ValueDataLoaderImpl,
-    ValueMixtureDataset,
+from rlinf.data.datasets.recap.utils import (
     load_return_stats_from_dataset,
 )
-from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager  # noqa: E402
-from rlinf.models import get_model  # noqa: E402
-from rlinf.scheduler import Worker  # noqa: E402
-from rlinf.utils.distributed import all_reduce_dict  # noqa: E402
+from rlinf.data.datasets.recap.value_model import (
+    ValueDataLoaderImpl,
+    ValueMixtureDataset,
+)
+from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
+from rlinf.models import get_model
+from rlinf.scheduler import Worker
+from rlinf.utils.distributed import all_reduce_dict
 
 
 class FSDPValueSftWorker(FSDPModelManager, Worker):
@@ -148,7 +141,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
         except (ImportError, AttributeError):
             pass
 
-        from rlinf.data.datasets.cfg import ValueDataset
+        from rlinf.data.datasets.recap.value_model import ValueDataset
         from rlinf.models.embodiment.value_model.data_collator import ValueDataCollator
         from rlinf.models.embodiment.value_model.processing import ValueProcessor
 
@@ -263,7 +256,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
                 global_return_max = (
                     max(all_maxs) if global_return_max is None else global_return_max
                 )
-                logger.info(
+                self.logger.info(
                     "[ValueSFT] Computed global return range from stats.json: "
                     f"[{global_return_min}, {global_return_max}]"
                 )
@@ -281,7 +274,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
                     "data.return_max explicitly in the config."
                 )
         else:
-            logger.info(
+            self.logger.info(
                 "[ValueSFT] Using global return range from config: "
                 f"[{global_return_min}, {global_return_max}]"
             )
@@ -334,7 +327,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
 
             ds = ValueDataset(**entry_kwargs)
             datasets_with_weights.append((ds, weight))
-            logger.info(
+            self.logger.info(
                 f"[ValueSFT] Loaded: {ds_path}  (type={ds_type}, {len(ds)} samples, weight={weight})"
             )
 
@@ -347,7 +340,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
                 balance_dataset_weights=data_cfg.get("balance_weights", True),
                 seed=data_cfg.get("seed", 42),
             )
-        logger.info(f"[ValueSFT] Total samples: {len(dataset)}")
+        self.logger.info(f"[ValueSFT] Total samples: {len(dataset)}")
 
         sampler = None
         if torch.distributed.is_initialized():
@@ -369,7 +362,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             collate_fn=train_collator,
             **train_loader_worker_kwargs,
         )
-        logger.info(
+        self.logger.info(
             "[ValueSFT] Train DataLoader workers: "
             f"num_workers={train_num_workers}, "
             f"prefetch_factor={prefetch_factor if train_num_workers > 0 else 'N/A'}, "
@@ -392,7 +385,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
                 continue
 
             if "return_min" in eval_entry or "return_max" in eval_entry:
-                logger.warning(
+                self.logger.warning(
                     "[ValueSFT] eval entry return_min/return_max are ignored. "
                     "Eval reward/return normalization always uses train global "
                     f"range [{global_return_min}, {global_return_max}]."
@@ -443,7 +436,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             )
             eval_data_loader = ValueDataLoaderImpl(data_config, eval_torch_loader)
             eval_data_loaders.append((ds_name, eval_data_loader))
-            logger.info(
+            self.logger.info(
                 f"[ValueSFT] Eval dataset '{ds_name}' loaded: {eval_ds_path} "
                 f"({len(eval_dataset)} samples, max_samples={eval_max_samples}, "
                 "norm_range=train_global:"
@@ -451,11 +444,11 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             )
 
         if eval_data_loaders:
-            logger.info(
+            self.logger.info(
                 f"[ValueSFT] {len(eval_data_loaders)} eval dataset(s) registered: "
                 f"{[name for name, _ in eval_data_loaders]}"
             )
-            logger.info(
+            self.logger.info(
                 "[ValueSFT] Eval DataLoader workers: "
                 f"num_workers={eval_num_workers}, "
                 f"prefetch_factor={prefetch_factor if eval_num_workers > 0 else 'N/A'}, "

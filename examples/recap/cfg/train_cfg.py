@@ -29,7 +29,7 @@ from rlinf.config import validate_cfg
 from rlinf.runners.sft_runner import SFTRunner
 from rlinf.scheduler import Cluster
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.workers.cfg.fsdp_cfg_worker import FSDPCfgWorker
+from rlinf.workers.sft.fsdp_cfg_worker import FSDPCfgWorker
 
 mp.set_start_method("spawn", force=True)
 

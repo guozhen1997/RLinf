@@ -53,11 +53,11 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from rlinf.data.datasets.cfg.return_loaders import (
+from rlinf.data.datasets.recap.utils import (
+    decode_image_struct_batch,
     load_return_stats_from_dataset,
     load_returns_sidecar,
 )
-from rlinf.data.datasets.cfg.value_dataset import _hf_transform_decode_images
 from rlinf.models.embodiment.value_model.modeling_critic import ValueCriticModel
 
 logger = logging.getLogger(__name__)
@@ -373,7 +373,7 @@ def load_lerobot_dataset(
         str(dataset_path),
         download_videos=False,
     )
-    dataset.hf_dataset.set_transform(_hf_transform_decode_images)
+    dataset.hf_dataset.set_transform(decode_image_struct_batch)
 
     tasks = {}
     tasks_path = dataset_path / "meta" / "tasks.jsonl"

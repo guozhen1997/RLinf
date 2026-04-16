@@ -41,7 +41,6 @@ Usage:
 """
 
 import argparse
-import io
 import json
 from pathlib import Path
 from typing import Any
@@ -54,19 +53,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-from lerobot.datasets.utils import hf_transform_to_torch
 from matplotlib.animation import FFMpegWriter, FuncAnimation
-from PIL import Image as PILImage
 from tqdm import tqdm
 
-
-def _hf_transform_decode_images(batch: dict) -> dict:
-    """Decode HF Image-feature struct dicts to PIL before hf_transform_to_torch."""
-    for key in list(batch.keys()):
-        vals = batch[key]
-        if vals and isinstance(vals[0], dict) and "bytes" in vals[0]:
-            batch[key] = [PILImage.open(io.BytesIO(v["bytes"])) for v in vals]
-    return hf_transform_to_torch(batch)
+from rlinf.data.datasets.recap.utils import decode_image_struct_batch
 
 
 def to_numpy(x):
@@ -97,7 +87,7 @@ def load_dataset(
         delta_timestamps=None,
         download_videos=False,
     )
-    dataset.hf_dataset.set_transform(_hf_transform_decode_images)
+    dataset.hf_dataset.set_transform(decode_image_struct_batch)
 
     tasks = {}
     tasks_path = dataset_path / "meta" / "tasks.jsonl"
