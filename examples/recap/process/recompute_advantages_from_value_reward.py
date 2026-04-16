@@ -73,7 +73,7 @@ def _suppress_video_logging() -> None:
 
 _suppress_video_logging()
 
-from rlinf.data.datasets.cfg.return_loaders import (  # noqa: E402
+from rlinf.data.datasets.recap.utils import (  # noqa: E402
     load_return_stats_from_dataset,
 )
 

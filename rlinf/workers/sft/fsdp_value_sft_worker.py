@@ -25,14 +25,15 @@ import os
 from pathlib import Path
 
 import numpy as np
-
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.datasets.cfg import (
+from rlinf.data.datasets.recap.utils import (
+    load_return_stats_from_dataset,
+)
+from rlinf.data.datasets.recap.value_model import (
     ValueDataLoaderImpl,
     ValueMixtureDataset,
-    load_return_stats_from_dataset,
 )
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
@@ -140,7 +141,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
         except (ImportError, AttributeError):
             pass
 
-        from rlinf.data.datasets.cfg import ValueDataset
+        from rlinf.data.datasets.recap.value_model import ValueDataset
         from rlinf.models.embodiment.value_model.data_collator import ValueDataCollator
         from rlinf.models.embodiment.value_model.processing import ValueProcessor
 

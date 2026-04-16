@@ -29,18 +29,20 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.datasets.cfg import TokenizePromptWithGuidance
-from rlinf.data.datasets.cfg.mixture_datasets import CfgMixtureDataset
+from rlinf.data.datasets.recap.cfg_model import (
+    AdvantagePreservingDataset,
+    CFGDataLoaderImpl,
+    CfgMixtureDataset,
+    TokenizePromptWithGuidance,
+)
+from rlinf.data.datasets.recap.utils import (
+    cast_image_features,
+)
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.distributed import all_reduce_dict
 from rlinf.utils.metric_utils import append_to_dict
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.workers.cfg.utils import (
-    AdvantagePreservingDataset,
-    CFGDataLoaderImpl,
-    cast_image_features,
-)
 from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
 
 # Suppress libdav1d/ffmpeg verbose logging

@@ -12,29 +12,55 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utility functions for loading return statistics and sidecar data."""
+"""Lightweight utility helpers for ReCap datasets."""
 
+from __future__ import annotations
+
+import io
+import json
 import logging
 from pathlib import Path
 
 import numpy as np
+from lerobot.common.datasets.utils import hf_transform_to_torch
+from PIL import Image as PILImage
 
 logger = logging.getLogger(__name__)
+
+
+def cast_image_features(hf_dataset):
+    """Cast image columns from struct to Image type for proper decoding."""
+    from datasets import Image
+
+    features = hf_dataset.features
+    needs_cast = False
+    new_features = features.copy()
+
+    for key, feat in features.items():
+        if isinstance(feat, dict) and "bytes" in feat:
+            new_features[key] = Image()
+            needs_cast = True
+
+    if needs_cast:
+        hf_dataset = hf_dataset.cast(new_features)
+        hf_dataset.set_transform(hf_transform_to_torch)
+
+    return hf_dataset
+
+
+def decode_image_struct_batch(batch: dict) -> dict:
+    """Decode Image-feature struct dicts before ``hf_transform_to_torch``."""
+    for key in list(batch.keys()):
+        vals = batch[key]
+        if vals and isinstance(vals[0], dict) and "bytes" in vals[0]:
+            batch[key] = [PILImage.open(io.BytesIO(v["bytes"])) for v in vals]
+    return hf_transform_to_torch(batch)
 
 
 def load_return_stats_from_dataset(
     dataset_path: str | Path,
 ) -> tuple[float | None, float | None]:
-    """Load return min/max from dataset's stats.json.
-
-    Args:
-        dataset_path: Path to LeRobot dataset
-
-    Returns:
-        Tuple of (return_min, return_max), or (None, None) if not found
-    """
-    import json
-
+    """Load return min/max from a dataset's ``meta/stats.json``."""
     stats_path = Path(dataset_path) / "meta" / "stats.json"
     if not stats_path.exists():
         return None, None
@@ -52,17 +78,7 @@ def load_returns_sidecar(
     dataset_path: str | Path,
     returns_tag: str | None = None,
 ) -> dict[int, dict[str, np.ndarray]] | None:
-    """Load ``meta/returns_{tag}.parquet`` sidecar written by compute_returns.py.
-
-    Falls back to ``meta/returns.parquet`` when *returns_tag* is None.
-
-    Returns:
-        ``{episode_index: {"return": np.array, "reward": np.array}}``
-        or None if sidecar does not exist **and** no tag was explicitly requested.
-
-    Raises:
-        FileNotFoundError: If *returns_tag* is given but the file does not exist.
-    """
+    """Load ``meta/returns_{tag}.parquet`` sidecar written by compute_returns.py."""
     import pyarrow.parquet as pq
 
     dataset_path = Path(dataset_path)
@@ -96,3 +112,27 @@ def load_returns_sidecar(
 
     logger.info(f"Loaded returns sidecar: {sidecar_path} ({len(sidecar)} episodes)")
     return sidecar
+
+
+def load_task_descriptions(dataset_path: str | Path) -> dict[int, str]:
+    """Load task descriptions from ``meta/tasks.jsonl`` or ``meta/tasks.parquet``."""
+    meta = Path(dataset_path) / "meta"
+    jsonl = meta / "tasks.jsonl"
+    if jsonl.exists():
+        tasks = {}
+        with open(jsonl, "r") as f:
+            for line in f:
+                if line.strip():
+                    data = json.loads(line.strip())
+                    tasks[data.get("task_index", len(tasks))] = data.get("task", "")
+        return tasks
+
+    parquet = meta / "tasks.parquet"
+    if parquet.exists():
+        import pandas as pd
+
+        df = pd.read_parquet(parquet)
+        if "task_index" in df.columns and "task" in df.columns:
+            return {int(r["task_index"]): str(r["task"]) for _, r in df.iterrows()}
+
+    return {}

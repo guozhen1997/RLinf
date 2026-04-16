@@ -12,13 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Value Dataset: loads LeRobot data + returns sidecar for value model SFT."""
+"""Value-model datasets, transforms, and dataloader helpers for ReCap."""
 
-import io
+from __future__ import annotations
+
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 import numpy as np
 import openpi.models.model as _openpi_model
@@ -28,14 +30,17 @@ from lerobot.common.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
-from lerobot.common.datasets.utils import hf_transform_to_torch
-from PIL import Image as PILImage
+from openpi.transforms import DataTransformFn
 from torch.utils.data import Dataset
 
 from rlinf.models.embodiment.openpi.policies import franka_policy, libero_policy
 
-from .return_loaders import load_returns_sidecar
-from .value_transforms import ReturnNormalizer
+from .common import BaseDataLoaderImpl, ReCapMixtureDataset
+from .utils import (
+    decode_image_struct_batch,
+    load_returns_sidecar,
+    load_task_descriptions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,27 +81,117 @@ _REPACK_KEYS = {
 }
 
 
-def _hf_transform_decode_images(batch: dict) -> dict:
-    """Wrap hf_transform_to_torch to decode Image-feature struct dicts first.
+@dataclass
+class NormStats:
+    """Normalization statistics compatible with OpenPI format."""
 
-    LeRobot uses ``set_transform(hf_transform_to_torch)`` which bypasses
-    HuggingFace's native Image feature decoding.  When parquet columns
-    contain Image-feature structs (``{bytes, path}``), the raw dicts reach
-    ``torch.tensor()`` and crash.  This wrapper decodes them to PIL Images
-    so the existing PIL → tensor path in ``hf_transform_to_torch`` works.
-    """
-    for key in list(batch.keys()):
-        vals = batch[key]
-        if vals and isinstance(vals[0], dict) and "bytes" in vals[0]:
-            batch[key] = [PILImage.open(io.BytesIO(v["bytes"])) for v in vals]
-    return hf_transform_to_torch(batch)
+    mean: np.ndarray
+    std: np.ndarray
+    q01: Optional[np.ndarray] = None
+    q99: Optional[np.ndarray] = None
+    min: Optional[np.ndarray] = None
+    max: Optional[np.ndarray] = None
+
+
+def _dict_to_norm_stats(data: dict[str, Any]) -> NormStats:
+    return NormStats(
+        mean=np.array(data["mean"]),
+        std=np.array(data["std"]),
+        q01=np.array(data["q01"]) if data.get("q01") is not None else None,
+        q99=np.array(data["q99"]) if data.get("q99") is not None else None,
+        min=np.array(data["min"]) if data.get("min") is not None else None,
+        max=np.array(data["max"]) if data.get("max") is not None else None,
+    )
+
+
+def load_stats(norm_stats_path: Path) -> dict[str, NormStats]:
+    """Load normalization stats from a JSON file in OpenPI format."""
+    if not norm_stats_path.exists():
+        raise FileNotFoundError(f"Norm stats file not found at: {norm_stats_path}")
+
+    with open(norm_stats_path, "r") as f:
+        data = json.load(f)
+
+    if "norm_stats" in data:
+        data = data["norm_stats"]
+
+    return {key: _dict_to_norm_stats(stats_dict) for key, stats_dict in data.items()}
+
+
+class ReturnNormalizer(DataTransformFn):
+    """Normalize return values for value model training."""
+
+    def __init__(
+        self,
+        return_min: Optional[float] = None,
+        return_max: Optional[float] = None,
+        norm_stats: Optional[dict[str, NormStats]] = None,
+        norm_stats_path: Optional[Path] = None,
+        return_key: str = "return",
+        keep_continuous: bool = True,
+        normalize_to_minus_one_zero: bool = True,
+    ):
+        self.return_key = return_key
+        self.keep_continuous = keep_continuous
+        self.normalize_to_minus_one_zero = normalize_to_minus_one_zero
+
+        if return_min is not None and return_max is not None:
+            self.return_min = return_min
+            self.return_max = return_max
+        elif norm_stats is not None:
+            self._load_from_norm_stats(norm_stats)
+        elif norm_stats_path is not None:
+            self._load_from_norm_stats(load_stats(Path(norm_stats_path)))
+        else:
+            raise ValueError(
+                "Must provide either (return_min, return_max), norm_stats, "
+                "or norm_stats_path"
+            )
+
+        logger.info(
+            "ReturnNormalizer: return_min=%.4f, return_max=%.4f, range=%s",
+            self.return_min,
+            self.return_max,
+            "(-1, 0)" if self.normalize_to_minus_one_zero else "(0, 1)",
+        )
+
+    def _load_from_norm_stats(self, norm_stats: dict[str, NormStats]):
+        if "return" not in norm_stats:
+            raise ValueError("norm_stats must contain 'return' key")
+        rs = norm_stats["return"]
+        self.return_min = float(rs.min[0] if hasattr(rs.min, "__len__") else rs.min)
+        self.return_max = float(rs.max[0] if hasattr(rs.max, "__len__") else rs.max)
+
+    def normalize_value(self, value: float) -> float:
+        if self.normalize_to_minus_one_zero:
+            denom = abs(self.return_min) if self.return_min != 0 else 1.0
+            return value / denom
+        span = self.return_max - self.return_min
+        if span == 0:
+            return 0.0
+        return (value - self.return_min) / span
+
+    def __call__(self, data: dict[str, Any]) -> dict[str, Any]:
+        if self.return_key not in data:
+            return data
+
+        raw = data[self.return_key]
+        if isinstance(raw, torch.Tensor):
+            raw = raw.item() if raw.numel() == 1 else raw.cpu().numpy()
+        elif isinstance(raw, np.ndarray):
+            raw = raw.item() if raw.size == 1 else float(raw.flatten()[0])
+
+        result = dict(data)
+        result["return_normalized"] = self.normalize_value(float(raw))
+
+        if not self.keep_continuous:
+            del result[self.return_key]
+
+        return result
 
 
 class ValueDataset(Dataset):
-    """Flat dataset for value model SFT.
-
-    Returns ``{images, prompt, target_values, actions=None}`` per sample.
-    """
+    """Flat dataset for value model SFT."""
 
     def __init__(
         self,
@@ -114,7 +209,7 @@ class ValueDataset(Dataset):
         episode_percentage: Optional[float] = None,
         shuffle_episodes: bool = False,
         episode_seed: int = 42,
-        **kwargs,  # accept unused params (gamma, split, etc.)
+        **kwargs,
     ):
         _known_unused = {
             "gamma",
@@ -132,7 +227,6 @@ class ValueDataset(Dataset):
         self.max_samples = max_samples
         local_path = Path(dataset_path).absolute()
 
-        # Metadata + dataset
         self.dataset_meta = LeRobotDatasetMetadata(local_path.name, root=local_path)
         if "action" in self.dataset_meta.features:
             action_key = "action"
@@ -152,12 +246,8 @@ class ValueDataset(Dataset):
             delta_timestamps=delta_timestamps,
             download_videos=False,
         )
+        self._base.hf_dataset.set_transform(decode_image_struct_batch)
 
-        # Patch HF transform to decode Image-feature struct columns that
-        # would otherwise crash hf_transform_to_torch (see docstring).
-        self._base.hf_dataset.set_transform(_hf_transform_decode_images)
-
-        # Returns sidecar (required for value SFT)
         self._sidecar = load_returns_sidecar(local_path, tag)
         if self._sidecar is None:
             raise FileNotFoundError(
@@ -166,7 +256,6 @@ class ValueDataset(Dataset):
                 f"meta/returns{'_' + tag if tag else ''}.parquet"
             )
 
-        # Episode filtering
         self._indices = None
         if episode_percentage is not None and episode_percentage < 100:
             if episode_percentage <= 0:
@@ -188,20 +277,15 @@ class ValueDataset(Dataset):
                 for i in range(idx["from"][ep].item(), idx["to"][ep].item())
             ]
 
-        # Transform pipeline (repack → data → model)
         self._transform = self._build_transform(
             robot_type=robot_type,
             model_type=model_type,
             action_dim=action_dim or 32,
             default_prompt=default_prompt,
         )
-
-        # Task descriptions for prompt injection
-        self._tasks = self._load_tasks(local_path) or (
+        self._tasks = load_task_descriptions(local_path) or (
             self.dataset_meta.tasks if hasattr(self.dataset_meta, "tasks") else None
         )
-
-        # Return normalizer
         self._normalizer = (
             ReturnNormalizer(
                 return_min=return_min,
@@ -217,14 +301,11 @@ class ValueDataset(Dataset):
 
     @staticmethod
     def _build_transform(robot_type, model_type, action_dim, default_prompt):
-        """Build transform pipeline using openpi policies and transforms."""
         model_type_lower = model_type.lower()
         model_type_enum = _MODEL_TYPE_MAP[model_type_lower]
         robot = robot_type.lower()
 
         transforms_list = []
-
-        # 1. Repack (map dataset keys → standard observation keys)
         repack_keys = _REPACK_KEYS.get(robot)
         if repack_keys is None:
             raise ValueError(
@@ -233,7 +314,6 @@ class ValueDataset(Dataset):
             )
         transforms_list.append(_openpi_transforms.RepackTransform(repack_keys))
 
-        # 2. Data transforms (robot-specific, from openpi policies)
         if robot in ("libero", "libero_v2"):
             transforms_list.append(
                 libero_policy.LiberoInputs(model_type=model_type_enum)
@@ -246,35 +326,10 @@ class ValueDataset(Dataset):
                 )
             )
 
-        # 3. Model transforms (without TokenizePrompt and ResizeImages —
-        #    value model handles tokenization via ValueProcessor in the
-        #    collator, and image resize via ValueImageProcessor)
         transforms_list.append(_openpi_transforms.InjectDefaultPrompt(default_prompt))
         transforms_list.append(_openpi_transforms.PadStatesAndActions(action_dim))
 
         return _openpi_transforms.compose(transforms_list)
-
-    @staticmethod
-    def _load_tasks(dataset_path) -> dict[int, str]:
-        """Load task descriptions from dataset meta (tasks.jsonl or tasks.parquet)."""
-        meta = Path(dataset_path) / "meta"
-        jsonl = meta / "tasks.jsonl"
-        if jsonl.exists():
-            tasks = {}
-            with open(jsonl, "r") as f:
-                for line in f:
-                    if line.strip():
-                        d = json.loads(line.strip())
-                        tasks[d.get("task_index", len(tasks))] = d.get("task", "")
-            return tasks
-        parquet = meta / "tasks.parquet"
-        if parquet.exists():
-            import pandas as pd
-
-            df = pd.read_parquet(parquet)
-            if "task_index" in df.columns and "task" in df.columns:
-                return {int(r["task_index"]): str(r["task"]) for _, r in df.iterrows()}
-        return {}
 
     def __len__(self) -> int:
         n = len(self._indices) if self._indices else len(self._base)
@@ -284,7 +339,6 @@ class ValueDataset(Dataset):
         real_idx = self._indices[idx] if self._indices else idx
         sample = self._base[real_idx]
 
-        # Extract episode/frame indices BEFORE transforms (LiberoInputs drops them)
         ep = int(sample.get("episode_index", -1))
         fr = int(sample.get("frame_index", -1))
         if ep < 0 or fr < 0:
@@ -294,7 +348,6 @@ class ValueDataset(Dataset):
                 f"Available keys: {sorted(sample.keys())}"
             )
 
-        # Prompt injection
         if self._tasks and "task_index" in sample:
             ti = sample["task_index"]
             ti = ti.item() if isinstance(ti, torch.Tensor) else int(ti)
@@ -304,7 +357,6 @@ class ValueDataset(Dataset):
         if self._transform is not None:
             sample = self._transform(sample)
 
-        # Return lookup + normalize (sidecar guaranteed to exist)
         if ep not in self._sidecar:
             raise KeyError(
                 f"Episode {ep} not found in returns sidecar at "
@@ -330,3 +382,16 @@ class ValueDataset(Dataset):
         if isinstance(masks, dict) and masks:
             result["image_masks"] = masks
         return result
+
+
+class ValueDataLoaderImpl(BaseDataLoaderImpl):
+    """Lightweight wrapper that yields batches and exposes data_config()."""
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        yield from self._data_loader
+
+
+class ValueMixtureDataset(ReCapMixtureDataset):
+    """Mixture of multiple value datasets with weighted sampling."""
+
+    mixture_name = "ValueMixtureDataset"

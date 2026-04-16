@@ -12,13 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Mixture datasets for value and advantage training.
+"""Common dataloader and mixture dataset helpers for ReCap."""
 
-This module provides:
-- CfgMixtureDataset: for CFG-RL training with binary advantage labels
-- ValueMixtureDataset: for training value models on multiple datasets
-"""
+from __future__ import annotations
 
 import hashlib
 import logging
@@ -32,10 +28,35 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class SizedDataset(Protocol):
-    """Protocol for datasets that have both __len__ and __getitem__."""
+    """Protocol for datasets that have both ``__len__`` and ``__getitem__``."""
 
     def __len__(self) -> int: ...
     def __getitem__(self, index: int) -> Any: ...
+
+
+def forward_set_epoch(data_loader: Any, epoch: int) -> None:
+    """Forward ``set_epoch`` to the wrapped sampler and dataset when present."""
+    if hasattr(data_loader, "sampler") and hasattr(data_loader.sampler, "set_epoch"):
+        data_loader.sampler.set_epoch(epoch)
+    if hasattr(data_loader, "dataset") and hasattr(data_loader.dataset, "set_epoch"):
+        data_loader.dataset.set_epoch(epoch)
+
+
+class BaseDataLoaderImpl:
+    """Lightweight wrapper around a torch dataloader with epoch forwarding."""
+
+    def __init__(self, data_config: Any, data_loader: Any):
+        self._data_config = data_config
+        self._data_loader = data_loader
+
+    def data_config(self) -> Any:
+        return self._data_config
+
+    def __len__(self) -> int:
+        return len(self._data_loader)
+
+    def set_epoch(self, epoch: int) -> None:
+        forward_set_epoch(self._data_loader, epoch)
 
 
 def _safe_hash(input_tuple) -> int:
@@ -47,8 +68,10 @@ def _safe_hash(input_tuple) -> int:
     return seed & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
 
-class _MixtureBase(Dataset):
-    """Shared logic for mixture datasets."""
+class ReCapMixtureDataset(Dataset):
+    """Shared weighted-mixture sampling dataset for ReCap pipelines."""
+
+    mixture_name = "ReCapMixtureDataset"
 
     def __init__(
         self,
@@ -57,7 +80,6 @@ class _MixtureBase(Dataset):
         balance_dataset_weights: bool = True,
         seed: int = 42,
     ):
-        # Filter out empty datasets
         valid_datasets = []
         for ds, weight in datasets:
             if len(ds) == 0:
@@ -95,6 +117,16 @@ class _MixtureBase(Dataset):
             self._primary_indices = self._raw_weights == max_weight
 
         self._epoch = 0
+        self._log_initialization()
+
+    def _log_initialization(self) -> None:
+        logger.info(f"{self.mixture_name} initialized:")
+        logger.info(f"  Datasets: {len(self.datasets)}")
+        logger.info(f"  Total samples: {sum(self._dataset_lengths)}")
+        logger.info(f"  Dataset lengths: {self._dataset_lengths.tolist()}")
+        logger.info(f"  Raw weights: {self._raw_weights.tolist()}")
+        logger.info(f"  Sampling weights: {self._dataset_sampling_weights.tolist()}")
+        logger.info(f"  Mode: {self.mode}")
 
     @property
     def dataset_lengths(self) -> np.ndarray:
@@ -119,60 +151,17 @@ class _MixtureBase(Dataset):
         return int(ratios.max())
 
     def _sample_step(self, index: int) -> tuple[SizedDataset, int]:
-        if self.mode != "train":
-            seed = index
-        else:
-            seed = _safe_hash((self._epoch, index, self.seed))
-
+        seed = (
+            index
+            if self.mode != "train"
+            else _safe_hash((self._epoch, index, self.seed))
+        )
         rng = np.random.default_rng(seed)
         ds_idx = rng.choice(len(self.datasets), p=self._dataset_sampling_weights)
         dataset = self.datasets[ds_idx]
         sample_idx = int(rng.integers(0, len(dataset)))
-
         return dataset, sample_idx
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         dataset, sample_idx = self._sample_step(index)
         return dataset[sample_idx]
-
-
-class CfgMixtureDataset(_MixtureBase):
-    """Mixture of multiple datasets with weighted sampling for CFG-RL training."""
-
-    def __init__(
-        self,
-        datasets: Sequence[tuple[SizedDataset, float]],
-        mode: str = "train",
-        balance_dataset_weights: bool = True,
-        seed: int = 42,
-    ):
-        super().__init__(datasets, mode, balance_dataset_weights, seed)
-
-        logger.info("CfgMixtureDataset initialized:")
-        logger.info(f"  Datasets: {len(self.datasets)}")
-        logger.info(f"  Total samples: {sum(self._dataset_lengths)}")
-        logger.info(f"  Dataset lengths: {self._dataset_lengths.tolist()}")
-        logger.info(f"  Raw weights: {self._raw_weights.tolist()}")
-        logger.info(f"  Sampling weights: {self._dataset_sampling_weights.tolist()}")
-        logger.info(f"  Mode: {mode}")
-
-
-class ValueMixtureDataset(_MixtureBase):
-    """Mixture of multiple ValueDatasets with weighted sampling."""
-
-    def __init__(
-        self,
-        datasets: Sequence[tuple[SizedDataset, float]],
-        mode: str = "train",
-        balance_dataset_weights: bool = True,
-        seed: int = 42,
-    ):
-        super().__init__(datasets, mode, balance_dataset_weights, seed)
-
-        logger.info("ValueMixtureDataset initialized:")
-        logger.info(f"  Datasets: {len(self.datasets)}")
-        logger.info(f"  Total samples: {sum(self._dataset_lengths)}")
-        logger.info(f"  Dataset lengths: {self._dataset_lengths.tolist()}")
-        logger.info(f"  Raw weights: {self._raw_weights.tolist()}")
-        logger.info(f"  Sampling weights: {self._dataset_sampling_weights.tolist()}")
-        logger.info(f"  Mode: {mode}")
