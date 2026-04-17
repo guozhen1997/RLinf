@@ -44,9 +44,6 @@ data:
     - dataset_path: "/path/to/sft_dataset"
       type: "sft"
       weight: 1.0
-    - dataset_path: "/path/to/collected_data"
-      type: "rollout"
-      weight: 1.0
 
 algorithm:
   adv_type: gae

@@ -29,7 +29,7 @@ runner:
   save_interval: -1
 
 data:
-  num_workers: 8
+  num_workers: 1
   # Tag: loads meta/advantages_{tag}.parquet from each dataset
   # If null, loads meta/advantages.parquet (legacy format)
   advantage_tag: fail300_N5_ckpt9000_q30_collect4096_task0
