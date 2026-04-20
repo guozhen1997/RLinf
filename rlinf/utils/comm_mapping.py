@@ -62,6 +62,9 @@ class CommMapper:
                 # special case for src_world_size == 1 and env_worker > rollout_worker size case
                 # To avoid the rollout worker become deadlocked, the len(buffer) should be divisible by 2.
                 # In env decoupled mode the env worker nums should >= rollout worker nums when rollout worker num is 1.
+                # for example, rollout_worker_nums = 1, env_worker_nums = 4, batch_size = 32
+                # the rollout worker rank 0 [8, 8] (the buffer size should be divisible by 2)
+                # the env worker rank 0 [8] rank1 [8] rank2 [8] rank3 [8]
                 return [
                     batch_size // dst_world_size
                     for _ in range(dst_world_size // src_world_size // 2)
