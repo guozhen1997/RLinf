@@ -95,7 +95,7 @@ env:
     # When set rollout worker to "decoupled":
     # The rollout and env workers are fully decoupled, removing the static mapping.
     # This is to handle situations where the env worker may become deadlocked.
-    env_mode: "decoupled"
+    # env_mode: "decoupled"
 
   eval:
     total_num_envs: 1024
