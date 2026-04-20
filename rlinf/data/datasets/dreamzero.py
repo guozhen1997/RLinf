@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DreamZero SFT data utilities for LIBERO.
+"""DreamZero SFT data utilities for LIBERO and OXE DROID (LeRobot).
 
-Provides DreamZeroLiberoDataset and DreamZeroCollator that convert
-LeRobot v3 LIBERO data into the batch format expected by VLA.forward().
+Provides DreamZeroLiberoDataset / DreamZeroDroidDataset and DreamZeroCollator
+that convert LeRobot data into the batch format expected by VLA.forward().
 
 Data flow summary (shapes shown for default config: num_chunks=4, action_horizon=64):
   Raw parquet/mp4
@@ -58,6 +58,18 @@ LIBERO_PROMPT_TEMPLATE = (
 )
 POSITIVE_GUIDANCE_PROMPT_TEMPLATE = "[POSITIVE][POSITIVE]\n" + LIBERO_PROMPT_TEMPLATE
 NEGATIVE_GUIDANCE_PROMPT_TEMPLATE = "[NEGATIVE][NEGATIVE]\n" + LIBERO_PROMPT_TEMPLATE
+
+# Prompt for DROID (aligned with groot DreamZero collate / rlinf_collate wording).
+DROID_PROMPT_TEMPLATE = (
+    "A multi-view video shows that a robot {task} "
+    "The video is split into three views: The top view shows the camera view from the robot's wrist, "
+    "the bottom-left view shows the camera view from the left exterior camera, and the bottom-right view "
+    "shows the camera view from the right exterior camera. During training, one of the two bottom exterior "
+    "views may be a black screen (dropped view). The robot {task}"
+)
+
+# DreamZero projector id for OXE DROID (see rlinf.models.embodiment.dreamzero.transform_runtime).
+DROID_EMBODIMENT_ID = 17
 
 
 def _load_gear_stats(meta_dir: Path) -> dict[str, np.ndarray]:
@@ -771,6 +783,504 @@ class DreamZeroLiberoDataset(Dataset):
         }
 
 
+def _droid_default_state_action_slices() -> tuple[slice, slice, slice, slice]:
+    """Slice ranges into convert_droid-style concatenated vectors.
+
+    state: cartesian(6) + gripper(1) + joint(7)
+    action: cartesian(6) + cartesian_vel(6) + gripper(1) + gripper_vel(1) + joint(7) + joint_vel(7)
+    """
+    st_joint = slice(7, 14)
+    st_grip = slice(6, 7)
+    ac_joint = slice(14, 21)
+    ac_grip = slice(12, 13)
+    return st_joint, st_grip, ac_joint, ac_grip
+
+
+def _empty_slice() -> slice:
+    return slice(0, 0)
+
+
+def _infer_joint_grip_slices(
+    names: list | dict | None, feature_dim: int | None = None
+) -> tuple[slice, slice] | None:
+    """Map concat-vector indices for joint_position and gripper_position from meta names."""
+    if not names:
+        return None
+    # droid_100-style: names is a dict like {"motors": ["motor_0", ...]}.
+    if isinstance(names, dict):
+        if "joint_position" in names:
+            joints = names.get("joint_position")
+            n_joint = len(joints) if isinstance(joints, list) else 0
+            if n_joint > 0:
+                if "gripper_position" in names:
+                    gripper = names.get("gripper_position")
+                    n_grip = len(gripper) if isinstance(gripper, list) else 0
+                    if n_grip > 0:
+                        return slice(0, n_joint), slice(n_joint, n_joint + n_grip)
+                return slice(0, n_joint), _empty_slice()
+        motors = names.get("motors")
+        if isinstance(motors, list) and len(motors) > 0:
+            # Heuristic fallback:
+            # - 8 dims -> (7 joint + 1 gripper), which matches official modality definition.
+            # - otherwise keep joint-only.
+            if len(motors) >= 8:
+                return slice(0, 7), slice(7, 8)
+            return slice(0, len(motors)), _empty_slice()
+        return None
+
+    # LeRobot convert_droid-style: names is a list of component keys with known widths.
+    if all(isinstance(x, str) for x in names):
+        plan = {
+            "cartesian_position": 6,
+            "cartesian_velocity": 6,
+            "gripper_position": 1,
+            "gripper_velocity": 1,
+            "joint_position": 7,
+            "joint_velocity": 7,
+        }
+        cursor = 0
+        spans: dict[str, tuple[int, int]] = {}
+        for key in names:
+            if key not in plan:
+                return None
+            w = plan[key]
+            spans[key] = (cursor, cursor + w)
+            cursor += w
+        if "joint_position" in spans and "gripper_position" in spans:
+            j0, j1 = spans["joint_position"]
+            g0, g1 = spans["gripper_position"]
+            return slice(j0, j1), slice(g0, g1)
+        # Joint-only representation (e.g. ["motor_0", ...] or ["joint_position"]).
+        if "joint_position" in spans:
+            j0, j1 = spans["joint_position"]
+            return slice(j0, j1), _empty_slice()
+        if feature_dim is not None and feature_dim > 0:
+            return slice(0, feature_dim), _empty_slice()
+        return None
+
+    cursor = 0
+    spans = {}
+    for entry in names:
+        if isinstance(entry, str):
+            key = entry
+            size = 1
+        elif isinstance(entry, dict):
+            key = str(entry.get("name", ""))
+            shape = entry.get("shape")
+            size = int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
+        else:
+            continue
+        spans[key] = (cursor, cursor + size)
+        cursor += size
+    need = ("joint_position", "gripper_position")
+    if not all(k in spans for k in need):
+        if "joint_position" in spans:
+            j0, j1 = spans["joint_position"]
+            return slice(j0, j1), _empty_slice()
+        if feature_dim is not None and feature_dim > 0:
+            return slice(0, feature_dim), _empty_slice()
+        return None
+    j0, j1 = spans["joint_position"]
+    g0, g1 = spans["gripper_position"]
+    return slice(j0, j1), slice(g0, g1)
+
+
+def _safe_lang_text(value: Any, task_map: dict[int, str]) -> str:
+    """Decode language field into a non-empty string when possible."""
+    raw = value
+    if hasattr(raw, "item"):
+        raw = raw.item()
+    if isinstance(raw, (list, tuple, np.ndarray)):
+        if len(raw) == 0:
+            return ""
+        raw = raw[0]
+        if hasattr(raw, "item"):
+            raw = raw.item()
+    if isinstance(raw, (int, np.integer)) and task_map:
+        return str(task_map.get(int(raw), "")).strip()
+    if raw is None:
+        return ""
+    return str(raw).strip()
+
+
+def _infer_droid_image_keys(info: dict) -> tuple[str, str, str]:
+    feats = info.get("features") or {}
+    candidates = [k for k in feats if k.startswith("observation.images.")]
+    wrist_keys = [k for k in candidates if "wrist" in k]
+    ext_keys = sorted([k for k in candidates if "wrist" not in k])
+    if len(wrist_keys) != 1 or len(ext_keys) != 2:
+        raise ValueError(
+            "DROID dataset needs exactly 2 exterior + 1 wrist under observation.images.*, "
+            f"found wrist={wrist_keys} exterior={ext_keys}"
+        )
+    return ext_keys[0], ext_keys[1], wrist_keys[0]
+
+
+class DreamZeroDroidDataset(Dataset):
+    """Map LeRobot OXE DROID samples to DreamZero SFT tensors (layout matches groot OXE_DROID).
+
+    Video: 33 frames (delta 0..32), stacked into a 2x2 layout (H*2 x W*2),
+    matching DreamTransform._prepare_video for EmbodimentTag.OXE_DROID.
+
+    State: one timestep, joint (7) + gripper (1) -> padded to (1, max_state_dim).
+
+    Action: 24 steps (delta 0..23), joint + optional gripper slices -> padded to (24, max_action_dim).
+
+    Optional relative joint targets: action_joint := action_joint - ref_joint (current state),
+    same convention as groot LeRobotSingleDataset relative_action on ``joint_position``.
+    """
+
+    def __init__(
+        self,
+        data_path: str | list[str],
+        action_horizon: int = 24,
+        num_video_frames: int = 33,
+        total_action_steps: int = 96,
+        state_horizon: int = 4,
+        state_step: int = 24,
+        max_action_dim: int = 32,
+        max_state_dim: int = 64,
+        cfg_mode: bool = False,
+        advantage_parquet: str | None = None,
+        unconditional_prob: float = 0.3,
+        relative_action: bool = True,
+        relative_action_keys: list[str] | None = None,
+    ):
+        if isinstance(data_path, (list, tuple)):
+            if len(data_path) == 0:
+                raise ValueError("DreamZeroDroidDataset requires at least one data path.")
+            data_path = data_path[0]
+        self.data_path = str(data_path)
+        self.action_horizon = int(action_horizon)
+        self.total_action_steps = int(total_action_steps)
+        self.num_video_frames = int(num_video_frames)
+        self.state_horizon = int(state_horizon)
+        self.state_step = int(state_step)
+        self.max_action_dim = int(max_action_dim)
+        self.max_state_dim = int(max_state_dim)
+        self.cfg_mode = bool(cfg_mode)
+        self.advantage_parquet = advantage_parquet
+        self.unconditional_prob = float(unconditional_prob)
+        self.relative_action = bool(relative_action)
+        self.relative_action_keys = list(relative_action_keys or ["joint_position"])
+        self.embodiment_id = DROID_EMBODIMENT_ID
+
+        meta_dir = Path(self.data_path) / "meta"
+        with open(meta_dir / "info.json") as f:
+            info = json.load(f)
+        self._fps = float(info.get("fps", 15))
+        self._version = str(info.get("codebase_version", "v2.0"))
+        feats = info.get("features") or {}
+        self._raw_hw = (
+            feats.get("observation.images.exterior_image_1_left", {})
+            .get("shape", [180, 320, 3])[:2]
+        )
+        self._raw_hw = (int(self._raw_hw[0]), int(self._raw_hw[1]))
+
+        st_feat = feats.get("observation.state") or {}
+        act_feat = feats.get("action") or {}
+        st_dim = int((st_feat.get("shape") or [0])[0] or 0)
+        ac_dim = int((act_feat.get("shape") or [0])[0] or 0)
+        st_slices = _infer_joint_grip_slices(st_feat.get("names"), st_dim)
+        ac_slices = _infer_joint_grip_slices(act_feat.get("names"), ac_dim)
+        if st_slices is None or ac_slices is None:
+            if st_dim > 0 and ac_dim > 0 and st_dim <= 8 and ac_dim <= 8:
+                self._st_j, self._st_g = slice(0, st_dim), _empty_slice()
+                self._ac_j, self._ac_g = slice(0, ac_dim), _empty_slice()
+                logger.info(
+                    "DROID: using joint-only slices inferred from feature dims "
+                    "(state=%d, action=%d).",
+                    st_dim,
+                    ac_dim,
+                )
+            else:
+                self._st_j, self._st_g, self._ac_j, self._ac_g = _droid_default_state_action_slices()
+                logger.info(
+                    "DROID: using default convert_droid slices "
+                    "(meta feature names missing joint_position/gripper_position)."
+                )
+        else:
+            self._st_j, self._st_g = st_slices
+            self._ac_j, self._ac_g = ac_slices
+
+        self._img_key_left, self._img_key_right, self._img_key_wrist = _infer_droid_image_keys(
+            info
+        )
+        self._tasks = DreamZeroLiberoDataset._load_task_texts(meta_dir)
+
+        gear_stats = _load_gear_stats(meta_dir)
+        st_full = gear_stats.get("observation.state") or {}
+        ac_full = gear_stats.get("action") or {}
+        self._full_state_q01 = st_full.get("q01")
+        self._full_state_q99 = st_full.get("q99")
+        self._full_action_q01 = ac_full.get("q01")
+        self._full_action_q99 = ac_full.get("q99")
+
+        video_offsets = list(range(self.num_video_frames))
+        state_offsets = [i * self.state_step for i in range(self.state_horizon)]
+        action_offsets = list(range(self.total_action_steps))
+
+        import lerobot.datasets.lerobot_dataset as lerobot_dataset
+
+        delta_timestamps = {
+            self._img_key_left: [t / self._fps for t in video_offsets],
+            self._img_key_right: [t / self._fps for t in video_offsets],
+            self._img_key_wrist: [t / self._fps for t in video_offsets],
+            "observation.state": [t / self._fps for t in state_offsets],
+            "action": [t / self._fps for t in action_offsets],
+        }
+        self.dataset = lerobot_dataset.LeRobotDataset(
+            self.data_path,
+            delta_timestamps=delta_timestamps,
+            video_backend="pyav",
+        )
+
+        self._advantage_map: dict[int, np.ndarray] = {}
+        self._advantage_path: Path | None = None
+        self._init_advantage_lookup(meta_dir)
+
+    def _init_advantage_lookup(self, meta_dir: Path) -> None:
+        if not self.cfg_mode:
+            return
+        import pandas as pd
+
+        adv_path = (
+            Path(self.advantage_parquet)
+            if self.advantage_parquet
+            else (meta_dir / "advantages_test.parquet")
+        )
+        if not adv_path.is_absolute():
+            adv_path = meta_dir / adv_path
+        if not adv_path.exists():
+            raise FileNotFoundError(
+                f"CFG mode enabled but advantage parquet not found: {adv_path}"
+            )
+        cache_key = str(adv_path.resolve())
+        if cache_key in DreamZeroLiberoDataset._advantage_cache:
+            self._advantage_map = DreamZeroLiberoDataset._advantage_cache[cache_key]
+            self._advantage_path = adv_path
+            return
+        t0 = time.monotonic()
+        df = pd.read_parquet(
+            adv_path, columns=["episode_index", "frame_index", "advantage"]
+        )
+        advantage_map: dict[int, np.ndarray] = {}
+        for ep_idx, ep_df in df.groupby("episode_index", sort=False):
+            frame_idx = ep_df["frame_index"].to_numpy(dtype=np.int64)
+            advantage = ep_df["advantage"].to_numpy(dtype=np.bool_)
+            max_frame = int(frame_idx.max())
+            lookup = np.zeros(max_frame + 1, dtype=np.bool_)
+            lookup[frame_idx] = advantage
+            advantage_map[int(ep_idx)] = lookup
+        DreamZeroLiberoDataset._advantage_cache[cache_key] = advantage_map
+        self._advantage_map = advantage_map
+        self._advantage_path = adv_path
+        logger.info(
+            "Loaded advantage parquet (%d rows, %d episodes) from %s in %.1fs",
+            len(df),
+            len(advantage_map),
+            adv_path,
+            time.monotonic() - t0,
+        )
+
+    def _lookup_advantage(self, episode_index: int, frame_index: int) -> bool:
+        if episode_index not in self._advantage_map:
+            raise KeyError(
+                f"episode_index={episode_index} not found in advantage parquet {self._advantage_path}"
+            )
+        values = self._advantage_map[episode_index]
+        fi = int(frame_index)
+        if fi < 0 or fi >= len(values):
+            fi = min(max(fi, 0), len(values) - 1)
+        return bool(values[fi])
+
+    def _slice_norm(
+        self,
+        x: np.ndarray,
+        full_q01: np.ndarray | None,
+        full_q99: np.ndarray | None,
+        sl: slice,
+    ) -> np.ndarray:
+        if full_q01 is None or full_q99 is None:
+            return np.clip(x.astype(np.float32), -1.0, 1.0)
+        q01 = full_q01[sl].astype(np.float32)
+        q99 = full_q99[sl].astype(np.float32)
+        return q99_normalize(x.astype(np.float32), q01, q99)
+
+    def _build_droid_frame_grid(
+        self, left: np.ndarray, right: np.ndarray, wrist: np.ndarray
+    ) -> np.ndarray:
+        """Stack three views into (H*2, W*2) per timestep (groot OXE_DROID layout)."""
+        import cv2
+
+        t = left.shape[0]
+        out = []
+        for i in range(t):
+            a = DreamZeroLiberoDataset._to_hwc_uint8(left[i])
+            b = DreamZeroLiberoDataset._to_hwc_uint8(right[i])
+            w = DreamZeroLiberoDataset._to_hwc_uint8(wrist[i])
+            # Align with this DreamZero-DROID checkpoint's frame_seqlen=880:
+            # final stitched frame should be 352x640, i.e. per-view 176x320.
+            target_hw = (176, 320)
+            if a.shape[:2] != target_hw:
+                a = cv2.resize(a, target_hw[::-1], interpolation=cv2.INTER_LINEAR)
+            if b.shape[:2] != target_hw:
+                b = cv2.resize(b, target_hw[::-1], interpolation=cv2.INTER_LINEAR)
+            if w.shape[:2] != target_hw:
+                w = cv2.resize(w, target_hw[::-1], interpolation=cv2.INTER_LINEAR)
+            h0, w0 = a.shape[0], a.shape[1]
+            hb, wb = h0 * 2, w0 * 2
+            canvas = np.zeros((hb, wb, 3), dtype=np.uint8)
+            wrist_wide = np.repeat(w, 2, axis=1)
+            canvas[:h0, :] = wrist_wide
+            canvas[h0:, :w0] = a
+            canvas[h0:, w0:] = b
+            out.append(canvas)
+        return np.stack(out, axis=0)
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        sample = self.dataset[idx]
+
+        left = np.asarray(sample[self._img_key_left])
+        right = np.asarray(sample[self._img_key_right])
+        wrist = np.asarray(sample[self._img_key_wrist])
+        for name, arr in (("left", left), ("right", right), ("wrist", wrist)):
+            if arr.ndim == 3:
+                arr = arr[None, ...]
+            if name == "left":
+                left = arr
+            elif name == "right":
+                right = arr
+            else:
+                wrist = arr
+
+        images = self._build_droid_frame_grid(left, right, wrist).astype(np.uint8)
+        images = DreamZeroLiberoDataset._augment_video(images)
+
+        full_state = np.asarray(sample["observation.state"], dtype=np.float32)
+        if full_state.ndim == 1:
+            full_state = full_state[None, ...]
+        if full_state.shape[0] < self.state_horizon:
+            last = full_state[-1:]
+            pad = np.repeat(last, self.state_horizon - full_state.shape[0], axis=0)
+            full_state = np.concatenate([full_state, pad], axis=0)
+        full_state = full_state[: self.state_horizon]
+        joint_s = full_state[:, self._st_j].astype(np.float32)
+        grip_s = full_state[:, self._st_g].astype(np.float32)
+
+        full_action = np.asarray(sample["action"], dtype=np.float32)
+        if full_action.ndim == 1:
+            full_action = full_action[None, :]
+        if full_action.ndim == 2 and full_action.shape[0] < self.total_action_steps:
+            last = full_action[-1:]
+            pad = np.repeat(last, self.total_action_steps - full_action.shape[0], axis=0)
+            full_action = np.concatenate([full_action, pad], axis=0)
+        full_action = full_action[: self.total_action_steps]
+
+        joint_a = full_action[:, self._ac_j].astype(np.float32)
+        grip_a = full_action[:, self._ac_g].astype(np.float32)
+
+        if self.relative_action and "joint_position" in self.relative_action_keys:
+            # Use the first state token as reference for all action steps.
+            joint_a = joint_a - joint_s[0:1, :]
+
+        joint_s_n = self._slice_norm(
+            joint_s, self._full_state_q01, self._full_state_q99, self._st_j
+        )
+        grip_s_n = self._slice_norm(
+            grip_s, self._full_state_q01, self._full_state_q99, self._st_g
+        )
+        state_norm = np.concatenate([joint_s_n, grip_s_n], axis=-1)
+
+        joint_a_n = self._slice_norm(
+            joint_a, self._full_action_q01, self._full_action_q99, self._ac_j
+        )
+        grip_a_n = self._slice_norm(
+            grip_a.reshape(self.total_action_steps, -1),
+            self._full_action_q01,
+            self._full_action_q99,
+            self._ac_g,
+        )
+        action_norm = np.concatenate([joint_a_n, grip_a_n], axis=-1)
+
+        state_pad = np.zeros((self.state_horizon, self.max_state_dim), dtype=np.float32)
+        sd = min(state_norm.shape[-1], self.max_state_dim)
+        state_pad[:, :sd] = state_norm[:, :sd]
+        state_mask = np.zeros((self.state_horizon, self.max_state_dim), dtype=bool)
+        state_mask[:, :sd] = True
+
+        action_pad = np.zeros((self.total_action_steps, self.max_action_dim), dtype=np.float32)
+        ad = min(action_norm.shape[-1], self.max_action_dim)
+        action_pad[:, :ad] = action_norm[:, :ad]
+        action_mask = np.zeros((self.total_action_steps, self.max_action_dim), dtype=bool)
+        action_mask[:, :ad] = True
+
+        task_text = sample.get("task")
+        if task_text is None:
+            task_idx = int(sample.get("task_index", 0))
+            task_text = self._tasks.get(task_idx, "")
+        task_text = str(task_text)
+        lang_keys = [
+            "annotation.language.language_instruction",
+            "annotation.language.language_instruction_2",
+            "annotation.language.language_instruction_3",
+        ]
+        lang_candidates: list[str] = []
+        for lang_key in lang_keys:
+            if lang_key not in sample:
+                continue
+            text = _safe_lang_text(sample[lang_key], self._tasks)
+            if text:
+                lang_candidates.append(text)
+        # Match official training behavior: randomly sample one instruction if multiple are available.
+        if lang_candidates:
+            task_text = str(np.random.choice(lang_candidates))
+        elif not task_text.strip():
+            task_text = ""
+
+        prompt = task_text
+        if self.cfg_mode:
+            episode_index = sample.get("episode_index")
+            frame_index = sample.get("frame_index")
+            if episode_index is None or frame_index is None:
+                raise KeyError(
+                    "CFG mode requires episode_index and frame_index in each sample."
+                )
+            use_unconditional = np.random.random() < self.unconditional_prob
+            if use_unconditional:
+                prompt = DROID_PROMPT_TEMPLATE.format(task=task_text)
+            else:
+                advantage = self._lookup_advantage(int(episode_index), int(frame_index))
+                if advantage:
+                    prompt = "[POSITIVE][POSITIVE]\n" + DROID_PROMPT_TEMPLATE.format(
+                        task=task_text
+                    )
+                else:
+                    prompt = "[NEGATIVE][NEGATIVE]\n" + DROID_PROMPT_TEMPLATE.format(
+                        task=task_text
+                    )
+
+        return {
+            "images": images,
+            "state": state_pad,
+            "state_mask": state_mask,
+            "action": action_pad,
+            "action_mask": action_mask,
+            "embodiment_id": np.int64(self.embodiment_id),
+            "has_real_action": np.bool_(True),
+            "has_lapa_action": np.bool_(False),
+            "is_cotrain_instance": np.bool_(False),
+            "segmentation_target": np.zeros((2,), dtype=np.float32),
+            "segmentation_target_mask": np.zeros((1,), dtype=np.float32),
+            "lapa_action": np.zeros_like(action_pad),
+            "lapa_action_mask": np.zeros_like(action_mask),
+            "text": prompt,
+        }
+
+
 class DreamZeroCollator:
     """Collate DreamZero samples: stack tensors and tokenize text.
 
@@ -789,7 +1299,13 @@ class DreamZeroCollator:
       text_attention_mask (B, 512)            int64   1 for real tokens, 0 for padding
     """
 
-    def __init__(self, tokenizer_path: str, max_seq_len: int, cfg_mode: bool = False):
+    def __init__(
+        self,
+        tokenizer_path: str,
+        max_seq_len: int,
+        cfg_mode: bool = False,
+        sft_embodiment: str = "libero",
+    ):
         from groot.vla.model.dreamzero.transform.dreamzero_cotrain import (
             HuggingfaceTokenizer,
         )
@@ -801,6 +1317,7 @@ class DreamZeroCollator:
             clean="whitespace",
         )
         self.cfg_mode = bool(cfg_mode)
+        self.sft_embodiment = str(sft_embodiment).lower().replace("-", "_")
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
         batch: dict[str, Any] = {}
@@ -832,6 +1349,10 @@ class DreamZeroCollator:
         raw_texts = [str(f["text"]) for f in features]
         if self.cfg_mode:
             text_values = raw_texts
+        elif self.sft_embodiment in ("droid", "oxe_droid"):
+            text_values = [
+                DROID_PROMPT_TEMPLATE.format(task=t.lower()) for t in raw_texts
+            ]
         else:
             text_values = [LIBERO_PROMPT_TEMPLATE.format(task=t) for t in raw_texts]
         text_ids, text_mask = self.tokenizer(
@@ -859,11 +1380,6 @@ def build_dreamzero_sft_dataloader(
     model_cfg = cfg.actor.model
     tokenizer_path = model_cfg.get("tokenizer_path", "google/umt5-xxl")
     max_seq_len = int(model_cfg.get("max_seq_len", 512))
-    action_chunk_size = int(
-        model_cfg.get("dreamzero_action_horizon", 16)
-    )  # steps per chunk
-    num_chunks = int(model_cfg.get("dreamzero_num_chunks", 4))
-    effective_action_horizon = action_chunk_size * num_chunks  # = 64 total action steps
     max_action_dim = int(model_cfg.get("dreamzero_max_action_dim", 32))
     max_state_dim = int(model_cfg.get("dreamzero_max_state_dim", 64))
     cfg_mode = bool(model_cfg.get("cfg_mode", False))
@@ -872,16 +1388,62 @@ def build_dreamzero_sft_dataloader(
         advantage_parquet = None
     unconditional_prob = float(model_cfg.get("unconditional_prob", 0.3))
 
-    dataset = DreamZeroLiberoDataset(
-        data_path=data_paths,
-        action_horizon=effective_action_horizon,
-        num_chunks=num_chunks,
-        max_action_dim=max_action_dim,
-        max_state_dim=max_state_dim,
-        cfg_mode=cfg_mode,
-        advantage_parquet=advantage_parquet,
-        unconditional_prob=unconditional_prob,
-    )
+    sft_embodiment = str(model_cfg.get("embodiment_tag", "libero_sim")).lower()
+    if sft_embodiment in ("droid", "oxe_droid"):
+        # Unified knobs for both libero and droid:
+        # - dreamzero_action_horizon: per-block action steps
+        # - dreamzero_num_chunks: number of temporal chunks/blocks
+        # - dreamzero_num_video_frames: sampled video frames
+        droid_action_horizon = int(model_cfg.get("dreamzero_action_horizon", 24))
+        droid_num_chunks = int(model_cfg.get("dreamzero_num_chunks", 4))
+        droid_video_frames = int(model_cfg.get("dreamzero_num_video_frames", 33))
+        droid_total_action_steps = int(
+            model_cfg.get(
+                "dreamzero_total_action_steps",
+                droid_action_horizon * droid_num_chunks,
+            )
+        )
+        droid_state_horizon = int(
+            model_cfg.get("dreamzero_state_horizon", droid_num_chunks)
+        )
+        droid_state_step = int(
+            model_cfg.get("dreamzero_state_step", droid_action_horizon)
+        )
+        rel = bool(model_cfg.get("relative_action", True))
+        rel_keys = list(model_cfg.get("relative_action_keys", ["joint_position"]))
+        dataset = DreamZeroDroidDataset(
+            data_path=data_paths,
+            action_horizon=droid_action_horizon,
+            num_video_frames=droid_video_frames,
+            total_action_steps=droid_total_action_steps,
+            state_horizon=droid_state_horizon,
+            state_step=droid_state_step,
+            max_action_dim=max_action_dim,
+            max_state_dim=max_state_dim,
+            cfg_mode=cfg_mode,
+            advantage_parquet=advantage_parquet,
+            unconditional_prob=unconditional_prob,
+            relative_action=rel,
+            relative_action_keys=rel_keys,
+        )
+        collate_embodiment = "oxe_droid"
+    else:
+        action_chunk_size = int(
+            model_cfg.get("dreamzero_action_horizon", 16)
+        )  # steps per chunk
+        num_chunks = int(model_cfg.get("dreamzero_num_chunks", 4))
+        effective_action_horizon = action_chunk_size * num_chunks  # = 64 total action steps
+        dataset = DreamZeroLiberoDataset(
+            data_path=data_paths,
+            action_horizon=effective_action_horizon,
+            num_chunks=num_chunks,
+            max_action_dim=max_action_dim,
+            max_state_dim=max_state_dim,
+            cfg_mode=cfg_mode,
+            advantage_parquet=advantage_parquet,
+            unconditional_prob=unconditional_prob,
+        )
+        collate_embodiment = "libero"
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset,
         num_replicas=world_size,
@@ -903,6 +1465,7 @@ def build_dreamzero_sft_dataloader(
             tokenizer_path=tokenizer_path,
             max_seq_len=max_seq_len,
             cfg_mode=cfg_mode,
+            sft_embodiment=collate_embodiment,
         ),
     )
     return data_loader, {"num_samples": len(dataset)}
