@@ -113,13 +113,13 @@ class EnvWorker(Worker):
     def init_worker(self):
         # check env mode
         env_mode = self.cfg.env.train.get("env_mode", None)
-        assert env_mode in ["async", None], f"{env_mode} is not supported"
-        self.env_async_mode = env_mode == "async"
-        if self.env_async_mode:
-            self.log_info("Env worker initialized with async mode")
-            self.batch_size_map = self._setup_async_env_mode_batch_size()
+        assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
+        self.env_decoupled_mode = env_mode == "decoupled"
+        if self.env_decoupled_mode:
+            self.log_info("Env worker initialized with decoupled mode")
+            self.batch_size_map = self._setup_decoupled_env_mode_batch_size()
             self.log_info(
-                f"Async model env worker initialized with batch_size_map: {self.batch_size_map}"
+                f"decoupled model env worker initialized with batch_size_map: {self.batch_size_map}"
             )
             self.dst_rank_map = self._setup_eval_dst_rank_map()
             self.src_rank_map = self._setup_eval_src_rank_map()
@@ -280,11 +280,11 @@ class EnvWorker(Worker):
             env_list.append(env)
         return env_list
 
-    def _setup_async_env_mode_batch_size(self) -> dict[str, list[int]]:
-        """Compute batch_size for this env worker in async mode.
+    def _setup_decoupled_env_mode_batch_size(self) -> dict[str, list[int]]:
+        """Compute batch_size for this env worker in decoupled mode.
 
         This mapping supports both one-to-many and many-to-one env/rollout/reward layouts.
-        get the async mode batch size index for this env worker
+        get the decoupled mode batch size index for this env worker
         env outputs and receiving results from rollout and reward workers.
 
         Returns:
@@ -293,7 +293,7 @@ class EnvWorker(Worker):
         """
         if not self.only_eval:
             batch_size_map = {
-                "rollout_train": CommMapper.async_get_batch_index(
+                "rollout_train": CommMapper.decoupled_get_batch_index(
                     self.cfg.env.train.total_num_envs // self.stage_num,
                     self._component_placement.get_world_size("env"),
                     self._component_placement.get_world_size("rollout"),
@@ -303,7 +303,7 @@ class EnvWorker(Worker):
             if self.cfg.get("reward", {}).get("use_reward_model", False):
                 batch_size_map.update(
                     {
-                        "reward_train": CommMapper.async_get_batch_index(
+                        "reward_train": CommMapper.decoupled_get_batch_index(
                             batch_size=self.cfg.env.train.total_num_envs
                             // self.stage_num,
                             src_world_size=self._component_placement.get_world_size(
@@ -319,7 +319,7 @@ class EnvWorker(Worker):
             if self.enable_eval:
                 batch_size_map.update(
                     {
-                        "rollout_eval": CommMapper.async_get_batch_index(
+                        "rollout_eval": CommMapper.decoupled_get_batch_index(
                             batch_size=self.cfg.env.eval.total_num_envs
                             // self.stage_num,
                             src_world_size=self._component_placement.get_world_size(
@@ -1097,7 +1097,7 @@ class EnvWorker(Worker):
                     )
                 }
             )
-        if self.env_async_mode:
+        if self.env_decoupled_mode:
             self.send_reward_input_to_channel(
                 send_channel=send_channel, reward_input=reward_input
             )
@@ -1234,7 +1234,7 @@ class EnvWorker(Worker):
             for stage_id in range(self.stage_num):
                 env_output: EnvOutput = env_outputs[stage_id]
                 env_batch = env_output.to_dict()
-                if self.env_async_mode:
+                if self.env_decoupled_mode:
                     self.send_env_batch_to_channel(
                         rollout_channel,
                         {
@@ -1276,7 +1276,7 @@ class EnvWorker(Worker):
                                 reward_model_output.detach().float().reshape(-1).cpu()
                             )
 
-                    if self.env_async_mode:
+                    if self.env_decoupled_mode:
                         rollout_result = self.recv_rollout_results_from_channel(
                             input_channel, mode="train"
                         )
@@ -1312,7 +1312,7 @@ class EnvWorker(Worker):
                         rollout_result.actions, stage_id
                     )
                     env_batch = env_output.to_dict()
-                    if self.env_async_mode:
+                    if self.env_decoupled_mode:
                         last_env_batch = False
                         if (
                             chunk_step_idx == self.n_train_chunk_steps - 1
@@ -1369,7 +1369,7 @@ class EnvWorker(Worker):
                         env_metrics["reward_model_output"].append(
                             reward_model_output.detach().float().reshape(-1).cpu()
                         )
-                if self.env_async_mode:
+                if self.env_decoupled_mode:
                     rollout_result = self.recv_rollout_results_from_channel(
                         input_channel, mode="train"
                     )

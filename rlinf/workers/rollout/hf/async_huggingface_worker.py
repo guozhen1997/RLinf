@@ -75,11 +75,11 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         output_channel: Channel,
         metric_channel: Channel,
     ):
-        if self.env_async_mode:
+        if self.env_decoupled_mode:
             if self._background_weight_sync_active:
                 await self._poll_background_weight_sync()
             await self.wait_if_stale()
-            await self.async_generate_one_epoch(input_channel, output_channel)
+            await self.decoupled_generate_one_epoch(input_channel, output_channel)
         else:
             while True:
                 if self._background_weight_sync_active:
@@ -259,7 +259,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         mode: Literal["train", "eval"] = "train",
     ):
         assert mode in ["train", "eval"], f"{mode=} is not supported"
-        assert mode == "train", "Now eval mode is not supported in env async mode"
+        assert mode == "train", "Now eval mode is not supported in env decoupled mode"
         batch_size_map = self.batch_size_map[mode]
         batch_index_map = self.batch_index_map[mode]
         assert len(batch_index_map) == len(batch_size_map), (
@@ -311,7 +311,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             rollout worker, outputs are merged on batch dimension.
         """
         assert mode in ["train", "eval"], f"{mode=} is not supported"
-        assert mode == "train", "Now eval mode is not supported in env async mode"
+        assert mode == "train", "Now eval mode is not supported in env decoupled mode"
 
         batch_size_map = self.batch_size_map[mode]
         batch_index_map = self.batch_index_map[mode]
@@ -336,7 +336,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             obs_batches.append(obs_batch["batch"])
         return self._merge_obs_batches(obs_batches)
 
-    async def async_generate_one_epoch(
+    async def decoupled_generate_one_epoch(
         self, input_channel: Channel, output_channel: Channel
     ):
         self.update_dagger_beta()

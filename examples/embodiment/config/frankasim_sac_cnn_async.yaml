@@ -94,9 +94,12 @@ env:
     video_cfg:
       save_video: False
       video_base_dir: ${runner.logger.log_path}/video/eval
-    # When async mode is enabled, the communication mechanism between the env worker and the rollout worker will be changed. 
+
+    # When decoupled mode is enabled, the communication mechanism between the env worker and the rollout worker will be changed. 
+    # When set rollout worker to "decoupled":
+    # The rollout and env workers are fully decoupled, removing the static mapping.
     # This is to handle situations where the env worker may become deadlocked.
-    env_mode: "async"
+    env_mode: "decoupled"
 
   eval:
     obs_format: tensor

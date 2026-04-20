@@ -25,13 +25,13 @@ class CommMapper:
         return f"{src_rank}_{dst_rank}_{extra}"
 
     @staticmethod
-    def async_get_batch_index(
+    def decoupled_get_batch_index(
         batch_size: int,
         src_world_size: int,
         dst_world_size: int,
     ) -> list[int]:
         """Compute destination ranks and transfer sizes for one source rank."""
-        # in async mode, the src_world_size and dst_world_size are the world size of the source and destination workers.
+        # in decoupled mode, the src_world_size and dst_world_size are the world size of the source and destination workers.
         # the batch_size is the total batch size of the source workers.
         # the return value is a list of batch sizes for thi rank destination to send batch split size.
 
@@ -58,6 +58,14 @@ class CommMapper:
             # the dst_world_size > src_world_size
             # for example, src_world_size = 2, dst_world_size = 8, batch_size = 32
             # the rank 0 [4, 4, 4, 4] rank1 [4, 4, 4, 4]
+            if src_world_size == 1:
+                # special case for src_world_size == 1 and env_worker > rollout_worker size case
+                # To avoid the rollout worker become deadlocked, the len(buffer) should be divisible by 2.
+                # In env decoupled mode the env worker nums should >= rollout worker nums when rollout worker num is 1.
+                return [
+                    batch_size // dst_world_size
+                    for _ in range(dst_world_size // src_world_size // 2)
+                ]
             return [
                 batch_size // dst_world_size
                 for _ in range(dst_world_size // src_world_size)

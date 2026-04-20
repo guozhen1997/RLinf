@@ -15,9 +15,9 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor: 0-1
-    env: 0-3
-    rollout: 0-1
+    actor: 0-0
+    env: 0-0
+    rollout: 0-0
 
 runner:
   task_type: embodied
@@ -97,9 +97,6 @@ env:
     use_fixed_reset_state_ids: False
     max_episode_steps: 50 # max episode steps for truncation
     max_steps_per_rollout_epoch: 50
-    # When async mode is enabled, the communication mechanism between the env worker and the rollout worker will be changed. 
-    # This is to handle situations where the env worker may become deadlocked.
-    env_mode: "async"
   
   eval:
     total_num_envs: 32
@@ -133,7 +130,7 @@ actor:
   training_backend: "fsdp"
 
   micro_batch_size: 1024
-  global_batch_size: 4096
+  global_batch_size: 1024
   seed: 1234
   enable_offload: False
 

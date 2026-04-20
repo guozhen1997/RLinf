@@ -255,20 +255,20 @@ class EmbodiedRewardWorker(Worker):
 
         # check env mode
         env_mode = self.cfg.env.train.get("env_mode", None)
-        assert env_mode in ["async", None], f"{env_mode} is not supported"
-        self.env_async_mode = env_mode == "async"
-        if self.env_async_mode:
+        assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
+        self.env_decoupled_mode = env_mode == "decoupled"
+        if self.env_decoupled_mode:
             self.batch_size_map = {
-                "train": self._async_env_mode_setup_batch_size(
+                "train": self._decoupled_env_mode_setup_batch_size(
                     self.total_num_train_envs // self.num_pipeline_stages
                 ),
             }
-            # save the run-time imformation in communicate channel for async mode
+            # save the run-time imformation in communicate channel for decoupled mode
             self.batch_index_map = {
                 "train": [],
             }
             self.logger.info(
-                f"Async model reward worker initialized with batch_size_map: {self.batch_size_map}"
+                f"decoupled model reward worker initialized with batch_size_map: {self.batch_size_map}"
             )
         else:
             self.dst_ranks = {
@@ -348,7 +348,7 @@ class EmbodiedRewardWorker(Worker):
             ).async_wait()
             images = data["batch"]["images"]
             actual_size = self._infer_reward_batch_size(images)
-            # Note: the last_run tag don't handle in async mode
+            # Note: the last_run tag don't handle in decoupled mode
             batch_index = data["batch_index"]
             batch_index_map.append(batch_index)
             assert actual_size == expected_size, (
@@ -409,9 +409,11 @@ class EmbodiedRewardWorker(Worker):
             return rewards.detach().cpu()
         return rewards
 
-    def _async_env_mode_setup_batch_size(self, batch_size: int) -> dict[str, list[int]]:
-        """Compute batch_size for this reward worker in async mode."""
-        return CommMapper.async_get_batch_index(
+    def _decoupled_env_mode_setup_batch_size(
+        self, batch_size: int
+    ) -> dict[str, list[int]]:
+        """Compute batch_size for this reward worker in decoupled mode."""
+        return CommMapper.decoupled_get_batch_index(
             batch_size=batch_size,
             src_world_size=self.placement.get_world_size("reward"),
             dst_world_size=self.placement.get_world_size("env"),
@@ -529,7 +531,7 @@ class EmbodiedRewardWorker(Worker):
 
     async def _compute_rewards(self, input_channel: Channel, output_channel: Channel):
         while True:
-            if self.env_async_mode:
+            if self.env_decoupled_mode:
                 merged_images = await self.recv_merged_reward_input_from_channel(
                     input_channel, mode="train"
                 )

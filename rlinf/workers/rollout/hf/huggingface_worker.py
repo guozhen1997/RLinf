@@ -125,23 +125,23 @@ class MultiStepRolloutWorker(Worker):
             )
 
         env_mode = self.cfg.env.train.get("env_mode", None)
-        assert env_mode in ["async", None], f"{env_mode} is not supported"
-        self.env_async_mode = env_mode == "async"
-        if self.env_async_mode:
+        assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
+        self.env_decoupled_mode = env_mode == "decoupled"
+        if self.env_decoupled_mode:
             self.batch_size_map = {
-                "train": self._async_env_mode_setup_batch_size(
+                "train": self._decoupled_env_mode_setup_batch_size(
                     self.total_num_train_envs // self.num_pipeline_stages
                 ),
-                "eval": self._async_env_mode_setup_batch_size(
+                "eval": self._decoupled_env_mode_setup_batch_size(
                     self.total_num_eval_envs // self.num_pipeline_stages
                 ),
             }
-            # save the run-time imformation in communicate channel for async mode
+            # save the run-time imformation in communicate channel for decoupled mode
             self.batch_index_map = {
                 "train": [],
             }
             self.log_info(
-                f"Async model rollout worker initialized with batch_size_map: {self.batch_size_map}"
+                f"decoupled model rollout worker initialized with batch_size_map: {self.batch_size_map}"
             )
 
             # use for evaluation
@@ -231,9 +231,11 @@ class MultiStepRolloutWorker(Worker):
                 f"Beta schedule {self._dagger_sampling_params['beta_schedule']} is not implemented"
             )
 
-    def _async_env_mode_setup_batch_size(self, batch_size: int) -> dict[str, list[int]]:
-        """Compute batch_size for this rollout worker in async mode."""
-        return CommMapper.async_get_batch_index(
+    def _decoupled_env_mode_setup_batch_size(
+        self, batch_size: int
+    ) -> dict[str, list[int]]:
+        """Compute batch_size for this rollout worker in decoupled mode."""
+        return CommMapper.decoupled_get_batch_index(
             batch_size=batch_size,
             src_world_size=self.placement.get_world_size("rollout"),
             dst_world_size=self.placement.get_world_size("env"),
