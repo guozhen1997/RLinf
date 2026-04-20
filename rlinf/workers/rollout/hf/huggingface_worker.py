@@ -128,6 +128,11 @@ class MultiStepRolloutWorker(Worker):
         assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
         self.env_decoupled_mode = env_mode == "decoupled"
         if self.env_decoupled_mode:
+            if self._component_placement.get_world_size("rollout") > 1:
+                # when the rollout worker num is greater than 1, the env worker num should be greater than 1
+                assert self._component_placement.get_world_size("env") > 1, (
+                    "when rollout worker num is greater than 1, env world size should be greater than 1 in decoupled mode, but got 1"
+                )
             self.batch_size_map = {
                 "train": self._decoupled_env_mode_setup_batch_size(
                     self.total_num_train_envs // self.num_pipeline_stages
