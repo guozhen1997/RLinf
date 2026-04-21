@@ -858,6 +858,121 @@ class Worker(metaclass=WorkerMeta):
 
         return Channel.connect(name=channel_name, current_worker=self)
 
+    def send_to(
+        self,
+        group_name: str,
+        channel,
+        data: Any,
+        *,
+        route_key: Any = None,
+        tag: str | None = None,
+        async_op: bool = False,
+        batch_size: int | None = None,
+        split_fn: Optional[Callable[[Any, list[int]], list[Any]]] = None,
+    ):
+        """Route one payload to a worker group through a channel."""
+
+        from ..collective import AsyncRouteWork
+        from .routing import (
+            build_send_plan,
+            get_group_world_size,
+            infer_batch_size,
+            split_batch,
+        )
+
+        dst_world_size = get_group_world_size(self._manager_proxy, group_name)
+        local_batch_size = batch_size
+        if local_batch_size is None:
+            local_batch_size = infer_batch_size(data)
+
+        plan = build_send_plan(
+            src_group_name=self.worker_address.root_group_name,
+            dst_group_name=group_name,
+            src_rank=self._rank,
+            src_world_size=self._world_size,
+            dst_world_size=dst_world_size,
+            tag=tag,
+            route_key=route_key,
+            local_batch_size=local_batch_size,
+        )
+
+        split_sizes = [entry.batch_size for entry in plan.entries]
+        payloads = (
+            split_fn(data, split_sizes)
+            if split_fn is not None
+            else split_batch(data, split_sizes)
+        )
+
+        works = []
+        for entry, payload in zip(plan.entries, payloads):
+            work = channel.put(
+                item=payload,
+                key=entry.key,
+                async_op=async_op,
+            )
+            if async_op and work is not None:
+                works.append(work)
+
+        if async_op:
+            return AsyncRouteWork(works, lambda _: None)
+        return None
+
+    def recv_from(
+        self,
+        group_name: str,
+        channel,
+        *,
+        route_key: Any = None,
+        tag: str | None = None,
+        async_op: bool = False,
+        batch_size: int | None = None,
+        merge_fn: Optional[Callable[[list[Any]], Any]] = None,
+        infer_batch_size_fn: Optional[Callable[[Any], int]] = None,
+    ):
+        """Receive one routed payload or shard set from a worker group."""
+
+        from ..collective import AsyncRouteWork
+        from .routing import (
+            build_recv_plan,
+            get_group_world_size,
+            merge_batches,
+            validate_batch_size,
+        )
+
+        src_world_size = get_group_world_size(self._manager_proxy, group_name)
+        plan = build_recv_plan(
+            src_group_name=group_name,
+            dst_group_name=self.worker_address.root_group_name,
+            dst_rank=self._rank,
+            src_world_size=src_world_size,
+            dst_world_size=self._world_size,
+            tag=tag,
+            route_key=route_key,
+            local_batch_size=batch_size,
+        )
+
+        def _finalize(received_items: list[Any]):
+            if not received_items:
+                return None
+            for item, entry in zip(received_items, plan.entries):
+                validate_batch_size(
+                    data=item,
+                    expected_batch_size=entry.batch_size,
+                    infer_batch_size_fn=infer_batch_size_fn,
+                )
+            if merge_fn is not None:
+                return merge_fn(received_items)
+            if len(received_items) == 1:
+                return received_items[0]
+            return merge_batches(received_items)
+
+        if async_op:
+            works = [channel.get(key=entry.key, async_op=True) for entry in plan.entries]
+            return AsyncRouteWork(works, _finalize)
+
+        received_items = [channel.get(key=entry.key) for entry in plan.entries]
+        return _finalize(received_items)
+
     def get_name(self) -> str:
         """Convert the WorkerAddress to a string representation.
 
