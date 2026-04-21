@@ -670,6 +670,10 @@ install_env_only() {
     create_and_sync_venv
     SKIP_ROS=${SKIP_ROS:-0}
     case "$ENV_NAME" in
+        maniskill_libero)
+            install_common_embodied_deps
+            install_maniskill_libero_env
+            ;;
         d4rl)
             install_d4rl_env
             ;;
