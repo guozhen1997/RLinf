@@ -192,7 +192,6 @@ reward:
   group_name: RewardGroup
   reward_mode: history_buffer
   history_reward_assign: True
-  reward_threshold: 0.5
   reward_weight: 1.0
   env_reward_weight: 0.0
 

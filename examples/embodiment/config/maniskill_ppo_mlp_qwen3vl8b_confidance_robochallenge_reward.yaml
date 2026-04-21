@@ -194,8 +194,6 @@ reward:
 
   reward_mode: "history_buffer"
   history_reward_assign: True
-
-  reward_threshold: 0.5
   
   use_output_step: 0
 
