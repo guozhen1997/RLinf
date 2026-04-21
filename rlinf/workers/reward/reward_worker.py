@@ -221,8 +221,6 @@ class EmbodiedRewardWorker(Worker):
         self.enable_offload = self.cfg.reward.get("enable_offload", False)
         self._interact_task = None
 
-        self.reward_threshold = self.cfg.reward.get("reward_threshold", 0.6)
-
     def model_provider_func(self):
         reward_cls = get_reward_model_class(self.cfg.reward.model.model_type)
 
