@@ -17,27 +17,11 @@
 Provides DreamZeroLiberoDataset / DreamZeroDroidDataset and DreamZeroCollator
 that convert LeRobot data into the batch format expected by VLA.forward().
 
-Data flow summary (shapes shown for default config: num_chunks=4, action_horizon=64):
-  Raw parquet/mp4
-    -> __getitem__:
-         images           (T=33, H=256, W=512, C=3)  uint8   side-by-side main+wrist
-         state            (4, 64)                     float32 normalized joint angles, zero-padded
-         state_mask       (4, 64)                     bool    True for real joint dims
-         action           (64, 32)                    float32 normalized joint deltas, zero-padded
-         action_mask      (64, 32)                    bool    True for real action dims
-         text             str                         raw task description
-    -> DreamZeroCollator:
-         images           (B, 33, 256, 512, 3)        uint8
-         state            (B, 4, 64)                  float32
-         state_mask       (B, 4, 64)                  bool
-         action           (B, 64, 32)                 float32
-         action_mask      (B, 64, 32)                 bool
-         text             (B, 512)                    int64   T5 token IDs
-         text_attn_mask   (B, 512)                    int64   1=real token, 0=padding
 """
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -903,6 +887,70 @@ def _safe_lang_text(value: Any, task_map: dict[int, str]) -> str:
     return str(raw).strip()
 
 
+def _discover_local_lerobot_episode_indices(
+    root: Path, info: dict, allowed_episode_indices: set[int] | None = None
+) -> list[int]:
+    """Episode indices that have both parquet and all video files on disk.
+
+    LeRobot 0.3.x otherwise checks ``range(total_episodes)`` from info.json; any missing
+    file triggers Hub download (``get_safe_version``), which breaks offline machines even
+    when ``data/`` already contains a subset of episodes.
+    """
+    root = root.resolve()
+    data_root = root / "data"
+    if not data_root.is_dir():
+        raise FileNotFoundError(
+            f"LeRobot dataset missing data/ directory: {data_root}."
+            "Offline loading requires local data, videos, and meta to be aligned."
+        )
+    ep_re = re.compile(r"^episode_(\d+)\.parquet$")
+    present: set[int] = set()
+    for p in data_root.rglob("episode_*.parquet"):
+        m = ep_re.match(p.name)
+        if m:
+            present.add(int(m.group(1)))
+    if not present:
+        raise FileNotFoundError(
+            f"No episode_*.parquet found in {data_root}."
+            "Please confirm data_path matches disk directory (e.g. data/chunk-000/episode_000000.parquet)."
+        )
+    chunks_size = int(info.get("chunks_size") or 1000)
+    data_tmpl = info.get("data_path")
+    video_tmpl = info.get("video_path")
+    if not data_tmpl:
+        raise ValueError("meta/info.json missing data_path")
+    feats = info.get("features") or {}
+    video_keys = [k for k, v in feats.items() if v.get("dtype") == "video"]
+    complete: list[int] = []
+    for ep_idx in sorted(present):
+        ep_chunk = ep_idx // chunks_size
+        rel_p = Path(
+            data_tmpl.format(episode_chunk=ep_chunk, episode_index=ep_idx)
+        )
+        if not (root / rel_p).is_file():
+            continue
+        if video_tmpl and video_keys:
+            if not all(
+                (root / Path(video_tmpl.format(
+                    episode_chunk=ep_chunk,
+                    video_key=vk,
+                    episode_index=ep_idx,
+                ))).is_file()
+                for vk in video_keys
+            ):
+                continue
+        complete.append(ep_idx)
+    if allowed_episode_indices is not None:
+        complete = [e for e in complete if e in allowed_episode_indices]
+    if not complete:
+        raise FileNotFoundError(
+            f"Found parquet in {root}/data/, but no episode that satisfies "
+            f"data_path and video_path (both in meta/episodes.jsonl) in info.json."
+            f"({len(present)} parquet files on disk). Please fill in the corresponding videos/ or check if the paths match meta."
+        )
+    return complete
+
+
 def _infer_droid_image_keys(info: dict) -> tuple[str, str, str]:
     feats = info.get("features") or {}
     candidates = [k for k in feats if k.startswith("observation.images.")]
@@ -1021,6 +1069,8 @@ class DreamZeroDroidDataset(Dataset):
         action_offsets = list(range(self.total_action_steps))
 
         import lerobot.datasets.lerobot_dataset as lerobot_dataset
+        from importlib.metadata import version as _pkg_version
+        from packaging.version import Version as _PkgVersion
 
         delta_timestamps = {
             self._img_key_left: [t / self._fps for t in video_offsets],
@@ -1029,8 +1079,42 @@ class DreamZeroDroidDataset(Dataset):
             "observation.state": [t / self._fps for t in state_offsets],
             "action": [t / self._fps for t in action_offsets],
         }
+        data_path_obj = Path(self.data_path)
+        if not data_path_obj.exists():
+            raise FileNotFoundError(
+                f"DROID data_path must be a local path, got: {self.data_path}"
+            )
+
+        # lerobot 0.3.x: first arg is repo_id (name only), not a filesystem path. Local datasets must use
+        # repo_id=<folder name> + root=<absolute path to that folder> so metadata loads from disk and
+        # never hits Hub (get_safe_version). lerobot 0.4.x rejects codebase_version v2.0 in info.json.
+        if _PkgVersion(_pkg_version("lerobot")) >= _PkgVersion("0.4.0"):
+            raise RuntimeError(
+                "DreamZeroDroidDataset requires lerobot<0.4 for datasets with "
+                "meta/info.json codebase_version v2.0 (e.g. DreamZero-DROID-Data-mini). "
+                "Install lerobot==0.3.3 (see requirements/embodied/models/dreamzero.txt)."
+            )
+        # Only pass episodes that exist locally; info.json total_episodes can be full-dataset
+        # size while this tree is a subset — otherwise lerobot asserts all files and hits Hub.
+        meta_episode_indices: set[int] = set()
+        with open(meta_dir / "episodes.jsonl") as _epf:
+            for _line in _epf:
+                _line = _line.strip()
+                if not _line:
+                    continue
+                meta_episode_indices.add(int(json.loads(_line)["episode_index"]))
+        local_episodes = _discover_local_lerobot_episode_indices(
+            data_path_obj, info, allowed_episode_indices=meta_episode_indices
+        )
+        logger.info(
+            "DROID LeRobot: loading %d episodes present under data/ (info total_episodes=%s).",
+            len(local_episodes),
+            info.get("total_episodes"),
+        )
         self.dataset = lerobot_dataset.LeRobotDataset(
-            self.data_path,
+            data_path_obj.name,
+            root=str(data_path_obj.resolve()),
+            episodes=local_episodes,
             delta_timestamps=delta_timestamps,
             video_backend="pyav",
         )
