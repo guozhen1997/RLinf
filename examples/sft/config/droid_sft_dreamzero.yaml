@@ -30,7 +30,8 @@ runner:
 
 data:
   # Root of LeRobot DROID (OXE) dataset, e.g. output of dreamzero-0/scripts/data/convert_droid.py
-  train_data_paths: /mnt/project_rlinf/liyanghao/data/droid_100
+  #train_data_paths: /mnt/project_rlinf_hs/yuanhuining/datasets/DreamZero-DROID-Data-mini
+  train_data_paths: /mnt/project_rlinf_hs/shiletong/datasets/dreamzero/data/beijing_collect_test
 
 algorithm:
   adv_type: gae
@@ -39,7 +40,7 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 1
-  global_batch_size: 16
+  global_batch_size: 8
   seed: 42
   dataloader_num_workers: 1
   enable_offload: False
@@ -66,9 +67,7 @@ actor:
     pretrained_model_path: null
     add_value_head: false
     is_lora: False
-    # Match eval / checkpoint (see examples/embodiment/config/libero_spatial_eval_dreamzero.yaml)
     embodiment_tag: "oxe_droid"
-    dreamzero_transform_preset: "oxe_droid"
     relative_action: true
     relative_action_per_horizon: false
 
@@ -83,7 +82,7 @@ actor:
     lr_scheduler: "cosine"
     lr_warmup_steps: -1
     lr_warmup_steps_ratio: 0.05
-    total_training_steps: 50000
+    total_training_steps: 15000
 
   fsdp_config:
     strategy: "fsdp2"
