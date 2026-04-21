@@ -9,6 +9,7 @@ ENV_NAME=""
 VENV_DIR=".venv"
 PYTHON_VERSION="3.11.14"
 TEST_BUILD=${TEST_BUILD:-0}
+VLM_REWARD=0
 # Absolute path to this script (resolves symlinks)
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
@@ -34,6 +35,7 @@ Targets:
 Options (for target=embodied):
     --model <name>         Embodied model to install: ${SUPPORTED_MODELS[*]}.
     --env <name>           Single environment to install: ${SUPPORTED_ENVS[*]}.
+    --vlm-reward           Upgrade transformers/tokenizers for VLM reward model support.
 
 Common options:
     -h, --help             Show this help message and exit.
@@ -80,6 +82,7 @@ parse_args() {
                 ENV_NAME="${2:-}"
                 shift 2
                 ;;
+            --vlm-reward) VLM_REWARD=1; shift ;;
             --use-mirror)
                 USE_MIRRORS=1
                 shift
@@ -339,6 +342,7 @@ clone_or_reuse_repo() {
 #=======================EMBODIED INSTALLERS=======================
 install_common_embodied_deps() {
     uv sync --extra embodied --active $NO_INSTALL_RLINF_CMD
+    [ "$VLM_REWARD" -eq 1 ] && uv pip install --upgrade "transformers>=4.57.1,<=4.57.6" "tokenizers>=0.22,<0.23"
     uv pip install -r $SCRIPT_DIR/embodied/envs/common.txt
     if [ "$NO_ROOT" -eq 0 ]; then
         bash $SCRIPT_DIR/embodied/sys_deps.sh
@@ -658,6 +662,7 @@ install_env_only() {
     create_and_sync_venv
     SKIP_ROS=${SKIP_ROS:-0}
     case "$ENV_NAME" in
+        maniskill_libero) install_common_embodied_deps; install_maniskill_libero_env ;;
         franka)
             uv sync --extra franka --active $NO_INSTALL_RLINF_CMD
             if [ "$SKIP_ROS" -ne 1 ]; then
