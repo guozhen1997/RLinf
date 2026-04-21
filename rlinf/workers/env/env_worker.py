@@ -453,22 +453,36 @@ class EnvWorker(Worker):
         return merged_final_obs
 
     @staticmethod
-    def _infer_rollout_batch_size(rollout_result: RolloutResult) -> int:
-        for field_name in (
-            "actions",
-            "prev_logprobs",
-            "prev_values",
-            "bootstrap_values",
-            "versions",
-        ):
-            value = getattr(rollout_result, field_name, None)
-            if isinstance(value, torch.Tensor):
-                return value.shape[0]
-        if rollout_result.forward_inputs:
-            first_tensor = next(iter(rollout_result.forward_inputs.values()))
-            if isinstance(first_tensor, torch.Tensor):
-                return first_tensor.shape[0]
-        raise ValueError("Cannot infer batch size from rollout result.")
+    def _infer_rollout_batch_size(data: Any) -> int:
+        """Infer batch dim for routed shards; supports RolloutResult and plain tensor payloads.
+
+        When the channel carries a non-``RolloutResult`` shard (e.g. reward tensor or eval
+        actions) into a rollout recv, avoid assuming dataclass fields and delegate or use
+        the leading dimension of dense arrays.
+        """
+
+        if isinstance(data, torch.Tensor) or isinstance(data, np.ndarray):
+            return int(data.shape[0])
+        if isinstance(data, RolloutResult):
+            for field_name in (
+                "actions",
+                "prev_logprobs",
+                "prev_values",
+                "bootstrap_values",
+                "versions",
+            ):
+                value = getattr(data, field_name, None)
+                if isinstance(value, torch.Tensor):
+                    return int(value.shape[0])
+            forward_inputs = getattr(data, "forward_inputs", None)
+            if forward_inputs:
+                first_tensor = next(iter(forward_inputs.values()))
+                if isinstance(first_tensor, torch.Tensor):
+                    return int(first_tensor.shape[0])
+            raise ValueError("Cannot infer batch size from rollout result.")
+        from rlinf.scheduler.worker.routing import infer_batch_size
+
+        return infer_batch_size(data)
 
     @Worker.timer("compute_bootstrap_rewards")
     def compute_bootstrap_rewards(
