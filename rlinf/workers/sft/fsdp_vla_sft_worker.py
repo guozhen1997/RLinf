@@ -11,18 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any
 import os
-import logging
+from typing import Any
+
 import torch
 from omegaconf import DictConfig
 from torch.utils import _pytree
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 from rlinf.config import SupportedModel
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.utils.pytree import register_pytree_dataclasses
 from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
-from rlinf.utils.runner_utils import check_progress, local_mkdir_safe
 
 
 class FSDPVlaSftWorker(FSDPSftWorker):
@@ -137,23 +137,26 @@ class FSDPVlaSftWorker(FSDPSftWorker):
 
     def save_checkpoint(self, save_path: str, step: int = 0) -> None:
         super().save_checkpoint(save_path, step)
-        if self._rank == 0:
-            data_save_path = os.path.join(save_path, "data")
-            local_mkdir_safe(data_save_path)
-            
-            dataloader_state_dict = self.data_loader.state_dict()
-            torch.save(dataloader_state_dict, os.path.join(data_save_path, "data.pt"))
+
+        if isinstance(self.data_loader, StatefulDataLoader):
+            state = self.data_loader.state_dict()
+
+            all_states = [None] * self._world_size
+            torch.distributed.all_gather_object(all_states, state)
+
+            if self._rank == 0:
+                torch.save(all_states, os.path.join(save_path, "data.pt"))
+
+            torch.distributed.barrier()
 
     def load_checkpoint(self, load_path: str) -> None:
         super().load_checkpoint(load_path)
-        # load data
-        dataloader_local_path = os.path.join(load_path, "data/data.pt")
-        if os.path.exists(dataloader_local_path):
-            dataloader_state_dict = torch.load(
-                dataloader_local_path, weights_only=False
+
+        if isinstance(self.data_loader, StatefulDataLoader):
+            all_states = torch.load(
+                os.path.join(load_path, "data.pt"), weights_only=False
             )
-            self.data_loader.load_state_dict(dataloader_state_dict)
-        else:
-            logging.warning(
-                f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch"
-            )
+            state = all_states[self._rank]
+            self.data_loader.load_state_dict(state)
+
+        torch.distributed.barrier()
