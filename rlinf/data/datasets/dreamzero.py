@@ -28,7 +28,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 logger = logging.getLogger(__name__)
@@ -852,7 +852,9 @@ def _infer_joint_grip_slices(
         elif isinstance(entry, dict):
             key = str(entry.get("name", ""))
             shape = entry.get("shape")
-            size = int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
+            size = (
+                int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
+            )
         else:
             continue
         spans[key] = (cursor, cursor + size)
@@ -925,18 +927,21 @@ def _discover_local_lerobot_episode_indices(
     complete: list[int] = []
     for ep_idx in sorted(present):
         ep_chunk = ep_idx // chunks_size
-        rel_p = Path(
-            data_tmpl.format(episode_chunk=ep_chunk, episode_index=ep_idx)
-        )
+        rel_p = Path(data_tmpl.format(episode_chunk=ep_chunk, episode_index=ep_idx))
         if not (root / rel_p).is_file():
             continue
         if video_tmpl and video_keys:
             if not all(
-                (root / Path(video_tmpl.format(
-                    episode_chunk=ep_chunk,
-                    video_key=vk,
-                    episode_index=ep_idx,
-                ))).is_file()
+                (
+                    root
+                    / Path(
+                        video_tmpl.format(
+                            episode_chunk=ep_chunk,
+                            video_key=vk,
+                            episode_index=ep_idx,
+                        )
+                    )
+                ).is_file()
                 for vk in video_keys
             ):
                 continue
@@ -997,7 +1002,9 @@ class DreamZeroDroidDataset(Dataset):
     ):
         if isinstance(data_path, (list, tuple)):
             if len(data_path) == 0:
-                raise ValueError("DreamZeroDroidDataset requires at least one data path.")
+                raise ValueError(
+                    "DreamZeroDroidDataset requires at least one data path."
+                )
             data_path = data_path[0]
         self.data_path = str(data_path)
         self.action_horizon = int(action_horizon)
@@ -1020,10 +1027,9 @@ class DreamZeroDroidDataset(Dataset):
         self._fps = float(info.get("fps", 15))
         self._version = str(info.get("codebase_version", "v2.0"))
         feats = info.get("features") or {}
-        self._raw_hw = (
-            feats.get("observation.images.exterior_image_1_left", {})
-            .get("shape", [180, 320, 3])[:2]
-        )
+        self._raw_hw = feats.get("observation.images.exterior_image_1_left", {}).get(
+            "shape", [180, 320, 3]
+        )[:2]
         self._raw_hw = (int(self._raw_hw[0]), int(self._raw_hw[1]))
 
         st_feat = feats.get("observation.state") or {}
@@ -1043,7 +1049,9 @@ class DreamZeroDroidDataset(Dataset):
                     ac_dim,
                 )
             else:
-                self._st_j, self._st_g, self._ac_j, self._ac_g = _droid_default_state_action_slices()
+                self._st_j, self._st_g, self._ac_j, self._ac_g = (
+                    _droid_default_state_action_slices()
+                )
                 logger.info(
                     "DROID: using default convert_droid slices "
                     "(meta feature names missing joint_position/gripper_position)."
@@ -1052,8 +1060,8 @@ class DreamZeroDroidDataset(Dataset):
             self._st_j, self._st_g = st_slices
             self._ac_j, self._ac_g = ac_slices
 
-        self._img_key_left, self._img_key_right, self._img_key_wrist = _infer_droid_image_keys(
-            info
+        self._img_key_left, self._img_key_right, self._img_key_wrist = (
+            _infer_droid_image_keys(info)
         )
         self._tasks = DreamZeroLiberoDataset._load_task_texts(meta_dir)
 
@@ -1069,8 +1077,9 @@ class DreamZeroDroidDataset(Dataset):
         state_offsets = [i * self.state_step for i in range(self.state_horizon)]
         action_offsets = list(range(self.total_action_steps))
 
-        import lerobot.datasets.lerobot_dataset as lerobot_dataset
         from importlib.metadata import version as _pkg_version
+
+        import lerobot.datasets.lerobot_dataset as lerobot_dataset
         from packaging.version import Version as _PkgVersion
 
         delta_timestamps = {
@@ -1261,7 +1270,9 @@ class DreamZeroDroidDataset(Dataset):
             full_action = full_action[None, :]
         if full_action.ndim == 2 and full_action.shape[0] < self.total_action_steps:
             last = full_action[-1:]
-            pad = np.repeat(last, self.total_action_steps - full_action.shape[0], axis=0)
+            pad = np.repeat(
+                last, self.total_action_steps - full_action.shape[0], axis=0
+            )
             full_action = np.concatenate([full_action, pad], axis=0)
         full_action = full_action[: self.total_action_steps]
 
@@ -1297,10 +1308,14 @@ class DreamZeroDroidDataset(Dataset):
         state_mask = np.zeros((self.state_horizon, self.max_state_dim), dtype=bool)
         state_mask[:, :sd] = True
 
-        action_pad = np.zeros((self.total_action_steps, self.max_action_dim), dtype=np.float32)
+        action_pad = np.zeros(
+            (self.total_action_steps, self.max_action_dim), dtype=np.float32
+        )
         ad = min(action_norm.shape[-1], self.max_action_dim)
         action_pad[:, :ad] = action_norm[:, :ad]
-        action_mask = np.zeros((self.total_action_steps, self.max_action_dim), dtype=bool)
+        action_mask = np.zeros(
+            (self.total_action_steps, self.max_action_dim), dtype=bool
+        )
         action_mask[:, :ad] = True
 
         task_text = sample.get("task")
@@ -1517,7 +1532,9 @@ def build_dreamzero_sft_dataloader(
             model_cfg.get("dreamzero_action_horizon", 16)
         )  # steps per chunk
         num_chunks = int(model_cfg.get("dreamzero_num_chunks", 4))
-        effective_action_horizon = action_chunk_size * num_chunks  # = 64 total action steps
+        effective_action_horizon = (
+            action_chunk_size * num_chunks
+        )  # = 64 total action steps
         dataset = DreamZeroLiberoDataset(
             data_path=data_paths,
             action_horizon=effective_action_horizon,
