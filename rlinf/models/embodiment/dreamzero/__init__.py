@@ -123,7 +123,9 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         elif st.exists():
             state_dict.update(load_file(str(st)))
         if any(".base_layer." in k for k in state_dict):
-            state_dict = {k.replace(".base_layer.", "."): v for k, v in state_dict.items()}
+            state_dict = {
+                k.replace(".base_layer.", "."): v for k, v in state_dict.items()
+            }
         model.load_state_dict(state_dict, strict=False)
     else:
         logger.warning(

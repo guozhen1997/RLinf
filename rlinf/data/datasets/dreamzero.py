@@ -1550,7 +1550,9 @@ def build_dreamzero_sft_dataloader(
         rel = bool(model_cfg.get("relative_action", True))
         rel_keys = list(model_cfg.get("relative_action_keys", ["joint_position"]))
         droid_view_hw = _infer_droid_view_hw_from_model_cfg(model_cfg)
-        logger.info("DreamZero DROID map-style: per-view resize target = %s", droid_view_hw)
+        logger.info(
+            "DreamZero DROID map-style: per-view resize target = %s", droid_view_hw
+        )
         dataset = DreamZeroDroidDataset(
             data_path=data_paths,
             action_horizon=droid_action_horizon,
