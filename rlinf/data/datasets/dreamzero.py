@@ -57,6 +57,43 @@ DROID_PROMPT_TEMPLATE = (
 DROID_EMBODIMENT_ID = 17
 
 
+def _infer_droid_view_hw_from_model_cfg(model_cfg: Any) -> tuple[int, int]:
+    """Infer DROID per-view resize target, compatible with WAN2.1/WAN2.2.
+
+    Priority:
+    1) Explicit override via cfg: dreamzero_droid_view_height/width
+    2) Infer from model_path/config.json diffusion model signature
+    3) Fallback to WAN2.1-style 176x320
+    """
+    h_override = model_cfg.get("dreamzero_droid_view_height", None)
+    w_override = model_cfg.get("dreamzero_droid_view_width", None)
+    if h_override is not None and w_override is not None:
+        return int(h_override), int(w_override)
+
+    model_path = Path(str(model_cfg.get("model_path", ""))).expanduser()
+    cfg_path = model_path / "config.json"
+    if not cfg_path.is_file():
+        return (176, 320)
+
+    try:
+        with open(cfg_path) as f:
+            cfg_json = json.load(f)
+        ah_cfg = cfg_json.get("action_head_cfg", {}).get("config", {})
+        dcfg = ah_cfg.get("diffusion_model_cfg", {})
+        in_dim = int(dcfg.get("in_dim", -1))
+        model_type = str(dcfg.get("model_type", "")).lower()
+        frame_seqlen = int(dcfg.get("frame_seqlen", -1))
+        if in_dim == 48 or model_type == "ti2v" or frame_seqlen == 50:
+            return (160, 320)  # WAN2.2 default
+    except Exception:
+        logger.exception(
+            "Failed to infer DROID per-view target from %s; fallback to 176x320.",
+            cfg_path,
+        )
+
+    return (176, 320)
+
+
 def _load_gear_stats(meta_dir: Path) -> dict[str, np.ndarray]:
     """Load normalization bounds from stats.json.
 
@@ -999,6 +1036,7 @@ class DreamZeroDroidDataset(Dataset):
         unconditional_prob: float = 0.3,
         relative_action: bool = True,
         relative_action_keys: list[str] | None = None,
+        droid_view_hw: tuple[int, int] = (176, 320),
     ):
         if isinstance(data_path, (list, tuple)):
             if len(data_path) == 0:
@@ -1020,6 +1058,7 @@ class DreamZeroDroidDataset(Dataset):
         self.relative_action = bool(relative_action)
         self.relative_action_keys = list(relative_action_keys or ["joint_position"])
         self.embodiment_id = DROID_EMBODIMENT_ID
+        self._target_view_hw = (int(droid_view_hw[0]), int(droid_view_hw[1]))
 
         meta_dir = Path(self.data_path) / "meta"
         with open(meta_dir / "info.json") as f:
@@ -1213,9 +1252,8 @@ class DreamZeroDroidDataset(Dataset):
             a = DreamZeroLiberoDataset._to_hwc_uint8(left[i])
             b = DreamZeroLiberoDataset._to_hwc_uint8(right[i])
             w = DreamZeroLiberoDataset._to_hwc_uint8(wrist[i])
-            # Align with this DreamZero-DROID checkpoint's frame_seqlen=880:
-            # final stitched frame should be 352x640, i.e. per-view 176x320.
-            target_hw = (176, 320)
+            # Per-view size is inferred from model config (WAN2.1/WAN2.2) or manual override.
+            target_hw = self._target_view_hw
             if a.shape[:2] != target_hw:
                 a = cv2.resize(a, target_hw[::-1], interpolation=cv2.INTER_LINEAR)
             if b.shape[:2] != target_hw:
@@ -1511,6 +1549,8 @@ def build_dreamzero_sft_dataloader(
         )
         rel = bool(model_cfg.get("relative_action", True))
         rel_keys = list(model_cfg.get("relative_action_keys", ["joint_position"]))
+        droid_view_hw = _infer_droid_view_hw_from_model_cfg(model_cfg)
+        logger.info("DreamZero DROID map-style: per-view resize target = %s", droid_view_hw)
         dataset = DreamZeroDroidDataset(
             data_path=data_paths,
             action_horizon=droid_action_horizon,
@@ -1525,6 +1565,7 @@ def build_dreamzero_sft_dataloader(
             unconditional_prob=unconditional_prob,
             relative_action=rel,
             relative_action_keys=rel_keys,
+            droid_view_hw=droid_view_hw,
         )
         collate_embodiment = "oxe_droid"
     else:
