@@ -29,6 +29,7 @@ from typing import Any
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 logger = logging.getLogger(__name__)
 
@@ -1536,7 +1537,7 @@ def build_dreamzero_sft_dataloader(
         drop_last=not eval_dataset,
     )
     num_workers = int(cfg.actor.get("dataloader_num_workers", 4))
-    data_loader = DataLoader(
+    data_loader = StatefulDataLoader(
         dataset,
         batch_size=cfg.actor.micro_batch_size,  # samples per GPU per step
         sampler=sampler,

@@ -28,10 +28,11 @@ runner:
   save_interval: 2000
   log_interval: 100
 
+  resume_dir: path/to/checkpoint
+
 data:
-  # Root of LeRobot DROID (OXE) dataset, e.g. output of dreamzero-0/scripts/data/convert_droid.py
-  #train_data_paths: /mnt/project_rlinf_hs/yuanhuining/datasets/DreamZero-DROID-Data-mini
-  train_data_paths: /mnt/project_rlinf_hs/shiletong/datasets/dreamzero/data/beijing_collect_test
+  # Root of LeRobot DROID (OXE) dataset
+  train_data_paths: path/to/datasets/DreamZero-DROID-Data
 
 algorithm:
   adv_type: gae
@@ -47,9 +48,9 @@ actor:
 
   model:
     model_type: "dreamzero"
-    precision: bf16 # fp32 when fsdp cpu offload is enabled
-    model_path: /mnt/project_rlinf/liyanghao/data/models/DreamZero-DROID
-    tokenizer_path: /mnt/project_rlinf/liyanghao/data/models/umt5-xxl
+    precision: fp32
+    model_path: path/to/models/DreamZero-DROID
+    tokenizer_path: path/to/models/umt5-xxl
     max_seq_len: 512
     # Shared DreamZero dims (also match DreamZero-DROID checkpoint config).
     dreamzero_max_action_dim: 32
@@ -91,6 +92,7 @@ actor:
     gradient_checkpointing: True
     limit_all_gathers: True
     reshard_after_forward: True
+    save_full_model_weights: False
     grad_scaler:
       enabled: False
     mixed_precision:

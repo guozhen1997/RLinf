@@ -203,8 +203,8 @@ def get_model(cfg: DictConfig):
     torch_dtype = torch_dtype_from_precision(cfg.precision)
     model = model_builder(cfg, torch_dtype)
 
-    if Worker.torch_platform is not None and Worker.torch_platform.is_available():
-        model = model.to(Worker.torch_device_type)
+    # if Worker.torch_platform is not None and Worker.torch_platform.is_available():
+    #     model = model.to(Worker.torch_device_type)
 
     if cfg.is_lora:
         from peft import LoraConfig, PeftModel, get_peft_model

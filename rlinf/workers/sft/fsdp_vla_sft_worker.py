@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Any
-
+import os
+import logging
 import torch
 from omegaconf import DictConfig
 from torch.utils import _pytree
@@ -21,6 +22,7 @@ from rlinf.config import SupportedModel
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.utils.pytree import register_pytree_dataclasses
 from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
+from rlinf.utils.runner_utils import check_progress, local_mkdir_safe
 
 
 class FSDPVlaSftWorker(FSDPSftWorker):
@@ -132,3 +134,26 @@ class FSDPVlaSftWorker(FSDPSftWorker):
             )
             self._dreamzero_loss = None
         return train_metrics
+
+    def save_checkpoint(self, save_path: str, step: int = 0) -> None:
+        super().save_checkpoint(save_path, step)
+        if self._rank == 0:
+            data_save_path = os.path.join(save_path, "data")
+            local_mkdir_safe(data_save_path)
+            
+            dataloader_state_dict = self.data_loader.state_dict()
+            torch.save(dataloader_state_dict, os.path.join(data_save_path, "data.pt"))
+
+    def load_checkpoint(self, load_path: str) -> None:
+        super().load_checkpoint(load_path)
+        # load data
+        dataloader_local_path = os.path.join(load_path, "data/data.pt")
+        if os.path.exists(dataloader_local_path):
+            dataloader_state_dict = torch.load(
+                dataloader_local_path, weights_only=False
+            )
+            self.data_loader.load_state_dict(dataloader_state_dict)
+        else:
+            logging.warning(
+                f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch"
+            )
