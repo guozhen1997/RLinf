@@ -19,10 +19,12 @@ that convert LeRobot data into the batch format expected by VLA.forward().
 
 """
 
+import bisect
 import json
 import logging
 import re
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,10 @@ from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 logger = logging.getLogger(__name__)
+
+# Shared cache across all dataset instances in the same process to avoid redundant
+# parquet reads when DataLoader forks worker subprocesses.
+_ADVANTAGE_CACHE: dict[str, dict[int, np.ndarray]] = {}
 
 # Prompt template fed to the T5 tokenizer.
 # {task} is the raw task string from tasks.jsonl, e.g. "put the white mug on the left plate".
@@ -145,6 +151,79 @@ def q99_normalize(x: np.ndarray, q01: np.ndarray, q99: np.ndarray) -> np.ndarray
     return np.clip(out, -1.0, 1.0)
 
 
+def _resolve_advantage_parquet_path(
+    meta_dir: Path, advantage_parquet: str | None
+) -> Path:
+    adv_path = Path(advantage_parquet) if advantage_parquet else (meta_dir / "advantages_test.parquet")
+    if not adv_path.is_absolute():
+        adv_path = meta_dir / adv_path
+    if not adv_path.exists():
+        raise FileNotFoundError(f"CFG mode enabled but advantage parquet not found: {adv_path}")
+    return adv_path
+
+
+def _load_advantage_map_cached(adv_path: Path) -> dict[int, np.ndarray]:
+    """Load advantage parquet into {episode_index: bool_lookup[frame_index]} with caching."""
+    import pandas as pd
+
+    cache_key = str(adv_path.resolve())
+    if cache_key in _ADVANTAGE_CACHE:
+        return _ADVANTAGE_CACHE[cache_key]
+
+    t0 = time.monotonic()
+    df = pd.read_parquet(adv_path, columns=["episode_index", "frame_index", "advantage"])
+    required_cols = {"episode_index", "frame_index", "advantage"}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(
+            f"Advantage parquet must contain columns {sorted(required_cols)}, got {list(df.columns)}"
+        )
+
+    advantage_map: dict[int, np.ndarray] = {}
+    for ep_idx, ep_df in df.groupby("episode_index", sort=False):
+        frame_idx = ep_df["frame_index"].to_numpy(dtype=np.int64)
+        advantage = ep_df["advantage"].to_numpy(dtype=np.bool_)
+        max_frame = int(frame_idx.max())
+        lookup = np.zeros(max_frame + 1, dtype=np.bool_)
+        lookup[frame_idx] = advantage
+        advantage_map[int(ep_idx)] = lookup
+
+    _ADVANTAGE_CACHE[cache_key] = advantage_map
+    logger.info(
+        "Loaded advantage parquet (%d rows, %d episodes) from %s in %.1fs",
+        len(df),
+        len(advantage_map),
+        adv_path,
+        time.monotonic() - t0,
+    )
+    return advantage_map
+
+
+def _lookup_advantage_from_map(
+    advantage_map: dict[int, np.ndarray],
+    adv_path: Path | None,
+    episode_index: int,
+    frame_index: int,
+    *,
+    warn_oob: bool,
+) -> bool:
+    if episode_index not in advantage_map:
+        raise KeyError(
+            f"episode_index={episode_index} not found in advantage parquet {adv_path}"
+        )
+    values = advantage_map[int(episode_index)]
+    fi = int(frame_index)
+    if fi < 0 or fi >= len(values):
+        if warn_oob:
+            logger.warning(
+                "frame_index=%d out of range [0, %d] for episode %d; clamping to boundary",
+                fi,
+                len(values) - 1,
+                int(episode_index),
+            )
+        fi = min(max(fi, 0), len(values) - 1)
+    return bool(values[fi])
+
+
 class DreamZeroLiberoDataset(Dataset):
     """Map LeRobot LIBERO samples to DreamZero training inputs.
 
@@ -251,94 +330,21 @@ class DreamZeroLiberoDataset(Dataset):
         self._advantage_path: Path | None = None
         self._init_advantage_lookup(meta_dir)
 
-    # Shared cache across all Dataset instances in the same process to avoid
-    # redundant parquet reads when DataLoader forks worker subprocesses.
-    _advantage_cache: dict[str, dict[int, np.ndarray]] = {}
-
     def _init_advantage_lookup(self, meta_dir: Path) -> None:
-        """Load per-frame advantage labels for CFG prompt guidance.
-
-        Uses a class-level cache keyed by the resolved parquet path so that
-        multiple Dataset instances (e.g. from DataLoader worker forks) share
-        the same parsed numpy arrays via copy-on-write memory.
-        """
         if not self.cfg_mode:
             return
-
-        import pandas as pd
-
-        adv_path = (
-            Path(self.advantage_parquet)
-            if self.advantage_parquet
-            else (meta_dir / "advantages_test.parquet")
-        )
-        if not adv_path.is_absolute():
-            adv_path = meta_dir / adv_path
-        if not adv_path.exists():
-            raise FileNotFoundError(
-                f"CFG mode enabled but advantage parquet not found: {adv_path}"
-            )
-
-        cache_key = str(adv_path.resolve())
-        if cache_key in DreamZeroLiberoDataset._advantage_cache:
-            self._advantage_map = DreamZeroLiberoDataset._advantage_cache[cache_key]
-            self._advantage_path = adv_path
-            return
-
-        t0 = time.monotonic()
-        df = pd.read_parquet(
-            adv_path, columns=["episode_index", "frame_index", "advantage"]
-        )
-        required_cols = {"episode_index", "frame_index", "advantage"}
-        if not required_cols.issubset(df.columns):
-            raise ValueError(
-                f"Advantage parquet must contain columns {sorted(required_cols)}, "
-                f"got {list(df.columns)}"
-            )
-
-        advantage_map: dict[int, np.ndarray] = {}
-        for ep_idx, ep_df in df.groupby("episode_index", sort=False):
-            frame_idx = ep_df["frame_index"].to_numpy(dtype=np.int64)
-            advantage = ep_df["advantage"].to_numpy(dtype=np.bool_)
-            max_frame = int(frame_idx.max())
-            lookup = np.zeros(max_frame + 1, dtype=np.bool_)
-            lookup[frame_idx] = advantage
-            advantage_map[int(ep_idx)] = lookup
-
-        DreamZeroLiberoDataset._advantage_cache[cache_key] = advantage_map
-        self._advantage_map = advantage_map
+        adv_path = _resolve_advantage_parquet_path(meta_dir, self.advantage_parquet)
+        self._advantage_map = _load_advantage_map_cached(adv_path)
         self._advantage_path = adv_path
-        elapsed = time.monotonic() - t0
-        logger.info(
-            "Loaded advantage parquet (%d rows, %d episodes) from %s in %.1fs",
-            len(df),
-            len(advantage_map),
-            adv_path,
-            elapsed,
-        )
 
     def _lookup_advantage(self, episode_index: int, frame_index: int) -> bool:
-        """Return per-frame advantage label.
-
-        Raises KeyError if the episode is missing entirely.
-        Logs a warning (once per episode) and clamps if frame_index is out of range.
-        """
-        if episode_index not in self._advantage_map:
-            raise KeyError(
-                f"episode_index={episode_index} not found in advantage parquet "
-                f"{self._advantage_path}"
-            )
-        values = self._advantage_map[episode_index]
-        fi = int(frame_index)
-        if fi < 0 or fi >= len(values):
-            logger.warning(
-                "frame_index=%d out of range [0, %d] for episode %d; clamping to boundary",
-                fi,
-                len(values) - 1,
-                episode_index,
-            )
-            fi = min(max(fi, 0), len(values) - 1)
-        return bool(values[fi])
+        return _lookup_advantage_from_map(
+            self._advantage_map,
+            self._advantage_path,
+            episode_index,
+            frame_index,
+            warn_oob=True,
+        )
 
     def _init_v3(self):
         """Initialize with LeRobot v3 dataset (mp4 videos).
@@ -1024,6 +1030,7 @@ class DreamZeroDroidDataset(Dataset):
     def __init__(
         self,
         data_path: str | list[str],
+        lazy_load: bool = True,
         action_horizon: int = 24,
         num_video_frames: int = 33,
         total_action_steps: int = 96,
@@ -1045,6 +1052,7 @@ class DreamZeroDroidDataset(Dataset):
                 )
             data_path = data_path[0]
         self.data_path = str(data_path)
+        self.lazy_load = bool(lazy_load)
         self.action_horizon = int(action_horizon)
         self.total_action_steps = int(total_action_steps)
         self.num_video_frames = int(num_video_frames)
@@ -1116,116 +1124,307 @@ class DreamZeroDroidDataset(Dataset):
         state_offsets = [i * self.state_step for i in range(self.state_horizon)]
         action_offsets = list(range(self.total_action_steps))
 
-        from importlib.metadata import version as _pkg_version
+        if self.lazy_load:
+            # --- Map-style, episode-local loading (DreamZero official behavior) ---
+            # Avoid `datasets.load_dataset("parquet")` which materializes a huge Arrow dataset and
+            # is the source of "Generating train split ..." + OOM in multi-process jobs.
+            self._root = Path(self.data_path).resolve()
+            if not self._root.exists():
+                raise FileNotFoundError(
+                    f"DROID data_path must be a local path, got: {self.data_path}"
+                )
+            self._meta_dir = meta_dir
+            self._info = info
+            self._chunks_size = int(info.get("chunks_size") or 1000)
+            self._data_tmpl = str(info.get("data_path") or "")
+            self._video_tmpl = str(info.get("video_path") or "")
+            if not self._data_tmpl:
+                raise ValueError("meta/info.json missing data_path")
 
-        import lerobot.datasets.lerobot_dataset as lerobot_dataset
-        from packaging.version import Version as _PkgVersion
+            feats = info.get("features") or {}
+            self._video_keys = [k for k, v in feats.items() if v.get("dtype") == "video"]
 
-        delta_timestamps = {
-            self._img_key_left: [t / self._fps for t in video_offsets],
-            self._img_key_right: [t / self._fps for t in video_offsets],
-            self._img_key_wrist: [t / self._fps for t in video_offsets],
-            "observation.state": [t / self._fps for t in state_offsets],
-            "action": [t / self._fps for t in action_offsets],
-        }
-        data_path_obj = Path(self.data_path)
-        if not data_path_obj.exists():
-            raise FileNotFoundError(
-                f"DROID data_path must be a local path, got: {self.data_path}"
+            # Episodes list: only those that exist on disk and in meta/episodes.jsonl.
+            meta_episode_indices: set[int] = set()
+            episode_lengths: dict[int, int] = {}
+            with open(meta_dir / "episodes.jsonl") as _epf:
+                for _line in _epf:
+                    _line = _line.strip()
+                    if not _line:
+                        continue
+                    obj = json.loads(_line)
+                    ep_idx = int(obj.get("episode_index", 0))
+                    meta_episode_indices.add(ep_idx)
+                    # Try several common keys.
+                    for k in ("episode_length", "length", "num_frames", "num_steps"):
+                        if k in obj and obj[k] is not None:
+                            try:
+                                episode_lengths[ep_idx] = int(obj[k])
+                                break
+                            except Exception:
+                                pass
+
+            self._episodes: list[int] = _discover_local_lerobot_episode_indices(
+                self._root, info, allowed_episode_indices=meta_episode_indices
+            )
+            if not self._episodes:
+                raise FileNotFoundError(
+                    f"No local episodes found under {self._root} that match meta/episodes.jsonl."
+                )
+            logger.info(
+                "DROID lazy map-style: using %d local episodes (info total_episodes=%s).",
+                len(self._episodes),
+                info.get("total_episodes"),
             )
 
-        # lerobot 0.3.x: first arg is repo_id (name only), not a filesystem path. Local datasets must use
-        # repo_id=<folder name> + root=<absolute path to that folder> so metadata loads from disk and
-        # never hits Hub (get_safe_version). lerobot 0.4.x rejects codebase_version v2.0 in info.json.
-        if _PkgVersion(_pkg_version("lerobot")) >= _PkgVersion("0.4.0"):
-            raise RuntimeError(
-                "DreamZeroDroidDataset requires lerobot<0.4 for datasets with "
-                "meta/info.json codebase_version v2.0 (e.g. DreamZero-DROID-Data-mini). "
-                "Install lerobot==0.3.3 (see requirements/embodied/models/dreamzero.txt)."
-            )
-        # Only pass episodes that exist locally; info.json total_episodes can be full-dataset
-        # size while this tree is a subset — otherwise lerobot asserts all files and hits Hub.
-        meta_episode_indices: set[int] = set()
-        with open(meta_dir / "episodes.jsonl") as _epf:
-            for _line in _epf:
-                _line = _line.strip()
-                if not _line:
-                    continue
-                meta_episode_indices.add(int(json.loads(_line)["episode_index"]))
-        local_episodes = _discover_local_lerobot_episode_indices(
-            data_path_obj, info, allowed_episode_indices=meta_episode_indices
-        )
-        logger.info(
-            "DROID LeRobot: loading %d episodes present under data/ (info total_episodes=%s).",
-            len(local_episodes),
-            info.get("total_episodes"),
-        )
-        self.dataset = lerobot_dataset.LeRobotDataset(
-            data_path_obj.name,
-            root=str(data_path_obj.resolve()),
-            episodes=local_episodes,
-            delta_timestamps=delta_timestamps,
-            video_backend="pyav",
-        )
+            # Episode -> length (fallback to parquet metadata when missing).
+            self._episode_lengths: list[int] = []
+            for ep_idx in self._episodes:
+                n = episode_lengths.get(int(ep_idx))
+                if n is None or n <= 0:
+                    n = self._infer_episode_length_from_parquet(int(ep_idx))
+                self._episode_lengths.append(int(n))
 
-        self._advantage_map: dict[int, np.ndarray] = {}
-        self._advantage_path: Path | None = None
+            # Prefix sum offsets for global indexing (idx -> (episode, frame_in_episode)).
+            self._episode_starts: list[int] = [0]
+            total = 0
+            for n in self._episode_lengths:
+                total += int(n)
+                self._episode_starts.append(total)
+            self._total_frames = int(total)
+
+            # Cached episode parquet tables (LRU-ish using insertion order).
+            self._pq_cache: "OrderedDict[int, Any]" = OrderedDict()
+            self._pq_cache_max_episodes = 8
+
+            # Offsets used for sampling each modality around the base frame.
+            self._video_offsets = np.asarray(video_offsets, dtype=np.int64)
+            self._state_offsets = np.asarray(state_offsets, dtype=np.int64)
+            self._action_offsets = np.asarray(action_offsets, dtype=np.int64)
+            self._video_tolerance_s = 0.1
+            self._video_backend = "pyav"
+            self._parquet_columns = [
+                "timestamp",
+                # Some datasets store state under a struct column "observation" with field "state"
+                # instead of a flattened "observation.state" column.
+                "observation",
+                "observation.state",
+                "action",
+                "task",
+                "task_index",
+                "annotation.language.language_instruction",
+                "annotation.language.language_instruction_2",
+                "annotation.language.language_instruction_3",
+            ]
+        else:
+            # --- LeRobotDataset loading (legacy behavior, non-map-style) ---
+            from importlib.metadata import version as _pkg_version
+
+            import lerobot.datasets.lerobot_dataset as lerobot_dataset
+            from packaging.version import Version as _PkgVersion
+
+            delta_timestamps = {
+                self._img_key_left: [t / self._fps for t in video_offsets],
+                self._img_key_right: [t / self._fps for t in video_offsets],
+                self._img_key_wrist: [t / self._fps for t in video_offsets],
+                "observation.state": [t / self._fps for t in state_offsets],
+                "action": [t / self._fps for t in action_offsets],
+            }
+            data_path_obj = Path(self.data_path)
+            if not data_path_obj.exists():
+                raise FileNotFoundError(
+                    f"DROID data_path must be a local path, got: {self.data_path}"
+                )
+
+            # lerobot 0.3.x: first arg is repo_id (name only), not a filesystem path. Local datasets must use
+            # repo_id=<folder name> + root=<absolute path to that folder> so metadata loads from disk and
+            # never hits Hub (get_safe_version). lerobot 0.4.x rejects codebase_version v2.0 in info.json.
+            if _PkgVersion(_pkg_version("lerobot")) >= _PkgVersion("0.4.0"):
+                raise RuntimeError(
+                    "DreamZeroDroidDataset requires lerobot<0.4 for datasets with "
+                    "meta/info.json codebase_version v2.0 (e.g. DreamZero-DROID-Data-mini). "
+                    "Install lerobot==0.3.3 (see requirements/embodied/models/dreamzero.txt)."
+                )
+            # Only pass episodes that exist locally; info.json total_episodes can be full-dataset
+            # size while this tree is a subset — otherwise lerobot asserts all files and hits Hub.
+            meta_episode_indices: set[int] = set()
+            with open(meta_dir / "episodes.jsonl") as _epf:
+                for _line in _epf:
+                    _line = _line.strip()
+                    if not _line:
+                        continue
+                    meta_episode_indices.add(int(json.loads(_line)["episode_index"]))
+            local_episodes = _discover_local_lerobot_episode_indices(
+                data_path_obj, info, allowed_episode_indices=meta_episode_indices
+            )
+            logger.info(
+                "DROID LeRobot: loading %d episodes present under data/ (info total_episodes=%s).",
+                len(local_episodes),
+                info.get("total_episodes"),
+            )
+            self.dataset = lerobot_dataset.LeRobotDataset(
+                data_path_obj.name,
+                root=str(data_path_obj.resolve()),
+                episodes=local_episodes,
+                delta_timestamps=delta_timestamps,
+                video_backend="pyav",
+            )
+
+        self._advantage_map = {}
+        self._advantage_path = None
         self._init_advantage_lookup(meta_dir)
+
+    def _infer_episode_length_from_parquet(self, episode_index: int) -> int:
+        import pyarrow.parquet as pq
+
+        p = self._get_parquet_path(episode_index)
+        md = pq.read_metadata(str(p))
+        n = int(md.num_rows)
+        if n <= 0:
+            raise ValueError(f"episode_{episode_index:06d}.parquet has 0 rows: {p}")
+        return n
+
+    def _get_parquet_path(self, episode_index: int) -> Path:
+        ep_chunk = int(episode_index) // self._chunks_size
+        rel = Path(
+            self._data_tmpl.format(episode_chunk=ep_chunk, episode_index=int(episode_index))
+        )
+        p = (self._root / rel).resolve()
+        if not p.is_file():
+            raise FileNotFoundError(f"Parquet file not found for episode {episode_index}: {p}")
+        return p
+
+    def _get_video_path(self, episode_index: int, video_key: str) -> Path:
+        if not self._video_tmpl:
+            raise FileNotFoundError("meta/info.json missing video_path")
+        ep_chunk = int(episode_index) // self._chunks_size
+        rel = Path(
+            self._video_tmpl.format(
+                episode_chunk=ep_chunk, video_key=video_key, episode_index=int(episode_index)
+            )
+        )
+        p = (self._root / rel).resolve()
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"Video file not found for episode {episode_index} key {video_key}: {p}"
+            )
+        return p
+
+    def _get_episode_table(self, episode_index: int):
+        # Small LRU cache keyed by episode_index.
+        episode_index = int(episode_index)
+        if episode_index in self._pq_cache:
+            tbl = self._pq_cache.pop(episode_index)
+            self._pq_cache[episode_index] = tbl
+            return tbl
+
+        import pyarrow.parquet as pq
+
+        p = self._get_parquet_path(episode_index)
+        # Only load columns we might touch; keeps per-episode memory down.
+        # Some datasets do not contain optional columns like "task" (they might only have
+        # task_index + tasks.jsonl), so intersect with the on-disk schema to avoid ArrowInvalid.
+        # IMPORTANT: use Arrow schema column names, not parquet metadata schema names.
+        # For list/fixed_size_list columns, `read_metadata(...).schema.names` can degrade into
+        # repeated "element" entries, which breaks column projection decisions.
+        schema_names = list(pq.read_schema(str(p)).names)
+        schema_set = set(schema_names)
+        cols = [c for c in self._parquet_columns if c in schema_set]
+        # Ensure required columns are never accidentally dropped by projection logic.
+        for required in ("timestamp", "action", "observation.state"):
+            if required in schema_set and required not in cols:
+                cols.append(required)
+        # Keep deterministic order (pyarrow accepts list; order doesn't matter but helps debugging).
+        cols = [c for i, c in enumerate(cols) if c not in cols[:i]]
+        tbl = pq.read_table(str(p), columns=cols)
+        self._pq_cache[episode_index] = tbl
+        if len(self._pq_cache) > self._pq_cache_max_episodes:
+            self._pq_cache.popitem(last=False)
+        return tbl
+
+    @staticmethod
+    def _pick_state_column_from_schema(schema_names: list[str]) -> str | None:
+        # Prefer the canonical flattened name.
+        if "observation.state" in schema_names:
+            return "observation.state"
+        # Common struct flattening patterns in parquet.
+        candidates = [
+            n
+            for n in schema_names
+            if ("state" in n.split(".")[-1])
+            and ("observation" in n.split(".")[0] or n.startswith("observation"))
+        ]
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _clip_indices(indices: np.ndarray, length: int) -> np.ndarray:
+        if length <= 0:
+            return np.zeros_like(indices, dtype=np.int64)
+        return np.clip(indices.astype(np.int64), 0, int(length) - 1)
+
+    @staticmethod
+    def _col_exists(table, name: str) -> bool:
+        try:
+            # `pyarrow.Table` should expose `column_names`; some derived objects can behave
+            # oddly under column projection. Check schema too for robustness.
+            if hasattr(table, "column_names") and name in table.column_names:
+                return True
+            if hasattr(table, "schema") and hasattr(table.schema, "names"):
+                return name in table.schema.names
+            return False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _read_list_column(table, name: str, indices: np.ndarray, dtype=np.float32) -> np.ndarray:
+        col = table.column(name)
+        out = []
+        for i in indices.tolist():
+            v = col[int(i)].as_py()
+            out.append(v)
+        return np.asarray(out, dtype=dtype)
+
+    @staticmethod
+    def _read_struct_list_field(
+        table,
+        struct_col: str,
+        field: str,
+        indices: np.ndarray,
+        dtype=np.float32,
+    ) -> np.ndarray:
+        """Read a list/fixed_size_list field from a struct column."""
+        col = table.column(struct_col)
+        try:
+            arr = col.chunk(0) if hasattr(col, "num_chunks") and col.num_chunks > 0 else col
+            # `arr` is a StructArray; extract the field as an Array-like
+            field_arr = arr.field(field)
+        except Exception as e:
+            raise KeyError(f"Missing struct field {struct_col}.{field}: {e}") from e
+
+        out = []
+        for i in indices.tolist():
+            out.append(field_arr[int(i)].as_py())
+        return np.asarray(out, dtype=dtype)
+
+    @staticmethod
+    def _read_scalar_column(table, name: str, index: int) -> Any:
+        return table.column(name)[int(index)].as_py()
 
     def _init_advantage_lookup(self, meta_dir: Path) -> None:
         if not self.cfg_mode:
             return
-        import pandas as pd
-
-        adv_path = (
-            Path(self.advantage_parquet)
-            if self.advantage_parquet
-            else (meta_dir / "advantages_test.parquet")
-        )
-        if not adv_path.is_absolute():
-            adv_path = meta_dir / adv_path
-        if not adv_path.exists():
-            raise FileNotFoundError(
-                f"CFG mode enabled but advantage parquet not found: {adv_path}"
-            )
-        cache_key = str(adv_path.resolve())
-        if cache_key in DreamZeroLiberoDataset._advantage_cache:
-            self._advantage_map = DreamZeroLiberoDataset._advantage_cache[cache_key]
-            self._advantage_path = adv_path
-            return
-        t0 = time.monotonic()
-        df = pd.read_parquet(
-            adv_path, columns=["episode_index", "frame_index", "advantage"]
-        )
-        advantage_map: dict[int, np.ndarray] = {}
-        for ep_idx, ep_df in df.groupby("episode_index", sort=False):
-            frame_idx = ep_df["frame_index"].to_numpy(dtype=np.int64)
-            advantage = ep_df["advantage"].to_numpy(dtype=np.bool_)
-            max_frame = int(frame_idx.max())
-            lookup = np.zeros(max_frame + 1, dtype=np.bool_)
-            lookup[frame_idx] = advantage
-            advantage_map[int(ep_idx)] = lookup
-        DreamZeroLiberoDataset._advantage_cache[cache_key] = advantage_map
-        self._advantage_map = advantage_map
+        adv_path = _resolve_advantage_parquet_path(meta_dir, self.advantage_parquet)
+        self._advantage_map = _load_advantage_map_cached(adv_path)
         self._advantage_path = adv_path
-        logger.info(
-            "Loaded advantage parquet (%d rows, %d episodes) from %s in %.1fs",
-            len(df),
-            len(advantage_map),
-            adv_path,
-            time.monotonic() - t0,
-        )
 
     def _lookup_advantage(self, episode_index: int, frame_index: int) -> bool:
-        if episode_index not in self._advantage_map:
-            raise KeyError(
-                f"episode_index={episode_index} not found in advantage parquet {self._advantage_path}"
-            )
-        values = self._advantage_map[episode_index]
-        fi = int(frame_index)
-        if fi < 0 or fi >= len(values):
-            fi = min(max(fi, 0), len(values) - 1)
-        return bool(values[fi])
+        return _lookup_advantage_from_map(
+            self._advantage_map,
+            self._advantage_path,
+            episode_index,
+            frame_index,
+            warn_oob=False,
+        )
 
     def _slice_norm(
         self,
@@ -1271,10 +1470,116 @@ class DreamZeroDroidDataset(Dataset):
         return np.stack(out, axis=0)
 
     def __len__(self) -> int:
+        if self.lazy_load:
+            return int(self._total_frames)
         return len(self.dataset)
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        sample = self.dataset[idx]
+        if self.lazy_load:
+            # Map global frame index -> (episode_index, frame_in_episode)
+            if idx < 0 or idx >= self._total_frames:
+                raise IndexError(
+                    f"Index {idx} out of range for dataset of len {self._total_frames}"
+                )
+            ep_pos = bisect.bisect_right(self._episode_starts, int(idx)) - 1
+            ep_pos = max(0, min(ep_pos, len(self._episodes) - 1))
+            ep_start = self._episode_starts[ep_pos]
+            frame_in_ep = int(idx) - int(ep_start)
+            episode_index = int(self._episodes[ep_pos])
+            ep_len = int(self._episode_lengths[ep_pos])
+
+            table = self._get_episode_table(episode_index)
+
+            # Indices per modality (padded by clamping).
+            video_idx = self._clip_indices(frame_in_ep + self._video_offsets, ep_len)
+            state_idx = self._clip_indices(frame_in_ep + self._state_offsets, ep_len)
+            action_idx = self._clip_indices(frame_in_ep + self._action_offsets, ep_len)
+
+            # Timestamps for video decode come from parquet (more robust than assuming fps-perfect alignment).
+            if not self._col_exists(table, "timestamp"):
+                raise KeyError(
+                    f"episode parquet missing 'timestamp' column: {self._get_parquet_path(episode_index)}"
+                )
+            ts_col = table.column("timestamp")
+            video_timestamps = [
+                float(ts_col[int(i)].as_py()) for i in video_idx.tolist()
+            ]
+
+            from lerobot.datasets.video_utils import decode_video_frames
+
+            left = decode_video_frames(
+                self._get_video_path(episode_index, self._img_key_left),
+                video_timestamps,
+                tolerance_s=self._video_tolerance_s,
+                backend=self._video_backend,
+            )
+            right = decode_video_frames(
+                self._get_video_path(episode_index, self._img_key_right),
+                video_timestamps,
+                tolerance_s=self._video_tolerance_s,
+                backend=self._video_backend,
+            )
+            wrist = decode_video_frames(
+                self._get_video_path(episode_index, self._img_key_wrist),
+                video_timestamps,
+                tolerance_s=self._video_tolerance_s,
+                backend=self._video_backend,
+            )
+            sample: dict[str, Any] = {
+                self._img_key_left: left,
+                self._img_key_right: right,
+                self._img_key_wrist: wrist,
+                "episode_index": episode_index,
+                "frame_index": frame_in_ep,
+            }
+
+            # Optional language/task fields (base frame only).
+            for k in (
+                "task",
+                "task_index",
+                "annotation.language.language_instruction",
+                "annotation.language.language_instruction_2",
+                "annotation.language.language_instruction_3",
+            ):
+                if self._col_exists(table, k):
+                    sample[k] = self._read_scalar_column(table, k, frame_in_ep)
+
+            # Vector modalities sampled with offsets.
+            if self._col_exists(table, "observation.state"):
+                state_arr = self._read_list_column(
+                    table, "observation.state", state_idx, dtype=np.float32
+                )
+            elif self._col_exists(table, "observation"):
+                # Struct column case: observation: struct<..., state: fixed_size_list<...>, ...>
+                state_arr = self._read_struct_list_field(
+                    table, "observation", "state", state_idx, dtype=np.float32
+                )
+            else:
+                # Fallback: schema-driven column selection (handles variants like observation/state flattening)
+                import pyarrow.parquet as pq
+
+                p = self._get_parquet_path(episode_index)
+                schema_names = list(pq.read_schema(str(p)).names)
+                picked = self._pick_state_column_from_schema(schema_names)
+                if picked is not None and picked != "observation":
+                    tbl2 = pq.read_table(str(p), columns=[picked])
+                    state_arr = self._read_list_column(
+                        tbl2, picked, state_idx, dtype=np.float32
+                    )
+                else:
+                    raise KeyError(
+                        "episode parquet missing state; expected 'observation.state' or struct 'observation.state'. "
+                        f"episode={episode_index} parquet={p} loaded_cols={getattr(table, 'column_names', None)} "
+                        f"schema_cols={schema_names[:50]} (showing first 50)"
+                    )
+            if not self._col_exists(table, "action"):
+                raise KeyError("episode parquet missing 'action' column")
+            sample["observation.state"] = state_arr
+            sample["action"] = self._read_list_column(
+                table, "action", action_idx, dtype=np.float32
+            )
+        else:
+            sample = self.dataset[idx]
 
         left = np.asarray(sample[self._img_key_left])
         right = np.asarray(sample[self._img_key_right])
@@ -1553,8 +1858,12 @@ def build_dreamzero_sft_dataloader(
         logger.info(
             "DreamZero DROID map-style: per-view resize target = %s", droid_view_hw
         )
+        
+        lazy_load = cfg.data.get("lazy_load", True)
+        
         dataset = DreamZeroDroidDataset(
             data_path=data_paths,
+            lazy_load=lazy_load,
             action_horizon=droid_action_horizon,
             num_video_frames=droid_video_frames,
             total_action_steps=droid_total_action_steps,
@@ -1596,16 +1905,17 @@ def build_dreamzero_sft_dataloader(
         shuffle=not eval_dataset,
         drop_last=not eval_dataset,
     )
-    num_workers = int(cfg.actor.get("dataloader_num_workers", 4))
+    num_workers = int(cfg.data.get("num_workers", 4))
+    prefetch_factor = int(cfg.data.get("prefetch_factor", 4))
     data_loader = StatefulDataLoader(
         dataset,
         batch_size=cfg.actor.micro_batch_size,  # samples per GPU per step
         sampler=sampler,
-        shuffle=False,
         drop_last=not eval_dataset,
         num_workers=num_workers,
         pin_memory=True,  # faster CPU->GPU transfer
         persistent_workers=num_workers > 0,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
         collate_fn=DreamZeroCollator(
             tokenizer_path=tokenizer_path,
             max_seq_len=max_seq_len,
