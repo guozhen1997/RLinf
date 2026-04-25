@@ -154,11 +154,17 @@ def q99_normalize(x: np.ndarray, q01: np.ndarray, q99: np.ndarray) -> np.ndarray
 def _resolve_advantage_parquet_path(
     meta_dir: Path, advantage_parquet: str | None
 ) -> Path:
-    adv_path = Path(advantage_parquet) if advantage_parquet else (meta_dir / "advantages_test.parquet")
+    adv_path = (
+        Path(advantage_parquet)
+        if advantage_parquet
+        else (meta_dir / "advantages_test.parquet")
+    )
     if not adv_path.is_absolute():
         adv_path = meta_dir / adv_path
     if not adv_path.exists():
-        raise FileNotFoundError(f"CFG mode enabled but advantage parquet not found: {adv_path}")
+        raise FileNotFoundError(
+            f"CFG mode enabled but advantage parquet not found: {adv_path}"
+        )
     return adv_path
 
 
@@ -171,7 +177,9 @@ def _load_advantage_map_cached(adv_path: Path) -> dict[int, np.ndarray]:
         return _ADVANTAGE_CACHE[cache_key]
 
     t0 = time.monotonic()
-    df = pd.read_parquet(adv_path, columns=["episode_index", "frame_index", "advantage"])
+    df = pd.read_parquet(
+        adv_path, columns=["episode_index", "frame_index", "advantage"]
+    )
     required_cols = {"episode_index", "frame_index", "advantage"}
     if not required_cols.issubset(df.columns):
         raise ValueError(
@@ -1142,7 +1150,9 @@ class DreamZeroDroidDataset(Dataset):
                 raise ValueError("meta/info.json missing data_path")
 
             feats = info.get("features") or {}
-            self._video_keys = [k for k, v in feats.items() if v.get("dtype") == "video"]
+            self._video_keys = [
+                k for k, v in feats.items() if v.get("dtype") == "video"
+            ]
 
             # Episodes list: only those that exist on disk and in meta/episodes.jsonl.
             meta_episode_indices: set[int] = set()
@@ -1287,11 +1297,15 @@ class DreamZeroDroidDataset(Dataset):
     def _get_parquet_path(self, episode_index: int) -> Path:
         ep_chunk = int(episode_index) // self._chunks_size
         rel = Path(
-            self._data_tmpl.format(episode_chunk=ep_chunk, episode_index=int(episode_index))
+            self._data_tmpl.format(
+                episode_chunk=ep_chunk, episode_index=int(episode_index)
+            )
         )
         p = (self._root / rel).resolve()
         if not p.is_file():
-            raise FileNotFoundError(f"Parquet file not found for episode {episode_index}: {p}")
+            raise FileNotFoundError(
+                f"Parquet file not found for episode {episode_index}: {p}"
+            )
         return p
 
     def _get_video_path(self, episode_index: int, video_key: str) -> Path:
@@ -1300,7 +1314,9 @@ class DreamZeroDroidDataset(Dataset):
         ep_chunk = int(episode_index) // self._chunks_size
         rel = Path(
             self._video_tmpl.format(
-                episode_chunk=ep_chunk, video_key=video_key, episode_index=int(episode_index)
+                episode_chunk=ep_chunk,
+                video_key=video_key,
+                episode_index=int(episode_index),
             )
         )
         p = (self._root / rel).resolve()
@@ -1376,7 +1392,9 @@ class DreamZeroDroidDataset(Dataset):
             return False
 
     @staticmethod
-    def _read_list_column(table, name: str, indices: np.ndarray, dtype=np.float32) -> np.ndarray:
+    def _read_list_column(
+        table, name: str, indices: np.ndarray, dtype=np.float32
+    ) -> np.ndarray:
         col = table.column(name)
         out = []
         for i in indices.tolist():
@@ -1395,7 +1413,11 @@ class DreamZeroDroidDataset(Dataset):
         """Read a list/fixed_size_list field from a struct column."""
         col = table.column(struct_col)
         try:
-            arr = col.chunk(0) if hasattr(col, "num_chunks") and col.num_chunks > 0 else col
+            arr = (
+                col.chunk(0)
+                if hasattr(col, "num_chunks") and col.num_chunks > 0
+                else col
+            )
             # `arr` is a StructArray; extract the field as an Array-like
             field_arr = arr.field(field)
         except Exception as e:
@@ -1858,9 +1880,9 @@ def build_dreamzero_sft_dataloader(
         logger.info(
             "DreamZero DROID map-style: per-view resize target = %s", droid_view_hw
         )
-        
+
         lazy_load = cfg.data.get("lazy_load", True)
-        
+
         dataset = DreamZeroDroidDataset(
             data_path=data_paths,
             lazy_load=lazy_load,
