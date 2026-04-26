@@ -735,9 +735,9 @@ def _resolve_video_path(path: str, data_root: Optional[str]) -> str:
     return path
 
 
-@VLMDatasetRegistry.register("robochallenge_progress_sft")
-class RoboChallengeProgressSFTDataset(VLMBaseDataset):
-    """SFT dataset for RoboChallenge progress: full_video + video_clip 输入，与 pilot 一致。
+@VLMDatasetRegistry.register("qwentrend_progress_sft")
+class QwenTrendProgressSFTDataset(VLMBaseDataset):
+    """SFT dataset for QwenTrend progress: full_video + video_clip 输入，与 pilot 一致。
 
     Each record: full_video (mp4), video_clip (mp4), question, answer.
     Qwen3-VL 用 videos 输入，与数据集形式一致。
@@ -775,7 +775,7 @@ class RoboChallengeProgressSFTDataset(VLMBaseDataset):
         answer_text: Optional[str] | list[Optional[str]] = None,
     ) -> tuple[str | list[str], dict[str, Any], dict[str, Any]]:
         """
-        Build Qwen3-VL processor inputs for RoboChallenge progress SFT.
+        Build Qwen3-VL processor inputs for QwenTrend progress SFT.
         """
 
         def _render_prompt_text(
@@ -991,9 +991,9 @@ class RoboChallengeProgressSFTDataset(VLMBaseDataset):
         )
 
 
-@VLMDatasetRegistry.register("simple_robochallenge_sft")
-class SimpleRobochallengeSFTDataset(RoboChallengeProgressSFTDataset):
-    """SFT dataset for a single-video, single-word RoboChallenge format."""
+@VLMDatasetRegistry.register("simple_qwentrend_sft")
+class SimpleQwenTrendSFTDataset(QwenTrendProgressSFTDataset):
+    """SFT dataset for a single-video, single-word QwenTrend format."""
 
     @classmethod
     def _build_video_user_content(

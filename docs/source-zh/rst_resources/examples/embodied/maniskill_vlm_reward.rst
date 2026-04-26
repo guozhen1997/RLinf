@@ -2,7 +2,7 @@ ManiSkill PPO（基于 VLM Reward Model）
 ========================================
 
 本文档给出在 RLinf 框架内使用 **MLP policy + Qwen3-VL reward model** 运行 ManiSkill PPO 训练的完整说明。
-主要参考配置为 ``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl4b_robochallenge_reward.yaml``。
+主要参考配置为 ``examples/embodiment/config/maniskill_ppo_mlp_qwentrend_reward.yaml``。
 
 主要目标是让训练流程具备以下能力：
 
@@ -17,15 +17,16 @@ ManiSkill PPO（基于 VLM Reward Model）
 **ManiSkill3 环境**
 
 - **Environment**：ManiSkill3 仿真平台
-- **Task**：以 ``PickCube-v1`` 为代表的机械臂操作任务
+- **Task**：以 ``PickCube3View-v1`` 为代表的机械臂操作任务
 - **Policy Observation**：``states``
-- **Reward Observation**：``main_images``，以及任务描述文本
-- **Action Space**：7 维连续动作
+- **Reward Observation**：``main_images``、``extra_view_images``，以及任务描述文本
+- **Action Space**：8 维连续动作
 
 **Reward 输入结构**
 
 - **States**：供 ``mlp_policy`` 使用的状态向量
 - **Main Images**：供 Qwen3-VL reward worker 使用的主视角历史图像
+- **Extra View Images**：与主视角同步的第三人称历史图像
 - **Task Descriptions**：任务文本描述
 - **History Buffer**：按 ``history_size`` 和 ``input_interval`` 组织的短视频片段
 
@@ -154,8 +155,9 @@ ManiSkill PPO（基于 VLM Reward Model）
          wrap_obs_mode: simple_prompt
          use_full_state: True
          init_params:
-            id: PickCube-v1
+            id: PickCube3View-v1
             obs_mode: rgb
+         use_3rd_view_as_extra: True
 
    reward:
       use_reward_model: True
@@ -167,14 +169,21 @@ ManiSkill PPO（基于 VLM Reward Model）
          model_type: history_vlm
          model_path: /path/to/Qwen3-VL-4B-Instruct
          lora_path: /path/to/Qwen3-VL-4B-Instruct_lora
-         input_builder_name: simple_robochallenge_input_builder
-         reward_parser_name: robochallenge_reward_parser
+         gt_success_bonus: 20.0
+         input_builder_name: qwentrend_input_builder
+         reward_parser_name: qwentrend_reward_parser
+         reward_parser_params:
+            positive_reward: 1.0
+            negative_reward: -0.2
+            unclear_reward: 0.0
+            invalid_reward: 0.0
 
 这些参数的作用如下：
 
 - ``component_placement.reward`` 用于放置在线 reward worker。
 - ``wrap_obs_mode: simple_prompt`` 会同时暴露 ``states``、``main_images``、``extra_view_images`` 和 ``task_descriptions``。
 - ``use_full_state: True`` 保持 actor 继续基于 ``states`` 运行 ``mlp_policy``。
+- ``use_3rd_view_as_extra: True`` 会把 ManiSkill 的第三视角相机作为 ``extra_view_images`` 暴露出来。
 - ``reward_mode: history_buffer`` 表示 reward worker 消费一段历史片段，而不是只看当前帧。
 - ``history_reward_assign: True`` 表示当前窗口的 reward 会回填到窗口覆盖的更早几个 step。
 
@@ -182,9 +191,7 @@ ManiSkill PPO（基于 VLM Reward Model）
 
 可以直接参考以下配置文件：
 
-- 主单视角示例：``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl4b_robochallenge_reward.yaml``
-- 双视角变体：``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl4b_dualview_robochallenge_reward.yaml``
-- 8B confidence 变体：``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl8b_confidance_robochallenge_reward.yaml``
+- 主 QwenTrend 示例：``examples/embodiment/config/maniskill_ppo_mlp_qwentrend_reward.yaml``
 
 **3. 启动命令**
 
@@ -192,14 +199,7 @@ ManiSkill PPO（基于 VLM Reward Model）
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwen3vl4b_robochallenge_reward
-
-另外两个变体可以通过以下命令启动：
-
-.. code-block:: bash
-
-   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwen3vl4b_dualview_robochallenge_reward
-   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwen3vl8b_confidance_robochallenge_reward
+   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwentrend_reward
 
 可视化与结果
 -------------------------
@@ -246,7 +246,6 @@ VLM reward 的主路径如下：
 ------------
 
 - 这些 YAML 在顶层 ``reward`` 段配置了 ``reward_threshold``，但当前 ``history_vlm`` 实现并不会在 reward 推理阶段应用这个阈值。
-- 在主单视角配置中，reward worker 只消费 ``main_images`` 的历史输入。虽然环境观测里仍然有 ``extra_view_images``，但 ``simple_robochallenge_input_builder`` 并不会使用它。
-- ``robochallenge_reward_parser`` 会把最终 reward 截断到 ``[0, 1]``。实际效果上，``positive`` 会得到正分，而 ``negative`` 会被裁成 ``0``，而不是变成带符号惩罚。
-- 对 dual-view 变体而言，``dualview_robochallenge_input_builder`` 会从 ``history_input`` 中同时读取 ``main_images`` 和 ``extra_view_images``。如果想真正使用双视角历史输入，需要在历史缓冲配置里同时记录这两个键。
-- ``confidence_robochallenge_reward_parser`` 同样输出 ``[0, 1]`` 区间的值；对 ``negative`` 判断，它会返回 ``1 - confidence``，因此它更像是一个有界分数，而不是带符号的惩罚值。
+- ``qwentrend_input_builder`` 会从 ``history_input`` 中同时读取 ``main_images`` 和 ``extra_view_images``，因此历史缓冲里需要同时记录这两个键，才能组成同步双视角输入。
+- ``qwentrend_reward_parser`` 会按照 ``positive_reward``、``negative_reward``、``unclear_reward`` 和 ``invalid_reward`` 直接映射成带符号标量 reward，不会把输出截断到 ``[0, 1]``。
+- ``gt_success_bonus`` 配置在 ``reward.model`` 下，并在 reward model 内部生效，而不是在 reward worker 前端额外注入。

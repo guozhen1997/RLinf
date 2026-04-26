@@ -69,6 +69,8 @@ class HistoryManager:
             )
             history_size = 0
 
+        min_history_size = history_buffer_cfg.get("min_history_size", 0)
+
         input_interval = history_buffer_cfg.get("input_interval")
         if not input_interval:
             logging.warning(
@@ -87,6 +89,7 @@ class HistoryManager:
         return {
             "name": history_buffer_name,
             "history_size": history_size,
+            "min_history_size": min_history_size,
             "input_interval": input_interval,
             "history_keys": history_keys,
             "input_on_done": input_on_done,
@@ -151,8 +154,9 @@ class HistoryManager:
 
         for env_idx, done in enumerate(dones):
             for history_buffer in self.history_buffers:
-                history_range = slice(0, 0)
-                if self.history_counts[env_idx] % history_buffer["input_interval"] == 0:
+                if len(self.history_entries[env_idx]) < history_buffer["min_history_size"]:
+                    history_range = slice(0, 0)
+                elif self.history_counts[env_idx] % history_buffer["input_interval"] == 0:
                     history_range = slice(
                         max(
                             0,

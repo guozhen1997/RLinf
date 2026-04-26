@@ -319,7 +319,7 @@ jobs:
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
-          bash tests/e2e_tests/embodied/run.sh maniskill_ppo_mlp_qwen3vl4b_robochallenge_reward
+          bash tests/e2e_tests/embodied/run.sh maniskill_ppo_mlp_qwentrend_reward
 
       - name: Clean up
         run: |

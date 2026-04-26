@@ -2,7 +2,7 @@ ManiSkill PPO with VLM Reward Model
 ===================================
 
 This document provides a complete guide for running ManiSkill PPO in RLinf with an **MLP policy + Qwen3-VL reward model**.
-The main reference config is ``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl4b_robochallenge_reward.yaml``.
+The main reference config is ``examples/embodiment/config/maniskill_ppo_mlp_qwentrend_reward.yaml``.
 
 The main goals of this setup are:
 
@@ -17,15 +17,16 @@ Environment
 **ManiSkill3 Environment**
 
 - **Environment**: ManiSkill3 simulation platform
-- **Task**: robotic manipulation tasks such as ``PickCube-v1``
+- **Task**: robotic manipulation tasks such as ``PickCube3View-v1``
 - **Policy Observation**: ``states``
-- **Reward Observation**: ``main_images`` together with task text
-- **Action Space**: 7-dimensional continuous actions
+- **Reward Observation**: ``main_images`` and ``extra_view_images`` together with task text
+- **Action Space**: 8-dimensional continuous actions
 
 **Reward Input Structure**
 
 - **States**: state vectors for ``mlp_policy``
 - **Main Images**: main-view image history for the Qwen3-VL reward worker
+- **Extra View Images**: third-person image history paired with the main view
 - **Task Descriptions**: task text descriptions
 - **History Buffer**: short video segments organized by ``history_size`` and ``input_interval``
 
@@ -154,8 +155,9 @@ Running the Script
          wrap_obs_mode: simple_prompt
          use_full_state: True
          init_params:
-            id: PickCube-v1
+            id: PickCube3View-v1
             obs_mode: rgb
+         use_3rd_view_as_extra: True
 
    reward:
       use_reward_model: True
@@ -167,24 +169,29 @@ Running the Script
          model_type: history_vlm
          model_path: /path/to/Qwen3-VL-4B-Instruct
          lora_path: /path/to/Qwen3-VL-4B-Instruct_lora
-         input_builder_name: simple_robochallenge_input_builder
-         reward_parser_name: robochallenge_reward_parser
+         gt_success_bonus: 20.0
+         input_builder_name: qwentrend_input_builder
+         reward_parser_name: qwentrend_reward_parser
+         reward_parser_params:
+            positive_reward: 1.0
+            negative_reward: -0.2
+            unclear_reward: 0.0
+            invalid_reward: 0.0
 
 These parameters matter because:
 
 - ``component_placement.reward`` places the online reward worker.
 - ``wrap_obs_mode: simple_prompt`` exposes ``states``, ``main_images``, ``extra_view_images``, and ``task_descriptions`` together.
 - ``use_full_state: True`` keeps the actor on ``states`` with ``mlp_policy``.
+- ``use_3rd_view_as_extra: True`` makes the ManiSkill third-person camera available as ``extra_view_images``.
 - ``reward_mode: history_buffer`` means the reward worker scores a short trajectory segment instead of a single frame.
 - ``history_reward_assign: True`` back-fills the reward to earlier steps covered by the current history window.
 
 **2. Configuration Files**
 
-You can directly refer to the following configs:
+You can directly refer to the following config:
 
-- Main single-view example: ``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl4b_robochallenge_reward.yaml``
-- Dual-view variant: ``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl4b_dualview_robochallenge_reward.yaml``
-- 8B confidence variant: ``examples/embodiment/config/maniskill_ppo_mlp_qwen3vl8b_confidance_robochallenge_reward.yaml``
+- Main QwenTrend example: ``examples/embodiment/config/maniskill_ppo_mlp_qwentrend_reward.yaml``
 
 **3. Launch Commands**
 
@@ -192,14 +199,7 @@ After choosing a config, start training with:
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwen3vl4b_robochallenge_reward
-
-The other two variants can be launched with:
-
-.. code-block:: bash
-
-   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwen3vl4b_dualview_robochallenge_reward
-   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwen3vl8b_confidance_robochallenge_reward
+   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwentrend_reward
 
 Visualization and Results
 -------------------------
@@ -246,7 +246,6 @@ Current Implementation Notes
 ----------------------------
 
 - ``reward_threshold`` is configured at the top-level ``reward`` section in these YAML files, but the ``history_vlm`` implementation does not currently apply that threshold during reward inference.
-- In the main single-view config, the reward worker only consumes ``main_images`` history. ``extra_view_images`` are still present in env observations, but they are not used by ``simple_robochallenge_input_builder``.
-- ``robochallenge_reward_parser`` clamps final rewards into ``[0, 1]``. In practice, this means ``positive`` maps to a positive score while ``negative`` is clipped to ``0`` rather than becoming a signed penalty.
-- For the dual-view variant, ``dualview_robochallenge_input_builder`` reads both ``main_images`` and ``extra_view_images`` from ``history_input``. To get true two-view history inputs, both keys need to be recorded in the configured history buffer.
-- ``confidence_robochallenge_reward_parser`` also outputs values in ``[0, 1]``. For ``negative`` judgements it returns ``1 - confidence``, so it behaves as a bounded score rather than a signed penalty.
+- ``qwentrend_input_builder`` consumes both ``main_images`` and ``extra_view_images`` from ``history_input``, so the history buffer must record both keys to form the synchronized two-view prompt.
+- ``qwentrend_reward_parser`` maps the generated label directly to signed scalar rewards using ``positive_reward``, ``negative_reward``, ``unclear_reward``, and ``invalid_reward``. It does not clamp outputs into ``[0, 1]``.
+- ``gt_success_bonus`` is configured under ``reward.model`` and is applied inside the reward model path rather than in the reward worker front-end.
