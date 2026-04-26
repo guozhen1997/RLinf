@@ -13,23 +13,20 @@
 # limitations under the License.
 
 import logging
-import os
-import pickle
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
-import numpy as np
 import torch
 from PIL import Image
 from transformers import AutoProcessor
 
 from rlinf.data.datasets.vlm import (
     QwenTrendProgressSFTDataset,
-    SimpleQwenTrendSFTDataset,
     VLMBaseDataset,
 )
 
 logger = logging.getLogger(__name__)
+
 
 def _to_pil_images(
     images: Union[torch.Tensor, list[torch.Tensor]],
@@ -259,6 +256,7 @@ class VideoVLMInputBuilder(HistoryVLMInputBuilder):
 
         return videos
 
+
 @register_input_builder("qwentrend_input_builder")
 @dataclass
 class QwentrendInputBuilder(VideoVLMInputBuilder):
@@ -305,4 +303,4 @@ class QwentrendInputBuilder(VideoVLMInputBuilder):
             videos=videos_list,
             answer_text=None,
         )
-        return processed_inputs   
+        return processed_inputs

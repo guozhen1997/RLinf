@@ -77,9 +77,7 @@ def _parse_qwentrend_output(text: str) -> str | None:
         if trend_label in valid_labels:
             return trend_label
 
-    matches = re.findall(
-        r"\b(positive|negative|unclear)\b", str(text).strip().lower()
-    )
+    matches = re.findall(r"\b(positive|negative|unclear)\b", str(text).strip().lower())
     return matches[-1] if matches else None
 
 

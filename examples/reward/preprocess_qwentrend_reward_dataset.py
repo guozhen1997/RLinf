@@ -253,7 +253,10 @@ def load_episodes_with_labels(
             if not all_samples:
                 continue
 
-            if num_samples_per_episode > 0 and len(all_samples) > num_samples_per_episode:
+            if (
+                num_samples_per_episode > 0
+                and len(all_samples) > num_samples_per_episode
+            ):
                 indices = _compute_sample_indices(
                     n=len(all_samples),
                     num_samples_per_episode=num_samples_per_episode,
@@ -312,9 +315,7 @@ def balance_and_split_by_episode(
                         _build_reversed_negative_sample(sample)
                     )
 
-        raw_counts = {
-            label: len(samples) for label, samples in grouped_samples.items()
-        }
+        raw_counts = {label: len(samples) for label, samples in grouped_samples.items()}
         logger.info(f"{split_name} raw counts: {raw_counts}")
 
         for samples in grouped_samples.values():
@@ -497,7 +498,9 @@ def preprocess_and_save_reward_datasets(
         "eval_manifest": eval_manifest,
     }
 
-    with open(os.path.join(output_dir, "dataset_info.json"), "w", encoding="utf-8") as f:
+    with open(
+        os.path.join(output_dir, "dataset_info.json"), "w", encoding="utf-8"
+    ) as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
     return metadata
 

@@ -153,9 +153,14 @@ class HistoryManager:
 
         for env_idx, done in enumerate(dones):
             for history_buffer in self.history_buffers:
-                if len(self.history_entries[env_idx]) < history_buffer["min_history_size"]:
+                if (
+                    len(self.history_entries[env_idx])
+                    < history_buffer["min_history_size"]
+                ):
                     history_range = slice(0, 0)
-                elif self.history_counts[env_idx] % history_buffer["input_interval"] == 0:
+                elif (
+                    self.history_counts[env_idx] % history_buffer["input_interval"] == 0
+                ):
                     history_range = slice(
                         max(
                             0,
