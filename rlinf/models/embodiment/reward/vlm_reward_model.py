@@ -86,7 +86,7 @@ class VLMRewardModel(BaseRewardModel):
 
             subprocessoror = getattr(self._processor, subprocessor_name, None)
             if subprocessoror is None:
-                return
+                continue
             for key, value in dict(subprocessor_kwargs).items():
                 if hasattr(subprocessoror, key):
                     setattr(subprocessoror, key, value)
