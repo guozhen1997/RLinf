@@ -232,6 +232,64 @@ def _lookup_advantage_from_map(
     return bool(values[fi])
 
 
+def _probe_video_container_fps(video_path: Path) -> float | None:
+    """Read average FPS from the video container (PyAV), not meta/info.json.
+
+    Many RoboMIND / converted trees ship ``fps`` in info.json that does not match the
+    muxed stream (e.g. meta 14 vs H.264 30). Using meta for ``index / fps`` decode times
+    then violates lerobot's PTS tolerance against torchvision/pyav.
+    """
+    try:
+        import av
+    except ImportError:
+        return None
+    try:
+        with av.open(str(video_path), mode="r") as container:
+            streams = container.streams.video
+            if not streams:
+                return None
+            st = streams[0]
+
+            def _as_positive_fps(rate: Any) -> float | None:
+                if rate is None:
+                    return None
+                try:
+                    f = float(rate)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    return None
+                if 0.5 < f < 480.0:
+                    return f
+                return None
+
+            for attr in ("average_frame_rate", "guessed_frame_rate", "average_rate"):
+                f = _as_positive_fps(getattr(st, attr, None))
+                if f is not None:
+                    return f
+
+            cc = getattr(st, "codec_context", None)
+            if cc is not None:
+                f = _as_positive_fps(getattr(cc, "framerate", None))
+                if f is not None:
+                    return f
+
+            nb = int(getattr(st, "frames", 0) or 0)
+            if nb > 0 and st.duration is not None and st.time_base is not None:
+                try:
+                    dur_s = float(st.duration * st.time_base)
+                    if dur_s > 1e-3:
+                        f = float(nb) / dur_s
+                        if 0.5 < f < 480.0:
+                            return f
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+    except OSError:
+        return None
+    except Exception:
+        logger.debug("PyAV fps probe failed for %s", video_path, exc_info=True)
+        return None
+    return None
+
+
 class DreamZeroLiberoDataset(Dataset):
     """Map LeRobot LIBERO samples to DreamZero training inputs.
 
@@ -1013,12 +1071,35 @@ def _infer_droid_image_keys(info: dict) -> tuple[str, str, str]:
     candidates = [k for k in feats if k.startswith("observation.images.")]
     wrist_keys = [k for k in candidates if "wrist" in k]
     ext_keys = sorted([k for k in candidates if "wrist" not in k])
-    if len(wrist_keys) != 1 or len(ext_keys) != 2:
-        raise ValueError(
-            "DROID dataset needs exactly 2 exterior + 1 wrist under observation.images.*, "
-            f"found wrist={wrist_keys} exterior={ext_keys}"
-        )
-    return ext_keys[0], ext_keys[1], wrist_keys[0]
+
+    def _lr_sort(keys: list[str]) -> list[str]:
+        # Stable heuristic: prefer *_left* then *_right*, else lexicographic.
+        def _rank(k: str) -> tuple[int, str]:
+            kl = k.lower()
+            if "left" in kl and "right" not in kl:
+                return (0, k)
+            if "right" in kl and "left" not in kl:
+                return (1, k)
+            return (2, k)
+
+        return sorted(list(keys), key=_rank)
+
+    # Common DROID layouts:
+    # - 2 exterior + 1 wrist (canonical)
+    # - 1 exterior (often top_cam) + 2 wrist (left/right). For DreamZero's 3-view grid, we can
+    #   use exterior as the "wrist/top" slot and put the two wrists in the bottom tiles.
+    if len(wrist_keys) == 1 and len(ext_keys) == 2:
+        exts = _lr_sort(ext_keys)
+        return exts[0], exts[1], wrist_keys[0]
+    if len(wrist_keys) == 2 and len(ext_keys) == 1:
+        wrists = _lr_sort(wrist_keys)
+        return wrists[0], wrists[1], ext_keys[0]
+
+    raise ValueError(
+        "DROID dataset needs either (2 exterior + 1 wrist) or (1 exterior + 2 wrist) "
+        "under observation.images.*; "
+        f"found wrist={sorted(wrist_keys)} exterior={sorted(ext_keys)} candidates={sorted(candidates)}"
+    )
 
 
 class DreamZeroDroidDataset(Dataset):
@@ -1052,6 +1133,8 @@ class DreamZeroDroidDataset(Dataset):
         relative_action: bool = True,
         relative_action_keys: list[str] | None = None,
         droid_view_hw: tuple[int, int] = (176, 320),
+        pq_cache_max_episodes: int = 128,
+        video_tolerance_s: float = 0.1,
     ):
         if isinstance(data_path, (list, tuple)):
             if len(data_path) == 0:
@@ -1205,13 +1288,22 @@ class DreamZeroDroidDataset(Dataset):
 
             # Cached episode parquet tables (LRU-ish using insertion order).
             self._pq_cache: "OrderedDict[int, Any]" = OrderedDict()
-            self._pq_cache_max_episodes = 8
+            self._pq_cache_max_episodes = max(1, int(pq_cache_max_episodes))
+
+            # Per-mp4 decode FPS: info.json ``fps`` often disagrees with the muxed stream (e.g. 14 vs 30).
+            self._video_decode_fps_cache: "OrderedDict[str, float]" = OrderedDict()
+            self._video_decode_fps_cache_max = 512
 
             # Offsets used for sampling each modality around the base frame.
             self._video_offsets = np.asarray(video_offsets, dtype=np.int64)
             self._state_offsets = np.asarray(state_offsets, dtype=np.int64)
             self._action_offsets = np.asarray(action_offsets, dtype=np.int64)
-            self._video_tolerance_s = 0.1
+            _tol = float(video_tolerance_s)
+            if _tol <= 0.0:
+                raise ValueError(
+                    f"video_tolerance_s must be positive, got {video_tolerance_s!r}"
+                )
+            self._video_tolerance_s = _tol
             self._video_backend = "pyav"
             self._parquet_columns = [
                 "timestamp",
@@ -1325,6 +1417,22 @@ class DreamZeroDroidDataset(Dataset):
                 f"Video file not found for episode {episode_index} key {video_key}: {p}"
             )
         return p
+
+    def _decode_fps_for_video_file(self, video_path: Path) -> float:
+        """FPS used for ``row_index / fps`` → decode timestamp; prefers container over meta."""
+        key = str(video_path.resolve())
+        if key in self._video_decode_fps_cache:
+            fps = self._video_decode_fps_cache.pop(key)
+            self._video_decode_fps_cache[key] = fps
+            return fps
+        probed = _probe_video_container_fps(video_path)
+        fps = float(probed) if probed is not None else float(self._fps)
+        if fps <= 0.0:
+            fps = float(self._fps)
+        self._video_decode_fps_cache[key] = fps
+        if len(self._video_decode_fps_cache) > self._video_decode_fps_cache_max:
+            self._video_decode_fps_cache.popitem(last=False)
+        return fps
 
     def _get_episode_table(self, episode_index: int):
         # Small LRU cache keyed by episode_index.
@@ -1517,33 +1625,39 @@ class DreamZeroDroidDataset(Dataset):
             state_idx = self._clip_indices(frame_in_ep + self._state_offsets, ep_len)
             action_idx = self._clip_indices(frame_in_ep + self._action_offsets, ep_len)
 
-            # Timestamps for video decode come from parquet (more robust than assuming fps-perfect alignment).
-            if not self._col_exists(table, "timestamp"):
-                raise KeyError(
-                    f"episode parquet missing 'timestamp' column: {self._get_parquet_path(episode_index)}"
-                )
-            ts_col = table.column("timestamp")
-            video_timestamps = [
-                float(ts_col[int(i)].as_py()) for i in video_idx.tolist()
-            ]
+            # Decode times must track **muxed PTS**. (1) Parquet ``timestamp`` can disagree with
+            # PTS (fixed earlier). (2) meta ``fps`` can disagree with the stream (e.g. info 14 vs
+            # H.264 30); use PyAV-probed FPS per file, cached.
+            left_p = self._get_video_path(episode_index, self._img_key_left)
+            right_p = self._get_video_path(episode_index, self._img_key_right)
+            wrist_p = self._get_video_path(episode_index, self._img_key_wrist)
+            fl, fr, fw = (
+                self._decode_fps_for_video_file(left_p),
+                self._decode_fps_for_video_file(right_p),
+                self._decode_fps_for_video_file(wrist_p),
+            )
+            vi = video_idx.tolist()
+            ts_left = [float(int(i)) / fl for i in vi]
+            ts_right = [float(int(i)) / fr for i in vi]
+            ts_wrist = [float(int(i)) / fw for i in vi]
 
             from lerobot.datasets.video_utils import decode_video_frames
 
             left = decode_video_frames(
-                self._get_video_path(episode_index, self._img_key_left),
-                video_timestamps,
+                left_p,
+                ts_left,
                 tolerance_s=self._video_tolerance_s,
                 backend=self._video_backend,
             )
             right = decode_video_frames(
-                self._get_video_path(episode_index, self._img_key_right),
-                video_timestamps,
+                right_p,
+                ts_right,
                 tolerance_s=self._video_tolerance_s,
                 backend=self._video_backend,
             )
             wrist = decode_video_frames(
-                self._get_video_path(episode_index, self._img_key_wrist),
-                video_timestamps,
+                wrist_p,
+                ts_wrist,
                 tolerance_s=self._video_tolerance_s,
                 backend=self._video_backend,
             )
@@ -1882,6 +1996,8 @@ def build_dreamzero_sft_dataloader(
         )
 
         lazy_load = cfg.data.get("lazy_load", True)
+        pq_cache_max_episodes = cfg.data.get("parquet_cache_size", 128)
+        video_tolerance_s = cfg.data.get("video_tolerance_s", 0.1)
 
         dataset = DreamZeroDroidDataset(
             data_path=data_paths,
@@ -1899,6 +2015,8 @@ def build_dreamzero_sft_dataloader(
             relative_action=rel,
             relative_action_keys=rel_keys,
             droid_view_hw=droid_view_hw,
+            pq_cache_max_episodes=pq_cache_max_episodes,
+            video_tolerance_s=video_tolerance_s,
         )
         collate_embodiment = "oxe_droid"
     else:

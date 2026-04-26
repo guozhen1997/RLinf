@@ -189,8 +189,8 @@ class SFTRunner:
             )
 
     def set_max_steps(self) -> None:
-        self.num_steps_per_epoch = 1
-        self.max_steps = self.num_steps_per_epoch * self.cfg.runner.max_epochs
+        max_steps_per_epoch = self.actor.get_max_steps_per_epoch().wait()[0]
+        self.max_steps = max_steps_per_epoch * self.cfg.runner.max_epochs
 
         if (max_steps := self.cfg.runner.get("max_steps", -1)) >= 0:
             self.max_steps = min(self.max_steps, max_steps)
