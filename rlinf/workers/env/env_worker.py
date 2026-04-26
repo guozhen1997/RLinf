@@ -772,6 +772,8 @@ class EnvWorker(Worker):
                     src_rank, self._rank, extra="reward_output"
                 ),
             )
+            if rewards is None:
+                rewards = torch.zeros(expected_size, dtype=torch.float32)
             actual_size = rewards.shape[0]
             assert actual_size == expected_size, (
                 f"Expected reward result size {expected_size} from reward rank {src_rank}, "
