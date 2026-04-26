@@ -44,8 +44,7 @@ class HistoryManager:
         history_buffers = reward_cfg.get("model", {}).get("history_buffers", None)
         if history_buffers is None:
             raise ValueError(
-                "HistoryManager requires 'history_buffers' in YAML under "
-                "reward.history_buffers or reward.model.history_buffers."
+                "HistoryManager requires 'history_buffers' in YAML under reward.model.history_buffers."
             )
 
         history_buffers = [
