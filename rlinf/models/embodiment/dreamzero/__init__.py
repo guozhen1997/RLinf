@@ -58,7 +58,6 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         raise FileNotFoundError(f"DreamZero model_path does not exist: {model_path}")
 
     tokenizer_path = cfg.get("tokenizer_path", "google/umt5-xxl")
-    action_dim = cfg.get("action_dim", 7)
 
     config_path = model_path / "config.json"
     if not config_path.exists():
@@ -84,7 +83,8 @@ def get_model(cfg: DictConfig, torch_dtype=None):
             has_full_model_weights
         )
 
-    dreamzero_config.env_action_dim = action_dim
+    dreamzero_config.env_action_dim = cfg.get("action_dim", 7)
+    dreamzero_config.gradient_checkpointing = cfg.get("gradient_checkpointing", False)
 
     exp_cfg_dir = model_path / "experiment_cfg"
     metadata_path = exp_cfg_dir / "metadata.json"
