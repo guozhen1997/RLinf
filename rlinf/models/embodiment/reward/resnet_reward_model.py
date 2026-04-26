@@ -40,7 +40,7 @@ class ResNetRewardModel(BaseImageRewardModel):
     on individual images with success/fail labels.
 
     Training Input: (B, C, H, W) - batch of images with labels
-    Inference Input: (B, C, H, W) - batch of single images
+    Inference Input: observation dict containing ``main_images``
 
     Attributes:
         backbone: ResNet feature extractor with modified final layer.
@@ -191,12 +191,11 @@ class ResNetRewardModel(BaseImageRewardModel):
             "probabilities": probabilities,
         }
 
-    def compute_reward(self, observations: Any) -> torch.Tensor:
+    def compute_reward(self, observations: dict[str, Any]) -> torch.Tensor:
         """Compute rewards for inference.
 
         Args:
-            observations: Either an image tensor/ndarray, or a dict containing
-                'images' / 'main_images'.
+            observations: Observation dictionary containing ``main_images``.
 
         Returns:
             torch.Tensor: Reward tensor of shape [B].

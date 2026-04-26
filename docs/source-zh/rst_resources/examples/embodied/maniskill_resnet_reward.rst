@@ -220,3 +220,4 @@ ManiSkill PPO（基于 ResNet Reward Model）
 - ``cluster.component_placement.reward`` 是在线 reward 推理必需项，没有它就无法启动 reward worker 组。
 - ``reward.reward_weight`` 与 ``reward.env_reward_weight`` 控制 learned reward 与 env reward 的混合方式；示例中设置为 ``env_reward_weight: 0.0``。
 - ``reward_threshold`` 示例里放在顶层 ``reward`` 段，但当前 embodied reward worker 实际只会把 ``reward.model`` 传给 ``ResNetRewardModel``。因此按当前在线路径，这个顶层阈值并不会被真正消费。
+- ``ResNetRewardModel.compute_reward`` 当前要求输入为包含 ``main_images`` 的 observation dict；直接传入原始图像 tensor 或 ndarray 不属于当前接口。

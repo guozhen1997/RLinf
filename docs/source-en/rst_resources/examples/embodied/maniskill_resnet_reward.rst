@@ -220,3 +220,4 @@ Current Implementation Notes
 - ``cluster.component_placement.reward`` is required for online reward inference. Without it, the reward worker group cannot be launched.
 - ``reward.reward_weight`` and ``reward.env_reward_weight`` control the mixture between learned reward and env reward. The example sets ``env_reward_weight: 0.0``.
 - ``reward_threshold`` is kept at the top-level ``reward`` section in the example, but the current embodied reward worker only passes ``reward.model`` into ``ResNetRewardModel``. As a result, this top-level threshold is not actually consumed by the current online path.
+- ``ResNetRewardModel.compute_reward`` currently expects an observation dict containing ``main_images``. Passing a raw image tensor or ndarray directly is not part of the current interface.
