@@ -1082,7 +1082,7 @@ def _infer_droid_image_keys(info: dict) -> tuple[str, str, str]:
                 return (1, k)
             return (2, k)
 
-        return sorted(list(keys), key=_rank)
+        return sorted(keys, key=_rank)
 
     # Common DROID layouts:
     # - 2 exterior + 1 wrist (canonical)

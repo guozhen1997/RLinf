@@ -22,8 +22,8 @@ runner:
     experiment_name: "droid_sft_dreamzero"
     logger_backends: ["tensorboard"]
 
-  max_epochs: 2000
-  max_steps: -1
+  max_epochs: -1
+  max_steps: 2000
   val_check_interval: -1
   save_interval: 2000
   log_interval: 100
@@ -33,6 +33,11 @@ runner:
 data:
   # Root of LeRobot DROID (OXE) dataset
   train_data_paths: path/to/datasets/DreamZero-DROID-Data
+  lazy_load: True
+  num_workers: 4
+  prefetch_factor: 4
+  video_tolerance_s: 0.1
+  parquet_cache_size: 512
 
 algorithm:
   adv_type: gae
@@ -43,7 +48,6 @@ actor:
   micro_batch_size: 1
   global_batch_size: 8
   seed: 42
-  dataloader_num_workers: 1
   enable_offload: False
 
   model:
@@ -82,8 +86,8 @@ actor:
     clip_grad: 1.0
     lr_scheduler: "cosine"
     lr_warmup_steps: -1
-    lr_warmup_steps_ratio: 0.05
-    total_training_steps: 15000
+    lr_warmup_steps_ratio: 0.01
+    total_training_steps: ${runner.max_steps}
 
   fsdp_config:
     strategy: "fsdp2"

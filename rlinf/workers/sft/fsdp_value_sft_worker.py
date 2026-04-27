@@ -480,7 +480,8 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
 
             for idx in range(self.gradient_accumulation):
                 backward_ctx = self.before_micro_batch(
-                    self.model, is_last_micro_batch=(idx + 1) == grad_accum
+                    self.model,
+                    is_last_micro_batch=(idx + 1) == self.gradient_accumulation,
                 )
 
                 batch = next(self.data_iter)
@@ -524,7 +525,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
                         )
                     )
 
-                scaled_loss = loss / grad_accum
+                scaled_loss = loss / self.gradient_accumulation
                 with backward_ctx:
                     self.grad_scaler.scale(scaled_loss).backward()
 
@@ -745,5 +746,6 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
         if self.data_loader is not None:
             return max(1, len(self.data_loader) // self.gradient_accumulation)
         return 0
+
 
 __all__ = ["FSDPValueSftWorker"]

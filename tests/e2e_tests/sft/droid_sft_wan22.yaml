@@ -22,8 +22,8 @@ runner:
     experiment_name: "droid_sft_wan22"
     logger_backends: ["tensorboard"]
 
-  max_epochs: 3
-  max_steps: -1
+  max_epochs: -1
+  max_steps: 3
   val_check_interval: -1
   save_interval: -1
   log_interval: 100
