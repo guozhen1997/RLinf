@@ -80,16 +80,8 @@ class FSDPVlaSftWorker(FSDPSftWorker):
             SupportedModel.LINGBOTVLA,
             SupportedModel.DREAMZERO,
         ]:
-            batch_data = _pytree.tree_map(
-                lambda x: (
-                    torch.as_tensor(x, device=self.device).contiguous().clone()
-                    if isinstance(x, torch.Tensor)
-                    else x
-                ),
-                batch,
-            )
             with self.amp_context:
-                losses_dict = self.model(forward_type=ForwardType.SFT, data=batch_data)
+                losses_dict = self.model(forward_type=ForwardType.SFT, data=batch)
             if losses_dict.get("dynamics_loss", None) is not None:
                 self._dreamzero_loss = {
                     "dynamics_loss": losses_dict["dynamics_loss"],
