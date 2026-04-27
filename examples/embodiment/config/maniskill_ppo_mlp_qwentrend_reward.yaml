@@ -1,160 +1,44 @@
-env:
-  train:
-    env_type: maniskill
-    total_num_envs: 32
-    wrap_obs_mode: simple_prompt
-    use_full_state: true
-    auto_reset: true
-    ignore_terminations: false
-    use_rel_reward: false
-    reward_mode: raw
-    seed: 0
-    group_size: 1
-    use_fixed_reset_state_ids: false
-    max_steps_per_rollout_epoch: 50
-    max_episode_steps: 50
-    video_cfg:
-      save_video: false
-      info_on_video: true
-      video_base_dir: ${runner.logger.log_path}/video/train
-    enable_offload: false
-    init_params:
-      id: PickCube3View-v1
-      num_envs: null
-      obs_mode: rgb
-      control_mode: pd_joint_delta_pos
-      sim_backend: gpu
-      sim_config:
-        sim_freq: 100
-        control_freq: 20
-      max_episode_steps: 50
-      sensor_configs:
-        shader_pack: minimal
-        width: 224
-        height: 224
-      human_render_camera_configs:
-        shader_pack: minimal
-        width: 224
-        height: 224
-      render_mode: all
-    use_3rd_view_as_extra: true
-  eval:
-    env_type: maniskill
-    total_num_envs: 32
-    wrap_obs_mode: simple_prompt
-    use_full_state: true
-    auto_reset: true
-    ignore_terminations: true
-    use_rel_reward: false
-    reward_mode: raw
-    seed: 0
-    group_size: 1
-    use_fixed_reset_state_ids: true
-    max_steps_per_rollout_epoch: 50
-    max_episode_steps: 50
-    video_cfg:
-      save_video: true
-      info_on_video: true
-      video_base_dir: ${runner.logger.log_path}/video/eval
-    enable_offload: false
-    init_params:
-      id: PickCube3View-v1
-      num_envs: null
-      obs_mode: rgb
-      control_mode: pd_joint_delta_pos
-      sim_backend: gpu
-      sim_config:
-        sim_freq: 100
-        control_freq: 20
-      max_episode_steps: 50
-      sensor_configs:
-        shader_pack: minimal
-        width: 224
-        height: 224
-      human_render_camera_configs:
-        shader_pack: minimal
-        width: 224
-        height: 224
-      render_mode: all
-    use_3rd_view_as_extra: true
-  group_name: EnvGroup
-actor:
-  model:
-    model_type: mlp_policy
-    model_path: ''
-    policy_setup: panda-qpos
-    obs_dim: 42
-    action_dim: 8
-    num_action_chunks: 1
-    hidden_dim: 256
-    precision: '32'
-    add_value_head: true
-    is_lora: false
-    lora_rank: 32
-  fsdp_config:
-    strategy: fsdp
-    sharding_strategy: no_shard
-    gradient_checkpointing: false
-    cpu_offload: false
-    offload_pin_memory: false
-    reshard_after_forward: true
-    enable_gradient_accumulation: true
-    forward_prefetch: false
-    limit_all_gathers: false
-    backward_prefetch: null
-    use_orig_params: false
-    use_liger_kernel: false
-    fsdp_size: -1
-    mixed_precision:
-      param_dtype: '32'
-      reduce_dtype: '32'
-      buffer_dtype: '32'
-    amp_autocast:
-      enabled: false
-      precision: bf16
-    grad_scaler:
-      enabled: false
-      init_scale: null
-      growth_interval: null
-  group_name: ActorGroup
-  training_backend: fsdp
-  micro_batch_size: 1600
-  global_batch_size: 1600
-  seed: 1234
-  enable_offload: false
-  optim:
-    lr: 0.0001
-    value_lr: 0.0001
-    adam_beta1: 0.9
-    adam_beta2: 0.999
-    adam_eps: 1.0e-08
-    weight_decay: 0.01
-    clip_grad: 0.5
+defaults:
+  - env/maniskill_pick_cube_prompt@env.train
+  - env/maniskill_pick_cube_prompt@env.eval
+  - model/mlp_policy@actor.model
+  - training_backend/fsdp@actor.fsdp_config
+  - weight_syncer/patch_syncer@weight_syncer
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
 cluster:
   num_nodes: 1
   component_placement:
     actor: 0-0
-    rollout: 0-0
     env: 0-0
+    rollout: 0-0
     reward: 1-1
+
 runner:
   task_type: embodied
   logger:
-    log_path: ../results
+    log_path: "../results"
     project_name: rlinf
-    experiment_name: maniskill_ppo_mlp_qwentrend_gtsuccess_1000steps
-    logger_backends:
-    - tensorboard
+    experiment_name: "maniskill_ppo_mlp_qwentrend_gtsuccess_1000steps"
+    logger_backends: ["tensorboard"]
   max_epochs: 1000
   max_steps: 1000
   only_eval: false
   val_check_interval: -1
   save_interval: -1
-  resume_dir: /path/to/checkpoints/global_step_100
+  resume_dir: null
   ckpt_path: null
   per_worker_log: false
   per_worker_log_path: null
   weight_sync_interval: 1
+
 algorithm:
   update_epoch: 4
   normalize_advantages: true
@@ -167,7 +51,7 @@ algorithm:
   entropy_type: action_level
   adv_type: gae
   loss_type: actor_critic
-  loss_agg_func: token-mean
+  loss_agg_func: "token-mean"
   bootstrap_type: always
   kl_beta: 0.0
   entropy_bonus: 0
@@ -189,30 +73,122 @@ algorithm:
     max_new_token: 7
     max_length: 1024
     min_length: 1
+
+data:
+  rollout_batch_size: 32
+
+env:
+  group_name: "EnvGroup"
+  train:
+    total_num_envs: 32
+    auto_reset: true
+    ignore_terminations: false
+    use_fixed_reset_state_ids: false
+    use_full_state: true
+    max_episode_steps: 50
+    max_steps_per_rollout_epoch: 50
+    init_params:
+      id: "PickCube3View-v1"
+      obs_mode: "rgb"
+      control_mode: "pd_joint_delta_pos"
+      sim_backend: "gpu"
+      sim_config:
+        sim_freq: 100
+        control_freq: 20
+      sensor_configs:
+        shader_pack: "minimal"
+        width: 224
+        height: 224
+      human_render_camera_configs:
+        shader_pack: "minimal"
+        width: 224
+        height: 224
+      render_mode: all
+    use_3rd_view_as_extra: true
+  eval:
+    total_num_envs: 32
+    auto_reset: true
+    ignore_terminations: true
+    use_fixed_reset_state_ids: true
+    group_size: 1
+    use_full_state: true
+    max_episode_steps: 50
+    max_steps_per_rollout_epoch: 50
+    init_params:
+      id: "PickCube3View-v1"
+      obs_mode: "rgb"
+      control_mode: "pd_joint_delta_pos"
+      sim_backend: "gpu"
+      sim_config:
+        sim_freq: 100
+        control_freq: 20
+      sensor_configs:
+        shader_pack: "minimal"
+        width: 224
+        height: 224
+      human_render_camera_configs:
+        shader_pack: "minimal"
+        width: 224
+        height: 224
+      render_mode: all
+    use_3rd_view_as_extra: true
+    video_cfg:
+      save_video: true
+      info_on_video: true
+      video_base_dir: ${runner.logger.log_path}/video/eval
+
 rollout:
-  group_name: RolloutGroup
-  backend: huggingface
+  group_name: "RolloutGroup"
+  backend: "huggingface"
   enable_offload: false
   pipeline_stage_num: 1
   model:
-    model_path: ''
-    precision: '32'
+    model_path: ""
+    precision: ${actor.model.precision}
   enable_torch_compile: true
   enable_cuda_graph: true
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 1600
+  global_batch_size: 1600
+  seed: 1234
+  enable_offload: false
+  model:
+    model_path: ""
+    model_type: "mlp_policy"
+    obs_dim: 42
+  optim:
+    lr: 1.0e-4
+    value_lr: 1.0e-4
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    adam_eps: 1.0e-08
+    weight_decay: 0.01
+    clip_grad: 0.5
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "no_shard"
+    mixed_precision:
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}
+
 reward:
   use_reward_model: true
-  group_name: RewardGroup
+  group_name: "RewardGroup"
   reward_mode: history_buffer
   history_reward_assign: true
   reward_threshold: 0.5
   reward_weight: 1.0
   env_reward_weight: 0.0
   model:
-    model_type: history_vlm
-    model_path: /path/to/Qwen3-VL-4B-Instruct
-    lora_path: /path/to/qwen3-vl-lora-checkpoint
+    model_path: "/path/to/Qwen3-VL-4B-Instruct"
+    model_type: "history_vlm"
+    lora_path: "/path/to/qwen3-vl-lora-checkpoint"
     gt_success_bonus: 20.0
-    precision: bf16
+    precision: "bf16"
     input_builder_name: qwentrend_input_builder
     reward_parser_name: qwentrend_reward_parser
     reward_parser_params:
@@ -226,8 +202,8 @@ reward:
         history_size: 5
         input_interval: 1
         history_keys:
-        - main_images
-        - extra_view_images
+          - main_images
+          - extra_view_images
         input_on_done: false
     interval_reward: 0.0
     enable_history_offload: true
@@ -239,5 +215,6 @@ reward:
     do_sample: false
     temperature: 0.0
     use_chat_template: true
+
 critic:
   use_critic_model: false
