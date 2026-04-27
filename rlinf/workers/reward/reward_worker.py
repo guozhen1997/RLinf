@@ -221,6 +221,9 @@ class EmbodiedRewardWorker(Worker):
         self.enable_offload = self.cfg.reward.get("enable_offload", False)
         self._interact_task = None
 
+        self.reward_threshold = self.cfg.reward.get("reward_threshold", 0.6)
+        self._use_reward_prob = self.cfg.reward.get("use_reward_prob", False)
+
     def model_provider_func(self):
         reward_cls = get_reward_model_class(self.cfg.reward.model.model_type)
 
@@ -334,6 +337,28 @@ class EmbodiedRewardWorker(Worker):
                     f"{key} batch size {len(value)} != main_images batch size {batch_size}"
                 )
         return batch_size
+
+    @Worker.timer("compute_image_rewards")
+    def _compute_image_rewards(self, images: torch.Tensor):
+        if isinstance(images, np.ndarray):
+            images = torch.from_numpy(images)
+
+        model_dtype = next(self.model.parameters()).dtype
+        images = images.to(device=self.device, dtype=model_dtype)
+
+        with torch.no_grad():
+            outputs = self.model(images)
+            probs = outputs["probabilities"]
+            if self._use_reward_prob:
+                self.log_info(
+                    f"[reward_model/probs] shape={probs.shape} values={probs.cpu().tolist()}"
+                )
+            rewards = (probs > self.reward_threshold).to(probs.dtype)
+
+        if rewards.dim() == 1:
+            rewards = rewards.unsqueeze(-1)
+
+        return rewards
 
     def compute_image_rewards(
         self, images: torch.Tensor | np.ndarray
