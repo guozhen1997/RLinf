@@ -464,6 +464,7 @@
    mlp
    sac_flow
    sft_openpi
+   sft_dreamzero
    sft_vlm
    nft_openpi
    dsrl
