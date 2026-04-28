@@ -201,6 +201,7 @@ reward:
     history_buffers:
       history_window:
         history_size: 5
+        min_history_size: 5
         input_interval: 1
         history_keys:
           - main_images
