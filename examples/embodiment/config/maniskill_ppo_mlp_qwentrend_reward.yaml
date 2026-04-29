@@ -19,7 +19,7 @@ cluster:
     actor: 0-0
     env: 0-0
     rollout: 0-0
-    reward: 1-1
+    reward: 0-0
 
 runner:
   task_type: embodied
@@ -185,9 +185,9 @@ reward:
   reward_weight: 1.0
   env_reward_weight: 0.0
   model:
-    model_path: "/path/to/Qwen3-VL-4B-Instruct"
+    model_path: "/aoss/workspace_0424/ckpts/Qwen3-VL-4B-Instruct"
     model_type: "history_vlm"
-    lora_path: "/path/to/qwen3-vl-lora-checkpoint"
+    lora_path: "/aoss/ckpts/VLMReward/qwen3_vl_4b_5frame_dualview_pnu_word_lora_fmt2_global_step_1000"
     gt_success_bonus: 20.0
     precision: "bf16"
     input_builder_name: qwentrend_input_builder

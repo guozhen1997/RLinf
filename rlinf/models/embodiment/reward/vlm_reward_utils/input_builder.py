@@ -188,9 +188,17 @@ class HistoryVLMInputBuilder(BaseVLMInputBuilder):
         observations: dict[str, Any],
         history_input: dict[str, dict[str, list[list[Any]]]],
     ) -> list[int]:
-        return list(
-            range(len(next(iter(history_input[self.history_buffer_names[0]].values()))))
+        histories = tuple(
+            history
+            for history_buffer in history_input.values()
+            for history in history_buffer.values()
         )
+        valid_ids = range(len(histories[0]))
+        return [
+            env_id
+            for env_id in valid_ids
+            if all(history[env_id] for history in histories)
+        ]
 
     def prepare_inputs(
         self,
