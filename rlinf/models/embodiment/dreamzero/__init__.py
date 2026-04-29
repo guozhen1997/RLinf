@@ -83,6 +83,10 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         f"{_dit_chunk}.CausalWanSelfAttention._process_noisy_action_blocks",
         "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_noisy_action_blocks",
     )
+    Patcher.add_patch(
+        f"{_dit_chunk}.CausalWanModel._forward_train",
+        "rlinf.models.embodiment.dreamzero.patch.wan_causal_model_forward_train._forward_train",
+    )
     Patcher.apply()
 
     model_path = Path(cfg.get("model_path"))
