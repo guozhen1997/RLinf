@@ -14,6 +14,9 @@
 
 """Runtime replacements for DreamZero components (groot) used by RLinf."""
 
+from rlinf.models.embodiment.dreamzero.patch.wan_causal_model_forward_train import (
+    _forward_train,
+)
 from rlinf.models.embodiment.dreamzero.patch.wan_self_attention import (
     _process_clean_image_only,
     _process_noisy_action_blocks,
@@ -30,6 +33,7 @@ __all__ = [
     "WanVideoVAE",
     "WanVideoVAE38",
     "WanVideoVAEStateDictConverter",
+    "_forward_train",
     "_process_clean_image_only",
     "_process_noisy_action_blocks",
     "_process_noisy_image_blocks",
