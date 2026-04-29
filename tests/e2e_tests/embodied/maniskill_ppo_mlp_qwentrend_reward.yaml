@@ -3,6 +3,7 @@ defaults:
   - env/maniskill_pick_cube_prompt@env.eval
   - model/mlp_policy@actor.model
   - training_backend/fsdp@actor.fsdp_config
+  - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
 
 hydra:
@@ -38,6 +39,9 @@ runner:
 
   resume_dir: null
   ckpt_path: null
+  per_worker_log: false
+  per_worker_log_path: null
+  weight_sync_interval: 1
 
 algorithm:
   update_epoch: 4
@@ -64,7 +68,7 @@ algorithm:
   value_clip: 1.0
   huber_delta: 10.0
 
-  gamma: 0.8
+  gamma: 0.99
   gae_lambda: 0.9
 
   sampling_params:
@@ -79,6 +83,9 @@ algorithm:
     max_new_token: 7
     max_length: 1024
     min_length: 1
+
+data:
+  rollout_batch_size: 32
 
 env:
   train:
@@ -168,7 +175,7 @@ rollout:
   pipeline_stage_num: 1
   model:
     model_path: ""
-    precision: "32"
+    precision: ${actor.model.precision}
   enable_torch_compile: true
   enable_cuda_graph: true
 
@@ -227,6 +234,7 @@ actor:
 
 reward:
   use_reward_model: true
+  use_output_step: 100
   group_name: RewardGroup
   reward_mode: history_buffer
   history_reward_assign: true
@@ -250,6 +258,7 @@ reward:
     history_buffers:
       history_window:
         history_size: 5
+        min_history_size: 5
         input_interval: 1
         history_keys:
           - main_images
