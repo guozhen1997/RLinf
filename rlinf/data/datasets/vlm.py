@@ -16,6 +16,7 @@ import ast
 import json
 import logging
 import os
+import pickle
 from io import BytesIO
 from typing import Any, Callable, Optional, Union
 
@@ -950,16 +951,41 @@ class QwenTrendProgressSFTDataset(VLMBaseDataset):
         raw: dict[str, Any],
         idx: int,
         data_root: Optional[str],
-    ) -> tuple[str, str, list[str], list[str]]:
+    ) -> tuple[str, str, list[Any], list[Any]]:
         full_video = raw.get("full_video")
         video_clip = raw.get("video_clip")
-        if not full_video or not video_clip:
-            raise ValueError(f"Sample {idx} missing full_video or video_clip")
-        full_video = _resolve_video_path(str(full_video), data_root)
-        video_clip = _resolve_video_path(str(video_clip), data_root)
         question = str(raw.get("question", ""))
         answer_text = str(raw.get("answer", ""))
-        return question, answer_text, [full_video, video_clip], [full_video, video_clip]
+
+        if full_video and video_clip:
+            full_video = _resolve_video_path(str(full_video), data_root)
+            video_clip = _resolve_video_path(str(video_clip), data_root)
+            return (
+                question,
+                answer_text,
+                [full_video, video_clip],
+                [full_video, video_clip],
+            )
+
+        pkl_path = raw.get("pkl_path")
+        if not pkl_path:
+            raise ValueError(
+                f"Sample {idx} missing full_video/video_clip or pkl_path"
+            )
+
+        resolved_pkl_path = _resolve_video_path(str(pkl_path), data_root)
+        with open(resolved_pkl_path, "rb") as f:
+            payload = pickle.load(f)
+        main_frames = payload.get("main_frames")
+        extra_view_frames = payload.get("extra_view_frames")
+        if main_frames is None or extra_view_frames is None:
+            raise ValueError(f"Sample {idx} pkl missing dual-view frame arrays")
+        return (
+            question,
+            answer_text,
+            [main_frames, extra_view_frames],
+            [resolved_pkl_path, resolved_pkl_path],
+        )
 
     def _process_raw_record(self, raw: dict[str, Any], idx: int) -> "SftDatasetItem":
         prompt_text, answer_text, videos, image_data = self._parse_raw_record(

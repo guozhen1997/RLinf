@@ -60,7 +60,7 @@ algorithm:
   clip_ratio_c: 3.0
   value_clip: 1.0
   huber_delta: 10.0
-  gamma: 0.8
+  gamma: 0.99
   gae_lambda: 0.9
   sampling_params:
     do_sample: true

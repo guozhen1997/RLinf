@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Preprocess Qwen trend reward data into split train/eval video datasets.
+"""Preprocess Qwen trend reward data into split train/eval pkl datasets.
 
 Example:
     python examples/reward/preprocess_qwentrend_reward_dataset.py \
         --raw-data-path logs/xxx/collected_data \
         --output-dir logs/xxx/processed_qwentrend_reward_data
+
+The exported JSONL points to per-sample pkl files. QwenTrendProgressSFTDataset
+loads the two 5-frame video arrays directly from those pkl files, avoiding the
+slow small-mp4 export path.
 """
 
 import argparse
@@ -26,12 +30,13 @@ import os
 import pickle
 import random
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from glob import glob
 from typing import Any, Optional
 
-import imageio.v2 as imageio
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 
 from rlinf.utils.logging import get_logger
 
@@ -133,17 +138,11 @@ def _build_prompt(task: str, window_size: int) -> str:
     )
 
 
-def _build_messages(
-    prompt: str, main_video_path: str, extra_view_video_path: str, label: str
-) -> list[dict[str, Any]]:
+def _build_messages(prompt: str, label: str) -> list[dict[str, Any]]:
     return [
         {
             "role": "user",
-            "content": [
-                {"type": "video", "video": main_video_path},
-                {"type": "video", "video": extra_view_video_path},
-                {"type": "text", "text": prompt},
-            ],
+            "content": [{"type": "text", "text": prompt}],
         },
         {
             "role": "assistant",
@@ -173,6 +172,7 @@ def load_episodes_with_labels(
     num_samples_per_episode: int = 0,
     keep_last_window: bool = True,
     task_description: Optional[str] = None,
+    load_workers: int = 256,
 ) -> list[dict]:
     """Load episodes with per-window labels from collected data."""
     pkl_files = sorted(glob(os.path.join(data_path, "*.pkl")))
@@ -181,20 +181,24 @@ def load_episodes_with_labels(
     episodes = []
     label_counter = Counter()
 
-    for pkl_path in pkl_files:
+    def _load_one_episode(pkl_path: str) -> Optional[dict]:
         try:
             with open(pkl_path, "rb") as f:
                 episode = pickle.load(f)
 
             observations = episode.get("observations", [])
-            gae_values = episode.get("gae", [])
-            seq_len = min(len(observations), len(gae_values))
+            score_values = episode.get("gae", None)
+            score_source = "gae"
+            if score_values is None or len(score_values) == 0:
+                score_values = episode.get("rewards", [])
+                score_source = "rewards"
+            seq_len = min(len(observations), len(score_values))
             if seq_len < window_size:
-                continue
+                return None
 
             start_indices = list(range(0, seq_len - window_size + 1, stride))
             if not start_indices:
-                continue
+                return None
 
             tail_start = int(len(start_indices) * (1.0 - float(tail_unclear_ratio)))
             task = str(
@@ -211,9 +215,9 @@ def load_episodes_with_labels(
                 if frames is None:
                     continue
 
-                start_gae = _to_scalar(gae_values[start_idx])
-                end_gae = _to_scalar(gae_values[end_idx])
-                score = end_gae - start_gae
+                start_score = _to_scalar(score_values[start_idx])
+                end_score = _to_scalar(score_values[end_idx])
+                score = end_score - start_score
                 if abs(score) <= delta_threshold:
                     label = "unclear"
                 elif score > 0:
@@ -236,8 +240,9 @@ def load_episodes_with_labels(
                         "prompt": prompt,
                         "label": label,
                         "score": score,
-                        "start_gae": start_gae,
-                        "end_gae": end_gae,
+                        "start_gae": start_score,
+                        "end_gae": end_score,
+                        "score_source": score_source,
                         "start_idx": start_idx,
                         "end_idx": end_idx,
                         "main_frames": main_frames,
@@ -251,7 +256,7 @@ def load_episodes_with_labels(
                 )
 
             if not all_samples:
-                continue
+                return None
 
             if (
                 num_samples_per_episode > 0
@@ -266,11 +271,40 @@ def load_episodes_with_labels(
             else:
                 sampled = all_samples
 
-            label_counter.update(sample["label"] for sample in sampled)
-            episodes.append({"samples": sampled, "source_episode_path": pkl_path})
+            return {
+                "samples": sampled,
+                "source_episode_path": pkl_path,
+                "episode_key": os.path.abspath(pkl_path),
+            }
 
         except Exception as e:
             logger.warning(f"Failed to load {pkl_path}: {e}")
+            return None
+
+    if load_workers <= 1:
+        for pkl_path in tqdm(pkl_files, desc="Loading episodes", unit="episode"):
+            loaded = _load_one_episode(pkl_path)
+            if loaded is None:
+                continue
+            label_counter.update(sample["label"] for sample in loaded["samples"])
+            episodes.append(loaded)
+    else:
+        with ThreadPoolExecutor(max_workers=load_workers) as executor:
+            futures = {
+                executor.submit(_load_one_episode, pkl_path): pkl_path
+                for pkl_path in pkl_files
+            }
+            for future in tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc="Loading episodes",
+                unit="episode",
+            ):
+                loaded = future.result()
+                if loaded is None:
+                    continue
+                label_counter.update(sample["label"] for sample in loaded["samples"])
+                episodes.append(loaded)
 
     total_samples = sum(len(ep["samples"]) for ep in episodes)
     logger.info(
@@ -285,7 +319,8 @@ def balance_and_split_by_episode(
     val_split: float = 0.1,
     balance_labels: bool = True,
     max_samples_per_label: Optional[int] = None,
-    reverse_positive_as_negative: bool = False,
+    eval_max_samples_per_label: Optional[int] = None,
+    reverse_positive_as_negative: bool = True,
     random_seed: Optional[int] = None,
 ) -> tuple[list[dict], list[dict]]:
     """Split by episode and optionally rebalance positive/negative/unclear."""
@@ -300,12 +335,32 @@ def balance_and_split_by_episode(
     val_ep_count = max(1, int(len(episodes_copy) * val_split))
     val_episodes = episodes_copy[:val_ep_count]
     train_episodes = episodes_copy[val_ep_count:]
+    train_episode_keys = {episode["episode_key"] for episode in train_episodes}
+    val_episode_keys = {episode["episode_key"] for episode in val_episodes}
+    overlap_episode_keys = train_episode_keys & val_episode_keys
+    if overlap_episode_keys:
+        raise RuntimeError(
+            "Episode leakage detected between train and eval splits: "
+            f"{sorted(overlap_episode_keys)[:5]}"
+        )
 
     logger.info(
-        f"Episode split: {len(train_episodes)} train eps, {len(val_episodes)} eval eps"
+        f"Episode split: {len(train_episodes)} train eps, {len(val_episodes)} eval eps, "
+        f"overlap={len(overlap_episode_keys)}"
+    )
+    if eval_max_samples_per_label is None and max_samples_per_label is not None:
+        eval_ratio_to_train = len(val_episodes) / max(1, len(train_episodes))
+        eval_max_samples_per_label = max(
+            1, int(round(max_samples_per_label * eval_ratio_to_train))
+        )
+    logger.info(
+        "Per-label caps: "
+        f"train={max_samples_per_label}, eval={eval_max_samples_per_label}"
     )
 
-    def extract_and_sample(ep_list: list[dict], split_name: str) -> list[dict]:
+    def extract_and_sample(
+        ep_list: list[dict], split_name: str, per_label_cap: Optional[int]
+    ) -> list[dict]:
         grouped_samples = {"positive": [], "negative": [], "unclear": []}
         for episode in ep_list:
             for sample in episode["samples"]:
@@ -327,21 +382,21 @@ def balance_and_split_by_episode(
             ]
             if len(non_empty_counts) >= 2:
                 keep_count = min(non_empty_counts)
-                if max_samples_per_label is not None:
-                    keep_count = min(keep_count, max_samples_per_label)
+                if per_label_cap is not None:
+                    keep_count = min(keep_count, per_label_cap)
                 grouped_samples = {
                     label: samples[:keep_count]
                     for label, samples in grouped_samples.items()
                     if len(samples) > 0
                 }
-            elif max_samples_per_label is not None:
+            elif per_label_cap is not None:
                 grouped_samples = {
-                    label: samples[:max_samples_per_label]
+                    label: samples[:per_label_cap]
                     for label, samples in grouped_samples.items()
                 }
-        elif max_samples_per_label is not None:
+        elif per_label_cap is not None:
             grouped_samples = {
-                label: samples[:max_samples_per_label]
+                label: samples[:per_label_cap]
                 for label, samples in grouped_samples.items()
             }
 
@@ -354,8 +409,10 @@ def balance_and_split_by_episode(
         logger.info(f"{split_name} final counts: {final_counts}")
         return merged_samples
 
-    train_samples = extract_and_sample(train_episodes, "train")
-    eval_samples = extract_and_sample(val_episodes, "eval")
+    train_samples = extract_and_sample(train_episodes, "train", max_samples_per_label)
+    eval_samples = extract_and_sample(
+        val_episodes, "eval", eval_max_samples_per_label
+    )
     return train_samples, eval_samples
 
 
@@ -371,10 +428,13 @@ def preprocess_and_save_reward_datasets(
     val_split: float = 0.1,
     balance_labels: bool = True,
     max_samples_per_label: Optional[int] = None,
-    reverse_positive_as_negative: bool = False,
+    eval_max_samples_per_label: Optional[int] = None,
+    reverse_positive_as_negative: bool = True,
     fps: int = 2,
     task_description: Optional[str] = None,
     random_seed: Optional[int] = None,
+    load_workers: int = 256,
+    write_workers: int = 512,
 ) -> dict:
     """Build train/eval Qwen trend reward datasets from raw data."""
     episodes = load_episodes_with_labels(
@@ -386,6 +446,7 @@ def preprocess_and_save_reward_datasets(
         num_samples_per_episode=num_samples_per_episode,
         keep_last_window=keep_last_window,
         task_description=task_description,
+        load_workers=load_workers,
     )
     if len(episodes) == 0:
         raise ValueError(f"No episodes loaded from raw data path: {raw_data_path}")
@@ -395,69 +456,94 @@ def preprocess_and_save_reward_datasets(
         val_split=val_split,
         balance_labels=balance_labels,
         max_samples_per_label=max_samples_per_label,
+        eval_max_samples_per_label=eval_max_samples_per_label,
         reverse_positive_as_negative=reverse_positive_as_negative,
         random_seed=random_seed,
     )
 
-    def _write_clip(path: str, frames: list[Any]) -> None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with imageio.get_writer(path, fps=fps) as writer:
-            for frame in frames:
-                writer.append_data(_to_uint8_rgb(frame))
-
     def _save_split(samples: list[dict], split_name: str) -> tuple[str, dict[str, int]]:
         split_dir = os.path.join(output_dir, split_name)
         os.makedirs(split_dir, exist_ok=True)
+        pkl_dir = os.path.join(split_dir, "pkl")
+        os.makedirs(pkl_dir, exist_ok=True)
+
+        def _build_row_and_write(sample: dict) -> dict:
+            clip_stem = f"{sample['label']}_{sample['sample_id']}"
+            pkl_path = os.path.abspath(os.path.join(pkl_dir, f"{clip_stem}.pkl"))
+            if not (os.path.exists(pkl_path) and os.path.getsize(pkl_path) > 0):
+                with open(pkl_path, "wb") as f:
+                    pickle.dump(
+                        {
+                            "main_frames": [
+                                _to_uint8_rgb(frame) for frame in sample["main_frames"]
+                            ],
+                            "extra_view_frames": [
+                                _to_uint8_rgb(frame)
+                                for frame in sample["extra_view_frames"]
+                            ],
+                            "label": sample["label"],
+                            "score": sample["score"],
+                            "source_episode_path": sample["source_episode_path"],
+                            "start_idx": sample["start_idx"],
+                            "end_idx": sample["end_idx"],
+                            "augmentation": sample["augmentation"],
+                        },
+                        f,
+                        protocol=pickle.HIGHEST_PROTOCOL,
+                    )
+
+            return {
+                "task": sample["task"],
+                "prompt": sample["prompt"],
+                "question": sample["prompt"],
+                "answer": sample["label"],
+                "pkl_path": pkl_path,
+                "messages": _build_messages(sample["prompt"], sample["label"]),
+                "source_episode_path": sample["source_episode_path"],
+                "segment_metadata": {
+                    "start_step": sample["start_idx"],
+                    "end_step": sample["end_idx"],
+                    "window_size": window_size,
+                    "episode_id": sample["episode_id"],
+                    "env_idx": sample["env_idx"],
+                    "success": sample["success"],
+                    "augmentation": sample["augmentation"],
+                    "views": ["main_images", "extra_view_images[0]"],
+                },
+                "supervision": {
+                    "label": sample["label"],
+                    "score": sample["score"],
+                    "score_name": "gae_delta_window",
+                    "score_source": sample["score_source"],
+                    "delta_threshold": delta_threshold,
+                    "start_gae": sample["start_gae"],
+                    "end_gae": sample["end_gae"],
+                },
+            }
 
         rows = []
-        for sample in samples:
-            clip_name = f"{sample['label']}_{sample['sample_id']}.mp4"
-            main_video_path = os.path.abspath(
-                os.path.join(split_dir, "main_clips", clip_name)
-            )
-            extra_view_video_path = os.path.abspath(
-                os.path.join(split_dir, "extra_view_clips", clip_name)
-            )
-            _write_clip(main_video_path, sample["main_frames"])
-            _write_clip(extra_view_video_path, sample["extra_view_frames"])
-
-            rows.append(
-                {
-                    "task": sample["task"],
-                    "prompt": sample["prompt"],
-                    "question": sample["prompt"],
-                    "answer": sample["label"],
-                    "full_video": main_video_path,
-                    "video_clip": extra_view_video_path,
-                    "messages": _build_messages(
-                        sample["prompt"],
-                        main_video_path,
-                        extra_view_video_path,
-                        sample["label"],
-                    ),
-                    "clip_paths": [main_video_path, extra_view_video_path],
-                    "source_episode_path": sample["source_episode_path"],
-                    "segment_metadata": {
-                        "start_step": sample["start_idx"],
-                        "end_step": sample["end_idx"],
-                        "window_size": window_size,
-                        "episode_id": sample["episode_id"],
-                        "env_idx": sample["env_idx"],
-                        "success": sample["success"],
-                        "augmentation": sample["augmentation"],
-                        "views": ["main_images", "extra_view_images[0]"],
-                    },
-                    "supervision": {
-                        "label": sample["label"],
-                        "score": sample["score"],
-                        "score_name": "gae_delta_window",
-                        "score_source": "gae",
-                        "delta_threshold": delta_threshold,
-                        "start_gae": sample["start_gae"],
-                        "end_gae": sample["end_gae"],
-                    },
+        if write_workers <= 1:
+            for sample in tqdm(
+                samples,
+                desc=f"Saving {split_name} samples",
+                unit="sample",
+            ):
+                rows.append(_build_row_and_write(sample))
+        else:
+            rows_by_index: list[dict | None] = [None] * len(samples)
+            with ThreadPoolExecutor(max_workers=write_workers) as executor:
+                futures = {
+                    executor.submit(_build_row_and_write, sample): idx
+                    for idx, sample in enumerate(samples)
                 }
-            )
+                for future in tqdm(
+                    as_completed(futures),
+                    total=len(futures),
+                    desc=f"Saving {split_name} samples",
+                    unit="sample",
+                ):
+                    rows_by_index[futures[future]] = future.result()
+            rows = [row for row in rows_by_index if row is not None]
 
         manifest_path = os.path.join(split_dir, "segments.jsonl")
         with open(manifest_path, "w", encoding="utf-8") as f:
@@ -486,10 +572,14 @@ def preprocess_and_save_reward_datasets(
         "val_split": val_split,
         "balance_labels": balance_labels,
         "max_samples_per_label": max_samples_per_label,
+        "eval_max_samples_per_label": eval_max_samples_per_label,
         "reverse_positive_as_negative": reverse_positive_as_negative,
         "fps": fps,
         "task_description": task_description,
         "random_seed": random_seed,
+        "load_workers": load_workers,
+        "write_workers": write_workers,
+        "export_format": "pkl",
         "num_train_samples": len(train_samples),
         "num_eval_samples": len(eval_samples),
         "train_label_counts": train_label_counts,
@@ -519,13 +609,13 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=str,
         default="logs/processed_qwentrend_reward_data",
-        help="Output directory for processed train/eval video datasets.",
+        help="Output directory for processed train/eval pkl datasets.",
     )
     parser.add_argument(
         "--window-size",
         type=int,
         default=5,
-        help="Number of frames in each exported video window.",
+        help="Number of frames in each exported dual-view window.",
     )
     parser.add_argument(
         "--stride",
@@ -587,19 +677,47 @@ def parse_args() -> argparse.Namespace:
         "--max-samples-per-label",
         type=int,
         default=None,
-        help="Optional cap for each label after split and rebalancing.",
+        help="Optional train cap for each label after split and rebalancing.",
+    )
+    parser.add_argument(
+        "--eval-max-samples-per-label",
+        type=int,
+        default=None,
+        help=(
+            "Optional eval cap for each label. If omitted, it is derived from "
+            "--max-samples-per-label using the eval/train episode ratio."
+        ),
     )
     parser.add_argument(
         "--reverse-positive-as-negative",
+        dest="reverse_positive_as_negative",
         action="store_true",
-        default=False,
+        default=True,
         help="Reverse positive windows to synthesize additional negative samples.",
+    )
+    parser.add_argument(
+        "--no-reverse-positive-as-negative",
+        dest="reverse_positive_as_negative",
+        action="store_false",
+        help="Disable reversing positive windows into synthetic negative samples.",
     )
     parser.add_argument(
         "--fps",
         type=int,
         default=2,
-        help="FPS for exported mp4 clips.",
+        help="Kept for backward-compatible CLI calls; pkl export does not use FPS.",
+    )
+    parser.add_argument(
+        "--load-workers",
+        type=int,
+        default=256,
+        help="Number of parallel workers for loading and slicing episode pkl files.",
+    )
+    parser.add_argument(
+        "--write-workers",
+        type=int,
+        default=512,
+        help="Number of parallel workers for writing per-sample pkl files.",
     )
     parser.add_argument(
         "--task-description",
@@ -632,10 +750,13 @@ def main() -> None:
         val_split=args.val_split,
         balance_labels=args.balance_labels,
         max_samples_per_label=args.max_samples_per_label,
+        eval_max_samples_per_label=args.eval_max_samples_per_label,
         reverse_positive_as_negative=args.reverse_positive_as_negative,
         fps=args.fps,
         task_description=args.task_description,
         random_seed=args.seed,
+        load_workers=args.load_workers,
+        write_workers=args.write_workers,
     )
 
     print("=" * 80)
