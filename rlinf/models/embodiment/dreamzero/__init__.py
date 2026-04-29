@@ -51,6 +51,40 @@ def _promote_scalar_params_to_1d(model):
 def get_model(cfg: DictConfig, torch_dtype=None):
     """Load DreamZero policy from checkpoint."""
 
+    from rlinf.utils.patcher import Patcher
+
+    Patcher.clear()
+    Patcher.add_patch(
+        "groot.vla.model.dreamzero.modules.wan_video_vae.WanVideoVAE",
+        "rlinf.models.embodiment.dreamzero.patch.wan_video_vae.WanVideoVAE",
+    )
+    Patcher.add_patch(
+        "groot.vla.model.dreamzero.modules.wan_video_vae.WanVideoVAE38",
+        "rlinf.models.embodiment.dreamzero.patch.wan_video_vae.WanVideoVAE38",
+    )
+    Patcher.add_patch(
+        "groot.vla.model.dreamzero.modules.wan_video_vae.WanVideoVAEStateDictConverter",
+        "rlinf.models.embodiment.dreamzero.patch.wan_video_vae.WanVideoVAEStateDictConverter",
+    )
+    _dit_chunk = "groot.vla.model.dreamzero.modules.wan_video_dit_action_casual_chunk"
+    Patcher.add_patch(
+        f"{_dit_chunk}.CausalWanSelfAttention._process_clean_image_only",
+        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_clean_image_only",
+    )
+    Patcher.add_patch(
+        f"{_dit_chunk}.CausalWanSelfAttention._process_state_blocks",
+        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_state_blocks",
+    )
+    Patcher.add_patch(
+        f"{_dit_chunk}.CausalWanSelfAttention._process_noisy_image_blocks",
+        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_noisy_image_blocks",
+    )
+    Patcher.add_patch(
+        f"{_dit_chunk}.CausalWanSelfAttention._process_noisy_action_blocks",
+        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_noisy_action_blocks",
+    )
+    Patcher.apply()
+
     model_path = Path(cfg.get("model_path"))
     if not model_path.exists():
         raise FileNotFoundError(f"DreamZero model_path does not exist: {model_path}")
