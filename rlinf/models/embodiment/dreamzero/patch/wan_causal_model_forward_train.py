@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Replacement for ``CausalWanModel._forward_train`` (registered via ``get_model``)."""
-
 import torch
 from groot.vla.model.dreamzero.modules.wan2_1_submodule import sinusoidal_embedding_1d
 
+# This patch is a minimal modification to DreamZero's CausalWanModel._forward_train
+# to disable gradient checkpointing when the micro batch size is greater than 1
+# (due to a PyTorch bug in this scenario). Registered in get_model.
 
 def _forward_train(
     self,
@@ -33,8 +34,6 @@ def _forward_train(
     state=None,
     embodiment_id=None,
 ):
-    # Minimally-edited copy of DreamZero's CausalWanModel._forward_train.
-    # Supports micro-batch (B) > 1 with gradient checkpointing (see use_ckpt below).
     if self.model_type == "i2v":
         assert clip_feature is not None and y is not None
 

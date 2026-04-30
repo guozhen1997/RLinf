@@ -12,13 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""RLinf-maintained ``WanVideoVAE`` / ``WanVideoVAE38``.
-
-Registered via :class:`rlinf.utils.patcher.Patcher` in ``dreamzero.get_model``
-before ``DreamZeroPolicy`` is constructed. Backbone ``VideoVAE_`` /
-``VideoVAE38_`` stay in groot.
-"""
-
 from __future__ import annotations
 
 import torch
@@ -30,6 +23,9 @@ from tqdm import tqdm
 VideoVAE_ = _groot_vae.VideoVAE_
 VideoVAE38_ = _groot_vae.VideoVAE38_
 
+# The purpose of this patch is to modify the WanVideoVAE of DreamZeroPolicy
+# to support processing multiple videos as a batch when the micro batch size
+# is greater than 1 (previously, they could only be processed one by one), thereby accelerating the training process.
 
 class WanVideoVAE(nn.Module):
     def __init__(self, z_dim=16, vae_pretrained_path: str | None = None):
@@ -267,7 +263,6 @@ class WanVideoVAE(nn.Module):
     def state_dict_converter():
         return WanVideoVAEStateDictConverter()
 
-
 class WanVideoVAEStateDictConverter:
     def __init__(self):
         pass
@@ -280,6 +275,9 @@ class WanVideoVAEStateDictConverter:
             state_dict_["model." + name] = state_dict[name]
         return state_dict_
 
+# Because monkey patching can break the inheritance chain,
+# we need to further patch WanVideoVAE38, even though no modifications have been made.
+# This could potentially be solved by improving our Patcher, but we'll leave that for next time.
 
 class WanVideoVAE38(WanVideoVAE):
     def __init__(self, z_dim=48, dim=160, vae_pretrained_path: str | None = None):
