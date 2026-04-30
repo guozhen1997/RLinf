@@ -140,8 +140,9 @@ class EnvWorker(Worker):
             self.dst_rank_map = self._setup_dst_rank_map()
             self.src_rank_map = self._setup_src_rank_map()
 
-        self.dst_rank_map.update(self._setup_eval_dst_rank_map())
-        self.src_rank_map.update(self._setup_eval_src_rank_map())
+        if self.enable_eval:
+            self.dst_rank_map.update(self._setup_eval_dst_rank_map())
+            self.src_rank_map.update(self._setup_eval_src_rank_map())
 
         self.log_info(f"Env worker initialized with dst_rank_map: {self.dst_rank_map}")
         self.log_info(f"Env worker initialized with src_rank_map: {self.src_rank_map}")
