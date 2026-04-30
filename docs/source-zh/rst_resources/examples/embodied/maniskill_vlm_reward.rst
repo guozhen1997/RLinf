@@ -132,8 +132,92 @@ ManiSkill PPO（基于 VLM Reward Model）
 - ``reward.model.model_path``
 - ``reward.model.lora_path``
 
-如果还需要准备或微调 reward worker 使用的 Qwen3-VL checkpoint / LoRA，请参考
+如果还需要准备或微调 reward worker 使用的 Qwen3-VL checkpoint / LoRA，可以参考下面的
+QwenTrend 数据与 SFT 流程；通用 VLM SFT runner 说明也可参考
 :doc:`/rst_source/examples/embodied/sft_vlm`。
+
+QwenTrend Reward Model 数据与 SFT 流程
+-------------------------------------
+
+如果你已经有训练好的 QwenTrend reward checkpoint，可以跳过本节。否则，reward model
+的准备流程分为三步：先收集 ManiSkill episode pkl，再改造成 5 帧双视角 progress
+标签数据，最后运行 VLM SFT。
+
+**1. 收集原始 episode pickle 数据**
+
+.. code-block:: bash
+
+   cd <path_to_RLinf>
+   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwentrend_collect
+
+这条命令会用 ``examples/embodiment/config/maniskill_ppo_mlp_qwentrend_collect.yaml``
+启动 ``examples/embodiment/train_embodied_agent.py``。它是数据收集任务，不是在线
+VLM-reward PPO 任务：
+
+- ``reward.use_reward_model`` 为 ``false``，因此不会调用 VLM reward worker。
+- 只有 ``env.eval.data_collection.enabled`` 为 ``true``，train 环境的数据收集是关闭的。
+- 每到配置的 eval interval，eval 环境会被 ``CollectEpisode`` 包装并保存完整 episode。
+- 默认输出目录是 ``logs/<timestamp>-maniskill_ppo_mlp_qwentrend_collect/collected_data``。
+- 每个 episode pkl 会保存 observations、actions、rewards、done flags、info dicts 和 success 信息。由于 eval 环境使用 ``obs_mode: rgb`` 且 ``use_3rd_view_as_extra: true``，observation 中会包含 ``main_images`` 和 ``extra_view_images``。
+
+**2. 将 episode 转成 QwenTrend SFT 数据**
+
+.. code-block:: bash
+
+   python examples/reward/preprocess_qwentrend_reward_dataset.py \
+      --raw-data-path logs/<timestamp>-maniskill_ppo_mlp_qwentrend_collect/collected_data \
+      --output-dir logs/processed_qwentrend_reward_data \
+      --max-samples-per-label 5000 \
+      --load-workers 32 \
+      --write-workers 32
+
+预处理脚本会扫描 ``*.pkl`` episode，把每个 episode 切成双视角窗口，并写出：
+
+- ``<output-dir>/train/segments.jsonl``
+- ``<output-dir>/train/pkl/*.pkl``
+- ``<output-dir>/eval/segments.jsonl``
+- ``<output-dir>/eval/pkl/*.pkl``
+
+几个重要默认值如下：
+
+- ``--window-size 5`` 表示每个视角导出 5 帧。
+- ``--stride 1`` 表示相邻窗口重叠滑动。
+- ``--delta-threshold 0.05`` 会把很小的 progress delta 标成 ``unclear``。
+- ``--tail-unclear-ratio 0.15`` 会强制把每个 episode 尾部窗口标成 ``unclear``。
+- ``--val-split 0.1`` 会按 episode 划分 train/eval。
+- ``--balance-labels`` 和 ``--reverse-positive-as-negative`` 默认开启。
+- ``--fps`` 只是为了兼容旧命令保留；当前 pkl 导出路径不会用 FPS 做重采样。
+
+如果原始 episode 里没有任务文本，建议额外传入 ``--task-description``，避免使用脚本的通用 fallback prompt。
+
+**3. 训练 Qwen3-VL QwenTrend reward model**
+
+先设置处理后数据的根目录，并检查 ``examples/sft/config/qwen3vl_sft_qwentrend.yaml``
+里的 ``actor.model.model_path`` 和 ``runner.output_dir``，然后启动 VLM SFT：
+
+.. code-block:: bash
+
+   export DUALVIEW_SFT_DATA_ROOT=/path/to/processed_qwentrend_reward_data
+   bash examples/sft/run_vlm_sft.sh qwen3vl_sft_qwentrend
+
+这个启动脚本实际会调用 ``examples/sft/train_vlm_sft.py``。``qwen3vl_sft_qwentrend``
+配置使用 ``dataset_name: qwentrend_progress_sft``，并读取：
+
+- ``${DUALVIEW_SFT_DATA_ROOT}/train/segments.jsonl``
+- ``${DUALVIEW_SFT_DATA_ROOT}/eval/segments.jsonl``
+
+数据集会根据每条样本的 ``pkl_path`` 读取两路内存中的 5 帧视频数组，并直接交给
+Qwen3-VL processor。配置里对应的是 ``video_nframes: 5`` 和 ``video_fps: null``。
+
+SFT checkpoint 会保存到：
+
+.. code-block:: text
+
+   logs/<sft-timestamp>/<experiment_name>/checkpoints/global_step_<N>/actor/model_state_dict/full_weights.pt
+
+后续在线 PPO 使用这个 reward model 时，``reward.model.model_path`` 指向 Qwen3-VL
+基础模型目录，``reward.model.lora_path`` 指向 checkpoint step 目录，例如
+``logs/<sft-timestamp>/<experiment_name>/checkpoints/global_step_<N>``。
 
 运行脚本
 -------------------

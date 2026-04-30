@@ -133,7 +133,93 @@ After downloading, make sure the config yaml correctly sets:
 - ``reward.model.lora_path``
 
 If you still need to prepare or fine-tune the Qwen3-VL checkpoint / LoRA used by the reward worker,
-please refer to :doc:`/rst_source/examples/embodied/sft_vlm`.
+the QwenTrend-specific data and SFT flow is described below. For the general VLM SFT runner,
+please also refer to :doc:`/rst_source/examples/embodied/sft_vlm`.
+
+QwenTrend Reward Model Data and SFT Workflow
+--------------------------------------------
+
+You can skip this section if you already have a trained QwenTrend reward checkpoint. Otherwise,
+the reward model is prepared in three stages: collect raw ManiSkill episode pickle files,
+convert them into 5-frame dual-view progress labels, and run VLM SFT.
+
+**1. Collect raw episode pickle files**
+
+.. code-block:: bash
+
+   cd <path_to_RLinf>
+   bash examples/embodiment/run_embodiment.sh maniskill_ppo_mlp_qwentrend_collect
+
+This command launches ``examples/embodiment/train_embodied_agent.py`` with
+``examples/embodiment/config/maniskill_ppo_mlp_qwentrend_collect.yaml``.
+It is a data-collection run, not the online VLM-reward PPO run:
+
+- ``reward.use_reward_model`` is ``false``, so no VLM reward worker is used.
+- ``env.eval.data_collection.enabled`` is ``true`` while training collection is disabled.
+- At each configured evaluation interval, the eval environment is wrapped by ``CollectEpisode``.
+- Raw pickle files are written under ``logs/<timestamp>-maniskill_ppo_mlp_qwentrend_collect/collected_data`` by default.
+- Each pickle episode stores observations, actions, rewards, termination flags, info dicts, and success metadata. With ``obs_mode: rgb`` and ``use_3rd_view_as_extra: true``, the observations include ``main_images`` and ``extra_view_images``.
+
+**2. Convert episodes into QwenTrend SFT data**
+
+.. code-block:: bash
+
+   python examples/reward/preprocess_qwentrend_reward_dataset.py \
+      --raw-data-path logs/<timestamp>-maniskill_ppo_mlp_qwentrend_collect/collected_data \
+      --output-dir logs/processed_qwentrend_reward_data \
+      --max-samples-per-label 5000 \
+      --load-workers 32 \
+      --write-workers 32
+
+The preprocessing script searches for ``*.pkl`` episodes, slices each episode into
+dual-view windows, and writes:
+
+- ``<output-dir>/train/segments.jsonl``
+- ``<output-dir>/train/pkl/*.pkl``
+- ``<output-dir>/eval/segments.jsonl``
+- ``<output-dir>/eval/pkl/*.pkl``
+
+Important defaults are:
+
+- ``--window-size 5`` exports five frames per view.
+- ``--stride 1`` creates overlapping windows.
+- ``--delta-threshold 0.05`` labels small progress deltas as ``unclear``.
+- ``--tail-unclear-ratio 0.15`` forces the tail windows of each episode to ``unclear``.
+- ``--val-split 0.1`` splits episodes into train and eval sets.
+- ``--balance-labels`` and ``--reverse-positive-as-negative`` are enabled by default.
+- ``--fps`` is kept only for backward-compatible CLI calls; the pkl export path does not use FPS resampling.
+
+If the raw episodes do not contain task text, pass ``--task-description`` to avoid the generic
+fallback prompt.
+
+**3. Train the Qwen3-VL QwenTrend reward model**
+
+Set the processed dataset root, check ``actor.model.model_path`` and ``runner.output_dir`` in
+``examples/sft/config/qwen3vl_sft_qwentrend.yaml``, then launch VLM SFT:
+
+.. code-block:: bash
+
+   export DUALVIEW_SFT_DATA_ROOT=/path/to/processed_qwentrend_reward_data
+   bash examples/sft/run_vlm_sft.sh qwen3vl_sft_qwentrend
+
+The launch script runs ``examples/sft/train_vlm_sft.py`` with the selected config. The
+``qwen3vl_sft_qwentrend`` config uses ``dataset_name: qwentrend_progress_sft`` and reads:
+
+- ``${DUALVIEW_SFT_DATA_ROOT}/train/segments.jsonl``
+- ``${DUALVIEW_SFT_DATA_ROOT}/eval/segments.jsonl``
+
+The dataset loads each sample's ``pkl_path`` and passes the two in-memory 5-frame video arrays
+directly to the Qwen3-VL processor. The config uses ``video_nframes: 5`` and ``video_fps: null``.
+
+The SFT checkpoints are saved under:
+
+.. code-block:: text
+
+   logs/<sft-timestamp>/<experiment_name>/checkpoints/global_step_<N>/actor/model_state_dict/full_weights.pt
+
+For online PPO with the trained reward model, set ``reward.model.model_path`` to the base
+Qwen3-VL model directory and set ``reward.model.lora_path`` to the checkpoint step directory,
+for example ``logs/<sft-timestamp>/<experiment_name>/checkpoints/global_step_<N>``.
 
 Running the Script
 -------------------
