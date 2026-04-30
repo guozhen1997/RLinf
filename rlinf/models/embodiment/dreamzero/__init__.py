@@ -15,6 +15,7 @@
 import json
 from pathlib import Path
 
+import torch
 import torch.nn as nn
 from groot.vla.data.schema import DatasetMetadata
 from groot.vla.data.transform import ComposedModalityTransform
@@ -67,21 +68,21 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         "rlinf.models.embodiment.dreamzero.patch.wan_video_vae.WanVideoVAEStateDictConverter",
     )
     _dit_chunk = "groot.vla.model.dreamzero.modules.wan_video_dit_action_casual_chunk"
-    Patcher.add_patch(
+    Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_clean_image_only",
-        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_clean_image_only",
+        torch.compile(mode='reduce-overhead')
     )
-    Patcher.add_patch(
+    Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_state_blocks",
-        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_state_blocks",
+        torch.compile(mode='reduce-overhead')
     )
-    Patcher.add_patch(
+    Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_noisy_image_blocks",
-        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_noisy_image_blocks",
+        torch.compile(mode='reduce-overhead')
     )
-    Patcher.add_patch(
+    Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_noisy_action_blocks",
-        "rlinf.models.embodiment.dreamzero.patch.wan_self_attention._process_noisy_action_blocks",
+        torch.compile(mode='reduce-overhead')
     )
     Patcher.add_patch(
         f"{_dit_chunk}.CausalWanModel._forward_train",

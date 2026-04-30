@@ -469,6 +469,16 @@ def apply_fsdp2_to_model(
             module, ignored_module_classes
         )
         root_kwargs["ignored_params"] = ignored_params
+    elif (
+        "ignored_module_classes" in config
+        or "ignored_module_classes" in wrap_policy_config
+    ):
+        raise ValueError(
+            "ignored_module_classes is configured but the current PyTorch version "
+            "does not support ignored_params in FSDP2 fully_shard. "
+            "Please upgrade to PyTorch >= 2.7 or remove ignored_module_classes "
+            "from the FSDP config."
+        )
 
     return fully_shard(module, **root_kwargs)
 
