@@ -38,6 +38,10 @@ runner:
   save_interval: -1
 
   resume_dir: null  # Set to checkpoint path to resume training
+  ckpt_path: null
+  per_worker_log: false
+  per_worker_log_path: null
+  weight_sync_interval: 1
 
 algorithm:
   update_epoch: 8
@@ -79,6 +83,9 @@ algorithm:
     max_new_token: 7
     max_length: 1024
     min_length: 1
+
+data:
+  rollout_batch_size: 128
 
 env:
   group_name: "EnvGroup"
@@ -185,6 +192,7 @@ actor:
 
 reward:
   use_reward_model: True
+  use_output_step: 100
   group_name: "RewardGroup"
   
   # Reward mode:
