@@ -129,30 +129,22 @@ class EnvWorker(Worker):
         self.env_decoupled_mode = env_mode == "decoupled"
         if self.env_decoupled_mode:
             self.log_info("Env worker initialized with decoupled mode")
-            self.batch_size_map = self._setup_decoupled_env_mode_batch_size()
             self.log_info(
                 f"decoupled model env worker initialized with batch_size_map: {self.batch_size_map}"
             )
-            self.dst_rank_map = self._setup_eval_dst_rank_map()
-            self.src_rank_map = self._setup_eval_src_rank_map()
-            self.log_info(
-                f"Env worker initialized with dst_rank_map for evaluation: {self.dst_rank_map}"
-            )
-            self.log_info(
-                f"Env worker initialized with src_rank_map for evaluation: {self.src_rank_map}"
-            )
+
+            self.batch_size_map = self._setup_decoupled_env_mode_batch_size()
+            self.dst_rank_map = {}
+            self.src_rank_map = {}
         else:
             self.dst_rank_map = self._setup_dst_rank_map()
             self.src_rank_map = self._setup_src_rank_map()
-            self.log_info(
-                f"Env worker initialized with dst_rank_map: {self.dst_rank_map}"
-            )
-            self.log_info(
-                f"Env worker initialized with src_rank_map: {self.src_rank_map}"
-            )
 
-        train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train)
-        eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
+        self.dst_rank_map.update(self._setup_eval_dst_rank_map())
+        self.src_rank_map.update(self._setup_eval_src_rank_map())
+
+        self.log_info(f"Env worker initialized with dst_rank_map: {self.dst_rank_map}")
+        self.log_info(f"Env worker initialized with src_rank_map: {self.src_rank_map}")
 
         # This is a barrier to ensure all envs' initial setup upon import is done
         # Essential for RealWorld env to ensure initial ROS node setup is done
@@ -408,9 +400,6 @@ class EnvWorker(Worker):
                         ),
                     }
                 )
-        # get the eval dst_rank_map
-        if self.enable_eval:
-            dst_rank_map.update(self._setup_eval_dst_rank_map())
         return dst_rank_map
 
     def _setup_eval_src_rank_map(self) -> dict[str, list[tuple[int, int]]]:
@@ -475,8 +464,6 @@ class EnvWorker(Worker):
                         ),
                     }
                 )
-        # get the eval src_rank_map
-        src_rank_map.update(self._setup_eval_src_rank_map())
         return src_rank_map
 
     def _init_env(self):
