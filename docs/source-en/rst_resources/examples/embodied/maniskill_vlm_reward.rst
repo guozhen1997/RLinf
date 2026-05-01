@@ -137,7 +137,7 @@ the QwenTrend-specific data and SFT flow is described below. For the general VLM
 please also refer to :doc:`/rst_source/examples/embodied/sft_vlm`.
 
 QwenTrend Reward Model Data and SFT Workflow
---------------------------------------------
+------------------------------------------------------------
 
 You can skip this section if you already have a trained QwenTrend reward checkpoint. Otherwise,
 the reward model is prepared in three stages: collect raw ManiSkill episode pickle files,

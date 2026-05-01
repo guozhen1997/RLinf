@@ -137,7 +137,7 @@ QwenTrend 数据与 SFT 流程；通用 VLM SFT runner 说明也可参考
 :doc:`/rst_source/examples/embodied/sft_vlm`。
 
 QwenTrend Reward Model 数据与 SFT 流程
--------------------------------------
+------------------------------------------------------------
 
 如果你已经有训练好的 QwenTrend reward checkpoint，可以跳过本节。否则，reward model
 的准备流程分为三步：先收集 ManiSkill episode pkl，再改造成 5 帧双视角 progress
