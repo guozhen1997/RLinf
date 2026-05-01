@@ -410,9 +410,7 @@ def balance_and_split_by_episode(
         return merged_samples
 
     train_samples = extract_and_sample(train_episodes, "train", max_samples_per_label)
-    eval_samples = extract_and_sample(
-        val_episodes, "eval", eval_max_samples_per_label
-    )
+    eval_samples = extract_and_sample(val_episodes, "eval", eval_max_samples_per_label)
     return train_samples, eval_samples
 
 

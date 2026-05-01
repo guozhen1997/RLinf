@@ -969,9 +969,7 @@ class QwenTrendProgressSFTDataset(VLMBaseDataset):
 
         pkl_path = raw.get("pkl_path")
         if not pkl_path:
-            raise ValueError(
-                f"Sample {idx} missing full_video/video_clip or pkl_path"
-            )
+            raise ValueError(f"Sample {idx} missing full_video/video_clip or pkl_path")
 
         resolved_pkl_path = _resolve_video_path(str(pkl_path), data_root)
         with open(resolved_pkl_path, "rb") as f:
