@@ -18,7 +18,7 @@ NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
 SUPPORTED_TARGETS=("embodied" "agentic" "docs")
 SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic" "starvla" "lingbotvla" "dreamzero")
-SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "liberopro" "liberoplus" "roboverse" "embodichain" "d4rl" "dosw1")
+SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "liberopro" "liberoplus" "roboverse" "embodichain" "d4rl" "dosw1" "polaris")
 
 #=======================Utility Functions=======================
 
@@ -508,6 +508,13 @@ install_openpi_model() {
             install_flash_attn
             install_roboverse_env
             ;;
+        polaris)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_polaris_env
+            uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            install_flash_attn
+            ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for OpenPI model." >&2
             exit 1
@@ -693,6 +700,9 @@ install_env_only() {
         dosw1)
             install_dosw1_env
             ;;
+        polaris)
+            install_polaris_env
+            ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for env-only installation." >&2
             exit 1
@@ -834,6 +844,16 @@ install_calvin_env() {
     uv pip install -e ${calvin_dir}/calvin_env
     uv pip install -e ${calvin_dir}/calvin_models
     uv pip install --upgrade hydra-core==1.3.2
+}
+
+install_polaris_env() {
+    local polaris_dir
+    polaris_dir=$(clone_or_reuse_repo POLARIS_PATH "$VENV_DIR/polaris" https://github.com/arhanjain/polaris.git)
+
+    pushd "$polaris_dir" >/dev/null
+    git submodule update --init --recursive || true
+    uv pip install -e .
+    popd >/dev/null
 }
 
 install_isaaclab_env() {

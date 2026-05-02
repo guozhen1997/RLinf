@@ -98,6 +98,27 @@ def prepare_actions_for_isaaclab(
         chunk_actions[..., -1] = torch.sign(chunk_actions[..., -1]) * -1.0
     return chunk_actions
 
+def prepare_actions_for_polaris(
+    raw_chunk_actions,
+    model_type,
+) -> torch.Tensor:
+    """
+    Here reture a general 7 dof action. If the action is modified, please change the output of the model
+    For example, in `RLinf/rlinf/models/embodiment/gr00t/simulation_io.py`
+    """
+    chunk_actions = (
+        torch.from_numpy(raw_chunk_actions)
+        if isinstance(raw_chunk_actions, np.ndarray)
+        else raw_chunk_actions
+    )
+    if SupportedModel(model_type) in [
+        SupportedModel.OPENVLA,
+        SupportedModel.OPENVLA_OFT,
+    ]:
+        chunk_actions[..., -1] = 2 * chunk_actions[..., -1] - 1
+        chunk_actions[..., -1] = torch.sign(chunk_actions[..., -1]) * -1.0
+    return chunk_actions
+
 
 def prepare_actions_for_calvin(
     raw_chunk_actions,
@@ -288,6 +309,11 @@ def prepare_actions(
         )
     elif env_type == SupportedEnvType.ROBOVERSE:
         chunk_actions = prepare_actions_for_roboverse(
+            raw_chunk_actions=raw_chunk_actions,
+            model_type=model_type,
+        )
+    elif env_type == SupportedEnvType.POLARIS:
+        chunk_actions = prepare_actions_for_polaris(
             raw_chunk_actions=raw_chunk_actions,
             model_type=model_type,
         )
