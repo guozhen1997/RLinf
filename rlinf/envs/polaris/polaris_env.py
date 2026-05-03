@@ -12,17 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""PolaRiS environment wrapper for RLinf.
-
-This module integrates PolaRiS (a Gaussian-splatting-based Real-to-Sim evaluation
-framework built on IsaacLab) into the RLinf embodied RL infrastructure.
-
-PolaRiS environments run inside a subprocess (via ``SubProcIsaacLabEnv``) because
-Isaac Sim requires ``AppLauncher`` to be initialised before any IsaacLab imports.
-The wrapper follows the same pattern as the existing IsaacLab environment
-(``rlinf.envs.isaaclab``).
-"""
-
 import os
 import sys
 
@@ -70,10 +59,6 @@ class PolarisEnv(IsaaclabBaseEnv):
             worker_info,
         )
 
-    # ------------------------------------------------------------------
-    # IsaaclabBaseEnv abstract methods
-    # ------------------------------------------------------------------
-
     def _make_env_function(self):
         """Return a factory that creates the PolaRiS env inside a subprocess.
 
@@ -98,22 +83,12 @@ class PolarisEnv(IsaaclabBaseEnv):
                 if key.startswith("polaris.") or key.startswith("isaaclab.") or key.startswith("isaacsim") or key.startswith("omni."):
                     del sys.modules[key]
 
-            # --- 1. clean env vars & launch Isaac Sim ----------------------
-            # Remove DISPLAY variable to force headless mode and avoid GLX errors
             os.environ.pop("DISPLAY", None)
 
-            # Resolve dataset path from config or environment variable.
-
             from isaaclab.app import AppLauncher
-
             sim_app = AppLauncher(headless=True, enable_cameras=True).app
 
-            # --- 2. import PolaRiS (must be after AppLauncher) -------------
-            sys.stderr.write("==============POLARIS before import polaris.environments\n")
-            sys.stderr.flush()
-            import polaris.environments  # noqa: F401  (registers gym envs)
-            sys.stderr.write("==============POLARIS after import polaris.environments\n")
-            sys.stderr.flush()
+            import polaris.environments
             from polaris.utils import load_eval_initial_conditions, parse_env_cfg
 
             dataset_path = getattr(cfg.init_params, "dataset_path", None)
@@ -122,11 +97,6 @@ class PolarisEnv(IsaaclabBaseEnv):
             if dataset_path is not None:
                 os.environ["POLARIS_DATA_PATH"] = str(dataset_path)
 
-            sys.stderr.write("==============POLARIS after dataset_path\n")
-            sys.stderr.flush()
-            # import fuck_2
-
-            # --- 3. build the inner env ------------------------------------
             usd_file = cfg.init_params.usd_file
             env_cfg = parse_env_cfg(
                 task_name,
@@ -137,11 +107,6 @@ class PolarisEnv(IsaaclabBaseEnv):
             )
             env_cfg.seed = seed
 
-            # import fuck_3
-            sys.stderr.write("==============POLARIS after env_cfg\n")
-            sys.stderr.flush()
-
-            # Override camera resolution from RLinf config if provided.
             if hasattr(cfg.init_params, "wrist_cam"):
                 env_cfg.scene.wrist_cam.height = cfg.init_params.wrist_cam.height
                 env_cfg.scene.wrist_cam.width = cfg.init_params.wrist_cam.width
@@ -155,22 +120,12 @@ class PolarisEnv(IsaaclabBaseEnv):
                             cfg.init_params.table_cam.width
                         )
 
-            # import fuck_4
-
-            sys.stderr.write("==============POLARIS before env create\n")
-            sys.stderr.flush()
             real_env = gym.make(task_name, cfg=env_cfg)
-            sys.stderr.write("==============POLARIS after env create\n")
-            sys.stderr.flush()
 
-            # Load language instruction and pre-defined initial conditions.
             language_instruction, initial_conditions = (
                 load_eval_initial_conditions(real_env.usd_file)
             )
 
-            # import fuck_5
-
-            # --- 4. thin adapter ------------------------------------------
             class _InnerPolarisEnv:
                 """Adapts PolaRiS's custom API to the protocol expected by
                 ``SubProcIsaacLabEnv._torch_worker`` (``reset`` / ``step`` /
@@ -182,8 +137,6 @@ class PolarisEnv(IsaaclabBaseEnv):
                     self.initial_conditions = initial_conditions
                     self._ic_idx = 0
                     self.device = "cuda"
-
-                # -- standard API consumed by _torch_worker --
 
                 def reset(self, seed=None, env_ids=None):
                     ic = self.initial_conditions[self._ic_idx]
@@ -200,24 +153,13 @@ class PolarisEnv(IsaaclabBaseEnv):
                         actions = torch.as_tensor(actions, device=self.device)
                     else:
                         actions = actions.to(self.device)
-                        
-                    # Pad 7D actions to 8D to bypass action dimension mismatch during pipeline testing
-                    if actions.shape[-1] == 7:
-                        padding = torch.zeros(actions.shape[:-1] + (1,), dtype=actions.dtype, device=self.device)
-                        actions = torch.cat([actions, padding], dim=-1)
-                        
                     return self.env.step(actions, expensive=True)
 
                 def close(self):
                     self.env.close()
 
-            sys.stderr.write("==============POLARIS before _InnerPolarisEnv\n")
-            sys.stderr.flush()
-
             inner_env = _InnerPolarisEnv()
 
-            sys.stderr.write("==============POLARIS after _InnerPolarisEnv\n")
-            sys.stderr.flush()
             return inner_env, sim_app
 
         return _make_polaris
@@ -236,9 +178,7 @@ class PolarisEnv(IsaaclabBaseEnv):
         task_descriptions : list[str]
             Natural-language instruction repeated for every env.
         """
-        # --- images from Gaussian-splat rendering --------------------------
         splat = obs.get("splat", {})
-        # PolaRiS camera names vary per scene; fall back to sim RGB.
         main_img = splat.get("external_cam", splat.get("camera", None))
         wrist_img = splat.get("wrist_cam", None)
 
@@ -246,7 +186,15 @@ class PolarisEnv(IsaaclabBaseEnv):
             if img is None:
                 return None
             if isinstance(img, np.ndarray):
-                return torch.from_numpy(img).to(self.device).unsqueeze(0)
+                if np.issubdtype(img.dtype, np.floating):
+                    if img.max() <= 1.0:
+                        img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
+                    else:
+                        img = np.where(img <= 1.0, img * 255, img)
+                        img = img.clip(0, 255).astype(np.uint8)
+                elif img.dtype != np.uint8:
+                    img = img.astype(np.uint8)
+                return torch.from_numpy(img.copy()).to(self.device).unsqueeze(0)
             if isinstance(img, torch.Tensor):
                 if img.dim() == 3:
                     img = img.unsqueeze(0)
@@ -256,7 +204,6 @@ class PolarisEnv(IsaaclabBaseEnv):
         main_images = _to_tensor(main_img)
         wrist_images = _to_tensor(wrist_img)
 
-        # --- proprioceptive state ------------------------------------------
         policy = obs.get("policy", {})
         arm_joint_pos = policy.get("arm_joint_pos", None)
         gripper_pos = policy.get("gripper_pos", None)
@@ -266,14 +213,12 @@ class PolarisEnv(IsaaclabBaseEnv):
                 arm_joint_pos = torch.from_numpy(arm_joint_pos).to(self.device)
             if isinstance(gripper_pos, np.ndarray):
                 gripper_pos = torch.from_numpy(gripper_pos).to(self.device)
-            # Ensure batch dimension [num_envs, ...]
             if arm_joint_pos.dim() == 1:
                 arm_joint_pos = arm_joint_pos.unsqueeze(0)
             if gripper_pos.dim() == 1:
                 gripper_pos = gripper_pos.unsqueeze(0)
             states = torch.cat([arm_joint_pos, gripper_pos], dim=-1).float()
         else:
-            # Fallback: zeros (should not happen in a correctly configured env)
             states = torch.zeros(
                 (self.num_envs, 8), dtype=torch.float32, device=self.device
             )
@@ -291,9 +236,52 @@ class PolarisEnv(IsaaclabBaseEnv):
 
         return env_obs
 
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
+    def step(self, actions=None, auto_reset=True):
+        obs, step_reward, terminations, truncations, infos = self.env.step(actions)
+
+        terminations = terminations.clone()
+        truncations = truncations.clone()
+
+        if isinstance(infos, dict) and "rubric" in infos:
+            rubric = infos["rubric"]
+            rubric_success = rubric.get("success", False)
+            if isinstance(rubric_success, bool):
+                if rubric_success:
+                    terminations[:] = True
+            elif isinstance(rubric_success, (torch.Tensor, np.ndarray)):
+                t = torch.as_tensor(rubric_success, device=terminations.device)
+                terminations = t.bool().reshape_as(terminations)
+
+        step_reward = self._calc_step_reward(terminations)
+
+        obs = self._wrap_obs(obs)
+
+        self._elapsed_steps += 1
+
+        truncations = (self.elapsed_steps >= self.cfg.max_episode_steps) | truncations
+
+        dones = terminations | truncations
+
+        merged_infos = {}
+        if isinstance(infos, dict):
+            merged_infos.update(infos)
+        infos = self._record_metrics(step_reward, terminations, merged_infos)
+
+        if self.ignore_terminations:
+            infos["episode"]["success_at_end"] = terminations
+            terminations[:] = False
+
+        _auto_reset = auto_reset and self.auto_reset
+        if dones.any() and _auto_reset:
+            obs, infos = self._handle_auto_reset(dones, obs, infos)
+
+        return (
+            obs,
+            step_reward,
+            terminations,
+            truncations,
+            infos,
+        )
 
     @property
     def total_num_group_envs(self):
