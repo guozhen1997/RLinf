@@ -409,7 +409,7 @@ _CONFIGS = [
         data=LeRobotPolarisDroidDataConfig(
             repo_id="physical-intelligence/droid",
             base_config=DataConfig(prompt_from_task=True),
-            assets=AssetsConfig(asset_id="droid"),
+            assets=AssetsConfig(asset_id="assets/droid"),
         ),
         pytorch_weight_path="checkpoints/torch/pi0_droid_polaris",
     ),
@@ -423,7 +423,7 @@ _CONFIGS = [
         data=LeRobotPolarisDroidDataConfig(
             repo_id="physical-intelligence/droid",
             base_config=DataConfig(prompt_from_task=True),
-            assets=AssetsConfig(asset_id="droid"),
+            assets=AssetsConfig(asset_id="assets/droid"),
         ),
         pytorch_weight_path="checkpoints/torch/pi05_droid_polaris",
     ),
