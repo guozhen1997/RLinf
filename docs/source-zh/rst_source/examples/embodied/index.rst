@@ -425,11 +425,22 @@
       <!-- TODO(thumbnail): replace placeholder cover image URL for dosw1 -->
       <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/dos-w1.png"
            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="dosw1.html" style="text-decoration: underline; color: blue;">
+           <b>Dexmal DOS-W1 真机强化学习</b>
+         </a><br>
+         基于 Flow Matching 策略 + SAC 的 Dexmal DOS-W1 双臂抓取任务
+       </p>
+     </div>
+
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <img src="https://github.com/RLinf/misc/raw/main/pic/pi0_icon.jpg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-        <a href="dosw1.html" style="text-decoration: underline; color: blue;">
-          <b>Dexmal DOS-W1 真机强化学习</b>
+        <a href="polaris.html" style="text-decoration: underline; color: blue;">
+          <b>基于 PolaRiS 仿真平台的强化学习</b>
         </a><br>
-        基于 Flow Matching 策略 + SAC 的 Dexmal DOS-W1 双臂抓取任务
+        PolaRiS + π0 + PPO 训练桌面操作任务
       </p>
     </div>
    </div>
@@ -476,3 +487,4 @@
    franka_pi0_sft_deploy
    xsquare_turtle2
    dosw1
+   polaris

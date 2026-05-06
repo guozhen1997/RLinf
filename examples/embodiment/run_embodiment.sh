@@ -8,6 +8,7 @@ export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
 export ROBOTWIN_PATH=${ROBOTWIN_PATH:-"/path/to/RoboTwin"}
 export PYTHONPATH=${REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
+export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
 
 # Base path to the BEHAVIOR dataset, which is the BEHAVIOR-1k repo's dataset folder
 # Only required when running the behavior experiment.
@@ -22,6 +23,9 @@ export OMNIGIBSON_HEADLESS=${OMNIGIBSON_HEADLESS:-1}
 export ISAAC_PATH=${ISAAC_PATH:-/path/to/isaac-sim}
 export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
+
+# POLARIS dataset
+export POLARIS_DATA_PATH="/mnt/public/lizj/docker_data/Codespace/RLinf/dataset/PolaRiS-Hub"
 
 if [ -z "$1" ]; then
     CONFIG_NAME="maniskill_ppo_openvlaoft"
