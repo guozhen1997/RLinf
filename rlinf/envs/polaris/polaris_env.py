@@ -75,6 +75,7 @@ class PolarisEnv(IsaaclabBaseEnv):
         task_name = self.isaaclab_env_id
         num_envs = self.num_envs
         seed = self.seed
+        open_loop_horizon = getattr(cfg.init_params, "open_loop_horizon", None)
 
         def _make_polaris():
             import os
@@ -107,6 +108,8 @@ class PolarisEnv(IsaaclabBaseEnv):
             )
             env_cfg.seed = seed
 
+            if hasattr(cfg.init_params, "episode_length_s"):
+                env_cfg.episode_length_s = cfg.init_params.episode_length_s
             if hasattr(cfg.init_params, "wrist_cam"):
                 env_cfg.scene.wrist_cam.height = cfg.init_params.wrist_cam.height
                 env_cfg.scene.wrist_cam.width = cfg.init_params.wrist_cam.width
@@ -122,6 +125,8 @@ class PolarisEnv(IsaaclabBaseEnv):
 
             real_env = gym.make(task_name, cfg=env_cfg)
 
+            sys.stderr.flush()
+
             language_instruction, initial_conditions = (
                 load_eval_initial_conditions(real_env.usd_file)
             )
@@ -131,14 +136,17 @@ class PolarisEnv(IsaaclabBaseEnv):
                 ``SubProcIsaacLabEnv._torch_worker`` (``reset`` / ``step`` /
                 ``close`` / ``device``)."""
 
-                def __init__(self):
+                def __init__(self, open_loop_horizon=None):
                     self.env = real_env
                     self.language_instruction = language_instruction
                     self.initial_conditions = initial_conditions
                     self._ic_idx = 0
                     self.device = "cuda"
+                    self._chunk_step_counter = 0
+                    self._open_loop_horizon = open_loop_horizon
 
                 def reset(self, seed=None, env_ids=None):
+                    self._chunk_step_counter = 0
                     ic = self.initial_conditions[self._ic_idx]
                     obs, info = self.env.reset(
                         object_positions=ic, expensive=True
@@ -153,12 +161,30 @@ class PolarisEnv(IsaaclabBaseEnv):
                         actions = torch.as_tensor(actions, device=self.device)
                     else:
                         actions = actions.to(self.device)
-                    return self.env.step(actions, expensive=True)
+                    try:
+                        if self._open_loop_horizon is not None:
+                            needs_render = (
+                                self._chunk_step_counter == 0
+                                or self._chunk_step_counter
+                                >= self._open_loop_horizon
+                            )
+                            if needs_render:
+                                self._chunk_step_counter = 0
+                            result = self.env.step(
+                                actions, expensive=needs_render
+                            )
+                            self._chunk_step_counter += 1
+                            return result
+                        return self.env.step(actions, expensive=True)
+                    except RuntimeError:
+                        return self.env.step(actions, expensive=False)
 
                 def close(self):
                     self.env.close()
 
-            inner_env = _InnerPolarisEnv()
+            inner_env = _InnerPolarisEnv(
+                open_loop_horizon=open_loop_horizon
+            )
 
             return inner_env, sim_app
 

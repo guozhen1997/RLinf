@@ -20,11 +20,11 @@ video_cfg:
   video_base_dir: ${runner.logger.log_path}/video/train
 
 init_params:
-  id: "DROID-TapeIntoContainer"
+  id: "DROID-BlockStackKitchen"
   num_envs: null
   episode_length_s: 30
-  task_description: "Put the tape into the container"
-  usd_file: ${oc.decode:${oc.env:POLARIS_DATA_PATH}}/tape_into_container/scene.usda
+  task_description: "Place and stack the blocks on top of the green tray"
+  usd_file: ${oc.decode:${oc.env:POLARIS_DATA_PATH}}/block_stack_kitchen/scene.usda
   dataset_path: ${oc.decode:${oc.env:POLARIS_DATA_PATH}}
   open_loop_horizon: 15
   wrist_cam:

@@ -10,8 +10,8 @@ group_size: 1
 
 reward_coef: 1.0
 use_fixed_reset_state_ids: False
-max_steps_per_rollout_epoch: 250
-max_episode_steps: 250 # max episode steps for truncation
+max_steps_per_rollout_epoch: 450
+max_episode_steps: 450
 
 video_cfg:
   save_video: False
@@ -22,10 +22,11 @@ video_cfg:
 init_params:
   id: "DROID-FoodBussing"
   num_envs: null
-  max_episode_steps: ${env.train.max_episode_steps}
+  episode_length_s: 30
   task_description: "Put all the foods in the bowl"
-  usd_file: "/path/to/dataset/PolaRiS-Hub/food_bussing/scene.usda"
-  dataset_path: "/path/to/dataset/PolaRiS-Hub"
+  usd_file: ${oc.decode:${oc.env:POLARIS_DATA_PATH}}/food_bussing/scene.usda
+  dataset_path: ${oc.decode:${oc.env:POLARIS_DATA_PATH}}
+  open_loop_horizon: 15
   wrist_cam:
     height: 224
     width: 224

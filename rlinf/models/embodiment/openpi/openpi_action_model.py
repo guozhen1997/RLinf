@@ -474,20 +474,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         return result
 
     def obs_processor(self, env_obs):
-        processed_obs = {
-            "prompt": env_obs["task_descriptions"],
-        }
-        if "calvin" in self.config.config_name:
-            processed_obs["observation/image"] = env_obs["main_images"]
-            state = env_obs["states"]
-            processed_obs["observation/state_ee_pos"] = state[:, :3]
-            processed_obs["observation/state_ee_rot"] = state[:, 3:6]
-            processed_obs["observation/state_gripper"] = state[:, 6:7]
-            if env_obs["wrist_images"] is not None:
-                processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
-            if env_obs["extra_view_images"] is not None:
-                processed_obs["observation/extra_view_image"] = env_obs["extra_view_images"]
-        elif "droid" in self.config.config_name:
+        if "droid" in self.config.config_name:
+            processed_obs = {
+                "prompt": env_obs["task_descriptions"],
+            }
             state = env_obs["states"]
             processed_obs["observation/joint_position"] = state[:, :7]
             processed_obs["observation/gripper_position"] = state[:, 7:8]
@@ -495,12 +485,26 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             if env_obs["wrist_images"] is not None:
                 processed_obs["observation/wrist_image_left"] = env_obs["wrist_images"]
         else:
-            processed_obs["observation/image"] = env_obs["main_images"]
-            processed_obs["observation/state"] = env_obs["states"]
+            # base observation
+            processed_obs = {
+                "observation/image": env_obs["main_images"],
+                "prompt": env_obs["task_descriptions"],
+            }
+            # state observation
+            if "calvin" in self.config.config_name:
+                state = env_obs["states"]
+                processed_obs["observation/state_ee_pos"] = state[:, :3]
+                processed_obs["observation/state_ee_rot"] = state[:, 3:6]
+                processed_obs["observation/state_gripper"] = state[:, 6:7]
+            else:
+                processed_obs["observation/state"] = env_obs["states"]
+            # wrist image observation
             if env_obs["wrist_images"] is not None:
                 processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
+            # extra view image observation
             if env_obs["extra_view_images"] is not None:
                 processed_obs["observation/extra_view_image"] = env_obs["extra_view_images"]
+            # store used keys
         return processed_obs
 
     def precision_processor(self, processed_obs):
