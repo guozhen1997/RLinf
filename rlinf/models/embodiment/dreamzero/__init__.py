@@ -70,19 +70,19 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     _dit_chunk = "groot.vla.model.dreamzero.modules.wan_video_dit_action_casual_chunk"
     Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_clean_image_only",
-        torch.compile(mode='reduce-overhead')
+        torch.compile(mode="reduce-overhead"),
     )
     Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_state_blocks",
-        torch.compile(mode='reduce-overhead')
+        torch.compile(mode="reduce-overhead"),
     )
     Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_noisy_image_blocks",
-        torch.compile(mode='reduce-overhead')
+        torch.compile(mode="reduce-overhead"),
     )
     Patcher.add_wrapper(
         f"{_dit_chunk}.CausalWanSelfAttention._process_noisy_action_blocks",
-        torch.compile(mode='reduce-overhead')
+        torch.compile(mode="reduce-overhead"),
     )
     Patcher.add_patch(
         f"{_dit_chunk}.CausalWanModel._forward_train",

@@ -27,6 +27,7 @@
 # limitations under the License.
 
 import functools
+import warnings
 from enum import Enum
 from typing import ContextManager, Iterable, Optional, Union
 
@@ -473,11 +474,12 @@ def apply_fsdp2_to_model(
         "ignored_module_classes" in config
         or "ignored_module_classes" in wrap_policy_config
     ):
-        raise ValueError(
+        warnings.warn(
             "ignored_module_classes is configured but the current PyTorch version "
-            "does not support ignored_params in FSDP2 fully_shard. "
-            "Please upgrade to PyTorch >= 2.7 or remove ignored_module_classes "
-            "from the FSDP config."
+            "does not support ignored_params in FSDP2 fully_shard; the setting will "
+            "be ignored. Upgrade to PyTorch >= 2.7 for this feature.",
+            UserWarning,
+            stacklevel=2,
         )
 
     return fully_shard(module, **root_kwargs)

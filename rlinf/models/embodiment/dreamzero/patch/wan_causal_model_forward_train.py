@@ -19,6 +19,7 @@ from groot.vla.model.dreamzero.modules.wan2_1_submodule import sinusoidal_embedd
 # to disable gradient checkpointing when the micro batch size is greater than 1
 # (due to a PyTorch bug in this scenario). Registered in get_model.
 
+
 def _forward_train(
     self,
     x,
