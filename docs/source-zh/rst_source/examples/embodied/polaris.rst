@@ -153,19 +153,24 @@ PolaRiS 提供了基于 DROID 数据集训练的多种模型变体，存储在 G
 
 .. code:: bash
 
+   cd path/to/polaris/third_party/openpi
+   GIT_LFS_SKIP_SMUDGE=1 uv sync
+   GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
+   source .venv/bin/activate
+
    # π0.5 Polaris → PyTorch
-   python polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+   python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
        --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
        --config_name pi05_droid_jointpos_polaris \
        --output_path /path/to/pytorch/pi05_droid_jointpos_polaris
 
    # π0 Polaris → PyTorch
-   # python polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+   # python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
    #     --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
    #     --config_name pi0_droid_jointpos_polaris \
    #     --output_path /path/to/pytorch/pi0_droid_jointpos_polaris
 
-其中 ``--config_name`` 需要使用**原版 OpenPI 的 config 名称**（不是 RLinf YAML 中的 ``actor.model.openpi.config_name``），对应关系如下：
+其中 ``--config_name`` 需要使用 **原版 OpenPI 的 config 名称** （不是 RLinf YAML 中的 ``actor.model.openpi.config_name``），对应关系如下：
 
 .. list-table:: **模型 checkpoint 与转换 config_name 对应表**
    :header-rows: 1

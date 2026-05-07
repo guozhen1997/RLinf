@@ -141,14 +141,19 @@ The downloaded JAX checkpoint needs to be converted to PyTorch format to be used
 
 .. code:: bash
 
+   cd path/to/polaris/third_party/openpi
+   GIT_LFS_SKIP_SMUDGE=1 uv sync
+   GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
+   source .venv/bin/activate
+
    # π0.5 Polaris → PyTorch
-   python polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+   python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
        --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
        --config_name pi05_droid_jointpos_polaris \
        --output_path /path/to/pytorch/pi05_droid_jointpos_polaris
 
    # π0 Polaris → PyTorch
-   # python polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+   # python /paht/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
    #     --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
    #     --config_name pi0_droid_jointpos_polaris \
    #     --output_path /path/to/pytorch/pi0_droid_jointpos_polaris
