@@ -162,13 +162,16 @@ PolaRiS 提供了基于 DROID 数据集训练的多种模型变体，存储在 G
    python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
        --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
        --config_name pi05_droid_jointpos_polaris \
-       --output_path /path/to/pytorch/pi05_droid_jointpos_polaris
+       --output_path /path/to/checkpoints/pi05_droid_jointpos_polaris_new
 
    # π0 Polaris → PyTorch
    # python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
    #     --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
    #     --config_name pi0_droid_jointpos_polaris \
-   #     --output_path /path/to/pytorch/pi0_droid_jointpos_polaris
+   #     --output_path /path/to/checkpoints/pi0_droid_jointpos_polaris_new
+
+   # Copy assets
+   cp -r /path/to/checkpoints/pi05_droid_jointpos_polaris/assets /path/to/checkpoints/pi05_droid_jointpos_polaris_new/
 
 其中 ``--config_name`` 需要使用 **原版 OpenPI 的 config 名称** （不是 RLinf YAML 中的 ``actor.model.openpi.config_name``），对应关系如下：
 

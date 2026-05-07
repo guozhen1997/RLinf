@@ -150,13 +150,16 @@ The downloaded JAX checkpoint needs to be converted to PyTorch format to be used
    python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
        --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
        --config_name pi05_droid_jointpos_polaris \
-       --output_path /path/to/pytorch/pi05_droid_jointpos_polaris
+       --output_path /path/to/checkpoints/pi05_droid_jointpos_polaris_new
 
    # π0 Polaris → PyTorch
-   # python /paht/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+   # python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
    #     --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
    #     --config_name pi0_droid_jointpos_polaris \
-   #     --output_path /path/to/pytorch/pi0_droid_jointpos_polaris
+   #     --output_path /path/to/checkpoints/pi0_droid_jointpos_polaris_new
+
+   # Copy assets
+   cp -r /path/to/checkpoints/pi05_droid_jointpos_polaris/assets /path/to/checkpoints/pi05_droid_jointpos_polaris_new/
 
 Here, ``--config_name`` needs to be the **original OpenPI config name** (not the ``actor.model.openpi.config_name`` from the RLinf YAML). The mapping is as follows:
 
