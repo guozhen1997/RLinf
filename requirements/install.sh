@@ -13,6 +13,7 @@ TEST_BUILD=${TEST_BUILD:-0}
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 USE_MIRRORS=0
+NO_SSH=0
 GITHUB_PREFIX=""
 NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
@@ -41,6 +42,7 @@ Common options:
     --use-mirror           Use mirrors for faster downloads.
     --no-root              Avoid system dependency installation for non-root users. Only use this if you are certain system dependencies are already installed.
     --install-rlinf        Install RLinf itself into the python.
+    --no-ssh               Convert all git SSH URLs (git@github.com) to HTTPS automatically.
 EOF
 }
 
@@ -86,6 +88,10 @@ parse_args() {
                 ;;
             --no-root)
                 NO_ROOT=1
+                shift
+                ;;
+            --no-ssh)
+                NO_SSH=1
                 shift
                 ;;
             --install-rlinf)
@@ -160,6 +166,18 @@ unset_mirror() {
         unset UV_DEFAULT_INDEX
         unset HF_ENDPOINT
         git config --global --unset url."${GITHUB_PREFIX}github.com/".insteadOf
+    fi
+}
+
+setup_no_ssh() {
+    if [ "$NO_SSH" -eq 1 ]; then
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
+    fi
+}
+
+unset_no_ssh() {
+    if [ "$NO_SSH" -eq 1 ]; then
+        git config --global --unset url."https://github.com/".insteadOf "git@github.com:"
     fi
 }
 
@@ -854,7 +872,6 @@ install_polaris_env() {
     polaris_dir=$(clone_or_reuse_repo POLARIS_PATH "$VENV_DIR/polaris" https://github.com/arhanjain/polaris.git)
 
     pushd "$polaris_dir" >/dev/null
-    git config --local url."https://github.com/".insteadOf "git@github.com:"
     git submodule update --init --recursive || true
     uv pip install -e .
     popd >/dev/null
@@ -1141,6 +1158,7 @@ install_docs() {
 
 main() {
     parse_args "$@"
+    setup_no_ssh
     setup_mirror
 
     case "$TARGET" in
@@ -1209,6 +1227,7 @@ main() {
     esac
 
     unset_mirror
+    unset_no_ssh
 }
 
 main "$@"
