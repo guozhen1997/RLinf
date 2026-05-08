@@ -854,6 +854,7 @@ install_polaris_env() {
     polaris_dir=$(clone_or_reuse_repo POLARIS_PATH "$VENV_DIR/polaris" https://github.com/arhanjain/polaris.git)
 
     pushd "$polaris_dir" >/dev/null
+    git config --local url."https://github.com/".insteadOf "git@github.com:"
     git submodule update --init --recursive || true
     uv pip install -e .
     popd >/dev/null
