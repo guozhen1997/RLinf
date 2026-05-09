@@ -156,7 +156,7 @@ setup_mirror() {
         export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple
         export HF_ENDPOINT=https://hf-mirror.com
         export GITHUB_PREFIX="https://ghfast.top/"
-        git config --global url."${GITHUB_PREFIX}github.com/".insteadOf "https://github.com/"
+        git config --global --add url."${GITHUB_PREFIX}github.com/".insteadOf "https://github.com/"
     fi
 }
 
@@ -165,19 +165,28 @@ unset_mirror() {
         unset UV_PYTHON_INSTALL_MIRROR
         unset UV_DEFAULT_INDEX
         unset HF_ENDPOINT
-        git config --global --unset url."${GITHUB_PREFIX}github.com/".insteadOf
+        git config --global --unset url."${GITHUB_PREFIX}github.com/".insteadOf "https://github.com/" || true
+        unset GITHUB_PREFIX
     fi
 }
 
 setup_no_ssh() {
     if [ "$NO_SSH" -eq 1 ]; then
-        git config --global url."https://github.com/".insteadOf "git@github.com:"
+        if [ "$USE_MIRRORS" -eq 1 ]; then
+            git config --global --add url."https://ghfast.top/github.com/".insteadOf "git@github.com:"
+        else
+            git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+        fi
     fi
 }
 
 unset_no_ssh() {
     if [ "$NO_SSH" -eq 1 ]; then
-        git config --global --unset url."https://github.com/".insteadOf "git@github.com:"
+        if [ "$USE_MIRRORS" -eq 1 ]; then
+            git config --global --unset url."https://ghfast.top/github.com/".insteadOf "git@github.com:" || true
+        else
+            git config --global --unset url."https://github.com/".insteadOf "git@github.com:" || true
+        fi
     fi
 }
 
@@ -873,6 +882,8 @@ install_polaris_env() {
 
     pushd "$polaris_dir" >/dev/null
     git submodule update --init --recursive || true
+    uv pip install "setuptools<82"
+    uv pip install "flatdict==4.0.1" --no-build-isolation
     uv pip install -e .
     popd >/dev/null
 }
@@ -1231,3 +1242,5 @@ main() {
 }
 
 main "$@"
+
+
