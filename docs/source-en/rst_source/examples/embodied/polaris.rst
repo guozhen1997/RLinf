@@ -90,7 +90,7 @@ Please download the dataset from `PolaRiS-Hub <https://github.com/arhanjain/pola
    # Clone the PolaRiS-Hub dataset
    hf download owhan/PolaRiS-Hub --repo-type=dataset --local-dir ./PolaRiS-Hub
 
-After downloading, set the following environment variable to the dataset path:
+After downloading, set the ``POLARIS_DATA_PATH`` environment variable to the dataset path in ``examples/embodiment/run_embodiment.sh`` and ``examples/embodiment/eval_embodiment.sh``:
 
 .. code:: bash
 
@@ -219,7 +219,7 @@ PolaRiS currently supports the following training configurations:
 
 Each task has an independent environment configuration file located under ``examples/embodiment/config/env/``:
 
-    - ``polaris_droid_tapeintocontainer.yaml``
+- ``polaris_droid_tapeintocontainer.yaml``
 - ``polaris_droid_panclean.yaml``
 - ``polaris_droid_blockstackkitchen.yaml``
 - ``polaris_droid_foodbussing.yaml``
