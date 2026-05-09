@@ -35,7 +35,6 @@ Targets:
 Options (for target=embodied):
     --model <name>         Embodied model to install: ${SUPPORTED_MODELS[*]}.
     --env <name>           Single environment to install: ${SUPPORTED_ENVS[*]}.
-    --vlm-reward           Upgrade transformers/tokenizers for VLM reward model support.
 
 Common options:
     -h, --help             Show this help message and exit.
@@ -720,6 +719,10 @@ install_env_only() {
             exit 1
             ;;
     esac
+
+    if [ "$VLM_REWARD" -eq 1 ]; then
+        install_flash_attn
+    fi
 }
 
 #=======================ENV INSTALLERS=======================
