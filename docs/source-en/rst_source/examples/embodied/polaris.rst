@@ -88,7 +88,7 @@ Please download the dataset from `PolaRiS-Hub <https://github.com/arhanjain/pola
 .. code:: bash
 
    # Clone the PolaRiS-Hub dataset
-   uvx hf download owhan/PolaRiS-Hub --repo-type=dataset --local-dir ./PolaRiS-Hub
+   hf download owhan/PolaRiS-Hub --repo-type=dataset --local-dir ./PolaRiS-Hub
 
 After downloading, set the following environment variable to the dataset path:
 
@@ -96,7 +96,7 @@ After downloading, set the following environment variable to the dataset path:
 
    export POLARIS_DATA_PATH=/path/to/PolaRiS-Hub
 
-Alternatively, you can modify ``env.train.init_params.dataset_path`` and ``env.eval.init_params.dataset_path`` in the configuration YAML file.
+Alternatively, you can modify ``init_params.dataset_path`` and ``init_params.usd_file`` in the configuration YAML files under ``examples/embodiment/config/env/polaris_droid_*.yaml``.
 
 Model Download and Conversion
 -----------------------------
@@ -219,7 +219,7 @@ PolaRiS currently supports the following training configurations:
 
 Each task has an independent environment configuration file located under ``examples/embodiment/config/env/``:
 
-- ``polaris_droid_tapeintocontainer.yaml``
+    - ``polaris_droid_tapeintocontainer.yaml``
 - ``polaris_droid_panclean.yaml``
 - ``polaris_droid_blockstackkitchen.yaml``
 - ``polaris_droid_foodbussing.yaml``
@@ -228,13 +228,14 @@ Each task has an independent environment configuration file located under ``exam
 
 **2. Key Parameter Configuration**
 
+Parameters below are located in the training configuration file ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``.
+
 .. code-block:: yaml
 
    cluster:
      num_nodes: 1
      component_placement:
-       actor,rollout: 0
-       env: 0,1
+       actor,rollout,env: 0
 
 You can flexibly configure the GPU allocation for the Actor, Rollout, and Env components.
 
@@ -259,12 +260,13 @@ You can flexibly configure the GPU allocation for the Actor, Rollout, and Env co
 
 **3. Environment Parameters**
 
+The ``init_params`` are located in the environment configuration files ``examples/embodiment/config/env/polaris_droid_*.yaml``.
+The training configuration file references them via Hydra defaults (e.g. ``defaults: - env/polaris_droid_tapeintocontainer@env.train``).
+
 .. code-block:: yaml
 
-   env:
-     train:
-       init_params:
-         open_loop_horizon: 15
+   init_params:
+     open_loop_horizon: 15
 
 ``open_loop_horizon`` controls the frequency of high-quality Gaussian Splatting rendering. During the execution of an action chunk, high-quality rendering is performed every ``open_loop_horizon`` steps, while intermediate steps use low-quality rendering to speed up the simulation.
 
