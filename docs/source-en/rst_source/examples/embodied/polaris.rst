@@ -62,19 +62,21 @@ Dependency Installation
    cd RLinf
 
 2. Install Dependencies
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code:: bash
-
-   bash requirements/install.sh embodied --model openpi --env polaris
-   source .venv/bin/activate
-
-Alternatively, you can clone the PolaRiS repository locally first, and then run the script:
+It is recommended to clone the PolaRiS repository locally first, then edit ``polaris/pyproject.toml`` to match your machine's CUDA version (e.g. change ``cu130`` to ``cu124``), and then run the install script:
 
 .. code:: bash
 
    git clone --recursive git@github.com:arhanjain/polaris.git
    export POLARIS_PATH=/path/to/polaris
+   bash requirements/install.sh embodied --model openpi --env polaris
+   source .venv/bin/activate
+
+Alternatively, you can let the install script clone and install automatically (but you cannot customize ``pyproject.toml``):
+
+.. code:: bash
+
    bash requirements/install.sh embodied --model openpi --env polaris
    source .venv/bin/activate
 
@@ -289,7 +291,7 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_embodiment.sh polaris_eval_openpi
+   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi
 
 Visualization and Results
 -------------------------
