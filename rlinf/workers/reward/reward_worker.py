@@ -312,6 +312,8 @@ class EmbodiedRewardWorker(Worker):
             last_run_count += int(last_run.sum().item()) if last_run is not None else 0
             batches.append(data)
 
+        batch_keys = [set(batch) - {"last_run"} for batch in batches]
+        assert len(set(map(frozenset, batch_keys))) == 1, f"Inconsistent reward input keys across shards: {batch_keys}"
         merged = cat_list_of_dict_tensor(
             [{k: v for k, v in b.items() if k != "last_run"} for b in batches], dim=0
         )
