@@ -52,6 +52,7 @@ class RewardWorker(Worker):
         self.cfg = cfg
         self.placement = HybridComponentPlacement(cfg, Cluster())
 
+    def init_worker(self):
         self.total_batch_size_per_dp = (
             self.cfg.data.rollout_batch_size
             * self.cfg.algorithm.get("group_size", 1)
@@ -65,7 +66,6 @@ class RewardWorker(Worker):
                 "down_sampling_config", {}
             )
 
-    def init_worker(self):
         if self.cfg.reward.use_reward_model:
             raise NotImplementedError
         else:
