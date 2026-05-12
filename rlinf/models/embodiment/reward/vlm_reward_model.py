@@ -288,11 +288,13 @@ class HistoryVLMRewardModel(VLMRewardModel):
         self,
         reward_input: dict[str, Any],
     ) -> torch.Tensor:
-        history_input: dict[str, dict[str, list[list[Any]]]] = reward_input.pop(
+        history_input: dict[str, dict[str, list[list[Any]]]] = reward_input[
             "history_input"
-        )
+        ]
         input_batch_size = len(next(iter(next(iter(history_input.values())).values())))
-        observations = reward_input
+        observations = {
+            key: value for key, value in reward_input.items() if key != "history_input"
+        }
 
         infer_micro_batch_size = self.infer_micro_batch_size or input_batch_size
 
