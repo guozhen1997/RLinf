@@ -236,22 +236,22 @@ class EmbodiedRewardWorker(Worker):
 
     def init_worker(self):
         """Initialize the reward worker for inference."""
-        # build model
-
         if self._standalone_realworld:
-            return
-
-        self.dst_ranks = {
-            "train": self._setup_dst_ranks(
-                self.total_num_train_envs // self.num_pipeline_stages
-            ),
-        }
-        self.src_ranks = {
-            "train": self._setup_src_ranks(
-                self.total_num_train_envs // self.num_pipeline_stages
-            ),
-        }
-        self.local_num_train_envs = sum(size for _, size in self.src_ranks["train"])
+            self.local_num_train_envs = self.total_num_train_envs
+            self.dst_ranks = {"train": [(0, self.local_num_train_envs)]}
+            self.src_ranks = {"train": [(0, self.local_num_train_envs)]}
+        else:
+            self.dst_ranks = {
+                "train": self._setup_dst_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            self.src_ranks = {
+                "train": self._setup_src_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            self.local_num_train_envs = sum(size for _, size in self.src_ranks["train"])
 
         self.model = self.model_provider_func()
 
