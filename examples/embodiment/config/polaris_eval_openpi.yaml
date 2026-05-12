@@ -1,6 +1,6 @@
 defaults:
-  - env/polaris_droid_foodbussing@env.eval
-  - env/polaris_droid_foodbussing@env.train
+  - env/polaris_droid_panclean@env.eval
+  - env/polaris_droid_panclean@env.train
   - model/pi0@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - weight_syncer/patch_syncer@weight_syncer
@@ -42,7 +42,7 @@ algorithm:
   group_size: 1
   reward_coef: 1.0
   rollout_epoch: 1
-  eval_rollout_epoch: 1
+  eval_rollout_epoch: 25
 
   reward_type: chunk_level
   logprob_type: chunk_level

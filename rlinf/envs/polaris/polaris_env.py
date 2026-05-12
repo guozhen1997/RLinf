@@ -125,8 +125,6 @@ class PolarisEnv(IsaaclabBaseEnv):
 
             real_env = gym.make(task_name, cfg=env_cfg)
 
-            sys.stderr.flush()
-
             language_instruction, initial_conditions = (
                 load_eval_initial_conditions(real_env.usd_file)
             )
