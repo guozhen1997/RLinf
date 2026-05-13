@@ -1,7 +1,7 @@
 defaults:
   - env/polaris_droid_tapeintocontainer@env.train
   - env/polaris_droid_tapeintocontainer@env.eval
-  - model/pi0@actor.model
+  - model/pi0_5@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
@@ -130,6 +130,7 @@ actor:
       noise_level: 0.5
       joint_logprob: False
       num_steps: ${actor.model.num_steps}
+      value_after_vlm: True
       detach_critic_input: True
 
   optim:
