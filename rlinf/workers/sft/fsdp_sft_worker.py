@@ -162,18 +162,16 @@ class FSDPSftWorker(FSDPModelManager, Worker):
                     batch = next(self.data_iter)
                     self._data_iter_offset = 1
 
-                losses = self.get_train_model_output(batch)
+                loss = self.get_train_model_output(batch)
 
-                if isinstance(losses, (list, tuple)):
-                    losses = torch.stack(losses)
-                elif not isinstance(losses, torch.Tensor):
-                    losses = torch.tensor(
-                        losses, device=self.device, dtype=torch.float32
+                if isinstance(loss, (list, tuple)):
+                    loss = torch.stack(loss)
+                elif not isinstance(loss, torch.Tensor):
+                    loss = torch.tensor(
+                        loss, device=self.device, dtype=torch.float32
                     )
-                loss = losses.mean()
-
                 loss = loss / self.gradient_accumulation
-                avg_loss += loss.item()
+                avg_loss += loss.detach().item()
                 with backward_ctx:
                     self.grad_scaler.scale(loss).backward()
 

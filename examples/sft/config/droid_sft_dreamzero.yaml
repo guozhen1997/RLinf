@@ -60,9 +60,9 @@ actor:
     dreamzero_max_action_dim: 32
     dreamzero_max_state_dim: 64
     # Unified temporal knobs (branching by embodiment_tag below):
-    dreamzero_action_horizon: 24
-    dreamzero_num_chunks: 4
-    dreamzero_num_video_frames: 33
+    action_horizon: 24
+    num_chunks: 4
+    num_video_frames: 33
     relative_action_keys:
       - joint_position
     cfg_mode: False

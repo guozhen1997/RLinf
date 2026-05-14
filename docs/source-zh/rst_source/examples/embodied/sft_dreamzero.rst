@@ -110,9 +110,9 @@ WAN2.2 训练通常需要下列组件权重：
 - ``actor.model.model_path``：模型目录（读取 ``config.json`` 与 ``experiment_cfg``）
 - ``actor.model.tokenizer_path``：文本 tokenizer 路径
 - ``actor.model.embodiment_tag``："oxe_droid" 或 "libero_sim"
-- ``actor.model.dreamzero_action_horizon``：动作步长（DROID 常见 24）
-- ``actor.model.dreamzero_num_chunks``：chunk 数（如 4）
-- ``actor.model.dreamzero_num_video_frames``：视频帧数（如 33）
+- ``actor.model.action_horizon``：动作步长（DROID 常见 24）
+- ``actor.model.num_chunks``：chunk 数（如 4）
+- ``actor.model.num_video_frames``：视频帧数（如 33）
 - ``actor.model.relative_action``：是否使用相对动作
 - ``actor.dataloader_num_workers``：数据线程数
 - ``actor.fsdp_config``：FSDP 训练策略

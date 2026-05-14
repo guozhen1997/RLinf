@@ -140,9 +140,9 @@ Important fields:
 - ``actor.model.model_path``: model root (loads ``config.json`` and ``experiment_cfg``)
 - ``actor.model.tokenizer_path``: tokenizer path
 - ``actor.model.embodiment_tag``: usually ``oxe_droid`` (DROID) or LIBERO-related tag
-- ``actor.model.dreamzero_action_horizon``
-- ``actor.model.dreamzero_num_chunks``
-- ``actor.model.dreamzero_num_video_frames``
+- ``actor.model.action_horizon``
+- ``actor.model.num_chunks``
+- ``actor.model.num_video_frames``
 - ``actor.model.relative_action``
 - ``actor.dataloader_num_workers``
 - ``actor.fsdp_config``

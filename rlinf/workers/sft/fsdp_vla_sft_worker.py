@@ -85,8 +85,8 @@ class FSDPVlaSftWorker(FSDPSftWorker):
                 losses_dict = self.model(forward_type=ForwardType.SFT, data=batch)
             if losses_dict.get("dynamics_loss", None) is not None:
                 self._dreamzero_loss = {
-                    "dynamics_loss": losses_dict["dynamics_loss"],
-                    "action_loss": losses_dict["action_loss"],
+                    "dynamics_loss": losses_dict["dynamics_loss"].detach().item(),
+                    "action_loss": losses_dict["action_loss"].detach().item(),
                 }
             return losses_dict["loss"]
         observation, actions = batch

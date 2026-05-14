@@ -12,7 +12,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor,env,rollout: all
+    actor: all
 
 runner:
   task_type: sft
@@ -23,13 +23,24 @@ runner:
     logger_backends: ["tensorboard"]
 
   max_epochs: -1
-  max_steps: 2000
+  max_steps: 20000
   val_check_interval: -1
-  save_interval: 2000
+  save_interval: 1000
   log_interval: 100
 
+  resume_dir: null
+
 data:
-  train_data_paths: "path/to/datasets/libero"
+  # Root of LeRobot DROID (OXE) dataset, e.g. output of dreamzero-0/scripts/data/convert_droid.py
+  #train_data_paths: /mnt/project_rlinf_hs/yuanhuining/datasets/DreamZero-DROID-Data-mini
+  #train_data_paths: /mnt/project_rlinf_hs/shiletong/datasets/dreamzero/data/beijing_collect_test
+  # train_data_paths: /mnt/project_rlinf/shiletong/data/dreamzero/data/beijing_collect_test
+  train_data_paths: /mnt/project_rlinf_hs/yuanhuining/datasets/libero
+  lazy_load: True
+  num_workers: 4
+  prefetch_factor: 8
+  video_tolerance_s: 0.1
+  parquet_cache_size: 512
 
 algorithm:
   adv_type: gae
@@ -38,28 +49,29 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 1
-  global_batch_size: 16
+  global_batch_size: 8
   seed: 42
-  dataloader_num_workers: 1
   enable_offload: False
 
   model:
     model_type: "dreamzero"
-    precision: bf16 # fp32 when fsdp cpu offload is enabled
-    model_path: "path/to/models/DreamZero-DROID"
-    tokenizer_path: "path/to/models/umt5-xxl"
+    precision: fp32 # fp32 when fsdp cpu offload is enabled
+    model_path: /mnt/project_rlinf/guozhen/models/DreamZero-DROID
+    tokenizer_path: /mnt/project_rlinf/liyanghao/data/models/umt5-xxl
     max_seq_len: 512
-    dreamzero_action_horizon: 16
-    dreamzero_num_chunks: 4
-    dreamzero_max_action_dim: 32
-    dreamzero_max_state_dim: 64
-    cfg_mode: false
-    advantage_parquet: 
-    unconditional_prob: 0.3
+    state_horizon: 1
+    action_horizon: 16
+    num_chunks: 4
+    num_video_frames: 33
+    max_action_dim: 32
+    max_state_dim: 64
     action_loss_scale: 1.0
-    pretrained_model_path: null
-    add_value_head: false
     is_lora: False
+    embodiment_tag: "libero_sim"
+
+    load_to_device: False
+    gradient_checkpointing: True
+    enable_torch_compile: False
 
   optim:
     lr: 1.0e-5
@@ -76,13 +88,13 @@ actor:
 
   fsdp_config:
     strategy: "fsdp2"
-    sharding_strategy: "full_shard"
     use_orig_params: True
-    gradient_checkpointing: True
-    limit_all_gathers: True
+    gradient_checkpointing: False
+    limit_all_gathers: False
+    forward_prefetch: False
+    backward_prefetch: null
     reshard_after_forward: True
-    # cpu_offload: True
-    # offload_pin_memory: True
+    save_full_model_weights: False
     grad_scaler:
       enabled: False
     mixed_precision:
@@ -92,9 +104,3 @@ actor:
     amp_autocast:
       enabled: false
       precision: "bf16"
-
-reward:
-  use_reward_model: false
-
-critic:
-  use_critic_model: false
