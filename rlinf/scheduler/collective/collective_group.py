@@ -651,22 +651,22 @@ class CollectiveGroup:
         if object_type == CollectiveGroup.TENSOR:
             tensor_list = [object] if self._rank == src_rank else None
             return self._broadcast_tensor_list(
-                tensor_list, comm_id=comm_id, src_rank=src_rank
+                tensor_list, comm_id=comm_id, src_rank=src_rank, options=options
             )[0]
         elif object_type == CollectiveGroup.TENSOR_LIST:
             tensor_list = object if self._rank == src_rank else None
             return self._broadcast_tensor_list(
-                tensor_list, comm_id=comm_id, src_rank=src_rank
+                tensor_list, comm_id=comm_id, src_rank=src_rank, options=options
             )
         elif object_type == CollectiveGroup.TENSOR_DICT:
             tensor_dict = object if self._rank == src_rank else None
             return self._broadcast_tensor_dict(
-                tensor_dict, comm_id=comm_id, src_rank=src_rank
+                tensor_dict, comm_id=comm_id, src_rank=src_rank, options=options
             )
         elif object_type == CollectiveGroup.DATACLASS_WITH_TENSORS:
             tensor_dataclass = object if self._rank == src_rank else None
             return self._broadcast_tensor_dataclass(
-                tensor_dataclass, comm_id=comm_id, src_rank=src_rank
+                tensor_dataclass, comm_id=comm_id, src_rank=src_rank, options=options
             )
         elif object_type == CollectiveGroup.OBJECT:
             return self._broadcast_object(object, comm_id=comm_id, src_rank=src_rank)
@@ -678,6 +678,7 @@ class CollectiveGroup:
         tensors: Optional[list[torch.Tensor]],
         comm_id: int,
         src_rank: int,
+        options: Optional[CollectiveGroupOptions] = None,
     ) -> list[torch.Tensor]:
         """Broadcast a list of tensors from src_rank to all ranks."""
         if self._rank == src_rank and tensors is None:
@@ -714,11 +715,31 @@ class CollectiveGroup:
         cpu_tensor_mask = metadata["cpu_tensor_mask"]
         has_accel_tensor = any(not m for m in cpu_tensor_mask)
 
-        broadcast_tensors = (
-            tensors
-            if self._rank == src_rank
-            else [
-                torch.empty(
+        if has_accel_tensor:
+            definitely_same_ranks, uncertain_ranks, diff_dev_ranks = (
+                self._classify_broadcast_ranks(src_rank)
+            )
+        else:
+            definitely_same_ranks, uncertain_ranks, diff_dev_ranks = [], [], []
+
+        # Non-src ranks that will receive accel tensors via the IPC hybrid path
+        # (definitely-same-device or uncertain peers) get freshly-allocated
+        # tensors back from the recv functions and overwrite their slots in
+        # `broadcast_tensors`. Preallocating accel buffers for those slots here
+        # would just churn device memory on large weight syncs, so defer the
+        # allocation. CPU slots are still preallocated since the CPU broadcast
+        # at the end of this function receives into them in-place.
+        skip_accel_prealloc = self._rank != src_rank and (
+            self._rank in definitely_same_ranks or self._rank in uncertain_ranks
+        )
+
+        if self._rank == src_rank:
+            broadcast_tensors = tensors
+        else:
+            broadcast_tensors = [
+                None
+                if (not is_cpu and skip_accel_prealloc)
+                else torch.empty(
                     shape,
                     dtype=dtype,
                     device=(
@@ -731,13 +752,6 @@ class CollectiveGroup:
                 )
                 for (shape, dtype), is_cpu in zip(tensor_shapes, cpu_tensor_mask)
             ]
-        )
-        if has_accel_tensor:
-            definitely_same_ranks, uncertain_ranks, diff_dev_ranks = (
-                self._classify_broadcast_ranks(src_rank)
-            )
-        else:
-            definitely_same_ranks, uncertain_ranks, diff_dev_ranks = [], [], []
 
         if not definitely_same_ranks and not uncertain_ranks:
             # No same-device or uncertain workers: straightforward collective for every tensor.
@@ -769,14 +783,14 @@ class CollectiveGroup:
                 # P2P IPC send to each definitely-same-device receiver.
                 for dst in definitely_same_ranks:
                     ipc_grp = self._get_or_create_ipc_sub_group(src_rank, dst)
-                    ipc_grp._init_process_group()
+                    ipc_grp._init_process_group(options=options)
                     ipc_grp._send_tensor_list_via_ipc(
                         accel_tensors, next(ipc_grp._send_comm_id_iter)
                     )
                 # Uncertain receivers: exchange current device then route per pair.
                 for dst in uncertain_ranks:
                     ipc_grp = self._get_or_create_ipc_sub_group(src_rank, dst)
-                    ipc_grp._init_process_group()
+                    ipc_grp._init_process_group(options=options)
                     ipc_grp._send_tensor_list_to_uncertain_peer(
                         accel_tensors, next(ipc_grp._send_comm_id_iter)
                     )
@@ -785,7 +799,7 @@ class CollectiveGroup:
                     sub_grp, sub_src = self._get_or_create_diff_dev_broadcast_sub_group(
                         src_rank, diff_dev_ranks
                     )
-                    sub_grp._init_process_group()
+                    sub_grp._init_process_group(options=options)
                     sub_comm_id = next(sub_grp._broadcast_comm_id_iter)
                     for tensor in accel_tensors:
                         sub_grp._broadcast(
@@ -794,7 +808,7 @@ class CollectiveGroup:
             elif self._rank in definitely_same_ranks:
                 # P2P IPC receive from source; replace pre-allocated slots.
                 ipc_grp = self._get_or_create_ipc_sub_group(src_rank, self._rank)
-                ipc_grp._init_process_group()
+                ipc_grp._init_process_group(options=options)
                 received = ipc_grp._recv_tensor_list_via_ipc(
                     next(ipc_grp._recv_comm_id_iter)
                 )
@@ -805,7 +819,7 @@ class CollectiveGroup:
             elif self._rank in uncertain_ranks:
                 # Exchange current device with source, then receive via IPC or accelerator P2P.
                 ipc_grp = self._get_or_create_ipc_sub_group(src_rank, self._rank)
-                ipc_grp._init_process_group()
+                ipc_grp._init_process_group(options=options)
                 received = ipc_grp._recv_tensor_list_to_uncertain_peer(
                     accel_tensor_shapes, next(ipc_grp._recv_comm_id_iter)
                 )
@@ -818,7 +832,7 @@ class CollectiveGroup:
                 sub_grp, sub_src = self._get_or_create_diff_dev_broadcast_sub_group(
                     src_rank, diff_dev_ranks
                 )
-                sub_grp._init_process_group()
+                sub_grp._init_process_group(options=options)
                 sub_comm_id = next(sub_grp._broadcast_comm_id_iter)
                 for tensor in accel_tensors:
                     sub_grp._broadcast(
@@ -837,12 +851,15 @@ class CollectiveGroup:
         tensor_dict: Optional[dict[str, torch.Tensor]],
         comm_id: int,
         src_rank: int,
+        options: Optional[CollectiveGroupOptions] = None,
     ) -> dict[str, torch.Tensor]:
         """Broadcast a dictionary of tensors from src_rank to all ranks."""
         keys = list(tensor_dict.keys()) if self._rank == src_rank else None
         keys = self._broadcast_object(keys, comm_id=comm_id, src_rank=src_rank)
         values = list(tensor_dict.values()) if self._rank == src_rank else None
-        values = self._broadcast_tensor_list(values, comm_id=comm_id, src_rank=src_rank)
+        values = self._broadcast_tensor_list(
+            values, comm_id=comm_id, src_rank=src_rank, options=options
+        )
         if len(keys) != len(values):
             raise RuntimeError(
                 f"Broadcast received {len(values)} values but {len(keys)} keys from Rank {src_rank} in group {self._group_info.group_name}"
@@ -1951,6 +1968,7 @@ class CollectiveGroup:
         tensor_dataclass: Optional[Any],
         comm_id: int,
         src_rank: int,
+        options: Optional[CollectiveGroupOptions] = None,
     ) -> Any:
         """Broadcast a dataclass with tensor fields (tensor, list, or dict of tensors) from src_rank to all ranks.
 
@@ -1975,7 +1993,7 @@ class CollectiveGroup:
             metadata, comm_id=comm_id, src_rank=src_rank
         )
         recv_flat_tensors = self._broadcast_tensor_list(
-            flat_tensors, comm_id=comm_id, src_rank=src_rank
+            flat_tensors, comm_id=comm_id, src_rank=src_rank, options=options
         )
         recv_tensor_dict = unflatten_dataclass_tensor_fields(
             recv_metadata, recv_flat_tensors
