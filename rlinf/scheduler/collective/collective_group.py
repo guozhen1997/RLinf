@@ -224,6 +224,14 @@ class CollectiveGroup:
         self._coll_manager = CollectiveManager.get_proxy()
         self._logger = logging.getLogger(cur_worker_address.get_name())
         self._lock = threading.Lock()
+        # Lazily populated sub-groups for the hybrid broadcast path.
+        # IPC sub-groups: one per (src_rank, same_device_dst_rank) pair.
+        self._ipc_sub_groups: dict[tuple[int, int], "CollectiveGroup"] = {}
+        # Broadcast sub-groups for different-device workers: keyed by src_rank.
+        # Value is (sub_group, src_rank_within_sub_group).
+        self._diff_dev_broadcast_sub_groups: dict[
+            int, tuple["CollectiveGroup", int]
+        ] = {}
 
         if self._group_info is not None:
             self._init_group()
@@ -724,16 +732,104 @@ class CollectiveGroup:
                 for (shape, dtype), is_cpu in zip(tensor_shapes, cpu_tensor_mask)
             ]
         )
-        for idx, tensor in enumerate(broadcast_tensors):
-            tensor_device = (
-                CollectiveGroup.CPU if cpu_tensor_mask[idx] else CollectiveGroup.ACCEL
+        if has_accel_tensor:
+            definitely_same_ranks, uncertain_ranks, diff_dev_ranks = (
+                self._classify_broadcast_ranks(src_rank)
             )
-            self._broadcast(
-                tensor,
-                device=tensor_device,
-                comm_id=comm_id,
-                src_rank=src_rank,
-            )
+        else:
+            definitely_same_ranks, uncertain_ranks, diff_dev_ranks = [], [], []
+
+        if not definitely_same_ranks and not uncertain_ranks:
+            # No same-device or uncertain workers: straightforward collective for every tensor.
+            for idx, tensor in enumerate(broadcast_tensors):
+                self._broadcast(
+                    tensor,
+                    device=CollectiveGroup.CPU
+                    if cpu_tensor_mask[idx]
+                    else CollectiveGroup.ACCEL,
+                    comm_id=comm_id,
+                    src_rank=src_rank,
+                )
+        else:
+            # Hybrid path:
+            #   - definitely-same-device workers: P2P IPC
+            #   - uncertain workers (overlapping multi-device sets): exchange current device
+            #     at runtime, then IPC or accelerator P2P send/recv per pair
+            #   - different-device workers: accelerator collective via dedicated sub-group
+            accel_tensors = [
+                t for t, is_cpu in zip(broadcast_tensors, cpu_tensor_mask) if not is_cpu
+            ]
+            accel_tensor_shapes = [
+                (shape, dtype)
+                for (shape, dtype), is_cpu in zip(tensor_shapes, cpu_tensor_mask)
+                if not is_cpu
+            ]
+
+            if self._rank == src_rank:
+                # P2P IPC send to each definitely-same-device receiver.
+                for dst in definitely_same_ranks:
+                    ipc_grp = self._get_or_create_ipc_sub_group(src_rank, dst)
+                    ipc_grp._init_process_group()
+                    ipc_grp._send_tensor_list_via_ipc(
+                        accel_tensors, next(ipc_grp._send_comm_id_iter)
+                    )
+                # Uncertain receivers: exchange current device then route per pair.
+                for dst in uncertain_ranks:
+                    ipc_grp = self._get_or_create_ipc_sub_group(src_rank, dst)
+                    ipc_grp._init_process_group()
+                    ipc_grp._send_tensor_list_to_uncertain_peer(
+                        accel_tensors, next(ipc_grp._send_comm_id_iter)
+                    )
+                # Collective broadcast to different-device receivers.
+                if diff_dev_ranks:
+                    sub_grp, sub_src = self._get_or_create_diff_dev_broadcast_sub_group(
+                        src_rank, diff_dev_ranks
+                    )
+                    sub_grp._init_process_group()
+                    sub_comm_id = next(sub_grp._broadcast_comm_id_iter)
+                    for tensor in accel_tensors:
+                        sub_grp._broadcast(
+                            tensor, CollectiveGroup.ACCEL, sub_comm_id, sub_src
+                        )
+            elif self._rank in definitely_same_ranks:
+                # P2P IPC receive from source; replace pre-allocated slots.
+                ipc_grp = self._get_or_create_ipc_sub_group(src_rank, self._rank)
+                ipc_grp._init_process_group()
+                received = ipc_grp._recv_tensor_list_via_ipc(
+                    next(ipc_grp._recv_comm_id_iter)
+                )
+                accel_iter = iter(received)
+                for i, is_cpu in enumerate(cpu_tensor_mask):
+                    if not is_cpu:
+                        broadcast_tensors[i] = next(accel_iter)
+            elif self._rank in uncertain_ranks:
+                # Exchange current device with source, then receive via IPC or accelerator P2P.
+                ipc_grp = self._get_or_create_ipc_sub_group(src_rank, self._rank)
+                ipc_grp._init_process_group()
+                received = ipc_grp._recv_tensor_list_to_uncertain_peer(
+                    accel_tensor_shapes, next(ipc_grp._recv_comm_id_iter)
+                )
+                accel_iter = iter(received)
+                for i, is_cpu in enumerate(cpu_tensor_mask):
+                    if not is_cpu:
+                        broadcast_tensors[i] = next(accel_iter)
+            else:
+                # Different-device: receive via collective sub-group.
+                sub_grp, sub_src = self._get_or_create_diff_dev_broadcast_sub_group(
+                    src_rank, diff_dev_ranks
+                )
+                sub_grp._init_process_group()
+                sub_comm_id = next(sub_grp._broadcast_comm_id_iter)
+                for tensor in accel_tensors:
+                    sub_grp._broadcast(
+                        tensor, CollectiveGroup.ACCEL, sub_comm_id, sub_src
+                    )
+
+            # CPU tensors still go through the full-group CPU collective.
+            for idx, tensor in enumerate(broadcast_tensors):
+                if cpu_tensor_mask[idx]:
+                    self._broadcast(tensor, CollectiveGroup.CPU, comm_id, src_rank)
+
         return broadcast_tensors
 
     def _broadcast_tensor_dict(
@@ -1075,6 +1171,75 @@ class CollectiveGroup:
         if len(peer_devices) == 1 and len(my_devices) == 1:
             return 1
         return 0
+
+    def _classify_broadcast_ranks(
+        self, src_rank: int
+    ) -> tuple[list[int], list[int], list[int]]:
+        """Classify non-src ranks by their device relationship to src_rank.
+
+        Returns:
+            Tuple of (definitely_same, uncertain, definitely_diff):
+            - definitely_same: same node, both have exactly one accelerator, identical
+              device → use P2P IPC directly.
+            - uncertain: same node, accelerator sets overlap but at least one side has
+              multiple accelerators → exchange current-device at runtime to decide.
+            - definitely_diff: different node or no accelerator overlap → accelerator collective.
+        """
+        src = self._group_info.workers[src_rank]
+        src_devices = set(src.available_accelerators)
+        definitely_same: list[int] = []
+        uncertain: list[int] = []
+        definitely_diff: list[int] = []
+        for i, worker in enumerate(self._group_info.workers):
+            if i == src_rank:
+                continue
+            if worker.cluster_node_rank != src.cluster_node_rank or not (
+                src_devices & set(worker.available_accelerators)
+            ):
+                definitely_diff.append(i)
+            elif (
+                len(src.available_accelerators) == 1
+                and len(worker.available_accelerators) == 1
+            ):
+                definitely_same.append(i)
+            else:
+                uncertain.append(i)
+        return definitely_same, uncertain, definitely_diff
+
+    def _get_or_create_ipc_sub_group(
+        self, src_rank: int, dst_rank: int
+    ) -> "CollectiveGroup":
+        """Return (creating if needed) the 2-worker CollectiveGroup for IPC.
+
+        The group spans src_rank and dst_rank within the broadcast group.
+        """
+        key = (src_rank, dst_rank)
+        if key not in self._ipc_sub_groups:
+            src_address = self._group_info.workers[src_rank].address
+            dst_address = self._group_info.workers[dst_rank].address
+            self._ipc_sub_groups[key] = self._collective.create_collective_group(
+                sorted([src_address, dst_address])
+            )
+        return self._ipc_sub_groups[key]
+
+    def _get_or_create_diff_dev_broadcast_sub_group(
+        self, src_rank: int, diff_dev_ranks: list[int]
+    ) -> tuple["CollectiveGroup", int]:
+        """Return (creating if needed) the accelerator collective sub-group for different-device workers.
+
+        The group spans src_rank and all different-device ranks. Returns the sub-group
+        and src's rank index within it.
+        """
+        if src_rank not in self._diff_dev_broadcast_sub_groups:
+            src_address = self._group_info.workers[src_rank].address
+            diff_addresses = [
+                self._group_info.workers[r].address for r in diff_dev_ranks
+            ]
+            sub_addresses = sorted([src_address] + diff_addresses)
+            sub_src_rank = sub_addresses.index(src_address)
+            sub_grp = self._collective.create_collective_group(sub_addresses)
+            self._diff_dev_broadcast_sub_groups[src_rank] = (sub_grp, sub_src_rank)
+        return self._diff_dev_broadcast_sub_groups[src_rank]
 
     def _object_to_tensor(self, obj: Any, device: str):
         """Convert an object to tensor.

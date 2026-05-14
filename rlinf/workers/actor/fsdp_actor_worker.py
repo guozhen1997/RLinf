@@ -1058,18 +1058,16 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         state_dict = self.get_rollout_state_dict()
 
         async def send_func(data):
-            handle = []
-            for rank in self._weight_dst_rank_in_rollout:
-                handle.append(
-                    self.send(
-                        data,
-                        dst_group_name=self._rollout_group_name,
-                        dst_rank=rank,
-                        async_op=True,
-                        options=self._sync_weight_comm_options,
-                    ).async_wait()
-                )
-            await asyncio.gather(*handle)
+            await self.broadcast(
+                data,
+                groups=[
+                    (self._group_name, self._rank),
+                    (self._rollout_group_name, self._weight_dst_rank_in_rollout),
+                ],
+                src=(self._group_name, self._rank),
+                async_op=True,
+                options=self._sync_weight_comm_options,
+            ).async_wait()
 
         async def recv_func():
             handle = []
