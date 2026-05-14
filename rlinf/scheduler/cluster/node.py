@@ -300,8 +300,10 @@ class NodeProbe:
                     ),
                     name=f"NodeProbe_{node_ray_id}",
                 ).remote(node_info, num_nodes, cluster_cfg, sys.executable)
-            except ValueError:
-                raise Cluster.NamespaceConflictError
+            except ValueError as e:
+                if Cluster._looks_like_ray_duplicate_named_actor_error(e):
+                    raise Cluster.NamespaceConflictError from e
+                raise
             self._probes.append(probe)
 
         handles = []
