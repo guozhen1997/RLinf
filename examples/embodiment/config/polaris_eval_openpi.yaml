@@ -81,13 +81,13 @@ env:
   group_name: "EnvGroup"
   train:
     total_num_envs: 1
-    max_episode_steps: 450
-    max_steps_per_rollout_epoch: 450
+    max_episode_steps: 456
+    max_steps_per_rollout_epoch: 456
     seed: 42
   eval:
     total_num_envs: 1
-    max_episode_steps: 450
-    max_steps_per_rollout_epoch: 450
+    max_episode_steps: 456
+    max_steps_per_rollout_epoch: 456
     auto_reset: True
     ignore_terminations: True
     video_cfg:
@@ -118,7 +118,7 @@ actor:
     model_path: "/path/to/model/pi05_droid_jointpos_polaris/"
     model_type: "openpi"
     action_dim: 8
-    num_action_chunks: 15
+    num_action_chunks: 8
     num_steps: 10
     add_value_head: True
     openpi:

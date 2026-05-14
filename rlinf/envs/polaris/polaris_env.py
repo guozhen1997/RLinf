@@ -291,6 +291,23 @@ class PolarisEnv(IsaaclabBaseEnv):
             merged_infos.update(infos)
         infos = self._record_metrics(step_reward, terminations, merged_infos)
 
+        if isinstance(merged_infos, dict) and "rubric" in merged_infos:
+            rubric = merged_infos["rubric"]
+            progress = rubric.get("progress", 0.0)
+            rubric_metrics = rubric.get("metrics", {})
+            criteria_reached = rubric_metrics.get("criteria_ever_reached", 0)
+            criteria_total = rubric_metrics.get("criteria_total", 0)
+
+            infos["episode"]["progress"] = torch.tensor(
+                [progress], dtype=torch.float32, device=self.device
+            )
+            infos["episode"]["criteria_ever_reached"] = torch.tensor(
+                [criteria_reached], dtype=torch.float32, device=self.device
+            )
+            infos["episode"]["criteria_total"] = torch.tensor(
+                [criteria_total], dtype=torch.float32, device=self.device
+            )
+
         if self.ignore_terminations:
             infos["episode"]["success_at_end"] = terminations
             terminations[:] = False
