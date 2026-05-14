@@ -26,7 +26,7 @@ init_params:
   task_description: "Place and stack the blocks on top of the green tray"
   usd_file: ${oc.decode:${oc.env:POLARIS_DATA_PATH}}/block_stack_kitchen/scene.usda
   dataset_path: ${oc.decode:${oc.env:POLARIS_DATA_PATH}}
-  open_loop_horizon: 15
+  open_loop_horizon: ${actor.model.num_action_chunks}
   wrist_cam:
     height: 224
     width: 224

@@ -40,7 +40,6 @@ class DroidJointPosInputs(_transforms.DataTransformFn):
         if gripper_pos.ndim == 0:
             gripper_pos = gripper_pos[np.newaxis]
         state = np.concatenate([data["observation/joint_position"], gripper_pos])
-        state = _transforms.pad_to_dim(state, self.action_dim)
 
         base_image = _parse_image(data["observation/exterior_image_1_left"])
         wrist_image = _parse_image(data["observation/wrist_image_left"])
@@ -64,9 +63,7 @@ class DroidJointPosInputs(_transforms.DataTransformFn):
         }
 
         if "actions" in data:
-            inputs["actions"] = _transforms.pad_to_dim(
-                np.asarray(data["actions"]), self.action_dim
-            )
+            inputs["actions"] = np.asarray(data["actions"])
 
         if "prompt" in data:
             if isinstance(data["prompt"], bytes):

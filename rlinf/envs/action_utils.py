@@ -117,6 +117,12 @@ def prepare_actions_for_polaris(
     ]:
         chunk_actions[..., -1] = 2 * chunk_actions[..., -1] - 1
         chunk_actions[..., -1] = torch.sign(chunk_actions[..., -1]) * -1.0
+    elif SupportedModel(model_type) == SupportedModel.OPENPI:
+        chunk_actions[..., -1] = torch.where(
+            chunk_actions[..., -1] > 0.5,
+            torch.ones_like(chunk_actions[..., -1]),
+            torch.zeros_like(chunk_actions[..., -1])
+        )
     return chunk_actions
 
 
