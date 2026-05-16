@@ -316,7 +316,6 @@ RLinf 提供了多个 reward model 接入 RL 的示例配置：
 
    reward:
      use_reward_model: true
-     use_output_step: 100
      group_name: "RewardGroup"
      reward_mode: history_buffer
      history_reward_assign: true
@@ -353,7 +352,6 @@ RLinf 提供了多个 reward model 接入 RL 的示例配置：
 
 关键字段说明：
 
-- ``use_output_step`` 延迟激活 reward worker，让 policy 先 warm up 一段时间再开始 VLM 推理。
 - ``history_buffers`` 定义需要缓存的 observation key、窗口长度和最小有效历史长度。
 - ``input_builder_name`` 将历史窗口转换为双视角 VLM 输入。
 - ``reward_parser_name`` 将模型生成的标签映射为标量 reward，标量由 ``positive_reward``、``negative_reward``、``unclear_reward`` 和 ``invalid_reward`` 控制。

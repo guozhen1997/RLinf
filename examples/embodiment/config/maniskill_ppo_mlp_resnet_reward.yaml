@@ -191,7 +191,6 @@ actor:
 
 reward:
   use_reward_model: True
-  use_output_step: 100
   group_name: "RewardGroup"
   
   # Reward mode:

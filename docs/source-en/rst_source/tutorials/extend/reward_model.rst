@@ -320,7 +320,6 @@ windows and sends them to the reward worker only when a valid window is availabl
 
    reward:
      use_reward_model: true
-     use_output_step: 100
      group_name: "RewardGroup"
      reward_mode: history_buffer
      history_reward_assign: true
@@ -357,7 +356,6 @@ windows and sends them to the reward worker only when a valid window is availabl
 
 Important fields:
 
-- ``use_output_step`` delays reward worker activation so the policy can warm up before VLM inference starts.
 - ``history_buffers`` defines which observation keys are cached, the window length, and the minimum valid history length.
 - ``input_builder_name`` converts the history window into dual-view VLM inputs.
 - ``reward_parser_name`` maps generated labels to scalar rewards using ``positive_reward``, ``negative_reward``, ``unclear_reward``, and ``invalid_reward``.

@@ -78,8 +78,10 @@ class EmbodiedRunner:
         self.env_channel = Channel.create("Env")
         self.rollout_channel = Channel.create("Rollout")
         self.actor_channel = Channel.create("Actor")
-        self.reward_channel = None
-        self.reward_initialized = False
+        if self.reward is not None:
+            self.reward_channel = Channel.create("Reward")
+        else:
+            self.reward_channel = None
 
         # this timer checks if we should stop training
         self.run_timer = Timer(None)  # Timer that checks if we should stop training
@@ -279,17 +281,6 @@ class EmbodiedRunner:
                     if _step % self.weight_sync_interval == 0:
                         self.update_rollout_weights()
                 with self.timer("generate_rollouts"):
-                    if (
-                        self.reward is not None
-                        and not self.reward_initialized
-                        and self.global_step > 0
-                        and self.global_step
-                        >= self.cfg.reward.get("use_output_step", 0)
-                    ):
-                        print(f"Activating reward worker at step {self.global_step}")
-                        self.reward_channel = Channel.create("Reward")
-                        self.reward_initialized = True
-
                     env_handle: Handle = self.env.interact(
                         input_channel=self.env_channel,
                         rollout_channel=self.rollout_channel,
@@ -301,7 +292,7 @@ class EmbodiedRunner:
                         output_channel=self.env_channel,
                     )
                     reward_handle = None
-                    if self.reward_initialized:
+                    if self.reward is not None:
                         reward_handle: Handle = self.reward.compute_rewards(
                             input_channel=self.reward_channel,
                             output_channel=self.env_channel,
@@ -310,7 +301,7 @@ class EmbodiedRunner:
                         input_channel=self.actor_channel
                     ).wait()
                     rollout_handle.wait()
-                    if self.reward_initialized:
+                    if self.reward is not None:
                         reward_handle.wait()
 
                 # compute advantages and returns.
@@ -373,7 +364,7 @@ class EmbodiedRunner:
             time_metrics.update(
                 {f"time/actor/{k}": v for k, v in actor_time_metrics.items()}
             )
-            if self.reward_initialized:
+            if self.reward is not None:
                 reward_time_metrics, reward_time_metrics_per_rank = (
                     reward_handle.consume_durations(return_per_rank=True)
                 )
@@ -449,7 +440,7 @@ class EmbodiedRunner:
                 prefix="env",
                 worker_group_name=self.env.worker_group_name,
             )
-            if self.reward_initialized:
+            if self.reward is not None:
                 self._log_ranked_metrics(
                     metrics_list=reward_time_metrics_per_rank,
                     step=_step,
