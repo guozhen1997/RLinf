@@ -464,8 +464,6 @@
    :maxdepth: 2
 
    maniskill
-   maniskill_resnet_reward
-   maniskill_vlm_reward
    libero
    liberoplus_pro
    behavior

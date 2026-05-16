@@ -473,8 +473,6 @@ as well as reinforcement learning training examples on real robots.
    :maxdepth: 2
 
    maniskill
-   maniskill_resnet_reward
-   maniskill_vlm_reward
    libero
    liberoplus_pro
    behavior
