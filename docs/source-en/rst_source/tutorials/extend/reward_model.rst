@@ -332,6 +332,8 @@ windows and sends them to the reward worker only when a valid window is availabl
        gt_success_bonus: 20.0
        precision: "bf16"
        input_builder_name: qwentrend_input_builder
+       input_builder_params:
+         default_task_description: "Pick up the red cube and place it on the green spot on the table."
        reward_parser_name: qwentrend_reward_parser
        reward_parser_params:
          positive_reward: 1.0

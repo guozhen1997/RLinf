@@ -271,6 +271,7 @@ class QwentrendInputBuilder(VideoVLMInputBuilder):
     video_keys: list[str] = field(
         default_factory=lambda: ["main_images", "extra_view_images"]
     )
+    default_task_description: str = ""
 
     def prepare_inputs(
         self,
@@ -281,11 +282,16 @@ class QwentrendInputBuilder(VideoVLMInputBuilder):
         history_window = history_input.get("history_window", {})
         videos_clip = self.extract_videos(history_window, self.video_keys)
         videos_list = [videos_clip[env_id] for env_id in valid_input_ids]
+        task_descriptions = observations.get(
+            "task_descriptions",
+            [self.default_task_description] * len(videos_clip),
+        )
 
         prompt_texts_list: list[list[str]] = []
-        for _ in valid_input_ids:
+        for env_id in valid_input_ids:
             prompt_texts_list.append(
                 [
+                    f"You are currently performing the task: {task_descriptions[env_id]}. "
                     "You are given two synchronized 5-frame videos from different camera "
                     "views (main view and third-person view) of the same robot action "
                     "window. Judge whether the action trend is positive, negative, or "

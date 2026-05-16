@@ -112,20 +112,8 @@ class ManiskillEnv(gym.Env):
         self._is_start = value
 
     @property
-    def extra_instructions(self):
-        EXTRA_INSTRUCTION_MAP = {
-            "PickCube-v1": "Pick up the red cube and place it on the green spot on the table.",
-            # TODO: add more instructions for other tasks
-        }
-        return EXTRA_INSTRUCTION_MAP
-
-    @property
     def instruction(self):
-        if hasattr(self.env.unwrapped, "get_language_instruction"):
-            # only for put_in_on_scene tasks
-            return self.env.unwrapped.get_language_instruction()
-        else:
-            return [self.extra_instructions.get(self.env.spec.id, "")] * self.num_envs
+        return self.env.unwrapped.get_language_instruction()
 
     def _init_reset_state_ids(self):
         self._generator = torch.Generator()
@@ -161,9 +149,9 @@ class ManiskillEnv(gym.Env):
             assert infos is not None
             return infos["extracted_obs"]
 
-        if "simple" in wrap_obs_mode:
+        if wrap_obs_mode == "simple":
             if self.env.unwrapped.obs_mode == "state":
-                obs = {"states": raw_obs}
+                return {"states": raw_obs}
             elif self.env.unwrapped.obs_mode == "rgb":
                 sensor_data = raw_obs.pop("sensor_data")
                 raw_obs.pop("sensor_param")
@@ -182,14 +170,11 @@ class ManiskillEnv(gym.Env):
                     if sorted_images
                     else None
                 )
-                obs = {
+                return {
                     "main_images": main_images,
                     "extra_view_images": extra_view_images,
                     "states": state,
                 }
-            if "prompt" in wrap_obs_mode:
-                obs["task_descriptions"] = self.instruction
-            return obs
 
         # Default
         obs_image = raw_obs["sensor_data"]["3rd_view_camera"]["rgb"].to(
