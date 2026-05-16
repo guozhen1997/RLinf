@@ -260,7 +260,7 @@ Reward-model-related settings live under the ``reward`` section:
 
 Where:
 
-- ``reward_mode`` controls whether inference happens every step, only on terminal frames, or on history windows.
+- ``reward_mode`` accepts ``"per_step"``, ``"terminal"``, or ``"history_buffer"``: run inference every step, only on terminal frames, or on history windows.
 - ``reward_weight`` and ``env_reward_weight`` control how learned reward and environment reward are combined.
 - ``reward_threshold`` filters reward model probabilities; values below the threshold are set to ``0``.
 - ``model_path`` points to the reward model checkpoint used for online inference.

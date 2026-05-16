@@ -715,20 +715,21 @@ class Robo2VLMSFTDataset(Robo2VLMDataset):
 
 
 def _resolve_video_path(path: str, data_root: Optional[str]) -> str:
-    """解析视频路径：若原路径不存在且 data_root 已配置，则用 data_root 重写。"""
+    """Resolve a video path, rewriting it with data_root if the original path is missing."""
     if not isinstance(path, str):
         return str(path)
     if os.path.isfile(path):
         return path
     if not data_root:
         return path
-    # 从绝对路径中提取 data/ 及之后部分，用 data_root 重写（适配 host→container 路径差异）
+    # Extract the data/ suffix from absolute paths and rewrite with data_root
+    # to handle host-to-container path differences.
     idx = path.find("data/")
     if idx >= 0:
         resolved = os.path.join(data_root, path[idx:])
         if os.path.isfile(resolved):
             return resolved
-    # 相对路径：直接拼接
+    # Relative path: join it directly with data_root.
     if not os.path.isabs(path):
         resolved = os.path.join(data_root, path)
         if os.path.isfile(resolved):
@@ -738,11 +739,11 @@ def _resolve_video_path(path: str, data_root: Optional[str]) -> str:
 
 @VLMDatasetRegistry.register("qwentrend_progress_sft")
 class QwenTrendProgressSFTDataset(VLMBaseDataset):
-    """SFT dataset for QwenTrend progress: full_video + video_clip 输入，与 pilot 一致。
+    """SFT dataset for QwenTrend progress: full_video + video_clip input, aligned with the pilot.
 
     Each record: full_video (mp4), video_clip (mp4), question, answer.
-    Qwen3-VL 用 videos 输入，与数据集形式一致。
-    若 JSONL 中路径为 host 绝对路径，可配置 data.data_root 以在 container 中解析。
+    Qwen3-VL uses videos input, matching the dataset format.
+    If JSONL paths are host absolute paths, set data.data_root to resolve them in the container.
     """
 
     def __init__(

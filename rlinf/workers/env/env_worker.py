@@ -68,7 +68,7 @@ class EnvWorker(Worker):
 
         self.reward_mode = self.cfg.get("reward", {}).get("reward_mode", "per_step")
         self.history_reward_assign = self.cfg.get("reward", {}).get(
-            "history_reward_assign", True
+            "history_reward_assign", False
         )
         self.use_reward_model = self.cfg.get("reward", {}).get(
             "use_reward_model", False
