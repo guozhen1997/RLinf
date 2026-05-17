@@ -130,8 +130,11 @@ RLinf 支持两条 reward 训练路径。``examples/reward/run_reward_training.s
 用于训练 ResNet 图像 reward model，``examples/sft/run_vlm_sft.sh``
 用于微调 QwenTrend 这类 VLM reward model。
 
-2.1 配置 ResNet 数据路径
-^^^^^^^^^^^^^^^^^^^^^^^^^
+2.1 微调 ResNet Reward Model
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+2.1.1 配置 ResNet 数据路径
+"""""""""""""""""""""""""""
 
 训练前需要先修改 ``examples/reward/config/reward_training.yaml`` 中的数据路径，
 指向上一步预处理得到的文件：
@@ -148,8 +151,8 @@ RLinf 支持两条 reward 训练路径。``examples/reward/run_reward_training.s
    训练数据路径以 ``reward_training.yaml`` 中的 ``data.train_data_paths`` 和
    ``data.val_data_paths`` 配置为准。
 
-2.2 配置 ResNet 模型
-^^^^^^^^^^^^^^^^^^^^
+2.1.2 配置 ResNet 模型
+""""""""""""""""""""""
 
 对于 ResNet 路径，需要将 ``actor.model.model_type`` 设置为 ``"resnet"``：
 
@@ -178,8 +181,8 @@ RLinf 支持两条 reward 训练路径。``examples/reward/run_reward_training.s
 ``resnet`` 是图像分类 reward 路径；``vlm`` 会基于当前观测运行 VLM；
 ``history_vlm`` 会基于 env worker 维护的历史窗口运行 VLM。
 
-2.3 启动 ResNet 训练
-^^^^^^^^^^^^^^^^^^^^
+2.1.3 启动 ResNet 训练
+""""""""""""""""""""""
 
 完成数据与模型配置后，执行：
 
@@ -189,7 +192,7 @@ RLinf 支持两条 reward 训练路径。``examples/reward/run_reward_training.s
 
 训练日志会保存到新建的 ``logs/<timestamp>-reward_training`` 目录下。
 
-2.4 微调 QwenTrend VLM Reward Model
+2.2 微调 QwenTrend VLM Reward Model
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 使用 ``preprocess_qwentrend_reward_dataset.py`` 转换数据后，将

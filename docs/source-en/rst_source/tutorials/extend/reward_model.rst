@@ -135,8 +135,11 @@ RLinf supports two reward training paths. ``examples/reward/run_reward_training.
 trains the ResNet image reward model, while ``examples/sft/run_vlm_sft.sh``
 fine-tunes a VLM reward model such as QwenTrend.
 
-2.1 Configure ResNet Dataset Paths
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2.1 Fine-Tune the ResNet Reward Model
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+2.1.1 Configure ResNet Dataset Paths
+""""""""""""""""""""""""""""""""""""
 
 Before training, edit ``examples/reward/config/reward_training.yaml`` so it points to your processed splits:
 
@@ -152,8 +155,8 @@ Before training, edit ``examples/reward/config/reward_training.yaml`` so it poin
    The dataset paths are taken from ``reward_training.yaml``, specifically
    ``data.train_data_paths`` and ``data.val_data_paths``.
 
-2.2 Configure the ResNet Model
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2.1.2 Configure the ResNet Model
+""""""""""""""""""""""""""""""""
 
 For the ResNet path, set ``actor.model.model_type`` to ``"resnet"``:
 
@@ -182,8 +185,8 @@ The online reward-worker registry currently contains the following model types:
 ``resnet`` is the image classifier path. ``vlm`` runs a VLM on the current
 observation. ``history_vlm`` runs a VLM on history windows built by the env worker.
 
-2.3 Launch ResNet Training
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+2.1.3 Launch ResNet Training
+""""""""""""""""""""""""""""
 
 Once the dataset and model are configured, run:
 
@@ -193,7 +196,7 @@ Once the dataset and model are configured, run:
 
 Training logs are written to a newly created ``logs/<timestamp>-reward_training`` directory.
 
-2.4 Fine-Tune the QwenTrend VLM Reward Model
+2.2 Fine-Tune the QwenTrend VLM Reward Model
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 After converting collected episodes with ``preprocess_qwentrend_reward_dataset.py``,
