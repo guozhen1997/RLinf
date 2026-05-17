@@ -323,43 +323,9 @@ class FSDPModelManager:
             self.load_optimizer(self.device)
             self.is_optimizer_offloaded = False
 
-        optimizer_lrs = self._get_optimizer_lrs()
         self._strategy.load_checkpoint(
             self.model, self.optimizer, self.lr_scheduler, load_path
         )
-        self._restore_optimizer_lrs(optimizer_lrs)
-
-    def _get_optimizer_lrs(self) -> list[float]:
-        if not hasattr(self, "optimizer") or self.optimizer is None:
-            return []
-        return [float(group["lr"]) for group in self.optimizer.param_groups]
-
-    def _restore_optimizer_lrs(self, target_lrs: list[float]) -> None:
-        if not hasattr(self, "optimizer") or self.optimizer is None or not target_lrs:
-            return
-        if len(target_lrs) != len(self.optimizer.param_groups):
-            self._logger.warning(
-                "[FSDP] Skip resetting optimizer learning rates after checkpoint "
-                "load because param group count changed: "
-                f"{len(target_lrs)} -> {len(self.optimizer.param_groups)}"
-            )
-            return
-
-        old_lrs = [float(group["lr"]) for group in self.optimizer.param_groups]
-        for group, lr in zip(self.optimizer.param_groups, target_lrs):
-            group["lr"] = lr
-
-        if hasattr(self, "lr_scheduler") and hasattr(self.lr_scheduler, "base_lrs"):
-            self.lr_scheduler.base_lrs = list(target_lrs)
-        if hasattr(self, "lr_scheduler") and hasattr(self.lr_scheduler, "_last_lr"):
-            self.lr_scheduler._last_lr = list(target_lrs)
-
-        new_lrs = [float(group["lr"]) for group in self.optimizer.param_groups]
-        if old_lrs != new_lrs:
-            self._logger.info(
-                f"[FSDP] Reset optimizer learning rates after checkpoint load: "
-                f"{old_lrs} -> {new_lrs}"
-            )
 
     def save_checkpoint(self, save_path: str, step: int = 0) -> None:
         """
