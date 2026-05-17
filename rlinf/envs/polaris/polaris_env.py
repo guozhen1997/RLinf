@@ -18,7 +18,6 @@ import sys
 import gymnasium as gym
 import numpy as np
 import torch
-from omegaconf import open_dict
 
 from rlinf.envs.isaaclab.isaaclab_env import IsaaclabBaseEnv
 
@@ -78,15 +77,19 @@ class PolarisEnv(IsaaclabBaseEnv):
         open_loop_horizon = getattr(cfg.init_params, "open_loop_horizon", None)
 
         def _make_polaris():
-            import os
-
             for key in list(sys.modules.keys()):
-                if key.startswith("polaris.") or key.startswith("isaaclab.") or key.startswith("isaacsim") or key.startswith("omni."):
+                if (
+                    key.startswith("polaris.")
+                    or key.startswith("isaaclab.")
+                    or key.startswith("isaacsim")
+                    or key.startswith("omni.")
+                ):
                     del sys.modules[key]
 
             os.environ.pop("DISPLAY", None)
 
             from isaaclab.app import AppLauncher
+
             sim_app = AppLauncher(headless=True, enable_cameras=True).app
 
             import polaris.environments
@@ -116,17 +119,17 @@ class PolarisEnv(IsaaclabBaseEnv):
             if hasattr(cfg.init_params, "table_cam"):
                 for cam_name in ("external_cam",):
                     if hasattr(env_cfg.scene, cam_name):
-                        getattr(env_cfg.scene, cam_name).height = (
-                            cfg.init_params.table_cam.height
-                        )
-                        getattr(env_cfg.scene, cam_name).width = (
-                            cfg.init_params.table_cam.width
-                        )
+                        getattr(
+                            env_cfg.scene, cam_name
+                        ).height = cfg.init_params.table_cam.height
+                        getattr(
+                            env_cfg.scene, cam_name
+                        ).width = cfg.init_params.table_cam.width
 
             real_env = gym.make(task_name, cfg=env_cfg)
 
-            language_instruction, initial_conditions = (
-                load_eval_initial_conditions(real_env.usd_file)
+            language_instruction, initial_conditions = load_eval_initial_conditions(
+                real_env.usd_file
             )
 
             class _InnerPolarisEnv:
@@ -146,12 +149,8 @@ class PolarisEnv(IsaaclabBaseEnv):
                 def reset(self, seed=None, env_ids=None):
                     self._chunk_step_counter = 0
                     ic = self.initial_conditions[self._ic_idx]
-                    obs, info = self.env.reset(
-                        object_positions=ic, expensive=True
-                    )
-                    self._ic_idx = (self._ic_idx + 1) % len(
-                        self.initial_conditions
-                    )
+                    obs, info = self.env.reset(object_positions=ic, expensive=True)
+                    self._ic_idx = (self._ic_idx + 1) % len(self.initial_conditions)
                     return obs, info
 
                 def step(self, actions):
@@ -163,14 +162,11 @@ class PolarisEnv(IsaaclabBaseEnv):
                         if self._open_loop_horizon is not None:
                             needs_render = (
                                 self._chunk_step_counter == 0
-                                or self._chunk_step_counter
-                                >= self._open_loop_horizon
+                                or self._chunk_step_counter >= self._open_loop_horizon
                             )
                             if needs_render:
                                 self._chunk_step_counter = 0
-                            result = self.env.step(
-                                actions, expensive=needs_render
-                            )
+                            result = self.env.step(actions, expensive=needs_render)
                             self._chunk_step_counter += 1
                             return result
                         return self.env.step(actions, expensive=True)
@@ -180,9 +176,7 @@ class PolarisEnv(IsaaclabBaseEnv):
                 def close(self):
                     self.env.close()
 
-            inner_env = _InnerPolarisEnv(
-                open_loop_horizon=open_loop_horizon
-            )
+            inner_env = _InnerPolarisEnv(open_loop_horizon=open_loop_horizon)
 
             return inner_env, sim_app
 

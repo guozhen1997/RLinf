@@ -53,14 +53,14 @@ from rlinf.models.embodiment.openpi.dataconfig.maniskill_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.metaworld_dataconfig import (
     LeRobotMetaworldDataConfig,
 )
+from rlinf.models.embodiment.openpi.dataconfig.polaris_dataconfig import (
+    LeRobotPolarisDroidDataConfig,
+)
 from rlinf.models.embodiment.openpi.dataconfig.realworld_dataconfig import (
     LeRobotRealworldDataConfig,
 )
 from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
     LeRobotRobocasaDataConfig,
-)
-from rlinf.models.embodiment.openpi.dataconfig.polaris_dataconfig import (
-    LeRobotPolarisDroidDataConfig,
 )
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,

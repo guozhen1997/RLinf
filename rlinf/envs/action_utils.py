@@ -98,6 +98,7 @@ def prepare_actions_for_isaaclab(
         chunk_actions[..., -1] = torch.sign(chunk_actions[..., -1]) * -1.0
     return chunk_actions
 
+
 def prepare_actions_for_polaris(
     raw_chunk_actions,
     model_type,
@@ -121,7 +122,7 @@ def prepare_actions_for_polaris(
         chunk_actions[..., -1] = torch.where(
             chunk_actions[..., -1] > 0.5,
             torch.ones_like(chunk_actions[..., -1]),
-            torch.zeros_like(chunk_actions[..., -1])
+            torch.zeros_like(chunk_actions[..., -1]),
         )
     return chunk_actions
 

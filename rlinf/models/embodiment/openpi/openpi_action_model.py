@@ -152,7 +152,11 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             proj_width = 1024
         # value head
         if self.config.add_value_head:
-            if self.config.config_name in ["pi05_maniskill", "pi05_libero", "pi05_droid_polaris"]:
+            if self.config.config_name in [
+                "pi05_maniskill",
+                "pi05_libero",
+                "pi05_droid_polaris",
+            ]:
                 value_head_hidden_sizes = (1024, 512, 256)
             else:
                 value_head_hidden_sizes = (512, 256, 128)
@@ -494,7 +498,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                 processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
             # extra view image observation
             if env_obs["extra_view_images"] is not None:
-                processed_obs["observation/extra_view_image"] = env_obs["extra_view_images"]
+                processed_obs["observation/extra_view_image"] = env_obs[
+                    "extra_view_images"
+                ]
             # store used keys
         return processed_obs
 
