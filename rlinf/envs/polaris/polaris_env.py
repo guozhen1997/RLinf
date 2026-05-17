@@ -92,7 +92,7 @@ class PolarisEnv(IsaaclabBaseEnv):
 
             sim_app = AppLauncher(headless=True, enable_cameras=True).app
 
-            import polaris.environments
+            import polaris.environments  # noqa: F401
             from polaris.utils import load_eval_initial_conditions, parse_env_cfg
 
             dataset_path = getattr(cfg.init_params, "dataset_path", None)
