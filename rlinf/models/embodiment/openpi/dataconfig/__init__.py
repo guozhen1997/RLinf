@@ -404,7 +404,7 @@ _CONFIGS = [
         name="pi0_droid_polaris",
         model=pi0_config.Pi0Config(
             action_horizon=10,
-            max_token_len=100,
+            max_token_len=48,
         ),
         data=LeRobotPolarisDroidDataConfig(
             repo_id="physical-intelligence/droid",
