@@ -131,13 +131,14 @@ Alternatively, you can let the install script clone and install automatically (b
 Dataset Download
 ----------------
 
-PolaRiS requires the **PolaRiS-Hub** dataset, which contains scene USD files and initial condition configurations.
+PolaRiS has two datasets: one for evaluation and one for co-training.
 
-Please download the dataset from `PolaRiS-Hub <https://github.com/arhanjain/polaris-hub>`_ and place it in a local directory:
+**1. Evaluation Dataset — PolaRiS-Hub**
+
+`PolaRiS-Hub <https://huggingface.co/datasets/owhan/PolaRiS-Hub>`_ contains scene USD files and initial condition configurations used for evaluation.
 
 .. code:: bash
 
-   # Clone the PolaRiS-Hub dataset
    hf download owhan/PolaRiS-Hub --repo-type=dataset --local-dir ./PolaRiS-Hub
 
 After downloading, set the ``POLARIS_DATA_PATH`` environment variable to the dataset path in ``examples/embodiment/run_embodiment.sh`` and ``examples/embodiment/eval_embodiment.sh``:
@@ -148,114 +149,39 @@ After downloading, set the ``POLARIS_DATA_PATH`` environment variable to the dat
 
 Alternatively, you can modify ``init_params.dataset_path`` and ``init_params.usd_file`` in the configuration YAML files under ``examples/embodiment/config/env/polaris_droid_*.yaml``.
 
-Model Download and Conversion
------------------------------
+**2. Co-training Dataset — PolaRiS-datasets**
 
-Before starting the training, you need to download the pre-trained JAX format model and convert it to PyTorch format.
+`PolaRiS-datasets <https://huggingface.co/datasets/owhan/PolaRiS-datasets>`_ contains demonstration data used for co-training fine-tuning of the model.
 
-PolaRiS provides several model variants trained on the DROID dataset, stored in Google Cloud Storage (GCS).
+.. code:: bash
 
-**1. Download JAX Checkpoint**
+   hf download owhan/PolaRiS-datasets --repo-type=dataset --local-dir ./PolaRiS-datasets
+
+Model Download
+--------------
+
+**1. Download Model**
 
 .. code:: bash
 
    # π0.5 Polaris (Recommended)
-   gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi05_droid_jointpos_polaris /path/to/checkpoints/
+   hf download RLinf/RLinf-Pi05-Polaris-droid_jointpos --local-dir ./checkpoints/RLinf-Pi05-Polaris-droid_jointpos
 
-   # Other available models:
    # π0 Polaris
-   # gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi0_droid_jointpos_polaris /path/to/checkpoints/
-   # π0 Polaris (100k)
-   # gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi0_droid_jointpos_100k_polaris /path/to/checkpoints/
-   # π0 Fast Polaris (Note: the current conversion script does not support this model, see explanation below)
-   # gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi0_fast_droid_jointpos_polaris /path/to/checkpoints/
+   hf download RLinf/RLinf-Pi0-Polaris-droid_jointpos --local-dir ./checkpoints/RLinf-Pi0-Polaris-droid_jointpos
 
-.. note::
+**2. Configure Model Path**
 
-   If you do not need the PolaRiS co-training fine-tuned version, you can also use the DROID Base models:
-
-   .. code:: bash
-
-      # π0.5 Base
-      gsutil -m cp -r gs://openpi-assets/checkpoints/pi05_droid_jointpos /path/to/checkpoints/
-      # π0 Base
-      # gsutil -m cp -r gs://openpi-assets/checkpoints/pi0_droid_jointpos /path/to/checkpoints/
-      # π0 Base 100k
-      # gsutil -m cp -r gs://openpi-assets/checkpoints/pi0_droid_jointpos_100k /path/to/checkpoints/
-      # π0 Fast Base
-      # gsutil -m cp -r gs://openpi-assets/checkpoints/pi0_fast_droid_jointpos /path/to/checkpoints/
-
-**2. Convert to PyTorch Format**
-
-The downloaded JAX checkpoint needs to be converted to PyTorch format to be used in RLinf:
-
-.. code:: bash
-
-   cd path/to/polaris/third_party/openpi
-   GIT_LFS_SKIP_SMUDGE=1 uv sync
-   GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-   source .venv/bin/activate
-
-   # π0.5 Polaris → PyTorch
-   python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
-       --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
-       --config_name pi05_droid_jointpos_polaris \
-       --output_path /path/to/checkpoints/pi05_droid_jointpos_polaris_new
-
-   # π0 Polaris → PyTorch
-   # python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
-   #     --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
-   #     --config_name pi0_droid_jointpos_polaris \
-   #     --output_path /path/to/checkpoints/pi0_droid_jointpos_polaris_new
-
-   # Copy assets
-   cp -r /path/to/checkpoints/pi05_droid_jointpos_polaris/assets /path/to/checkpoints/pi05_droid_jointpos_polaris_new/
-
-Here, ``--config_name`` needs to be the **original OpenPI config name** (not the ``actor.model.openpi.config_name`` from the RLinf YAML). The mapping is as follows:
-
-.. list-table:: **Model Checkpoint to Conversion config_name Mapping**
-   :header-rows: 1
-   :widths: 35 35 30
-
-   * - Model
-     - ``--config_name`` (for conversion script)
-     - RLinf YAML ``config_name``
-   * - π0.5 Polaris
-     - ``pi05_droid_jointpos_polaris``
-     - ``pi05_droid_polaris``
-   * - π0 Polaris
-     - ``pi0_droid_jointpos_polaris``
-     - ``pi0_droid_polaris``
-   * - π0 Polaris (100k)
-     - ``pi0_droid_jointpos_100k_polaris``
-     - ``pi0_droid_polaris``
-   * - π0.5 Base
-     - ``pi05_droid``
-     - ``pi05_droid_polaris``
-   * - π0 Base
-     - ``pi0_droid``
-     - ``pi0_droid_polaris``
-   * - π0 Base (100k)
-     - ``pi0_droid_jointpos_100k``
-     - ``pi0_droid_polaris``
-
-.. note::
-
-   **π0 Fast Polaris** (``pi0_fast_droid_jointpos_polaris``) uses ``Pi0FASTConfig`` instead of ``Pi0Config``.
-   The current conversion script ``convert_jax_model_to_pytorch.py`` does not support this model type.
-
-**3. Configure Model Path**
-
-After conversion, set the PyTorch model path in the YAML configuration file:
+After downloading, set the model path in the YAML configuration file:
 
 .. code-block:: yaml
 
    rollout:
      model:
-       model_path: "/path/to/pytorch/pi05_droid_jointpos_polaris"
+       model_path: "./checkpoints/RLinf-Pi05-Polaris-droid_jointpos"
    actor:
      model:
-       model_path: "/path/to/pytorch/pi05_droid_jointpos_polaris"
+       model_path: "./checkpoints/RLinf-Pi05-Polaris-droid_jointpos"
 
 Running the Script
 ------------------
@@ -264,8 +190,15 @@ Running the Script
 
 PolaRiS currently supports the following training configurations:
 
-- **PPO Training**: ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``
-- **Evaluation**: ``examples/embodiment/config/polaris_eval_openpi.yaml``
+- **PPO Training**
+
+  - ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``
+  - ``examples/embodiment/config/polaris_train_ppo_openpi_pi0.yaml``
+
+- **Evaluation**
+
+  - ``examples/embodiment/config/polaris_eval_openpi.yaml``
+  - ``examples/embodiment/config/polaris_eval_openpi_pi0.yaml``
 
 Each task has an independent environment configuration file located under ``examples/embodiment/config/env/``:
 
@@ -316,7 +249,7 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 .. code-block:: yaml
 
    init_params:
-     open_loop_horizon: 15
+     open_loop_horizon: ${actor.model.num_action_chunks}
 
 ``open_loop_horizon`` controls the frequency of high-quality Gaussian Splatting rendering. During the execution of an action chunk, high-quality rendering is performed every ``open_loop_horizon`` steps, while intermediate steps use low-quality rendering to speed up the simulation.
 
@@ -324,7 +257,10 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 
 .. code-block:: bash
 
+   # pi05
    bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi
+   # pi0
+   bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi_pi0
 
 .. note::
 
@@ -339,7 +275,10 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 
 .. code-block:: bash
 
+   # pi05
    bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi
+   # pi0
+   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi0
 
 Visualization and Results
 -------------------------
