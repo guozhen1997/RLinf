@@ -160,7 +160,9 @@ Alternatively, you can modify ``init_params.dataset_path`` and ``init_params.usd
 Model Download
 --------------
 
-**1. Download Model**
+**Method 1: Download Pre-converted PyTorch Model (Recommended)**
+
+Pre-trained PyTorch models are available on HuggingFace, converted from the original JAX checkpoints.
 
 .. code:: bash
 
@@ -170,9 +172,63 @@ Model Download
    # π0 Polaris
    hf download RLinf/RLinf-Pi0-Polaris-droid_jointpos --local-dir ./checkpoints/RLinf-Pi0-Polaris-droid_jointpos
 
-**2. Configure Model Path**
+**Method 2: Download JAX Checkpoint and Convert**
 
-After downloading, set the model path in the YAML configuration file:
+PolaRiS provides model variants trained on the DROID dataset, stored in Google Cloud Storage (GCS). You need to download the JAX checkpoint and convert it to PyTorch format.
+
+**2.1 Download JAX Checkpoint**
+
+.. code:: bash
+
+   # π0.5 Polaris (Recommended)
+   gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi05_droid_jointpos_polaris /path/to/checkpoints/
+
+   # π0 Polaris
+   gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi0_droid_jointpos_polaris /path/to/checkpoints/
+
+**2.2 Convert to PyTorch Format**
+
+The downloaded JAX checkpoint needs to be converted to PyTorch format to be used in RLinf:
+
+.. code:: bash
+
+   cd path/to/polaris/third_party/openpi
+   GIT_LFS_SKIP_SMUDGE=1 uv sync
+   GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
+   source .venv/bin/activate
+
+   # π0.5 Polaris → PyTorch
+   python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+       --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
+       --config_name pi05_droid_jointpos_polaris \
+       --output_path /path/to/checkpoints/pi05_droid_jointpos_polaris_new
+   # Copy assets
+   cp -r /path/to/checkpoints/pi05_droid_jointpos_polaris/assets /path/to/checkpoints/pi05_droid_jointpos_polaris_new/
+
+   # π0 Polaris → PyTorch
+   python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+       --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
+       --config_name pi0_droid_jointpos_polaris \
+       --output_path /path/to/checkpoints/pi0_droid_jointpos_polaris_new
+   # Copy assets
+   cp -r /path/to/checkpoints/pi0_droid_jointpos_polaris/assets /path/to/checkpoints/pi0_droid_jointpos_polaris_new/
+
+The mapping between models and the ``config_name`` in YAML is as follows:
+
+.. list-table:: **Model Checkpoint to config_name Mapping**
+   :header-rows: 1
+   :widths: 30 30
+
+   * - Model
+     - RLinf YAML ``config_name``
+   * - π0.5 Polaris
+     - ``pi05_droid_polaris``
+   * - π0 Polaris
+     - ``pi0_droid_polaris``
+
+**3. Configure Model Path**
+
+After downloading or converting, set the model path in the YAML configuration file:
 
 .. code-block:: yaml
 

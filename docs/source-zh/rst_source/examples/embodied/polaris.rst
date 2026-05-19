@@ -172,7 +172,9 @@ PolaRiS 有两个数据集：一个用于评估，一个用于协同训练。
 模型下载
 ---------
 
-**1. 下载模型**
+**方式一：下载已转换的 PyTorch 模型（推荐）**
+
+预训练的 PyTorch 模型已上传至 HuggingFace，由原始 JAX checkpoint 转换而来。
 
 .. code:: bash
 
@@ -182,9 +184,63 @@ PolaRiS 有两个数据集：一个用于评估，一个用于协同训练。
    # π0 Polaris
    hf download RLinf/RLinf-Pi0-Polaris-droid_jointpos --local-dir ./checkpoints/RLinf-Pi0-Polaris-droid_jointpos
 
-**2. 配置模型路径**
+**方式二：下载 JAX Checkpoint 并转换**
 
-下载完成后，在 YAML 配置文件中设置模型路径：
+PolaRiS 提供了基于 DROID 数据集训练的模型变体，存储在 Google Cloud Storage (GCS) 上。你需要下载 JAX checkpoint 并转换为 PyTorch 格式。
+
+**2.1 下载 JAX Checkpoint**
+
+.. code:: bash
+
+   # π0.5 Polaris（推荐）
+   gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi05_droid_jointpos_polaris /path/to/checkpoints/
+
+   # π0 Polaris
+   gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi0_droid_jointpos_polaris /path/to/checkpoints/
+
+**2.2 转换为 PyTorch 格式**
+
+下载的 JAX checkpoint 需要转换为 PyTorch 格式才能在 RLinf 中使用：
+
+.. code:: bash
+
+   cd path/to/polaris/third_party/openpi
+   GIT_LFS_SKIP_SMUDGE=1 uv sync
+   GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
+   source .venv/bin/activate
+
+   # π0.5 Polaris → PyTorch
+   python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+       --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
+       --config_name pi05_droid_jointpos_polaris \
+       --output_path /path/to/checkpoints/pi05_droid_jointpos_polaris_new
+   # Copy assets
+   cp -r /path/to/checkpoints/pi05_droid_jointpos_polaris/assets /path/to/checkpoints/pi05_droid_jointpos_polaris_new/
+
+   # π0 Polaris → PyTorch
+   python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
+       --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
+       --config_name pi0_droid_jointpos_polaris \
+       --output_path /path/to/checkpoints/pi0_droid_jointpos_polaris_new
+   # Copy assets
+   cp -r /path/to/checkpoints/pi0_droid_jointpos_polaris/assets /path/to/checkpoints/pi0_droid_jointpos_polaris_new/
+
+模型与 YAML 中 ``config_name`` 的对应关系如下：
+
+.. list-table:: **模型 checkpoint 与 config_name 对应表**
+   :header-rows: 1
+   :widths: 30 30
+
+   * - 模型
+     - RLinf YAML 中的 ``config_name``
+   * - π0.5 Polaris
+     - ``pi05_droid_polaris``
+   * - π0 Polaris
+     - ``pi0_droid_polaris``
+
+**3. 配置模型路径**
+
+下载或转换完成后，在 YAML 配置文件中设置模型路径：
 
 .. code-block:: yaml
 
