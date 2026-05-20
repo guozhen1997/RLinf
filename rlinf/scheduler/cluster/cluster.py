@@ -12,17 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import atexit
-import io
 import logging
 import os
 import re
 import shlex
-import shutil
 import signal
-import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 from enum import Enum
@@ -102,15 +97,7 @@ class ClusterEnvVar(str, Enum):
         - Absolute path: repository root containing ``pyproject.toml`` and ``rlinf/``, or the ``rlinf`` package dir.
 
     Set explicitly when workers do not share a filesystem with the launch node.
-
-    Combine with ``RLINF_CODE_SYNC_FROM_GIT`` to ship only tracked files under ``rlinf``.
     """
-
-    CODE_SYNC_FROM_GIT = "CODE_SYNC_FROM_GIT"
-    """If ``1``/``true``, package ``rlinf`` via ``git archive HEAD:rlinf`` (tracked files only).
-
-    Omits git-ignored/untracked artifacts under ``rlinf/``. Requires ``git`` and a ``.git`` checkout under
-    the repository root. On failure falls back to zipping the local ``rlinf/`` tree as-is."""
 
 
 class PathEnvMergeMode(str, Enum):
@@ -141,7 +128,6 @@ class Cluster:
         ClusterEnvVar.EXT_MODULE: None,
         ClusterEnvVar.PATH_ENV_MERGE_MODE: PathEnvMergeMode.APPEND.value,
         ClusterEnvVar.CODE_WORKING_DIR: "0",
-        ClusterEnvVar.CODE_SYNC_FROM_GIT: None,
     }
     PATH_LIKE_ENV_VARS = {
         "PYTHONPATH",
@@ -392,86 +378,6 @@ class Cluster:
         )
 
     @classmethod
-    def _want_git_tracked_rlinf_archive(cls) -> bool:
-        raw = (
-            (
-                os.environ.get(
-                    cls.get_full_env_var_name(ClusterEnvVar.CODE_SYNC_FROM_GIT)
-                )
-                or ""
-            )
-            .strip()
-            .lower()
-        )
-        return raw in ("1", "true", "yes", "on")
-
-    @classmethod
-    def _maybe_stage_git_tracked_rlinf_py_modules_dir(
-        cls,
-        repo_root: Path,
-        rlinf_pkg: Path,
-        logger: logging.Logger,
-    ) -> Path:
-        """Return filesystem directory passed to Ray ``py_modules``."""
-        local_rlinf = rlinf_pkg.resolve()
-        if not cls._want_git_tracked_rlinf_archive():
-            return local_rlinf
-        if not (repo_root / ".git").exists():
-            logger.warning(
-                "%s requested but %s is not a git checkout; syncing the full local rlinf/ tree.",
-                cls.get_full_env_var_name(ClusterEnvVar.CODE_SYNC_FROM_GIT),
-                repo_root,
-            )
-            return local_rlinf
-        try:
-            proc = subprocess.run(
-                ["git", "-C", str(repo_root), "archive", "--format=tar", "HEAD:rlinf"],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            logger.warning(
-                "git executable not found; syncing the full local rlinf/ tree."
-            )
-            return local_rlinf
-        except subprocess.CalledProcessError as e:
-            err = e.stderr.decode(errors="ignore") if e.stderr else str(e)
-            logger.warning(
-                "git archive HEAD:rlinf failed (%s); syncing the full local rlinf/ tree.",
-                err[:512],
-            )
-            return local_rlinf
-
-        tmp = tempfile.mkdtemp(prefix="rlinf_ray_git_sync_")
-        rlinf_staged = Path(tmp) / "rlinf"
-        rlinf_staged.mkdir(parents=True)
-        try:
-            with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:") as archive:
-                archive.extractall(path=rlinf_staged)
-        except (tarfile.TarError, OSError) as e:
-            shutil.rmtree(tmp, ignore_errors=True)
-            logger.warning(
-                "failed to unpack git archive (%s); syncing the full local rlinf/ tree.",
-                e,
-            )
-            return local_rlinf
-
-        if not (rlinf_staged / "__init__.py").is_file():
-            shutil.rmtree(tmp, ignore_errors=True)
-            logger.warning(
-                "git archive produced an unexpected tree; syncing the full local rlinf/ tree."
-            )
-            return local_rlinf
-
-        tmp_ref = tmp
-        atexit.register(lambda: shutil.rmtree(tmp_ref, ignore_errors=True))
-        logger.info(
-            "Packaged rlinf via git archive HEAD:rlinf (tracked files match the index)."
-        )
-        return rlinf_staged.resolve()
-
-    @classmethod
     def _strip_sync_roots_from_pythonpath(
         cls,
         env_vars: dict[str, str],
@@ -500,7 +406,6 @@ class Cluster:
         cls,
     ) -> tuple[Optional[dict[str, Any]], tuple[str, ...]]:
         """Build Ray ``runtime_env`` with ``py_modules`` for the ``rlinf`` package only."""
-        log = logging.getLogger(cls.SYS_NAME)
         env_key = cls.get_full_env_var_name(ClusterEnvVar.CODE_WORKING_DIR)
         raw = (os.environ.get(env_key) or "").strip()
 
@@ -526,9 +431,7 @@ class Cluster:
                 raise FileNotFoundError(
                     f"rlinf package missing or invalid at {rlinf_pkg}."
                 )
-            py_mod_path = cls._maybe_stage_git_tracked_rlinf_py_modules_dir(
-                repo_root, rlinf_pkg, log
-            )
+            py_mod_path = rlinf_pkg.resolve()
             fragment: dict[str, Any] = {"py_modules": [str(py_mod_path)]}
             strip_roots = {
                 os.path.realpath(str(repo_root)),
@@ -542,9 +445,7 @@ class Cluster:
             raise FileNotFoundError(
                 f"rlinf package missing or invalid at {rlinf_pkg} (repo root {repo_root})."
             )
-        py_mod_path = cls._maybe_stage_git_tracked_rlinf_py_modules_dir(
-            repo_root, rlinf_pkg, log
-        )
+        py_mod_path = rlinf_pkg.resolve()
         fragment = {"py_modules": [str(py_mod_path)]}
         strip_roots = {
             os.path.realpath(str(repo_root)),
@@ -641,11 +542,9 @@ class Cluster:
                 py_mods = ray_init_kwargs["runtime_env"].get("py_modules") or ()
                 self._logger.info(
                     "%s Ray code sync is enabled (py_modules=%r); workers receive "
-                    "only the rlinf package from the launch node. Tracked-only "
-                    "(git index) payload: set %s=1. Disable with %s=0.",
+                    "only the rlinf package from the launch node. Disable with %s=0.",
                     Cluster.SYS_NAME,
                     tuple(py_mods),
-                    Cluster.get_full_env_var_name(ClusterEnvVar.CODE_SYNC_FROM_GIT),
                     Cluster.get_full_env_var_name(ClusterEnvVar.CODE_WORKING_DIR),
                 )
             ray.init(**ray_init_kwargs)
@@ -678,7 +577,7 @@ class Cluster:
             )
             time.sleep(1)
 
-        # Get node info (probe snapshot; once NodeManager is up, _nodes / _node_groups read from it).
+        # Get node info
         self._node_probe = NodeProbe(self._num_nodes, self._cluster_cfg)
         self._probed_nodes = self._node_probe.nodes
         self._probed_node_groups = self._node_probe.node_groups
@@ -721,7 +620,6 @@ class Cluster:
                 self._nodes,
                 self._node_groups,
                 self._cluster_cfg,
-                self._num_nodes,
             )
             self._device_lock_manager = self._launch_manager_actor(
                 DeviceLockManager, manager_node, runtime_env
@@ -833,24 +731,13 @@ class Cluster:
         return os.environ.get(Cluster.get_full_env_var_name(env_var), default)
 
     @property
-    def num_alive_nodes(self):
-        """Get the number of alive nodes in the cluster."""
-        nodes, _, _ = self._get_node_state_from_manager()
-        return sum(1 for node in nodes if node.alive)
-
-    @property
     def num_nodes(self):
-        """Get the number of nodes in the cluster. Alive and dead."""
-        return len(self._nodes)
+        """Get the number of nodes in the cluster."""
+        return self._num_nodes
 
     @property
     def num_accelerators(self):
         """Get the number of accelerators in the cluster."""
-        return sum(node.num_accelerators for node in self._nodes if node.alive)
-
-    @property
-    def accelerator_capacity(self) -> int:
-        """Get the total accelerator slots reserved by stable node ranks."""
         return sum(node.num_accelerators for node in self._nodes)
 
     @property
@@ -869,10 +756,6 @@ class Cluster:
             )
             node_start_accel_rank += node.num_accelerators
         return node_accel_ranks
-
-    def get_node_accelerator_ranks(self, node_rank: int) -> list[int]:
-        """Get the stable global accelerator ranks for one node rank."""
-        return self.accelerator_ranks[node_rank]
 
     @staticmethod
     def get_alive_nodes():
