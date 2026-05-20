@@ -556,8 +556,8 @@ class DreamZeroLeRobotDataset(Dataset):
             and self._info.get("video_path")
             and self._root.exists()
         )
-        self._video_backend = "torchcodec"
-        if self.sampling_mode == "sharded" and not self.lazy_load and not self._use_image_parquet_storage():
+        self._video_backend = "pyav" # "torchcodec"
+        if self.sampling_mode == "sharded" and not self.lazy_load and not self._use_image_parquet_tree:
             raise ValueError(
                 "DreamZeroLeRobotDataset sampling_mode='sharded' requires lazy_load=True "
                 "or a v2 image-parquet layout (no mp4 video_path)."
@@ -573,7 +573,8 @@ class DreamZeroLeRobotDataset(Dataset):
         else:
             self._dense_temporal = None
             self._sharded_cfg = ShardedTemporalConfig(
-                max_temporal_blocks=self.max_temporal_blocks
+                max_temporal_blocks=self.max_temporal_blocks,
+                action_horizon=self.action_horizon,
             )
         if self._use_lazy_video_tree:
             self._init_lazy_map_style(pq_cache_max_episodes, video_tolerance_s)
@@ -1191,14 +1192,14 @@ class DreamZeroLeRobotDataset(Dataset):
         n_st, sd = state_arr.shape
         if self.sampling_mode == "sharded":
             assert self._sharded_cfg is not None
-            chunk_size = self._sharded_cfg.action_subchunk_size
-            if t_act > 0 and t_act % chunk_size == 0 and n_st > 0:
+            action_horizon = self._sharded_cfg.action_horizon
+            if t_act > 0 and t_act % action_horizon == 0 and n_st > 0:
                 v = value.astype(np.float32, copy=True)
                 d_ref = min(ad, sd)
-                num_macro_chunks = t_act // chunk_size
+                num_macro_chunks = t_act // action_horizon
                 for c in range(num_macro_chunks):
-                    rs = c * chunk_size
-                    re = rs + chunk_size
+                    rs = c * action_horizon
+                    re = rs + action_horizon
                     anchor_idx = min(c * self.state_horizon, n_st - 1)
                     ref = state_arr[anchor_idx : anchor_idx + 1, :d_ref]
                     v[rs:re, :d_ref] = value[rs:re, :d_ref].astype(np.float32) - ref
@@ -1322,7 +1323,8 @@ def _format_collate_text(
     from groot.vla.data.schema import EmbodimentTag
 
     prefix = "A multi-view video shows that a robot "
-    if embodiment_id == embodiment_tag_mapping[EmbodimentTag.OXE_DROID.value]:
+    tag = {v: k for k, v in embodiment_tag_mapping.items()}.get(embodiment_id)
+    if tag == EmbodimentTag.OXE_DROID.value:
         layout = (
             " The video is split into three views: The top view shows the camera view "
             "from the robot's wrist, the bottom-left view shows the camera view from the "
@@ -1330,13 +1332,16 @@ def _format_collate_text(
             "the right exterior camera. During training, one of the two bottom exterior "
             "views may be a black screen (dropped view). The robot "
         )
-    elif embodiment_id == embodiment_tag_mapping[EmbodimentTag.LIBERO_SIM.value]:
+    elif tag == EmbodimentTag.LIBERO_SIM.value:
         layout = (
             " The video is split into two horizontal views: the left view shows the "
             "exterior camera and the right view shows the wrist camera. The robot "
         )
     else:
-        raise ValueError(f"Embodiment ID {embodiment_id} not supported for collate.")
+        raise ValueError(
+            f"Embodiment ID {embodiment_id} not supported for collate "
+            f"(known tags: {list(embodiment_tag_mapping)})."
+        )
     return prefix + task + layout + task
 
 

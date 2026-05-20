@@ -8,6 +8,8 @@ image_encoder_pretrained_path: null
 text_encoder_pretrained_path: null
 vae_pretrained_path: null
 
+metadata_json_path: null
+
 action_dim: 32
 
 state_horizon: 1
@@ -15,8 +17,13 @@ action_horizon: 24
 num_chunks: 4
 num_video_frames: 33
 
+num_action_per_block: 24
+
 max_action_dim: 32
 max_state_dim: 64
+
+target_video_height: 176
+target_video_width: 320
 
 action_head_cfg:
   _convert_: object
@@ -47,7 +54,7 @@ action_head_cfg:
       in_dim: 48
       max_chunk_size: 4
       model_type: ti2v
-      num_action_per_block: 24
+      num_action_per_block: ${actor.model.num_action_per_block}
       num_frame_per_block: 2
       num_heads: 24
       num_layers: 30
@@ -84,8 +91,8 @@ action_head_cfg:
       _convert_: object
       _target_: groot.vla.model.dreamzero.modules.wan_video_text_encoder.WanTextEncoder
       text_encoder_pretrained_path: ${actor.model.text_encoder_pretrained_path}
-    target_video_height: 176
-    target_video_width: 320
+    target_video_height: ${actor.model.target_video_height}
+    target_video_width: ${actor.model.target_video_width}
     tile_size_height: 34
     tile_size_width: 34
     tile_stride_height: 18
@@ -118,10 +125,3 @@ architectures:
 - VLA
 backbone_cfg:
   _target_: groot.vla.model.dreamzero.backbone.identity.IdentityBackbone
-hidden_size: 0
-model_dtype: float32
-model_type: vla
-torch_dtype: bfloat16
-transformers_version: 4.51.3
-
-

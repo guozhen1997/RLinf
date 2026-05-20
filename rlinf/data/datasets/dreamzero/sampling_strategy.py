@@ -41,7 +41,7 @@ class ShardedTemporalConfig:
 
     max_temporal_blocks: int
     macro_stride: int = 24
-    action_subchunk_size: int = 24
+    action_horizon: int = 24
     video_in_chunk_offsets: tuple[int, ...] = (0, 3, 6, 9, 12, 15, 18, 21)
 
 
@@ -147,18 +147,18 @@ def sample_action_indices(
         return np.array([], dtype=np.int64)
 
     target_language = language_annotations[first_idx]
-    max_frames = cfg.action_subchunk_size * cfg.max_temporal_blocks
-    per_step_offsets = list(range(cfg.action_subchunk_size))
+    max_frames = cfg.action_horizon * cfg.max_temporal_blocks
+    per_step_offsets = list(range(cfg.action_horizon))
     sampled_list: list[int] = []
 
     def add_step_set(anchor_index: int) -> None:
-        if anchor_index < 0 or anchor_index + cfg.action_subchunk_size >= trajectory_length:
+        if anchor_index < 0 or anchor_index + cfg.action_horizon >= trajectory_length:
             return
-        if len(sampled_list) + cfg.action_subchunk_size > max_frames:
+        if len(sampled_list) + cfg.action_horizon > max_frames:
             return
         if (
             target_num_chunks is not None
-            and len(sampled_list) // cfg.action_subchunk_size >= target_num_chunks
+            and len(sampled_list) // cfg.action_horizon >= target_num_chunks
         ):
             return
         for offset in per_step_offsets:
@@ -170,7 +170,7 @@ def sample_action_indices(
     back_done = False
     fwd_done = False
     while len(sampled_list) < max_frames and (not back_done or not fwd_done):
-        if target_num_chunks is not None and len(sampled_list) // cfg.action_subchunk_size >= target_num_chunks:
+        if target_num_chunks is not None and len(sampled_list) // cfg.action_horizon >= target_num_chunks:
             break
         if not back_done:
             back_anchor = first_idx - cfg.macro_stride * step
@@ -197,7 +197,7 @@ def sample_action_indices(
 
     unique_sorted = np.array(sorted(set(sampled_list)), dtype=np.int64)
     capped_size = min(unique_sorted.size, max_frames)
-    divisible_size = (capped_size // cfg.action_subchunk_size) * cfg.action_subchunk_size
+    divisible_size = (capped_size // cfg.action_horizon) * cfg.action_horizon
     return unique_sorted[:divisible_size]
 
 
@@ -297,7 +297,11 @@ def require_sharded_temporal_indices(
     *,
     episode_index: int | None = None,
 ) -> TemporalIndices:
-    """Sharded sampling; raises :class:`EmptyShardedSampleError` when indices are empty."""
+    """Sharded sampling; raises :class:`EmptyShardedSampleError` when indices are empty.
+
+    Also rejects partial macro windows (``num_video_chunks < max_temporal_blocks``) so
+    collated ``state`` / ``action`` / ``images`` tensors stay batch-consistent.
+    """
     temporal = sample_temporal_indices(
         frame_in_ep, language_annotations, ep_len, cfg
     )
@@ -306,6 +310,28 @@ def require_sharded_temporal_indices(
         raise EmptyShardedSampleError(
             f"Empty sharded temporal indices at frame {frame_in_ep} "
             f"episode {ep} len {ep_len}"
+        )
+    if temporal.num_video_chunks != cfg.max_temporal_blocks:
+        ep = episode_index if episode_index is not None else "?"
+        raise EmptyShardedSampleError(
+            f"Partial sharded temporal window at frame {frame_in_ep} "
+            f"episode {ep} len {ep_len}: num_video_chunks="
+            f"{temporal.num_video_chunks}, expected {cfg.max_temporal_blocks}"
+        )
+    expected_action = cfg.max_temporal_blocks * cfg.action_horizon
+    if temporal.action.size != expected_action:
+        ep = episode_index if episode_index is not None else "?"
+        raise EmptyShardedSampleError(
+            f"Inconsistent sharded action span at frame {frame_in_ep} "
+            f"episode {ep}: action.size={temporal.action.size}, "
+            f"expected {expected_action}"
+        )
+    if temporal.state.size != cfg.max_temporal_blocks:
+        ep = episode_index if episode_index is not None else "?"
+        raise EmptyShardedSampleError(
+            f"Inconsistent sharded state span at frame {frame_in_ep} "
+            f"episode {ep}: state.size={temporal.state.size}, "
+            f"expected {cfg.max_temporal_blocks}"
         )
     return temporal
 
