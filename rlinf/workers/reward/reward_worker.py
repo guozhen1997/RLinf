@@ -417,6 +417,7 @@ class EmbodiedRewardWorker(Worker):
             batch_size=batch_size,
             src_world_size=self.placement.get_world_size("reward"),
             dst_world_size=self.placement.get_world_size("env"),
+            split_size=self.placement.get_world_size("env"),
         )
 
     def _setup_dst_ranks(self, batch_size: int) -> list[tuple[int, int]]:

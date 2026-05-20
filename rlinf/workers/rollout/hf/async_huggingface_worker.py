@@ -76,9 +76,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         metric_channel: Channel,
     ):
         if self.env_decoupled_mode:
-            if self._background_weight_sync_active:
-                await self._poll_background_weight_sync()
-            await self.wait_if_stale()
             await self.decoupled_generate_one_epoch(input_channel, output_channel)
         else:
             while True:
@@ -369,8 +366,11 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
     async def decoupled_generate_one_epoch(
         self, input_channel: Channel, output_channel: Channel
     ):
-        self.update_dagger_beta()
         while True:
+            self.update_dagger_beta()
+            if self._background_weight_sync_active:
+                await self._poll_background_weight_sync()
+            await self.wait_if_stale()
             env_output = await self.recv_env_output_from_channel(input_channel)
             actions, result = self.predict(env_output["obs"])
             save_flags = None

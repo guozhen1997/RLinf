@@ -130,11 +130,18 @@ class MultiStepRolloutWorker(Worker):
         env_mode = self.cfg.env.train.get("env_mode", None)
         assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
         self.env_decoupled_mode = env_mode == "decoupled"
+        self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
         if self.env_decoupled_mode:
-            if self._component_placement.get_world_size("rollout") > 1:
+            if self.placement.get_world_size("rollout") > 1:
                 # when the rollout worker num is greater than 1, the env worker num should be greater than 1
-                assert self._component_placement.get_world_size("env") > 1, (
+                assert self.placement.get_world_size("env") > 1, (
                     "when rollout worker num is greater than 1, env world size should be greater than 1 in decoupled mode, but got 1"
+                )
+            if self.rollout_queue_size > 0:
+                assert self.placement.get_world_size(
+                    "env"
+                ) > self.placement.get_world_size("rollout"), (
+                    "when rollout queue size is greater than 0, env world size should be greater than rollout world size in decoupled mode, but got 1"
                 )
             self.batch_size_map = {
                 "train": self._decoupled_env_mode_setup_batch_size(
@@ -247,6 +254,8 @@ class MultiStepRolloutWorker(Worker):
             batch_size=batch_size,
             src_world_size=self.placement.get_world_size("rollout"),
             dst_world_size=self.placement.get_world_size("env"),
+            split_size=self.placement.get_world_size("env"),
+            queue_size=self.rollout_queue_size,
         )
 
     def _setup_dst_ranks(self, batch_size: int) -> list[tuple[int, int]]:

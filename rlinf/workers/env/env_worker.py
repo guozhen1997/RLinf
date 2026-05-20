@@ -127,13 +127,14 @@ class EnvWorker(Worker):
         env_mode = self.cfg.env.train.get("env_mode", None)
         assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
         self.env_decoupled_mode = env_mode == "decoupled"
+        self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
         if self.env_decoupled_mode:
+            self.batch_size_map = self._setup_decoupled_env_mode_batch_size()
             self.log_info("Env worker initialized with decoupled mode")
             self.log_info(
                 f"decoupled model env worker initialized with batch_size_map: {self.batch_size_map}"
             )
 
-            self.batch_size_map = self._setup_decoupled_env_mode_batch_size()
             self.dst_rank_map = {}
             self.src_rank_map = {}
         else:
@@ -299,6 +300,8 @@ class EnvWorker(Worker):
                     self.cfg.env.train.total_num_envs // self.stage_num,
                     self._component_placement.get_world_size("env"),
                     self._component_placement.get_world_size("rollout"),
+                    self._component_placement.get_world_size("env"),
+                    self.rollout_queue_size,
                 ),
             }
 
@@ -314,6 +317,7 @@ class EnvWorker(Worker):
                             dst_world_size=self._component_placement.get_world_size(
                                 "reward"
                             ),
+                            split_size=self._component_placement.get_world_size("env"),
                         ),
                     }
                 )
@@ -330,6 +334,8 @@ class EnvWorker(Worker):
                             dst_world_size=self._component_placement.get_world_size(
                                 "rollout"
                             ),
+                            split_size=self._component_placement.get_world_size("env"),
+                            queue_size=self.rollout_queue_size,
                         ),
                     }
                 )
