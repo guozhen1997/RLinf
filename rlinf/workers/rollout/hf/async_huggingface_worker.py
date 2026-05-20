@@ -39,6 +39,11 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             // self._world_size
             // self.num_pipeline_stages
         )
+        # set the decoupled rollout worker sync weight time
+        self.sync_rollout_weight_time = (
+            self.num_pipeline_stages * self.n_train_chunk_steps * self.rollout_epoch
+        )
+
         assert not self.enable_offload, (
             "Offload not supported in AsyncMultiStepRolloutWorker"
         )
@@ -366,11 +371,15 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
     async def decoupled_generate_one_epoch(
         self, input_channel: Channel, output_channel: Channel
     ):
+        self.update_dagger_beta()
+        decoupled_generate_time = 1
         while True:
-            self.update_dagger_beta()
-            if self._background_weight_sync_active:
-                await self._poll_background_weight_sync()
-            await self.wait_if_stale()
+            if decoupled_generate_time % self.sync_rollout_weight_time == 0:
+                self.update_dagger_beta()
+                if self._background_weight_sync_active:
+                    await self._poll_background_weight_sync()
+                await self.wait_if_stale()
+                decoupled_generate_time = decoupled_generate_time + 1
             env_output = await self.recv_env_output_from_channel(input_channel)
             actions, result = self.predict(env_output["obs"])
             save_flags = None
