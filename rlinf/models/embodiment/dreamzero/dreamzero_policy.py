@@ -13,64 +13,16 @@
 # limitations under the License.
 
 import logging
-from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import cv2
 import numpy as np
 import torch
-from groot.vla.data.transform import ComposedModalityTransform
-from groot.vla.model.dreamzero.base_vla import VLA, VLAConfig
+from groot.vla.model.dreamzero.base_vla import VLA
 from tianshou.data import Batch
-from transformers.configuration_utils import PretrainedConfig
 
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-
-
-@dataclass
-class DreamZeroConfig(VLAConfig):
-    model_type = "dreamzero"
-    backbone_cfg: PretrainedConfig = field(
-        default=None, metadata={"help": "Backbone configuration."}
-    )
-
-    action_head_cfg: PretrainedConfig = field(
-        default=None, metadata={"help": "Action head configuration."}
-    )
-
-    action_horizon: int = field(default=None, metadata={"help": "Action horizon."})
-
-    action_dim: int = field(default=None, metadata={"help": "Action dimension."})
-    compute_dtype: str = field(default="float32", metadata={"help": "Compute dtype."})
-
-    env_action_dim: int = field(
-        default=None, metadata={"help": "Environment action dimension."}
-    )
-    num_action_chunks: int = field(
-        default=16, metadata={"help": "Number of action chunks."}
-    )
-
-    relative_action: bool = field(default=False, metadata={"help": "Relative action."})
-    relative_action_per_horizon: bool = field(
-        default=False, metadata={"help": "Relative action per horizon."}
-    )
-    relative_action_keys: list = field(
-        default_factory=list, metadata={"help": "Relative action keys."}
-    )
-
-    data_transforms: ComposedModalityTransform = field(
-        default=None,
-        metadata={
-            "help": "Transforming data modalities, e.g. video frame augmentation or action normalization."
-        },
-    )
-
-    gradient_checkpointing: bool = False
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+from rlinf.models.embodiment.dreamzero.dreamzero_config import DreamZeroConfig
 
 
 class DreamZeroPolicy(VLA, BasePolicy):

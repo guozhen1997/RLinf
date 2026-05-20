@@ -17,16 +17,19 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from groot.vla.data.schema import DatasetMetadata
 from groot.vla.data.transform import ComposedModalityTransform
-from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from safetensors.torch import load_file
 
-from rlinf.models.embodiment.dreamzero.dreamzero_policy import (
-    DreamZeroConfig,
-    DreamZeroPolicy,
+from rlinf.models.embodiment.dreamzero.data_transforms import (
+    build_dreamzero_composed_transform,
+    load_dreamzero_dataset_metadata,
 )
+from rlinf.models.embodiment.dreamzero.dreamzero_config import (
+    DreamZeroConfig,
+    load_dreamzero_config_dict,
+)
+from rlinf.models.embodiment.dreamzero.dreamzero_policy import DreamZeroPolicy
 from rlinf.utils.logging import get_logger
 
 
@@ -89,33 +92,26 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         "rlinf.models.embodiment.dreamzero.patch.wan_causal_model_forward_train._forward_train",
     )
     Patcher.add_patch(
-        "groot.vla.model.dreamzero.transform.dreamzero_cotrain.collate",
-        "rlinf.models.embodiment.dreamzero.patch.dreamzero_cotrain.collate",
-    )
-    Patcher.add_patch(
         "groot.vla.model.dreamzero.transform.dreamzero_cotrain.DreamTransform",
         "rlinf.models.embodiment.dreamzero.patch.dreamzero_cotrain.DreamTransform",
     )
     Patcher.apply()
 
-    model_path = Path(cfg.get("model_path"))
-    if not model_path.exists():
-        raise FileNotFoundError(f"DreamZero model_path does not exist: {model_path}")
+    model_path = cfg.get("model_path", None)
 
     tokenizer_path = cfg.get("tokenizer_path", "google/umt5-xxl")
 
-    config_path = model_path / "config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config not found: {config_path}")
-
-    with open(config_path) as f:
-        config_dict = json.load(f)
+    config_dict = load_dreamzero_config_dict(cfg)
 
     dreamzero_config = DreamZeroConfig(**config_dict)
 
-    st = model_path / "model.safetensors"
-    st_index = model_path / "model.safetensors.index.json"
-    has_full_model_weights = st.exists() or st_index.exists()
+    has_full_model_weights = False
+    st = st_index = None
+    if model_path is not None:
+        ckpt = Path(model_path)
+        st = ckpt / "model.safetensors"
+        st_index = ckpt / "model.safetensors.index.json"
+        has_full_model_weights = st.exists() or st_index.exists()
 
     # Disable defer_lora_injection for immediate loading
     if "config" in dreamzero_config.action_head_cfg and isinstance(
@@ -123,7 +119,7 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     ):
         dreamzero_config.action_head_cfg["config"]["defer_lora_injection"] = False
         # If full DreamZero safetensors are absent, fall back to component loading from
-        # WAN paths in config.json (diffusion_model_pretrained_path / text / image / vae).
+        # WAN paths in checkpoint config or preset YAML (diffusion / text / image / vae).
         dreamzero_config.action_head_cfg["config"]["skip_component_loading"] = (
             has_full_model_weights
         )
@@ -131,41 +127,32 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     dreamzero_config.env_action_dim = cfg.get("action_dim", 7)
     dreamzero_config.gradient_checkpointing = cfg.get("gradient_checkpointing", False)
 
-    exp_cfg_dir = model_path / "experiment_cfg"
-    metadata_path = exp_cfg_dir / "metadata.json"
-    with open(metadata_path, "r") as f:
-        metadatas = json.load(f)
-
-    embodiment_tag = cfg.get("embodiment_tag", "libero_sim")
-    metadata = DatasetMetadata.model_validate(metadatas[embodiment_tag])
-
-    train_cfg = OmegaConf.load(exp_cfg_dir / "conf.yaml")
-    train_cfg.transforms[embodiment_tag].transforms[-1].tokenizer_path = tokenizer_path
-    data_transforms = instantiate(train_cfg.transforms[embodiment_tag])
+    metadata = load_dreamzero_dataset_metadata(cfg)
+    data_transforms = build_dreamzero_composed_transform(cfg, tokenizer_path)
     assert isinstance(data_transforms, ComposedModalityTransform), f"{data_transforms=}"
     data_transforms.set_metadata(metadata)
     data_transforms.eval()
 
     dreamzero_config.data_transforms = data_transforms
-    dreamzero_config.relative_action = train_cfg.get("relative_action", False)
-    dreamzero_config.relative_action_per_horizon = train_cfg.get(
-        "relative_action_per_horizon", False
+    dreamzero_config.relative_action = bool(cfg.get("relative_action", False))
+    dreamzero_config.relative_action_per_horizon = bool(
+        cfg.get("relative_action_per_horizon", False)
     )
-    dreamzero_config.relative_action_keys = train_cfg.get("relative_action_keys", [])
+    dreamzero_config.relative_action_keys = list(cfg.get("relative_action_keys") or [])
 
     model = DreamZeroPolicy(
         config=dreamzero_config,
     )
 
     # Load DreamZero full weights if available; otherwise keep component-initialized model.
-    if has_full_model_weights:
+    if has_full_model_weights and model_path is not None:
         state_dict = {}
-        if st_index.exists():
+        if st_index is not None and st_index.exists():
             with open(st_index, "r") as f:
                 index = json.load(f)
             for shard_file in sorted(set(index["weight_map"].values())):
                 state_dict.update(load_file(str(model_path / shard_file)))
-        elif st.exists():
+        elif st is not None and st.exists():
             state_dict.update(load_file(str(st)))
         if any(".base_layer." in k for k in state_dict):
             state_dict = {
@@ -173,10 +160,11 @@ def get_model(cfg: DictConfig, torch_dtype=None):
             }
         model.load_state_dict(state_dict, strict=False)
     else:
+        loc = str(model_path) if model_path is not None else "model_path=null"
         get_logger().warning(
             "No model.safetensors under %s; initializing DreamZero from component weights "
-            "configured in config.json (WAN diffusion/text/image/vae paths).",
-            model_path,
+            "in config (set diffusion/text/image/vae paths in checkpoint config or preset).",
+            loc,
         )
     if hasattr(model, "action_head"):
         ah = model.action_head

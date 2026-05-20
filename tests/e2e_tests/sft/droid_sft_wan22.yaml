@@ -43,8 +43,6 @@ actor:
   micro_batch_size: 1
   global_batch_size: 8
   seed: 42
-  dataloader_num_workers: 1
-  enable_offload: False
 
   model:
     model_type: "dreamzero"
@@ -52,26 +50,16 @@ actor:
     model_path: /workspace/dataset/DreamZero/dreamzero-wan-22
     tokenizer_path: /workspace/dataset/DreamZero/umt5-xxl
     max_seq_len: 512
-    # Shared DreamZero dims (also match DreamZero-DROID checkpoint config).
-    dreamzero_max_action_dim: 32
-    dreamzero_max_state_dim: 64
-    # Unified temporal knobs (branching by embodiment_tag below):
-    dreamzero_action_horizon: 24
-    dreamzero_num_chunks: 4
-    dreamzero_num_video_frames: 33
+    # Same temporal keys as ``build_dreamzero_composed_transform`` / ``dreamzero_config``.
+    action_horizon: 24
+    num_chunks: 4
+    num_video_frames: 33
     relative_action_keys:
       - joint_position
-    cfg_mode: false
-    advantage_parquet:
-    unconditional_prob: 0.3
-    action_loss_scale: 1.0
-    pretrained_model_path: null
-    add_value_head: false
     is_lora: False
     embodiment_tag: "oxe_droid"
     relative_action: true
     relative_action_per_horizon: false
-
     load_to_device: False
 
   optim:

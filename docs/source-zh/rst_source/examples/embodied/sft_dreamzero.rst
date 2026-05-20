@@ -66,15 +66,32 @@ DreamZero 监督微调训练
 模型与权重准备
 ----------------
 
+Hydra 通过 ``defaults`` 组装 ``actor.model``（例如 ``libero_sft_dreamzero_5b.yaml`` 中的 ``model/dreamzero_5b@actor.model``），训练配置可直接覆盖 ``actor.model`` 下任意字段。
+
+**策略架构**
+
+- ``actor.model.model_path`` **已设置**：读取 ``<model_path>/config.json``（``actor.model`` 上其余架构字段不参与策略配置，并会打 warning）。
+- ``actor.model.model_path`` 为 **``null``**：使用 Hydra 解析后的 ``actor.model``；以下路径必须非空：``tokenizer_path``、``diffusion_model_pretrained_path``、``image_encoder_pretrained_path``、``text_encoder_pretrained_path``、``vae_pretrained_path``。
+
+``examples/sft/config/model/`` 下的预设（如 ``dreamzero_5b.yaml``）通过 Hydra ``defaults`` 引入，**没有**单独的 ``dreamzero_*`` 覆盖键。
+
+数据变换链在 Python 中按 ``embodiment_tag`` 组装；分辨率、``DreamTransform`` 的 ``state_horizon`` / ``action_horizon``
+等可通过 ``actor.model`` 上的 ``video_*``、``state_horizon`` / ``action_horizon``、``max_state_dim`` 等字段覆盖（见 ``data_transforms/__init__.py``）。
+SFT 数据加载器默认使用与 Groot **sharded** 一致的时间采样（``data.sampling_mode: sharded``、``data.max_temporal_blocks``）；``action_horizon`` 仅用于 ``DreamTransform`` / WAN。设 ``data.sampling_mode: dense`` 可恢复旧版连续窗口（``action_horizon * num_chunks``）。
+
+统计量来自数据集生成的 metadata.json，通过 ``metadata_json_path`` 指定路径，
+或放在 ``model_path/experiment_cfg/metadata.json``（按 ``embodiment_tag`` 键索引）。
+
 WAN2.1 路径（常规）
 ~~~~~~~~~~~~~~~~~~~~
 
-典型做法：使用 DreamZero 提供的模型目录作为 ``model_path``，目录下通常包含：
+若使用 **完整** DreamZero checkpoint 目录（例如官方发布目录），将 ``model_path`` 指向该目录。目录中通常包含：
 
 - ``config.json``
-- ``experiment_cfg/conf.yaml``
-- ``experiment_cfg/metadata.json``
-- （可选）``model.safetensors`` 或分片 safetensors
+- ``experiment_cfg/metadata.json``（数据集统计；RLinf **不**读取 ``conf.yaml``）
+- ``model.safetensors``（或分片 safetensors）
+
+设置 ``model_path`` 时，RLinf 从 ``config.json`` 读取 **config**，从 ``experiment_cfg/metadata.json`` 读取 **metadata**（若未设置 ``metadata_json_path``）。**数据变换**仍由 Python 按 ``embodiment_tag`` 组装。
 
 示例：
 
@@ -96,9 +113,11 @@ WAN2.2 训练通常需要下列组件权重：
 - WAN2.1 的 CLIP 图像编码器（WAN2.2-TI2V-5B 不含该文件）
 - tokenizer（umt5-xxl）
 
+无论 ``config.json`` 来自 checkpoint 还是 RLinf 预设/覆盖，**架构**需与权重一致，例如：
+
 - ``diffusion_model_cfg``：``model_type=ti2v``、``in_dim=48``、``out_dim=48``、``frame_seqlen=50`` 等
 - ``vae_cfg``：``WanVideoVAE38``
-- ``image_encoder_pretrained_path``：指向 WAN2.1 CLIP 权重
+- ``image_encoder_pretrained_path``：加载 WAN 组件时指向 WAN2.1 CLIP 权重
 
 
 关键配置说明（DreamZero）
@@ -107,14 +126,18 @@ WAN2.2 训练通常需要下列组件权重：
 以下字段在 DreamZero SFT 中最关键：
 
 - ``actor.model.model_type``：固定 ``dreamzero``
-- ``actor.model.model_path``：模型目录（读取 ``config.json`` 与 ``experiment_cfg``）
+- ``actor.model.model_path``：checkpoint 目录（``null`` 则仅用 Hydra ``actor.model``）。已设置时从该路径读 ``config.json``；metadata 来自 ``metadata_json_path`` 或 ``experiment_cfg/metadata.json``。**数据变换链**始终由 Python 按 ``embodiment_tag`` 组装（见 ``data_transforms/__init__.py``）。
 - ``actor.model.tokenizer_path``：文本 tokenizer 路径
 - ``actor.model.embodiment_tag``："oxe_droid" 或 "libero_sim"
-- ``actor.model.dreamzero_action_horizon``：动作步长（DROID 常见 24）
-- ``actor.model.dreamzero_num_chunks``：chunk 数（如 4）
-- ``actor.model.dreamzero_num_video_frames``：视频帧数（如 33）
+- ``data.sampling_mode``：``sharded``（与 Groot ``lerobot_sharded`` 一致的语言边界多锚点采样）或 ``dense``（旧版连续窗口）。
+- ``data.max_temporal_blocks``：宏观时间块数（可选，默认 **4**，与常见 checkpoint 一致；官方 Groot DROID 数据配方为 5 时可显式覆盖）。
+- ``actor.model.action_horizon``：仅用于 **DreamTransform / WAN 每块**（LIBERO 16，DROID 24）。sharded 数据集动作长度通常为 ``24 * max_temporal_blocks``（如 96），不是 ``action_horizon * num_chunks``。
+- ``actor.model.num_chunks``：旧版 dense 模式别名；sharded 下与 ``max_temporal_blocks`` 不一致时会被忽略。
+- ``actor.model.state_horizon``：每个样本的状态行数（通常为 1，每个宏观锚点一行 state）。
+- ``actor.model.num_video_frames``：仅在 ``data.sampling_mode: dense`` 时使用（sharded 约 ``8 * data.max_temporal_blocks + 1`` 帧，如 33）。
+- ``data.sharded_resample_attempts``：sharded 采样为空时在 map-style dataloader 中的重试次数。
+- ``actor.model.droid_view_height`` / ``droid_view_width``：DROID 每路 resize 目标（可选）
 - ``actor.model.relative_action``：是否使用相对动作
-- ``actor.dataloader_num_workers``：数据线程数
 - ``actor.fsdp_config``：FSDP 训练策略
 
 兼容 WAN2.1/WAN2.2 的数据尺寸建议：
@@ -167,7 +190,7 @@ WAN2.2 训练通常需要下列组件权重：
 
 2. **WAN2.2 维度不匹配**
 
-- 检查 ``config.json`` 中 ``diffusion_model_cfg`` 是否为 WAN2.2 参数
+- 检查最终生效配置（``model_path/config.json`` 或 Hydra ``actor.model``）里 ``diffusion_model_cfg`` 是否为 WAN2.2 参数
 - 检查 ``vae_cfg`` 是否使用 ``WanVideoVAE38``
 
 3. **action_loss 异常偏高**

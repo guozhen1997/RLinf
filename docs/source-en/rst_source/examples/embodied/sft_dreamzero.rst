@@ -88,15 +88,42 @@ LeRobot / OXE DROID
 Model and weight preparation
 ----------------------------
 
+Hydra composes ``actor.model`` from defaults (for example ``model/dreamzero_5b@actor.model`` in
+``libero_sft_dreamzero_5b.yaml``). Training configs can override any field on ``actor.model``.
+
+**Policy architecture**
+
+- If ``actor.model.model_path`` is set: load ``<model_path>/config.json`` (other architecture fields on
+  ``actor.model`` are ignored for the policy config; a warning is logged).
+- If ``actor.model.model_path`` is ``null``: use the resolved Hydra ``actor.model`` dict. These paths must be
+  non-null: ``tokenizer_path``, ``diffusion_model_pretrained_path``, ``image_encoder_pretrained_path``,
+  ``text_encoder_pretrained_path``, ``vae_pretrained_path``.
+
+Preset files under ``examples/sft/config/model/`` (e.g. ``dreamzero_5b.yaml``) are included via Hydra
+``defaults``; they are not selected by separate ``dreamzero_*`` override keys.
+
+Data transforms are constructed in Python from ``embodiment_tag``; optional numeric overrides live under
+``video_*``, ``state_horizon``, ``action_horizon``, ``max_state_dim``, ``max_action_dim``, ``max_seq_len``, etc. on ``actor.model``
+(see ``data_transforms/__init__.py``). The SFT dataloader defaults to Groot **sharded** temporal sampling
+(``data.sampling_mode: sharded``, ``data.max_temporal_blocks``) from ``lerobot_sharded.py``; ``action_horizon`` is only for
+``DreamTransform`` / WAN (per-block), not the dataset macro stride (24 frames).
+
+Dataset statistics are loaded from the dataset-generated ``metadata.json`` file.
+Specify its path with ``metadata_json_path``, or ensure the file exists at
+``model_path/experiment_cfg/metadata.json`` (keyed by embodiment tag).
+
 WAN2.1 path
 ~~~~~~~~~~~
 
-Typical usage: set ``model_path`` to a DreamZero model directory containing:
+If you use a **full** DreamZero checkpoint directory (for example an official release tree), set ``model_path`` to that
+directory. It typically contains:
 
 - ``config.json``
-- ``experiment_cfg/conf.yaml``
-- ``experiment_cfg/metadata.json``
-- optional ``model.safetensors`` (or sharded safetensors)
+- ``experiment_cfg/metadata.json`` (dataset statistics; ``conf.yaml`` is not read by RLinf)
+- ``model.safetensors`` (or sharded safetensors)
+
+When ``model_path`` is set, RLinf loads **config** from ``config.json`` and **metadata** from
+``experiment_cfg/metadata.json`` (unless ``metadata_json_path`` is set). **Data transforms** are still assembled in Python from ``embodiment_tag``.
 
 .. code:: yaml
 
@@ -116,11 +143,11 @@ WAN2.2 training usually requires:
 - WAN2.1 CLIP image encoder weights (not included in WAN2.2-TI2V-5B)
 - tokenizer (umt5-xxl)
 
-If you use a ``dreamzero-22`` directory as ``model_path``, ensure ``config.json`` and ``experiment_cfg`` are aligned:
+For WAN2.2, the **architecture** in ``config.json`` (whether from a checkpoint or from the RLinf preset) should be consistent with weights, for example:
 
 - ``diffusion_model_cfg``: ``model_type=ti2v``, ``in_dim=48``, ``out_dim=48``, ``frame_seqlen=50``
 - ``vae_cfg``: ``WanVideoVAE38``
-- ``image_encoder_pretrained_path`` points to WAN2.1 CLIP weights
+- ``image_encoder_pretrained_path`` points to WAN2.1 CLIP weights when loading WAN components
 
 .. code:: yaml
 
@@ -137,14 +164,18 @@ Key DreamZero config fields
 Important fields:
 
 - ``actor.model.model_type``: ``dreamzero``
-- ``actor.model.model_path``: model root (loads ``config.json`` and ``experiment_cfg``)
+- ``actor.model.model_path``: checkpoint directory (``null`` to use Hydra ``actor.model`` only). When set, loads ``config.json`` from this path; metadata from ``metadata_json_path`` or ``experiment_cfg/metadata.json``. Data transforms are always built in Python (see ``data_transforms/__init__.py``).
 - ``actor.model.tokenizer_path``: tokenizer path
 - ``actor.model.embodiment_tag``: usually ``oxe_droid`` (DROID) or LIBERO-related tag
-- ``actor.model.dreamzero_action_horizon``
-- ``actor.model.dreamzero_num_chunks``
-- ``actor.model.dreamzero_num_video_frames``
+- ``data.sampling_mode``: ``sharded`` (Groot language-aware multi-anchor sampling) or ``dense`` (legacy contiguous window).
+- ``data.max_temporal_blocks``: macro temporal blocks (optional, default **4**, matches common checkpoints; set to **5** to match official Groot DROID data recipes).
+- ``actor.model.action_horizon``: **DreamTransform / WAN per-block** action steps (LIBERO 16, DROID 24). Sharded dataset action length is typically ``24 * max_temporal_blocks`` (e.g. 96), not ``action_horizon * num_chunks``.
+- ``actor.model.num_chunks``: legacy dense-mode alias; ignored for sharded offsets when ``max_temporal_blocks`` is set.
+- ``actor.model.state_horizon``: state rows per sample (usually 1; one state per macro anchor).
+- ``actor.model.num_video_frames``: only used when ``data.sampling_mode: dense`` (sharded mode yields ~``8 * data.max_temporal_blocks + 1`` frames, e.g. 33).
+- ``data.sharded_resample_attempts``: retries when sharded sampling returns empty indices (map-style dataloader).
+- ``actor.model.droid_view_height`` / ``droid_view_width`` (optional per-view resize for DROID)
 - ``actor.model.relative_action``
-- ``actor.dataloader_num_workers``
 - ``actor.fsdp_config``
 
 For WAN2.1/WAN2.2 compatibility, avoid hard-coded video sizes in data preprocessing.
@@ -196,7 +227,7 @@ Common issues
 
 2. **WAN2.2 dimension mismatch**
 
-- Verify ``diffusion_model_cfg`` in ``config.json`` matches WAN2.2
+- Verify ``diffusion_model_cfg`` in the effective config (``model_path/config.json`` or Hydra ``actor.model``) matches WAN2.2
 - Verify ``vae_cfg`` uses ``WanVideoVAE38``
 
 3. **Abnormally high action loss**
