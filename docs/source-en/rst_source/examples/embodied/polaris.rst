@@ -206,13 +206,13 @@ PolaRiS currently supports the following training configurations:
 
 - **PPO Training**
 
-  - ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``
-  - ``examples/embodiment/config/polaris_train_ppo_openpi_pi0.yaml``
+  - ``examples/embodiment/config/polaris_ppo_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_ppo_openpi.yaml``
 
 - **Evaluation**
 
-  - ``examples/embodiment/config/polaris_eval_openpi.yaml``
-  - ``examples/embodiment/config/polaris_eval_openpi_pi0.yaml``
+  - ``examples/embodiment/config/polaris_eval_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_openpi_eval.yaml``
 
 Each task has an independent environment configuration file located under ``examples/embodiment/config/env/``:
 
@@ -225,7 +225,7 @@ Each task has an independent environment configuration file located under ``exam
 
 **2. Key Parameter Configuration**
 
-Parameters below are located in the training configuration file ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``.
+Parameters below are located in the training configuration file ``examples/embodiment/config/polaris_ppo_openpi_pi05.yaml``.
 
 .. code-block:: yaml
 
@@ -272,9 +272,9 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi
+   bash examples/embodiment/run_embodiment.sh polaris_ppo_openpi_pi05
    # pi0
-   bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi_pi0
+   bash examples/embodiment/run_embodiment.sh polaris_ppo_openpi
 
 .. note::
 
@@ -290,9 +290,9 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi
+   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi05
    # pi0
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi0
+   bash examples/embodiment/eval_embodiment.sh polaris_openpi_eval
 
 Visualization and Results
 -------------------------

@@ -216,13 +216,13 @@ PolaRiS 目前支持以下训练配置：
 
 - **PPO 训练**
 
-  - ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``
-  - ``examples/embodiment/config/polaris_train_ppo_openpi_pi0.yaml``
+  - ``examples/embodiment/config/polaris_ppo_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_ppo_openpi.yaml``
 
 - **评估**
 
-  - ``examples/embodiment/config/polaris_eval_openpi.yaml``
-  - ``examples/embodiment/config/polaris_eval_openpi_pi0.yaml``
+  - ``examples/embodiment/config/polaris_eval_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_openpi_eval.yaml``
 
 每个任务有独立的环境配置文件，位于 ``examples/embodiment/config/env/`` 下：
 
@@ -235,7 +235,7 @@ PolaRiS 目前支持以下训练配置：
 
 **2. 关键参数配置**
 
-以下参数位于训练配置文件 ``examples/embodiment/config/polaris_train_ppo_openpi.yaml`` 中。
+以下参数位于训练配置文件 ``examples/embodiment/config/polaris_ppo_openpi_pi05.yaml`` 中。
 
 .. code-block:: yaml
 
@@ -283,9 +283,9 @@ PolaRiS 目前支持以下训练配置：
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi
+   bash examples/embodiment/run_embodiment.sh polaris_ppo_openpi_pi05
    # pi0
-   bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi_pi0
+   bash examples/embodiment/run_embodiment.sh polaris_ppo_openpi
 
 .. note::
 
@@ -301,9 +301,9 @@ PolaRiS 目前支持以下训练配置：
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi
+   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi05
    # pi0
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi0
+   bash examples/embodiment/eval_embodiment.sh polaris_openpi_eval
 
 可视化与结果
 -----------------
