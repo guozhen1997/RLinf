@@ -56,8 +56,10 @@ actor:
     text_encoder_pretrained_path: Wan-AI/Wan2.2-TI2V-5B/models_t5_umt5-xxl-enc-bf16.pth # https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B
     vae_pretrained_path: Wan-AI/Wan2.2-TI2V-5B/Wan2.2_VAE.pth # https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B
     # Dataset-generated metadata.json for normalisation statistics.
+    # Generate with: python toolkits/lerobot/generate_dreamzero_metadata.py \
+    #   --preset libero_sim --dataset-root /path/to/libero --output-metadata /path/to/metadata.json
     # Must be explicitly specified unless it exists at model_path/experiment_cfg/metadata.json.
-    metadata_json_path: /mnt/project_rlinf/guozhen/test_wam/test_dataset/metadata.json
+    metadata_json_path: /path/to/metadata.json
     action_horizon: 16
     num_chunks: 4
     num_action_per_block: 16

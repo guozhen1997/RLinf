@@ -52,14 +52,11 @@ actor:
     precision: fp32
     model_path: "/path/to/models/DreamZero-DROID"
     # Dataset-generated metadata.json for normalisation statistics.
+    # Generate with: python toolkits/lerobot/generate_dreamzero_metadata.py \
+    #   --preset libero_sim --dataset-root /path/to/libero --output-metadata /path/to/metadata.json
     # Must be explicitly specified unless it exists at model_path/experiment_cfg/metadata.json.
-    metadata_json_path: /path/to/dataset/metadata.json
+    # metadata_json_path: /path/to/metadata.json
     tokenizer_path: "/path/to/models/umt5-xxl"
-    
-    diffusion_model_pretrained_path: null
-    image_encoder_pretrained_path: null
-    text_encoder_pretrained_path: null
-    vae_pretrained_path: null
     
     action_horizon: 16
     state_horizon: 1
