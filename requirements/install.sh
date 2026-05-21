@@ -1498,7 +1498,14 @@ install_calvin_env() {
 install_polaris_env() {
     local polaris_dir
     polaris_dir=$(clone_or_reuse_repo POLARIS_PATH "$VENV_DIR/polaris" https://github.com/RLinf/polaris.git --recurse-submodules)
-    uv pip install -e $polaris_dir
+    export OMNI_KIT_ACCEPT_EULA=YES
+    if ! grep -q '^export OMNI_KIT_ACCEPT_EULA=' "$VENV_DIR/bin/activate" 2>/dev/null; then
+        echo "export OMNI_KIT_ACCEPT_EULA=YES" >> "$VENV_DIR/bin/activate"
+    fi
+    uv pip install -e "$polaris_dir"
+    python - <<'EOF'
+import isaacsim
+EOF
 }
 
 install_isaaclab_env() {
