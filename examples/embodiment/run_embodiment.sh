@@ -24,7 +24,7 @@ export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
 # POLARIS dataset
-export POLARIS_DATA_PATH="/path/to/dataset/PolaRiS-Hub"
+export POLARIS_DATA_PATH=${POLARIS_DATA_PATH:-"/path/to/dataset/PolaRiS-Hub"}
 
 if [ -z "$1" ]; then
     CONFIG_NAME=${CONFIG_NAME:-"maniskill_ppo_openvlaoft"}

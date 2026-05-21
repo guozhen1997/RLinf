@@ -64,54 +64,7 @@ Dependency Installation
 2. Install Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-It is recommended to clone the PolaRiS repository locally first, then edit ``polaris/pyproject.toml`` to match your machine's CUDA version, and then run the install script.
-
-**Step 1:** Clone the PolaRiS repository:
-
-.. code:: bash
-
-   git clone --recursive git@github.com:arhanjain/polaris.git
-   export POLARIS_PATH=/path/to/polaris
-
-**Step 2:** Edit ``$POLARIS_PATH/pyproject.toml`` and apply the following changes (shown for CUDA 12.4; adapt version numbers for other CUDA versions):
-
-.. code:: diff
-
-   # 1. Lock Python version to 3.11
-   - requires-python = ">=3.11"
-   + requires-python = "==3.11.*"
-
-   # 2. Match torch/torchvision version to your CUDA toolkit
-   # Pin sympy to avoid version conflict with isaaclab
-   #    (CUDA 12.4 example; see https://pytorch.org/get-started/locally/ for other versions)
-   -     override-dependencies = [
-   -         "pywin32==306; sys_platform == 'win32'",
-   -         "torch>=2.9.0", # Change here for different CUDA version
-   -         "torchvision>=0.24.0", # Change here for different CUDA version
-   -     ]
-   +    override-dependencies = [
-   +        "pywin32==306; sys_platform == 'win32'",
-   +        "torch>=2.6.0", # Change here for different CUDA version
-   +        "torchvision>=0.21.0", # Change here for different CUDA version
-   +        "sympy==1.13.3"
-   +    ]
-
-   # 3. Add flatdict build dependency (missing in upstream, needed for setuptools>=82 compatibility)
-   + [tool.uv.extra-build-dependencies]
-   + flatdict = ["setuptools<82"]
-
-   # 4. Change torch wheel index to match your CUDA version
-   -    url = "https://download.pytorch.org/whl/cu130" # Change here for different CUDA version
-   +    url = "https://download.pytorch.org/whl/cu124" # Change here for different CUDA version
-
-**Step 3:** Run the install script:
-
-.. code:: bash
-
-   bash requirements/install.sh embodied --model openpi --env polaris
-   source .venv/bin/activate
-
-Alternatively, you can let the install script clone and install automatically (but you cannot customize ``pyproject.toml``):
+Run the install script:
 
 .. code:: bash
 

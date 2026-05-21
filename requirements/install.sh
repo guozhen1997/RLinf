@@ -70,7 +70,6 @@ TEST_BUILD=${TEST_BUILD:-0}
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 USE_MIRRORS=0
-NO_SSH=0
 GITHUB_PREFIX=""
 NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
@@ -115,7 +114,6 @@ Common options:
     --no-flash-attn        Skip flash-attn install. Useful when the host lacks a CUDA build
                            toolchain or when the platform has no flash-attn support (Ascend).
     --install-rlinf        Install RLinf itself into the python.
-    --no-ssh               Convert all git SSH URLs (git@github.com) to HTTPS automatically.
 EOF
 }
 
@@ -185,10 +183,6 @@ parse_args() {
                 ;;
             --no-root)
                 NO_ROOT=1
-                shift
-                ;;
-            --no-ssh)
-                NO_SSH=1
                 shift
                 ;;
             --install-rlinf)
@@ -720,26 +714,6 @@ unset_mirror() {
         unset HF_ENDPOINT
         git config --global --unset url."${GITHUB_PREFIX}github.com/".insteadOf "https://github.com/" || true
         unset GITHUB_PREFIX
-    fi
-}
-
-setup_no_ssh() {
-    if [ "$NO_SSH" -eq 1 ]; then
-        if [ "$USE_MIRRORS" -eq 1 ]; then
-            git config --global --add url."https://ghfast.top/github.com/".insteadOf "git@github.com:"
-        else
-            git config --global --add url."https://github.com/".insteadOf "git@github.com:"
-        fi
-    fi
-}
-
-unset_no_ssh() {
-    if [ "$NO_SSH" -eq 1 ]; then
-        if [ "$USE_MIRRORS" -eq 1 ]; then
-            git config --global --unset url."https://ghfast.top/github.com/".insteadOf "git@github.com:" || true
-        else
-            git config --global --unset url."https://github.com/".insteadOf "git@github.com:" || true
-        fi
     fi
 }
 
@@ -1521,14 +1495,8 @@ install_calvin_env() {
 
 install_polaris_env() {
     local polaris_dir
-    polaris_dir=$(clone_or_reuse_repo POLARIS_PATH "$VENV_DIR/polaris" https://github.com/arhanjain/polaris.git)
-
-    pushd "$polaris_dir" >/dev/null
-    git submodule update --init --recursive || true
-    uv pip install "setuptools<82"
-    uv pip install "flatdict==4.0.1" --no-build-isolation
-    uv pip install -e .
-    popd >/dev/null
+    polaris_dir=$(clone_or_reuse_repo POLARIS_PATH "$VENV_DIR/polaris" https://github.com/RLinf/polaris.git --recurse-submodules)
+    uv pip install -e $polaris_dir
 }
 
 install_isaaclab_env() {
@@ -1818,7 +1786,6 @@ install_docs() {
 
 main() {
     parse_args "$@"
-    setup_no_ssh
     configure_platform
     setup_mirror
     apply_torch_override
@@ -1893,9 +1860,6 @@ main() {
 
     install_platform_extras
     unset_mirror
-    unset_no_ssh
 }
 
 main "$@"
-
-
