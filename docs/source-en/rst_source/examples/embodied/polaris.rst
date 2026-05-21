@@ -58,15 +58,42 @@ Dependency Installation
 
 .. code:: bash
 
+   # For mainland China users, you can use the following for better download speed:
+   # git clone https://ghfast.top/github.com/RLinf/RLinf.git
    git clone https://github.com/RLinf/RLinf.git
    cd RLinf
 
 2. Install Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Run the install script:
+**Option 1: Docker Image**
+
+Use Docker image for the experiment.
 
 .. code:: bash
+
+   docker run -it --rm --gpus all \
+      --shm-size 20g \
+      --network host \
+      --name rlinf \
+      -v .:/workspace/RLinf \
+      rlinf/rlinf:agentic-rlinf0.2-polaris
+      # For mainland China users, you can use the following for better download speed:
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.2-polaris
+
+Please switch to the corresponding virtual environment via the built-in `switch_env` utility in the image:
+
+.. code:: bash
+
+   source switch_env openpi
+
+**Option 2: Custom Environment**
+
+Install dependencies directly in your environment by running the following command:
+
+.. code:: bash
+
+   # For mainland China users, you can add the `--use-mirror` flag to the install.sh command for better download speed.
 
    bash requirements/install.sh embodied --model openpi --env polaris
    source .venv/bin/activate
@@ -113,75 +140,53 @@ Alternatively, you can modify ``init_params.dataset_path`` and ``init_params.usd
 Model Download
 --------------
 
+Before starting training, you need to download the corresponding pretrained model:
+
 **Method 1: Download Pre-converted PyTorch Model (Recommended)**
 
 Pre-trained PyTorch models are available on HuggingFace, converted from the original JAX checkpoints.
 
 .. code:: bash
 
-   # π0.5 Polaris (Recommended)
-   hf download RLinf/RLinf-Pi05-Polaris-droid_jointpos --local-dir ./checkpoints/RLinf-Pi05-Polaris-droid_jointpos
+   # Download the model (choose either method)
+   # Method 1: Using git clone
+   git lfs install
+   git clone https://huggingface.co/RLinf/RLinf-Pi05-Polaris-droid_jointpos
+   git clone https://huggingface.co/RLinf/RLinf-Pi0-Polaris-droid_jointpos
 
-   # π0 Polaris
+   # Method 2: Using huggingface-hub
+   # For mainland China users, you can use the following for better download speed:
+   # export HF_ENDPOINT=https://hf-mirror.com
+   pip install huggingface-hub
+   hf download RLinf/RLinf-Pi05-Polaris-droid_jointpos --local-dir ./checkpoints/RLinf-Pi05-Polaris-droid_jointpos
    hf download RLinf/RLinf-Pi0-Polaris-droid_jointpos --local-dir ./checkpoints/RLinf-Pi0-Polaris-droid_jointpos
 
 **Method 2: Download JAX Checkpoint and Convert**
 
-PolaRiS provides model variants trained on the DROID dataset, stored in Google Cloud Storage (GCS). You need to download the JAX checkpoint and convert it to PyTorch format.
-
-**2.1 Download JAX Checkpoint**
+Alternatively, you can download the original JAX checkpoints and convert them to PyTorch format.
 
 .. code:: bash
 
-   # π0.5 Polaris (Recommended)
+   # Download JAX checkpoints
    gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi05_droid_jointpos_polaris /path/to/checkpoints/
-
-   # π0 Polaris
    gsutil -m cp -r gs://openpi-assets/checkpoints/polaris/pi0_droid_jointpos_polaris /path/to/checkpoints/
 
-**2.2 Convert to PyTorch Format**
-
-The downloaded JAX checkpoint needs to be converted to PyTorch format to be used in RLinf:
-
-.. code:: bash
-
-   cd path/to/polaris/third_party/openpi
-   GIT_LFS_SKIP_SMUDGE=1 uv sync
-   GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-   source .venv/bin/activate
-
-   # π0.5 Polaris → PyTorch
+   # Convert π0.5 Polaris to PyTorch
    python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
        --checkpoint_dir /path/to/checkpoints/pi05_droid_jointpos_polaris \
        --config_name pi05_droid_jointpos_polaris \
        --output_path /path/to/checkpoints/pi05_droid_jointpos_polaris_new
-   # Copy assets
    cp -r /path/to/checkpoints/pi05_droid_jointpos_polaris/assets /path/to/checkpoints/pi05_droid_jointpos_polaris_new/
 
-   # π0 Polaris → PyTorch
+   # Convert π0 Polaris to PyTorch
    python /path/to/polaris/third_party/openpi/examples/convert_jax_model_to_pytorch.py \
        --checkpoint_dir /path/to/checkpoints/pi0_droid_jointpos_polaris \
        --config_name pi0_droid_jointpos_polaris \
        --output_path /path/to/checkpoints/pi0_droid_jointpos_polaris_new
-   # Copy assets
    cp -r /path/to/checkpoints/pi0_droid_jointpos_polaris/assets /path/to/checkpoints/pi0_droid_jointpos_polaris_new/
 
-The mapping between models and the ``config_name`` in YAML is as follows:
-
-.. list-table:: **Model Checkpoint to config_name Mapping**
-   :header-rows: 1
-   :widths: 30 30
-
-   * - Model
-     - RLinf YAML ``config_name``
-   * - π0.5 Polaris
-     - ``pi05_droid_polaris``
-   * - π0 Polaris
-     - ``pi0_droid_polaris``
-
-**3. Configure Model Path**
-
-After downloading or converting, set the model path in the YAML configuration file:
+After downloading, make sure to correctly specify the model path in the configuration yaml file.
+The example below uses the π0.5 checkpoint. For π0 configs, use ``RLinf-Pi0-Polaris-droid_jointpos`` instead.
 
 .. code-block:: yaml
 
@@ -201,13 +206,13 @@ PolaRiS currently supports the following training configurations:
 
 - **PPO Training**
 
-  - ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``
-  - ``examples/embodiment/config/polaris_train_ppo_openpi_pi0.yaml``
+  - ``examples/embodiment/config/polaris_ppo_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_ppo_openpi.yaml``
 
 - **Evaluation**
 
-  - ``examples/embodiment/config/polaris_eval_openpi.yaml``
-  - ``examples/embodiment/config/polaris_eval_openpi_pi0.yaml``
+  - ``examples/embodiment/config/polaris_eval_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_openpi_eval.yaml``
 
 Each task has an independent environment configuration file located under ``examples/embodiment/config/env/``:
 
@@ -220,7 +225,7 @@ Each task has an independent environment configuration file located under ``exam
 
 **2. Key Parameter Configuration**
 
-Parameters below are located in the training configuration file ``examples/embodiment/config/polaris_train_ppo_openpi.yaml``.
+Parameters below are located in the training configuration file ``examples/embodiment/config/polaris_ppo_openpi_pi05.yaml``.
 
 .. code-block:: yaml
 
@@ -267,9 +272,9 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi
+   bash examples/embodiment/run_embodiment.sh polaris_ppo_openpi_pi05
    # pi0
-   bash examples/embodiment/run_embodiment.sh polaris_train_ppo_openpi_pi0
+   bash examples/embodiment/run_embodiment.sh polaris_ppo_openpi
 
 .. note::
 
@@ -285,9 +290,9 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi
+   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi05
    # pi0
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi0
+   bash examples/embodiment/eval_embodiment.sh polaris_openpi_eval
 
 Visualization and Results
 -------------------------

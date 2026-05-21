@@ -1,7 +1,7 @@
 defaults:
   - env/polaris_droid_tapeintocontainer@env.train
   - env/polaris_droid_tapeintocontainer@env.eval
-  - model/pi0_5@actor.model
+  - model/pi0@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
@@ -106,7 +106,7 @@ rollout:
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/model/pi05_droid_jointpos_polaris/"
+    model_path: "/path/to/model/RLinf-Pi0-Polaris-droid_jointpos/"
     precision: ${actor.model.precision}
 
 actor:
@@ -118,14 +118,14 @@ actor:
   enable_offload: True
 
   model:
-    model_path: "/path/to/model/pi05_droid_jointpos_polaris/"
+    model_path: "/path/to/model/RLinf-Pi0-Polaris-droid_jointpos/"
     model_type: "openpi"
     action_dim: 8
     num_action_chunks: 15
     num_steps: 10
     add_value_head: True
     openpi:
-      config_name: "pi05_droid_polaris"
+      config_name: "pi0_droid_polaris"
       num_images_in_input: 2
       noise_level: 0.5
       joint_logprob: False

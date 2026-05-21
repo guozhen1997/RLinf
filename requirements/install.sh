@@ -1112,6 +1112,8 @@ install_openpi_model() {
             install_roboverse_env
             ;;
         polaris)
+            TORCH_VERSION="2.7.0"
+            apply_torch_override
             create_and_sync_venv
             install_common_embodied_deps
             install_polaris_env
