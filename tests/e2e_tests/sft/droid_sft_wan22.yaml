@@ -34,9 +34,6 @@ data:
   # Root of LeRobot DROID (OXE) dataset
   train_data_paths: /workspace/dataset/data/sft-ci-data/dreamzero-droid
 
-algorithm:
-  adv_type: gae
-
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"

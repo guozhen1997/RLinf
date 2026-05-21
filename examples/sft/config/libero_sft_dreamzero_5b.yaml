@@ -39,9 +39,6 @@ data:
   parquet_cache_size: 512
   sampling_mode: multi_anchor # fixed_window
 
-algorithm:
-  adv_type: gae
-
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"

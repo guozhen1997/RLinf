@@ -1,5 +1,6 @@
 defaults:
   - training_backend/fsdp@actor.fsdp_config
+  - model/dreamzero_14b@actor.model
   - override hydra/job_logging: stdout
 
 hydra:
@@ -12,14 +13,14 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor,env,rollout: all
+    actor: all
 
 runner:
   task_type: sft
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "libero_sft_dreamzero"
+    experiment_name: "droid_sft_dreamzero"
     logger_backends: ["tensorboard"]
 
   max_epochs: -1
@@ -28,48 +29,55 @@ runner:
   save_interval: 2000
   log_interval: 100
 
+  resume_dir: null
+
 data:
-  train_data_paths: "path/to/datasets/libero"
+  # Root of LeRobot DROID (OXE) dataset
+  train_data_paths: path/to/datasets/DreamZero-DROID-Data
   lazy_load: True
-  num_workers: 8
+  num_workers: 4
   prefetch_factor: 8
   video_tolerance_s: 0.1
   parquet_cache_size: 512
+  sampling_mode: multi_anchor
   video_backend: torchcodec # LeRobot video decoder: pyav | torchcodec
-
-algorithm:
-  adv_type: gae
 
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 1
-  global_batch_size: 16
+  global_batch_size: 8
   seed: 42
-
   enable_offload: False
 
   model:
     model_type: "dreamzero"
-    precision: bf16 # fp32 when fsdp cpu offload is enabled
-    model_path: "path/to/models/DreamZero-DROID"
+    precision: fp32
+    model_path: /path/to/models/DreamZero-DROID
+    # If ``model_path`` lacks ``config.json`` + ``experiment_cfg/``, use WAN2.1 DROID preset:
+    # dreamzero_preset: dreamzero_14b
     # Dataset-generated metadata.json for normalisation statistics.
     # Must be explicitly specified unless it exists at model_path/experiment_cfg/metadata.json.
-    # metadata_json_path: path/to/dataset/metadata.json
-    tokenizer_path: "path/to/models/umt5-xxl"
-    
+    metadata_json_path: /path/to/dataset/metadata.json
+    tokenizer_path: /path/to/models/umt5-xxl
+
     diffusion_model_pretrained_path: null
     image_encoder_pretrained_path: null
     text_encoder_pretrained_path: null
     vae_pretrained_path: null
-    
-    action_horizon: 16
+
+    # DreamTransform per-block action steps.
+    action_horizon: 24
     state_horizon: 1
     num_chunks: 4
-    cfg_mode: false
-    advantage_parquet: 
-    unconditional_prob: 0.3
+    num_video_frames: 33
+    relative_action_keys:
+      - joint_position
     is_lora: False
+    embodiment_tag: "oxe_droid"
+    relative_action: True
+    relative_action_per_horizon: False
+    load_to_device: False
 
   optim:
     lr: 1.0e-5
@@ -81,18 +89,18 @@ actor:
     clip_grad: 1.0
     lr_scheduler: "cosine"
     lr_warmup_steps: -1
-    lr_warmup_steps_ratio: 0.05
-    total_training_steps: 50000
+    lr_warmup_steps_ratio: 0.01
+    total_training_steps: ${runner.max_steps}
 
   fsdp_config:
     strategy: "fsdp2"
     sharding_strategy: "full_shard"
     use_orig_params: True
     gradient_checkpointing: True
+    gradient_checkpointing_use_reentrant: True
     limit_all_gathers: True
     reshard_after_forward: True
-    # cpu_offload: True
-    # offload_pin_memory: True
+    save_full_model_weights: False
     grad_scaler:
       enabled: False
     mixed_precision:
