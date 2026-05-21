@@ -12,16 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DreamZero policy configuration.
-
-:class:`DreamZeroConfig` holds the VLA policy fields loaded from checkpoint
-``config.json`` or Hydra ``actor.model`` (see ``load_dreamzero_config_dict``).
-SFT temporal fields (``action_horizon``, ``num_chunks``, etc.) are read directly
-from ``actor.model`` by the dataset and ``data_transforms`` builders.
-"""
-
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from pathlib import Path

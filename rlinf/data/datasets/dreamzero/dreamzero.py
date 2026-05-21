@@ -12,17 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DreamZero SFT data utilities for LeRobot datasets.
-
-DreamZeroLeRobotDataset loads LeRobot modalities and applies ``ComposedModalityTransform``
-per sample (in DataLoader workers). DreamZeroCollator only stacks tensors and tokenizes text.
-"""
-
-import ast
 import bisect
 import json
 import random
-import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -33,409 +25,31 @@ from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from rlinf.data.datasets.dreamzero.sampling_strategy import (
-    EmptyShardedSampleError,
+    EmptyTemporalSampleError,
+    MultiAnchorTemporalConfig,
     SamplingMode,
-    ShardedTemporalConfig,
     TemporalIndices,
-    build_dense_offsets,
-    require_sharded_temporal_indices,
+    build_fixed_window_offsets,
+    require_multi_anchor_temporal_indices,
+)
+from rlinf.data.datasets.dreamzero.data_transforms import (
+    format_training_prompt,
+    normalize_instruction_text,
+)
+from rlinf.data.datasets.dreamzero.utils import (
+    collate_ready_sample,
+    discover_local_lerobot_episode_indices,
+    droid_default_state_action_slices,
+    infer_modality_json_from_features,
+    infer_named_component_slices,
+    load_modality_json,
+    load_task_texts,
+    probe_video_container_fps,
+    safe_lang_text,
 )
 from rlinf.utils.logging import get_logger
 
 logger = get_logger()
-
-# Default sharded macro temporal blocks (Groot ``lerobot_sharded`` ``max_chunk_size``).
-# Use 4 to match typical WAN/DreamZero checkpoints (``diffusion_model_cfg.max_chunk_size``,
-# ~33 sparse video frames, 96 action steps at macro stride 24). Override via Hydra ``data.max_temporal_blocks``.
-DEFAULT_MAX_TEMPORAL_BLOCKS = 4
-
-
-def _load_task_texts(meta_dir: Path) -> dict[int, str]:
-    """Build task_index -> instruction string mapping from tasks.jsonl or tasks.parquet."""
-    import pandas as pd
-
-    task_map: dict[int, str] = {}
-
-    tasks_jsonl = meta_dir / "tasks.jsonl"
-    if tasks_jsonl.exists():
-        with open(tasks_jsonl, encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                entry = json.loads(line)
-                task_id = int(entry.get("task_index", 0))
-                task_text = str(entry.get("task", ""))
-                task_map[task_id] = task_text
-        if task_map:
-            return task_map
-
-    task_path = meta_dir / "tasks.parquet"
-    if not task_path.exists():
-        return {}
-
-    tasks_df = pd.read_parquet(task_path)
-    if list(tasks_df.columns) == ["task_index"] and tasks_df.index.dtype.kind in (
-        "U",
-        "O",
-        "S",
-    ):
-        for text, row in tasks_df.iterrows():
-            task_map[int(row["task_index"])] = str(text)
-        return task_map
-
-    text_col = None
-    for candidate in ("task", "task_text", "language", "instruction", "prompt"):
-        if candidate in tasks_df.columns:
-            text_col = candidate
-            break
-    if text_col is None:
-        cols = [c for c in tasks_df.columns if c != "task_index"]
-        text_col = cols[0] if cols else None
-
-    for _, row in tasks_df.iterrows():
-        task_id = int(row.get("task_index", 0))
-        if text_col is None:
-            task_text = ""
-        else:
-            value = row.get(text_col, "")
-            task_text = "" if value is None else str(value)
-        task_map[task_id] = task_text
-    return task_map
-
-
-def _probe_video_container_fps(video_path: Path) -> float | None:
-    """Read average FPS from the video container (PyAV), not meta/info.json.
-
-    Many RoboMIND / converted trees ship ``fps`` in info.json that does not match the
-    muxed stream (e.g. meta 14 vs H.264 30). Using meta for ``index / fps`` decode times
-    then violates lerobot's PTS tolerance against torchvision/pyav.
-    """
-    try:
-        import av
-    except ImportError:
-        return None
-    try:
-        with av.open(str(video_path), mode="r") as container:
-            streams = container.streams.video
-            if not streams:
-                return None
-            st = streams[0]
-
-            def _as_positive_fps(rate: Any) -> float | None:
-                if rate is None:
-                    return None
-                try:
-                    f = float(rate)
-                except (TypeError, ValueError, ZeroDivisionError):
-                    return None
-                if 0.5 < f < 480.0:
-                    return f
-                return None
-
-            for attr in ("average_frame_rate", "guessed_frame_rate", "average_rate"):
-                f = _as_positive_fps(getattr(st, attr, None))
-                if f is not None:
-                    return f
-
-            cc = getattr(st, "codec_context", None)
-            if cc is not None:
-                f = _as_positive_fps(getattr(cc, "framerate", None))
-                if f is not None:
-                    return f
-
-            nb = int(getattr(st, "frames", 0) or 0)
-            if nb > 0 and st.duration is not None and st.time_base is not None:
-                try:
-                    dur_s = float(st.duration * st.time_base)
-                    if dur_s > 1e-3:
-                        f = float(nb) / dur_s
-                        if 0.5 < f < 480.0:
-                            return f
-                except (TypeError, ValueError, ZeroDivisionError):
-                    pass
-    except OSError:
-        return None
-    except Exception:
-        logger.debug("PyAV fps probe failed for %s", video_path, exc_info=True)
-        return None
-    return None
-
-
-
-def _droid_default_state_action_slices() -> tuple[slice, slice, slice, slice]:
-    """Slice ranges into convert_droid-style concatenated vectors.
-
-    state: cartesian(6) + gripper(1) + joint(7)
-    action: cartesian(6) + cartesian_vel(6) + gripper(1) + gripper_vel(1) + joint(7) + joint_vel(7)
-    """
-    st_joint = slice(7, 14)
-    st_grip = slice(6, 7)
-    ac_joint = slice(14, 21)
-    ac_grip = slice(12, 13)
-    return st_joint, st_grip, ac_joint, ac_grip
-
-
-def _load_modality_json(meta_dir: Path) -> dict[str, Any]:
-    modality_path = meta_dir / "modality.json"
-    if not modality_path.exists():
-        return {}
-    with open(modality_path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _feature_component_spans(names: Any, feature_dim: int) -> dict[str, slice]:
-    spans: dict[str, slice] = {}
-    if not names:
-        return spans
-
-    if isinstance(names, dict):
-        cursor = 0
-        for key, values in names.items():
-            width = len(_flatten_leaves(values))
-            if width <= 0:
-                continue
-            spans[str(key)] = slice(cursor, cursor + width)
-            cursor += width
-        return spans
-
-    if isinstance(names, list) and all(isinstance(x, str) for x in names):
-        component_widths = {
-            "cartesian_position": 6,
-            "cartesian_velocity": 6,
-            "gripper_position": 1,
-            "gripper_velocity": 1,
-            "joint_position": 7,
-            "joint_velocity": 7,
-            "state": feature_dim,
-            "actions": feature_dim,
-        }
-        cursor = 0
-        for key in names:
-            width = int(component_widths.get(key, 1))
-            spans[str(key)] = slice(cursor, cursor + width)
-            cursor += width
-        return spans
-
-    cursor = 0
-    for entry in names if isinstance(names, list) else []:
-        if isinstance(entry, str):
-            key, width = entry, 1
-        elif isinstance(entry, dict):
-            key = str(entry.get("name", ""))
-            shape = entry.get("shape")
-            width = int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
-        else:
-            continue
-        if key:
-            spans[key] = slice(cursor, cursor + width)
-        cursor += width
-    return spans
-
-
-def _infer_modality_json_from_features(features: dict[str, Any]) -> dict[str, Any]:
-    """Best-effort modality metadata for LeRobot trees without meta/modality.json."""
-    modality: dict[str, Any] = {"video": {}, "state": {}, "action": {}, "annotation": {}}
-
-    for source_key, feature in features.items():
-        if not isinstance(feature, dict):
-            continue
-        if feature.get("dtype") == "video" or source_key.startswith("observation.images."):
-            short = source_key.split("observation.images.", 1)[-1]
-            modality["video"][short] = {"original_key": source_key}
-        elif source_key in ("image", "wrist_image"):
-            modality["video"][source_key] = {"original_key": source_key}
-        elif source_key.startswith("annotation."):
-            short = source_key.split("annotation.", 1)[-1]
-            modality["annotation"][short] = {"original_key": source_key}
-
-    for modality_name, source_candidates in (
-        ("state", ("observation.state", "state")),
-        ("action", ("action", "actions")),
-    ):
-        source_key = next((key for key in source_candidates if key in features), None)
-        if source_key is None:
-            continue
-        feature = features.get(source_key) or {}
-        feature_dim = int((feature.get("shape") or [0])[0] or 0)
-        for key, span in _feature_component_spans(feature.get("names"), feature_dim).items():
-            modality[modality_name][key] = {
-                "original_key": source_key,
-                "start": int(span.start or 0),
-                "end": None if span.stop is None else int(span.stop),
-            }
-
-    return {key: value for key, value in modality.items() if value}
-
-
-def _safe_lang_text(value: Any, task_map: dict[int, str]) -> str:
-    """Decode language field into a non-empty string when possible."""
-    raw = value
-    if hasattr(raw, "item"):
-        raw = raw.item()
-    if isinstance(raw, (list, tuple, np.ndarray)):
-        if len(raw) == 0:
-            return ""
-        raw = raw[0]
-        if hasattr(raw, "item"):
-            raw = raw.item()
-    if isinstance(raw, (int, np.integer)) and task_map:
-        return str(task_map.get(int(raw), "")).strip()
-    if raw is None:
-        return ""
-    return str(raw).strip()
-
-
-def _discover_local_lerobot_episode_indices(
-    root: Path, info: dict, allowed_episode_indices: set[int] | None = None
-) -> list[int]:
-    """Episode indices that have both parquet and all video files on disk.
-
-    LeRobot 0.3.x otherwise checks ``range(total_episodes)`` from info.json; any missing
-    file triggers Hub download (``get_safe_version``), which breaks offline machines even
-    when ``data/`` already contains a subset of episodes.
-    """
-    root = root.resolve()
-    data_root = root / "data"
-    if not data_root.is_dir():
-        raise FileNotFoundError(
-            f"LeRobot dataset missing data/ directory: {data_root}."
-            "Offline loading requires local data, videos, and meta to be aligned."
-        )
-    ep_re = re.compile(r"^episode_(\d+)\.parquet$")
-    present: set[int] = set()
-    for p in data_root.rglob("episode_*.parquet"):
-        m = ep_re.match(p.name)
-        if m:
-            present.add(int(m.group(1)))
-    if not present:
-        raise FileNotFoundError(
-            f"No episode_*.parquet found in {data_root}."
-            "Please confirm data_path matches disk directory (e.g. data/chunk-000/episode_000000.parquet)."
-        )
-    chunks_size = int(info.get("chunks_size") or 1000)
-    data_tmpl = info.get("data_path")
-    video_tmpl = info.get("video_path")
-    if not data_tmpl:
-        raise ValueError("meta/info.json missing data_path")
-    feats = info.get("features") or {}
-    video_keys = [k for k, v in feats.items() if v.get("dtype") == "video"]
-    complete: list[int] = []
-    for ep_idx in sorted(present):
-        ep_chunk = ep_idx // chunks_size
-        rel_p = Path(data_tmpl.format(episode_chunk=ep_chunk, episode_index=ep_idx))
-        if not (root / rel_p).is_file():
-            continue
-        if video_tmpl and video_keys:
-            if not all(
-                (
-                    root
-                    / Path(
-                        video_tmpl.format(
-                            episode_chunk=ep_chunk,
-                            video_key=vk,
-                            episode_index=ep_idx,
-                        )
-                    )
-                ).is_file()
-                for vk in video_keys
-            ):
-                continue
-        complete.append(ep_idx)
-    if allowed_episode_indices is not None:
-        complete = [e for e in complete if e in allowed_episode_indices]
-    if not complete:
-        raise FileNotFoundError(
-            f"Found parquet in {root}/data/, but no episode that satisfies "
-            f"data_path and video_path (both in meta/episodes.jsonl) in info.json."
-            f"({len(present)} parquet files on disk). Please fill in the corresponding videos/ or check if the paths match meta."
-        )
-    return complete
-
-
-def _flatten_leaves(value: Any) -> list[str]:
-    if isinstance(value, dict):
-        out: list[str] = []
-        for v in value.values():
-            out.extend(_flatten_leaves(v))
-        return out
-    if isinstance(value, (list, tuple)):
-        return [str(v) for v in value]
-    return []
-
-
-def _infer_named_component_slices(
-    names: Any, feature_dim: int, wanted: list[str]
-) -> dict[str, slice] | None:
-    """Infer component slices from LeRobot feature names for generic DreamZero transforms."""
-    if not wanted:
-        return {}
-    if not names:
-        return None
-
-    if isinstance(names, dict):
-        cursor = 0
-        spans: dict[str, slice] = {}
-        for key, values in names.items():
-            width = len(_flatten_leaves(values))
-            if width <= 0:
-                continue
-            spans[str(key)] = slice(cursor, cursor + width)
-            cursor += width
-        if all(k in spans for k in wanted):
-            return {k: spans[k] for k in wanted}
-        if len(wanted) == 1 and wanted[0] in ("state", "actions"):
-            return {wanted[0]: slice(0, feature_dim)}
-        return None
-
-    if isinstance(names, list) and all(isinstance(x, str) for x in names):
-        plan = {
-            "cartesian_position": 6,
-            "cartesian_velocity": 6,
-            "gripper_position": 1,
-            "gripper_velocity": 1,
-            "joint_position": 7,
-            "joint_velocity": 7,
-            "state": feature_dim,
-            "actions": feature_dim,
-        }
-        cursor = 0
-        spans: dict[str, slice] = {}
-        for key in names:
-            width = int(plan.get(key, 1))
-            spans[str(key)] = slice(cursor, cursor + width)
-            cursor += width
-        if all(k in spans for k in wanted):
-            return {k: spans[k] for k in wanted}
-
-    cursor = 0
-    spans = {}
-    for entry in names if isinstance(names, list) else []:
-        if isinstance(entry, str):
-            key, width = entry, 1
-        elif isinstance(entry, dict):
-            key = str(entry.get("name", ""))
-            shape = entry.get("shape")
-            width = int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
-        else:
-            continue
-        spans[key] = slice(cursor, cursor + width)
-        cursor += width
-    if all(k in spans for k in wanted):
-        return {k: spans[k] for k in wanted}
-
-    return None
-
-
-def _collate_ready_sample(sample: dict[str, Any]) -> dict[str, Any]:
-    """Convert per-sample transform output to numpy for ``DreamZeroCollator`` stacking."""
-    out: dict[str, Any] = {}
-    for key, value in sample.items():
-        if isinstance(value, torch.Tensor):
-            value = value.detach().cpu().numpy()
-        elif isinstance(value, np.generic):
-            value = value.item() if value.ndim == 0 else np.asarray(value)
-        out[key] = value
-    return out
 
 
 class DreamZeroLeRobotDataset(Dataset):
@@ -458,13 +72,14 @@ class DreamZeroLeRobotDataset(Dataset):
         state_horizon: int,
         action_horizon: int,
         num_chunks: int,
+        max_chunk_size: int,
         relative_action: bool = False,
         relative_action_keys: list[str] | None = None,
         pq_cache_max_episodes: int = 128,
         video_tolerance_s: float = 0.1,
-        sampling_mode: SamplingMode = "sharded",
-        max_temporal_blocks: int | None = DEFAULT_MAX_TEMPORAL_BLOCKS,
-        sharded_resample_attempts: int = 8,
+        video_backend: str = "pyav",
+        sampling_mode: SamplingMode = "multi_anchor",
+        multi_anchor_resample_attempts: int = 8,
     ):
         if isinstance(data_path, (list, tuple)):
             if len(data_path) == 0:
@@ -477,30 +92,24 @@ class DreamZeroLeRobotDataset(Dataset):
         self.state_horizon = int(state_horizon)
         self.action_horizon = int(action_horizon)
         self.num_chunks = int(num_chunks)
-        # Sharded temporal span (macro anchors). Default 4; see ``DEFAULT_MAX_TEMPORAL_BLOCKS``.
-        resolved_max_temporal_blocks = (
-            DEFAULT_MAX_TEMPORAL_BLOCKS
-            if max_temporal_blocks is None
-            else int(max_temporal_blocks)
-        )
-        if resolved_max_temporal_blocks != self.num_chunks:
+        self.max_chunk_size = int(max_chunk_size)
+        if self.sampling_mode == "multi_anchor" and self.max_chunk_size != self.num_chunks:
             logger.warning(
-                "DreamZeroLeRobotDataset: actor.model.num_chunks=%s is ignored for sharded "
-                "offsets; using max_temporal_blocks=%s.",
+                "DreamZeroLeRobotDataset: actor.model.num_chunks=%s differs from "
+                "diffusion_model_cfg.max_chunk_size=%s; multi_anchor offsets use max_chunk_size.",
                 self.num_chunks,
-                resolved_max_temporal_blocks,
+                self.max_chunk_size,
             )
-        self.max_temporal_blocks = resolved_max_temporal_blocks
-        self.sharded_resample_attempts = max(1, int(sharded_resample_attempts))
+        self.multi_anchor_resample_attempts = max(1, int(multi_anchor_resample_attempts))
         if self.state_horizon <= 0:
             raise ValueError(f"state_horizon must be positive, got {state_horizon!r}")
         if self.action_horizon <= 0:
             raise ValueError(f"action_horizon must be positive, got {action_horizon!r}")
-        if self.max_temporal_blocks <= 0:
+        if self.max_chunk_size <= 0:
             raise ValueError(
-                f"max_temporal_blocks must be positive, got {max_temporal_blocks!r}"
+                f"max_chunk_size must be positive, got {max_chunk_size!r}"
             )
-        if self.sampling_mode == "dense" and self.num_video_frames <= 0:
+        if self.sampling_mode == "fixed_window" and self.num_video_frames <= 0:
             raise ValueError(f"num_video_frames must be positive, got {num_video_frames!r}")
         self.relative_action = bool(relative_action)
         self.relative_action_keys = list(relative_action_keys or [])
@@ -524,11 +133,11 @@ class DreamZeroLeRobotDataset(Dataset):
             self._info = json.load(f)
         self._fps = float(self._info.get("fps", 10))
         self._version = str(self._info.get("codebase_version", "v3.0"))
-        self._tasks = _load_task_texts(self._meta_dir)
+        self._tasks = load_task_texts(self._meta_dir)
         self._features = self._info.get("features") or {}
-        self._modality_meta = _load_modality_json(self._meta_dir)
+        self._modality_meta = load_modality_json(self._meta_dir)
         if not self._modality_meta:
-            self._modality_meta = _infer_modality_json_from_features(self._features)
+            self._modality_meta = infer_modality_json_from_features(self._features)
             logger.info(
                 "meta/modality.json not found under %s; inferred modality mapping from info.json features.",
                 self._meta_dir,
@@ -556,24 +165,24 @@ class DreamZeroLeRobotDataset(Dataset):
             and self._info.get("video_path")
             and self._root.exists()
         )
-        self._video_backend = "pyav" # "torchcodec"
-        if self.sampling_mode == "sharded" and not self.lazy_load and not self._use_image_parquet_tree:
+        self._video_backend = str(video_backend)
+        if self.sampling_mode == "multi_anchor" and not self.lazy_load and not self._use_image_parquet_tree:
             raise ValueError(
-                "DreamZeroLeRobotDataset sampling_mode='sharded' requires lazy_load=True "
+                "DreamZeroLeRobotDataset sampling_mode='multi_anchor' requires lazy_load=True "
                 "or a v2 image-parquet layout (no mp4 video_path)."
             )
-        if self.sampling_mode == "dense":
-            self._dense_temporal: TemporalIndices = build_dense_offsets(
+        if self.sampling_mode == "fixed_window":
+            self._fixed_window_temporal: TemporalIndices = build_fixed_window_offsets(
                 self.num_video_frames,
                 self.state_horizon,
                 self.action_horizon,
                 self.num_chunks,
             )
-            self._sharded_cfg = None
+            self._multi_anchor_cfg = None
         else:
-            self._dense_temporal = None
-            self._sharded_cfg = ShardedTemporalConfig(
-                max_temporal_blocks=self.max_temporal_blocks,
+            self._fixed_window_temporal = None
+            self._multi_anchor_cfg = MultiAnchorTemporalConfig(
+                max_chunk_size=self.max_chunk_size,
                 action_horizon=self.action_horizon,
             )
         if self._use_lazy_video_tree:
@@ -675,7 +284,7 @@ class DreamZeroLeRobotDataset(Dataset):
         else:
             feature = self._features.get("action") or self._features.get("actions") or {}
         dim = int((feature.get("shape") or [0])[0] or 0)
-        inferred = _infer_named_component_slices(
+        inferred = infer_named_component_slices(
             feature.get("names"), dim, missing_short_keys
         )
         if inferred is None and len(missing_short_keys) == 1:
@@ -683,7 +292,7 @@ class DreamZeroLeRobotDataset(Dataset):
         if inferred is None:
             # Backward-compatible DROID fallback when meta names are missing.
             if set(missing_short_keys).issubset({"joint_position", "gripper_position"}):
-                st_j, st_g, ac_j, ac_g = _droid_default_state_action_slices()
+                st_j, st_g, ac_j, ac_g = droid_default_state_action_slices()
                 inferred = (
                     {"joint_position": st_j, "gripper_position": st_g}
                     if modality == "state"
@@ -734,7 +343,7 @@ class DreamZeroLeRobotDataset(Dataset):
                         episode_lengths[ep_idx] = int(obj[k])
                         break
 
-        self._episodes = _discover_local_lerobot_episode_indices(
+        self._episodes = discover_local_lerobot_episode_indices(
             self._root, self._info, allowed_episode_indices=meta_episode_indices
         )
         self._episode_lengths = [
@@ -761,7 +370,7 @@ class DreamZeroLeRobotDataset(Dataset):
             return
         import lerobot.datasets.lerobot_dataset as lerobot_dataset
 
-        if self.sampling_mode == "sharded":
+        if self.sampling_mode == "multi_anchor":
             delta_timestamps = {
                 self._source_video_key[k]: [0.0] for k in self.video_keys
             }
@@ -770,18 +379,18 @@ class DreamZeroLeRobotDataset(Dataset):
             for source in state_sources | action_sources:
                 delta_timestamps[source] = [0.0]
         else:
-            dense = self._dense_temporal
-            assert dense is not None
+            fixed_window = self._fixed_window_temporal
+            assert fixed_window is not None
             delta_timestamps = {
-                self._source_video_key[k]: [t / self._fps for t in dense.video]
+                self._source_video_key[k]: [t / self._fps for t in fixed_window.video]
                 for k in self.video_keys
             }
             state_sources = {source for source, _ in self._state_components.values()}
             action_sources = {source for source, _ in self._action_components.values()}
             for source in state_sources:
-                delta_timestamps[source] = [t / self._fps for t in dense.state]
+                delta_timestamps[source] = [t / self._fps for t in fixed_window.state]
             for source in action_sources:
-                delta_timestamps[source] = [t / self._fps for t in dense.action]
+                delta_timestamps[source] = [t / self._fps for t in fixed_window.action]
         self.dataset = lerobot_dataset.LeRobotDataset(
             self.data_path,
             delta_timestamps=delta_timestamps,
@@ -920,7 +529,7 @@ class DreamZeroLeRobotDataset(Dataset):
             fps = self._video_decode_fps_cache.pop(key)
             self._video_decode_fps_cache[key] = fps
             return fps
-        fps = float(_probe_video_container_fps(video_path) or self._fps)
+        fps = float(probe_video_container_fps(video_path) or self._fps)
         self._video_decode_fps_cache[key] = fps
         if len(self._video_decode_fps_cache) > self._video_decode_fps_cache_max:
             self._video_decode_fps_cache.popitem(last=False)
@@ -1028,7 +637,7 @@ class DreamZeroLeRobotDataset(Dataset):
             ep_len = int(self._ep_frames[ep_pos])
             return frame_in_ep, episode_index, ep_len
         raise RuntimeError(
-            "_resolve_index_context requires lazy video tree or v2 image parquet in sharded mode"
+            "_resolve_index_context requires lazy video tree or v2 image parquet in multi_anchor mode"
         )
 
     def _language_column_for_episode_table(self, table) -> str | None:
@@ -1058,17 +667,17 @@ class DreamZeroLeRobotDataset(Dataset):
     def _temporal_offsets_for_frame(
         self, frame_in_ep: int, episode_index: int, ep_len: int
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        if self.sampling_mode == "dense":
-            assert self._dense_temporal is not None
-            t = self._dense_temporal
+        if self.sampling_mode == "fixed_window":
+            assert self._fixed_window_temporal is not None
+            t = self._fixed_window_temporal
             return t.video, t.state, t.action
-        assert self._sharded_cfg is not None
+        assert self._multi_anchor_cfg is not None
         language = self._read_episode_language_labels(episode_index)
-        temporal = require_sharded_temporal_indices(
+        temporal = require_multi_anchor_temporal_indices(
             frame_in_ep,
             language,
             ep_len,
-            self._sharded_cfg,
+            self._multi_anchor_cfg,
             episode_index=episode_index,
         )
         return temporal.video, temporal.state, temporal.action
@@ -1155,7 +764,7 @@ class DreamZeroLeRobotDataset(Dataset):
         candidates = []
         for key in self.language_keys:
             if key in sample:
-                text = _safe_lang_text(sample[key], self._tasks)
+                text = safe_lang_text(sample[key], self._tasks)
                 if text:
                     candidates.append(text)
         if candidates:
@@ -1190,9 +799,9 @@ class DreamZeroLeRobotDataset(Dataset):
             state_arr = state_arr[None, :]
         t_act, ad = value.shape
         n_st, sd = state_arr.shape
-        if self.sampling_mode == "sharded":
-            assert self._sharded_cfg is not None
-            action_horizon = self._sharded_cfg.action_horizon
+        if self.sampling_mode == "multi_anchor":
+            assert self._multi_anchor_cfg is not None
+            action_horizon = self._multi_anchor_cfg.action_horizon
             if t_act > 0 and t_act % action_horizon == 0 and n_st > 0:
                 v = value.astype(np.float32, copy=True)
                 d_ref = min(ad, sd)
@@ -1260,21 +869,21 @@ class DreamZeroLeRobotDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         last_error: Exception | None = None
-        for attempt in range(self.sharded_resample_attempts):
+        for attempt in range(self.multi_anchor_resample_attempts):
             try:
                 raw = self._build_modality_dict(self._load_raw_sample(idx))
                 transformed = self.data_transform(raw)
-                return _collate_ready_sample(transformed)
-            except EmptyShardedSampleError as exc:
+                return collate_ready_sample(transformed)
+            except EmptyTemporalSampleError as exc:
                 last_error = exc
-                if self.sampling_mode != "sharded":
+                if self.sampling_mode != "multi_anchor":
                     raise
-                if attempt + 1 >= self.sharded_resample_attempts:
+                if attempt + 1 >= self.multi_anchor_resample_attempts:
                     break
                 idx = random.randint(0, max(0, len(self) - 1))
-        raise EmptyShardedSampleError(
-            f"Failed to sample a valid sharded index after "
-            f"{self.sharded_resample_attempts} attempts: {last_error}"
+        raise EmptyTemporalSampleError(
+            f"Failed to sample a valid multi_anchor index after "
+            f"{self.multi_anchor_resample_attempts} attempts: {last_error}"
         )
 
     def _build_modality_dict(self, sample: dict[str, Any]) -> dict[str, Any]:
@@ -1294,55 +903,13 @@ class DreamZeroLeRobotDataset(Dataset):
         for key in self.language_keys:
             source = self._language_sources.get(key, key)
             value = sample.get(key, sample.get(source, ""))
-            text = _safe_lang_text(value, self._tasks) if value != "" else ""
+            text = safe_lang_text(value, self._tasks) if value != "" else ""
             if text:
                 out[key] = text
                 wrote_language = True
         if not wrote_language:
             out[self.language_keys[0]] = fallback_text
         return out
-
-
-def _parse_collate_text(item: Any) -> str:
-    if not isinstance(item, str):
-        return str(item).lower()
-    try:
-        parsed = ast.literal_eval(item)
-        if isinstance(parsed, (list, tuple)):
-            return str(parsed[0]).lower()
-        return str(parsed).lower()
-    except (ValueError, SyntaxError, TypeError):
-        return item.lower()
-
-
-def _format_collate_text(
-    task: str,
-    embodiment_id: int,
-    embodiment_tag_mapping: dict[str, int],
-) -> str:
-    from groot.vla.data.schema import EmbodimentTag
-
-    prefix = "A multi-view video shows that a robot "
-    tag = {v: k for k, v in embodiment_tag_mapping.items()}.get(embodiment_id)
-    if tag == EmbodimentTag.OXE_DROID.value:
-        layout = (
-            " The video is split into three views: The top view shows the camera view "
-            "from the robot's wrist, the bottom-left view shows the camera view from the "
-            "left exterior camera, and the bottom-right view shows the camera view from "
-            "the right exterior camera. During training, one of the two bottom exterior "
-            "views may be a black screen (dropped view). The robot "
-        )
-    elif tag == EmbodimentTag.LIBERO_SIM.value:
-        layout = (
-            " The video is split into two horizontal views: the left view shows the "
-            "exterior camera and the right view shows the wrist camera. The robot "
-        )
-    else:
-        raise ValueError(
-            f"Embodiment ID {embodiment_id} not supported for collate "
-            f"(known tags: {list(embodiment_tag_mapping)})."
-        )
-    return prefix + task + layout + task
 
 
 class DreamZeroCollator:
@@ -1375,8 +942,8 @@ class DreamZeroCollator:
         for key in features[0]:
             if key == "text":
                 texts = [
-                    _format_collate_text(
-                        _parse_collate_text(elem[key]),
+                    format_training_prompt(
+                        normalize_instruction_text(elem[key]),
                         int(elem["embodiment_id"]),
                         embodiment_tag_mapping,
                     )
@@ -1407,31 +974,6 @@ class DreamZeroCollator:
         )
 
 
-def _ensure_dreamzero_collate_patches() -> None:
-    """Patch ``DreamTransform`` before building transforms (workers apply it in ``__getitem__``)."""
-    from rlinf.utils.patcher import Patcher
-
-    Patcher.add_patch(
-        "groot.vla.model.dreamzero.transform.dreamzero_cotrain.DreamTransform",
-        "rlinf.models.embodiment.dreamzero.patch.dreamzero_cotrain.DreamTransform",
-    )
-    Patcher.apply()
-
-
-def _get_dreamzero_data_param(data_cfg, model_cfg, key: str, default=None):
-    """Read a dataset-only Hydra field from ``data``, with deprecated ``actor.model`` fallback."""
-    if key in data_cfg and data_cfg.get(key) is not None:
-        return data_cfg.get(key)
-    if key in model_cfg and model_cfg.get(key) is not None:
-        logger.warning(
-            "DreamZero: actor.model.%s is deprecated for the SFT dataset; "
-            "set data.%s instead.",
-            key,
-            key,
-        )
-        return model_cfg.get(key)
-    return default
-
 def build_dreamzero_sft_dataloader(
     cfg,
     world_size: int,
@@ -1449,11 +991,9 @@ def build_dreamzero_sft_dataloader(
       - micro_batch_size samples are returned per iteration per GPU
       - Global effective batch size = micro_batch_size * world_size * grad_accum_steps
     """
-    _ensure_dreamzero_collate_patches()
-
     from groot.vla.data.transform import ComposedModalityTransform
 
-    from rlinf.models.embodiment.dreamzero.data_transforms import (
+    from rlinf.data.datasets.dreamzero.data_transforms import (
         build_dreamzero_composed_transform,
         collect_dreamzero_dataset_keys,
         embodiment_tag_mapping_for_embodiment,
@@ -1480,17 +1020,16 @@ def build_dreamzero_sft_dataloader(
         data_transform, embodiment_tag
     )
 
-    sampling_mode = str(
-        _get_dreamzero_data_param(data_cfg, model_cfg, "sampling_mode", "sharded")
-    ).strip().lower()
-    if sampling_mode not in ("sharded", "dense"):
+    sampling_mode = data_cfg.get("sampling_mode", "multi_anchor")
+    if sampling_mode not in ("multi_anchor", "fixed_window"):
         raise ValueError(
-            f"Unsupported data.sampling_mode {sampling_mode!r}; use 'sharded' or 'dense'."
+            f"Unsupported data.sampling_mode {sampling_mode!r}; "
+            "use 'multi_anchor' or 'fixed_window'."
         )
-    max_temporal_blocks = data_cfg.get("max_temporal_blocks", DEFAULT_MAX_TEMPORAL_BLOCKS)
-    num_video_frames = model_cfg.get("num_video_frames", 33)
+    max_chunk_size = model_cfg.action_head_cfg.config.diffusion_model_cfg.max_chunk_size
+    num_video_frames = model_cfg.num_video_frames
     state_horizon = model_cfg.get("state_horizon", 1)
-    action_horizon = model_cfg.get("action_horizon", 16)
+    action_horizon = model_cfg.action_horizon
     num_chunks = model_cfg.num_chunks
     max_seq_len = int(model_cfg.get("max_seq_len", 512))
     embodiment_tag_mapping = embodiment_tag_mapping_for_embodiment(
@@ -1513,18 +1052,19 @@ def build_dreamzero_sft_dataloader(
         relative_action_keys=list(model_cfg.get("relative_action_keys", [])),
         pq_cache_max_episodes=cfg.data.get("parquet_cache_size", 128),
         video_tolerance_s=cfg.data.get("video_tolerance_s", 0.1),
+        video_backend=data_cfg.get("video_backend", "pyav"),
+        max_chunk_size=max_chunk_size,
         sampling_mode=sampling_mode,
-        max_temporal_blocks=max_temporal_blocks,
-        sharded_resample_attempts=int(
-            _get_dreamzero_data_param(data_cfg, model_cfg, "sharded_resample_attempts", 8)
+        multi_anchor_resample_attempts=data_cfg.get(
+            "multi_anchor_resample_attempts", 8
         ),
     )
     logger.info(
-        "DreamZero LeRobot dataset: embodiment=%s sampling_mode=%s max_temporal_blocks=%s "
+        "DreamZero LeRobot dataset: embodiment=%s sampling_mode=%s max_chunk_size=%s "
         "action_horizon(transform)=%s video_keys=%s state_keys=%s action_keys=%s language_keys=%s",
         embodiment_tag,
         dataset.sampling_mode,
-        dataset.max_temporal_blocks,
+        dataset.max_chunk_size,
         dataset.action_horizon,
         dataset.video_keys,
         dataset.state_keys,

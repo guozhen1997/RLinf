@@ -14,32 +14,62 @@
 
 """Temporal index sampling for DreamZero LeRobot SFT datasets.
 
-Two modes:
+Two modes (relative frame offsets before adding ``frame_in_ep``):
 
-- **dense**: fixed contiguous offsets from ``num_video_frames`` / ``num_chunks`` /
-  ``action_horizon`` (legacy RLinf window).
-- **sharded**: Groot ``lerobot_sharded`` language-aware multi-anchor expansion.
+**fixed_window** — one contiguous span from the dataset index (legacy RLinf).
+
+Config: ``num_video_frames``, ``num_chunks``, ``action_horizon``.
+
+::
+
+    episode timeline (same language segment optional)
+    ...|--- anchor t ---[==== video window ====]--->...
+
+    video :  t+0, t+1, ..., t+(num_video_frames-1)     # contiguous
+
+    action/state (num_chunks macro blocks, stride = action_horizon):
+    chunk0  [0 .. H-1]   chunk1  [H .. 2H-1]   ...   chunk_{K-1}
+            |<- H act ->|       |<- H act ->|
+
+**multi_anchor** — expand along the episode within the same language label
+(Groot ``lerobot_sharded`` semantics).
+
+Config: ``max_chunk_size``, ``macro_stride`` (default 24), per-anchor micro
+offsets (video: 0,3,...,21; action: 0..H-1).
+
+::
+
+    episode timeline
+    ...|-- lang A only --|-- lang B --|...
+         ^anchor              (stop here)
+         |<- macro_stride ->|
+    ...  a-24    a0    a+24   a+48  ...     # one anchor per macro block
+
+    at each anchor aK, sample micro frames (example video, 8 per block):
+    aK+0, aK+3, aK+6, ..., aK+21
+
+    video  : (max_chunk_size blocks) x 8 frames  (+ boundary frame) ~ 8*K+1
+    action : max_chunk_size x action_horizon
+    state  : one index per macro anchor (max_chunk_size)
 """
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 
-SamplingMode = Literal["sharded", "dense"]
+SamplingMode = Literal["fixed_window", "multi_anchor"]
 
 
-class EmptyShardedSampleError(ValueError):
-    """Raised when sharded sampling yields no valid video/action/state indices."""
+class EmptyTemporalSampleError(ValueError):
+    """Raised when multi-anchor sampling yields no valid video/action/state indices."""
 
 
 @dataclass(frozen=True)
-class ShardedTemporalConfig:
-    """Hyper-parameters for Groot-compatible sharded temporal sampling."""
+class MultiAnchorTemporalConfig:
+    """Hyper-parameters for language-bounded multi-anchor temporal sampling."""
 
-    max_temporal_blocks: int
+    max_chunk_size: int
     macro_stride: int = 24
     action_horizon: int = 24
     video_in_chunk_offsets: tuple[int, ...] = (0, 3, 6, 9, 12, 15, 18, 21)
@@ -62,18 +92,19 @@ class TemporalIndices:
             or self.state.size == 0
         )
 
+
 def sample_video_indices(
     first_idx: int,
     language_annotations: np.ndarray,
     trajectory_length: int,
-    cfg: ShardedTemporalConfig,
+    cfg: MultiAnchorTemporalConfig,
 ) -> tuple[np.ndarray, int]:
     """Match ``_uniform_sample_from_language_ranges`` in ``lerobot_sharded.py``."""
     if trajectory_length <= 0:
         return np.array([], dtype=np.int64), 0
 
     target_language = language_annotations[first_idx]
-    max_frames = 8 * cfg.max_temporal_blocks + 1
+    max_frames = 8 * cfg.max_chunk_size + 1
     per_step_offsets = list(cfg.video_in_chunk_offsets)
     sampled_list: list[int] = []
 
@@ -139,7 +170,7 @@ def sample_action_indices(
     first_idx: int,
     language_annotations: np.ndarray,
     trajectory_length: int,
-    cfg: ShardedTemporalConfig,
+    cfg: MultiAnchorTemporalConfig,
     target_num_chunks: int | None,
 ) -> np.ndarray:
     """Match ``get_action`` language-aware branch in ``lerobot_sharded.py``."""
@@ -147,7 +178,7 @@ def sample_action_indices(
         return np.array([], dtype=np.int64)
 
     target_language = language_annotations[first_idx]
-    max_frames = cfg.action_horizon * cfg.max_temporal_blocks
+    max_frames = cfg.action_horizon * cfg.max_chunk_size
     per_step_offsets = list(range(cfg.action_horizon))
     sampled_list: list[int] = []
 
@@ -205,7 +236,7 @@ def sample_state_indices(
     first_idx: int,
     language_annotations: np.ndarray,
     trajectory_length: int,
-    cfg: ShardedTemporalConfig,
+    cfg: MultiAnchorTemporalConfig,
     target_num_chunks: int | None,
 ) -> np.ndarray:
     """Match ``get_state`` language-aware branch in ``lerobot_sharded.py``."""
@@ -213,7 +244,7 @@ def sample_state_indices(
         return np.array([], dtype=np.int64)
 
     target_language = language_annotations[first_idx]
-    max_frames = cfg.max_temporal_blocks
+    max_frames = cfg.max_chunk_size
     sampled_list: list[int] = []
 
     def add_anchor(anchor_index: int) -> None:
@@ -261,7 +292,7 @@ def sample_temporal_indices(
     first_idx: int,
     language_annotations: np.ndarray,
     trajectory_length: int,
-    cfg: ShardedTemporalConfig,
+    cfg: MultiAnchorTemporalConfig,
 ) -> TemporalIndices:
     """Sample video then action/state (video chunk count drives action/state)."""
     video, num_chunks = sample_video_indices(
@@ -289,17 +320,17 @@ def sample_temporal_indices(
     )
 
 
-def require_sharded_temporal_indices(
+def require_multi_anchor_temporal_indices(
     frame_in_ep: int,
     language_annotations: np.ndarray,
     ep_len: int,
-    cfg: ShardedTemporalConfig,
+    cfg: MultiAnchorTemporalConfig,
     *,
     episode_index: int | None = None,
 ) -> TemporalIndices:
-    """Sharded sampling; raises :class:`EmptyShardedSampleError` when indices are empty.
+    """Multi-anchor sampling; raises :class:`EmptyTemporalSampleError` when empty.
 
-    Also rejects partial macro windows (``num_video_chunks < max_temporal_blocks``) so
+    Also rejects partial macro windows (``num_video_chunks < max_chunk_size``) so
     collated ``state`` / ``action`` / ``images`` tensors stay batch-consistent.
     """
     temporal = sample_temporal_indices(
@@ -307,42 +338,42 @@ def require_sharded_temporal_indices(
     )
     if temporal.is_empty:
         ep = episode_index if episode_index is not None else "?"
-        raise EmptyShardedSampleError(
-            f"Empty sharded temporal indices at frame {frame_in_ep} "
+        raise EmptyTemporalSampleError(
+            f"Empty multi-anchor temporal indices at frame {frame_in_ep} "
             f"episode {ep} len {ep_len}"
         )
-    if temporal.num_video_chunks != cfg.max_temporal_blocks:
+    if temporal.num_video_chunks != cfg.max_chunk_size:
         ep = episode_index if episode_index is not None else "?"
-        raise EmptyShardedSampleError(
-            f"Partial sharded temporal window at frame {frame_in_ep} "
+        raise EmptyTemporalSampleError(
+            f"Partial multi-anchor temporal window at frame {frame_in_ep} "
             f"episode {ep} len {ep_len}: num_video_chunks="
-            f"{temporal.num_video_chunks}, expected {cfg.max_temporal_blocks}"
+            f"{temporal.num_video_chunks}, expected {cfg.max_chunk_size}"
         )
-    expected_action = cfg.max_temporal_blocks * cfg.action_horizon
+    expected_action = cfg.max_chunk_size * cfg.action_horizon
     if temporal.action.size != expected_action:
         ep = episode_index if episode_index is not None else "?"
-        raise EmptyShardedSampleError(
-            f"Inconsistent sharded action span at frame {frame_in_ep} "
+        raise EmptyTemporalSampleError(
+            f"Inconsistent multi-anchor action span at frame {frame_in_ep} "
             f"episode {ep}: action.size={temporal.action.size}, "
             f"expected {expected_action}"
         )
-    if temporal.state.size != cfg.max_temporal_blocks:
+    if temporal.state.size != cfg.max_chunk_size:
         ep = episode_index if episode_index is not None else "?"
-        raise EmptyShardedSampleError(
-            f"Inconsistent sharded state span at frame {frame_in_ep} "
+        raise EmptyTemporalSampleError(
+            f"Inconsistent multi-anchor state span at frame {frame_in_ep} "
             f"episode {ep}: state.size={temporal.state.size}, "
-            f"expected {cfg.max_temporal_blocks}"
+            f"expected {cfg.max_chunk_size}"
         )
     return temporal
 
 
-def build_dense_offsets(
+def build_fixed_window_offsets(
     num_video_frames: int,
     state_horizon: int,
     action_horizon: int,
     num_chunks: int,
 ) -> TemporalIndices:
-    """Legacy contiguous offsets (``action_horizon * num_chunks`` window)."""
+    """Fixed contiguous offsets (``action_horizon * num_chunks`` window)."""
     return TemporalIndices(
         video=np.arange(num_video_frames, dtype=np.int64),
         state=np.asarray(

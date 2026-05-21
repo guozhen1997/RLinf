@@ -30,7 +30,12 @@ runner:
 
 data:
   train_data_paths: "path/to/datasets/libero"
-  sampling_mode: sharded
+  lazy_load: True
+  num_workers: 8
+  prefetch_factor: 8
+  video_tolerance_s: 0.1
+  parquet_cache_size: 512
+  video_backend: torchcodec # LeRobot video decoder: pyav | torchcodec
 
 algorithm:
   adv_type: gae

@@ -21,7 +21,7 @@ from groot.vla.data.transform import ComposedModalityTransform
 from omegaconf import DictConfig
 from safetensors.torch import load_file
 
-from rlinf.models.embodiment.dreamzero.data_transforms import (
+from rlinf.data.datasets.dreamzero.data_transforms import (
     build_dreamzero_composed_transform,
     load_dreamzero_dataset_metadata,
 )
@@ -90,10 +90,6 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     Patcher.add_patch(
         f"{_dit_chunk}.CausalWanModel._forward_train",
         "rlinf.models.embodiment.dreamzero.patch.wan_causal_model_forward_train._forward_train",
-    )
-    Patcher.add_patch(
-        "groot.vla.model.dreamzero.transform.dreamzero_cotrain.DreamTransform",
-        "rlinf.models.embodiment.dreamzero.patch.dreamzero_cotrain.DreamTransform",
     )
     Patcher.apply()
 

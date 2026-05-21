@@ -76,8 +76,8 @@ Hydra 通过 ``defaults`` 组装 ``actor.model``（例如 ``libero_sft_dreamzero
 ``examples/sft/config/model/`` 下的预设（如 ``dreamzero_5b.yaml``）通过 Hydra ``defaults`` 引入，**没有**单独的 ``dreamzero_*`` 覆盖键。
 
 数据变换链在 Python 中按 ``embodiment_tag`` 组装；分辨率、``DreamTransform`` 的 ``state_horizon`` / ``action_horizon``
-等可通过 ``actor.model`` 上的 ``video_*``、``state_horizon`` / ``action_horizon``、``max_state_dim`` 等字段覆盖（见 ``data_transforms/__init__.py``）。
-SFT 数据加载器默认使用与 Groot **sharded** 一致的时间采样（``data.sampling_mode: sharded``、``data.max_temporal_blocks``）；``action_horizon`` 仅用于 ``DreamTransform`` / WAN。设 ``data.sampling_mode: dense`` 可恢复旧版连续窗口（``action_horizon * num_chunks``）。
+等可通过 ``actor.model`` 上的 ``video_*``、``state_horizon`` / ``action_horizon``、``max_state_dim`` 等字段覆盖（见 ``rlinf/data/datasets/dreamzero/data_transforms/__init__.py``）。
+SFT 数据加载器默认使用 **multi_anchor** 时间采样（``data.sampling_mode: multi_anchor``，与 Groot ``lerobot_sharded`` 语义一致）；宏观时间块数来自 ``diffusion_model_cfg.max_chunk_size``。``action_horizon`` 仅用于 ``DreamTransform`` / WAN。设 ``data.sampling_mode: fixed_window`` 可恢复旧版连续窗口（``action_horizon * num_chunks``）。
 
 统计量来自数据集生成的 metadata.json，通过 ``metadata_json_path`` 指定路径，
 或放在 ``model_path/experiment_cfg/metadata.json``（按 ``embodiment_tag`` 键索引）。
@@ -126,16 +126,17 @@ WAN2.2 训练通常需要下列组件权重：
 以下字段在 DreamZero SFT 中最关键：
 
 - ``actor.model.model_type``：固定 ``dreamzero``
-- ``actor.model.model_path``：checkpoint 目录（``null`` 则仅用 Hydra ``actor.model``）。已设置时从该路径读 ``config.json``；metadata 来自 ``metadata_json_path`` 或 ``experiment_cfg/metadata.json``。**数据变换链**始终由 Python 按 ``embodiment_tag`` 组装（见 ``data_transforms/__init__.py``）。
+- ``actor.model.model_path``：checkpoint 目录（``null`` 则仅用 Hydra ``actor.model``）。已设置时从该路径读 ``config.json``；metadata 来自 ``metadata_json_path`` 或 ``experiment_cfg/metadata.json``。**数据变换链**始终由 Python 按 ``embodiment_tag`` 组装（见 ``rlinf/data/datasets/dreamzero/data_transforms/__init__.py``）。
 - ``actor.model.tokenizer_path``：文本 tokenizer 路径
 - ``actor.model.embodiment_tag``："oxe_droid" 或 "libero_sim"
-- ``data.sampling_mode``：``sharded``（与 Groot ``lerobot_sharded`` 一致的语言边界多锚点采样）或 ``dense``（旧版连续窗口）。
-- ``data.max_temporal_blocks``：宏观时间块数（可选，默认 **4**，与常见 checkpoint 一致；官方 Groot DROID 数据配方为 5 时可显式覆盖）。
-- ``actor.model.action_horizon``：仅用于 **DreamTransform / WAN 每块**（LIBERO 16，DROID 24）。sharded 数据集动作长度通常为 ``24 * max_temporal_blocks``（如 96），不是 ``action_horizon * num_chunks``。
-- ``actor.model.num_chunks``：旧版 dense 模式别名；sharded 下与 ``max_temporal_blocks`` 不一致时会被忽略。
+- ``data.sampling_mode``：``multi_anchor``（语言段内多锚点采样）或 ``fixed_window``（旧版连续窗口）。
+- ``actor.model.action_head_cfg.config.diffusion_model_cfg.max_chunk_size``：multi_anchor 宏观时间块数（与 WAN Causal DiT 一致，常见为 **4**；需与数据配方一致，例如官方 Groot DROID 为 5 时改此字段）。
+- ``actor.model.action_horizon``：仅用于 **DreamTransform / WAN 每块**（LIBERO 16，DROID 24）。multi_anchor 数据集动作长度通常为 ``action_horizon * max_chunk_size``（如 LIBERO 64、DROID 96），不是 ``action_horizon * num_chunks``。
+- ``actor.model.num_chunks``：fixed_window 模式连续块数；multi_anchor 下与 ``max_chunk_size`` 不一致时仅打警告，偏移以 ``max_chunk_size`` 为准。
 - ``actor.model.state_horizon``：每个样本的状态行数（通常为 1，每个宏观锚点一行 state）。
-- ``actor.model.num_video_frames``：仅在 ``data.sampling_mode: dense`` 时使用（sharded 约 ``8 * data.max_temporal_blocks + 1`` 帧，如 33）。
-- ``data.sharded_resample_attempts``：sharded 采样为空时在 map-style dataloader 中的重试次数。
+- ``actor.model.num_video_frames``：仅在 ``data.sampling_mode: fixed_window`` 时使用（multi_anchor 约 ``8 * max_chunk_size + 1`` 帧，如 33）。
+- ``data.multi_anchor_resample_attempts``：multi_anchor 采样为空时在 map-style dataloader 中的重试次数。
+- ``data.video_backend``：lazy 加载 mp4 时使用的 LeRobot 视频解码后端（``pyav``、``torchcodec``，默认 ``pyav``）。
 - ``actor.model.droid_view_height`` / ``droid_view_width``：DROID 每路 resize 目标（可选）
 - ``actor.model.relative_action``：是否使用相对动作
 - ``actor.fsdp_config``：FSDP 训练策略

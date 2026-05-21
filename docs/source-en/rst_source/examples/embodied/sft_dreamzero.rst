@@ -104,8 +104,9 @@ Preset files under ``examples/sft/config/model/`` (e.g. ``dreamzero_5b.yaml``) a
 
 Data transforms are constructed in Python from ``embodiment_tag``; optional numeric overrides live under
 ``video_*``, ``state_horizon``, ``action_horizon``, ``max_state_dim``, ``max_action_dim``, ``max_seq_len``, etc. on ``actor.model``
-(see ``data_transforms/__init__.py``). The SFT dataloader defaults to Groot **sharded** temporal sampling
-(``data.sampling_mode: sharded``, ``data.max_temporal_blocks``) from ``lerobot_sharded.py``; ``action_horizon`` is only for
+(see ``rlinf/data/datasets/dreamzero/data_transforms/__init__.py``). The SFT dataloader defaults to **multi_anchor** temporal sampling
+(``data.sampling_mode: multi_anchor``; Groot ``lerobot_sharded`` semantics); macro block count comes from
+``diffusion_model_cfg.max_chunk_size``. ``action_horizon`` is only for
 ``DreamTransform`` / WAN (per-block), not the dataset macro stride (24 frames).
 
 Dataset statistics are loaded from the dataset-generated ``metadata.json`` file.
@@ -164,16 +165,17 @@ Key DreamZero config fields
 Important fields:
 
 - ``actor.model.model_type``: ``dreamzero``
-- ``actor.model.model_path``: checkpoint directory (``null`` to use Hydra ``actor.model`` only). When set, loads ``config.json`` from this path; metadata from ``metadata_json_path`` or ``experiment_cfg/metadata.json``. Data transforms are always built in Python (see ``data_transforms/__init__.py``).
+- ``actor.model.model_path``: checkpoint directory (``null`` to use Hydra ``actor.model`` only). When set, loads ``config.json`` from this path; metadata from ``metadata_json_path`` or ``experiment_cfg/metadata.json``. Data transforms are always built in Python (see ``rlinf/data/datasets/dreamzero/data_transforms/__init__.py``).
 - ``actor.model.tokenizer_path``: tokenizer path
 - ``actor.model.embodiment_tag``: usually ``oxe_droid`` (DROID) or LIBERO-related tag
-- ``data.sampling_mode``: ``sharded`` (Groot language-aware multi-anchor sampling) or ``dense`` (legacy contiguous window).
-- ``data.max_temporal_blocks``: macro temporal blocks (optional, default **4**, matches common checkpoints; set to **5** to match official Groot DROID data recipes).
-- ``actor.model.action_horizon``: **DreamTransform / WAN per-block** action steps (LIBERO 16, DROID 24). Sharded dataset action length is typically ``24 * max_temporal_blocks`` (e.g. 96), not ``action_horizon * num_chunks``.
-- ``actor.model.num_chunks``: legacy dense-mode alias; ignored for sharded offsets when ``max_temporal_blocks`` is set.
+- ``data.sampling_mode``: ``multi_anchor`` (language-bounded multi-anchor sampling) or ``fixed_window`` (legacy contiguous window).
+- ``actor.model.action_head_cfg.config.diffusion_model_cfg.max_chunk_size``: multi-anchor macro temporal blocks (WAN Causal DiT capacity; commonly **4**; set to **5** for official Groot DROID data recipes).
+- ``actor.model.action_horizon``: **DreamTransform / WAN per-block** action steps (LIBERO 16, DROID 24). Multi-anchor dataset action length is ``action_horizon * max_chunk_size`` (e.g. LIBERO 64, DROID 96), not ``action_horizon * num_chunks``.
+- ``actor.model.num_chunks``: fixed_window-mode contiguous chunks; multi_anchor offsets use ``max_chunk_size`` (warns when it differs from ``num_chunks``).
 - ``actor.model.state_horizon``: state rows per sample (usually 1; one state per macro anchor).
-- ``actor.model.num_video_frames``: only used when ``data.sampling_mode: dense`` (sharded mode yields ~``8 * data.max_temporal_blocks + 1`` frames, e.g. 33).
-- ``data.sharded_resample_attempts``: retries when sharded sampling returns empty indices (map-style dataloader).
+- ``actor.model.num_video_frames``: only used when ``data.sampling_mode: fixed_window`` (multi_anchor mode yields ~``8 * max_chunk_size + 1`` frames, e.g. 33).
+- ``data.multi_anchor_resample_attempts``: retries when multi-anchor sampling returns empty indices (map-style dataloader).
+- ``data.video_backend``: LeRobot video decoder for lazy mp4 loading (``pyav``, ``torchcodec``; default ``pyav``).
 - ``actor.model.droid_view_height`` / ``droid_view_width`` (optional per-view resize for DROID)
 - ``actor.model.relative_action``
 - ``actor.fsdp_config``

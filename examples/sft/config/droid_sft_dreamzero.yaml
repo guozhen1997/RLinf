@@ -38,7 +38,8 @@ data:
   prefetch_factor: 8
   video_tolerance_s: 0.1
   parquet_cache_size: 512
-  sampling_mode: sharded
+  sampling_mode: multi_anchor
+  video_backend: torchcodec # LeRobot video decoder: pyav | torchcodec
 
 algorithm:
   adv_type: gae
