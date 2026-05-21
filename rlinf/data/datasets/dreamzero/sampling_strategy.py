@@ -86,11 +86,7 @@ class TemporalIndices:
 
     @property
     def is_empty(self) -> bool:
-        return (
-            self.video.size == 0
-            or self.action.size == 0
-            or self.state.size == 0
-        )
+        return self.video.size == 0 or self.action.size == 0 or self.state.size == 0
 
 
 def sample_video_indices(
@@ -201,7 +197,10 @@ def sample_action_indices(
     back_done = False
     fwd_done = False
     while len(sampled_list) < max_frames and (not back_done or not fwd_done):
-        if target_num_chunks is not None and len(sampled_list) // cfg.action_horizon >= target_num_chunks:
+        if (
+            target_num_chunks is not None
+            and len(sampled_list) // cfg.action_horizon >= target_num_chunks
+        ):
             break
         if not back_done:
             back_anchor = first_idx - cfg.macro_stride * step
@@ -333,9 +332,7 @@ def require_multi_anchor_temporal_indices(
     Also rejects partial macro windows (``num_video_chunks < max_chunk_size``) so
     collated ``state`` / ``action`` / ``images`` tensors stay batch-consistent.
     """
-    temporal = sample_temporal_indices(
-        frame_in_ep, language_annotations, ep_len, cfg
-    )
+    temporal = sample_temporal_indices(frame_in_ep, language_annotations, ep_len, cfg)
     if temporal.is_empty:
         ep = episode_index if episode_index is not None else "?"
         raise EmptyTemporalSampleError(

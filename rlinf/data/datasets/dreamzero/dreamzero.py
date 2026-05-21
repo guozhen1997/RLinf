@@ -24,6 +24,10 @@ import torch
 from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
+from rlinf.data.datasets.dreamzero.data_transforms import (
+    format_training_prompt,
+    normalize_instruction_text,
+)
 from rlinf.data.datasets.dreamzero.sampling_strategy import (
     EmptyTemporalSampleError,
     MultiAnchorTemporalConfig,
@@ -31,10 +35,6 @@ from rlinf.data.datasets.dreamzero.sampling_strategy import (
     TemporalIndices,
     build_fixed_window_offsets,
     require_multi_anchor_temporal_indices,
-)
-from rlinf.data.datasets.dreamzero.data_transforms import (
-    format_training_prompt,
-    normalize_instruction_text,
 )
 from rlinf.data.datasets.dreamzero.utils import (
     collate_ready_sample,
@@ -83,7 +83,9 @@ class DreamZeroLeRobotDataset(Dataset):
     ):
         if isinstance(data_path, (list, tuple)):
             if len(data_path) == 0:
-                raise ValueError("DreamZeroLeRobotDataset requires at least one data path.")
+                raise ValueError(
+                    "DreamZeroLeRobotDataset requires at least one data path."
+                )
             data_path = data_path[0]
         self.data_path = str(data_path)
         self.lazy_load = bool(lazy_load)
@@ -93,24 +95,29 @@ class DreamZeroLeRobotDataset(Dataset):
         self.action_horizon = int(action_horizon)
         self.num_chunks = int(num_chunks)
         self.max_chunk_size = int(max_chunk_size)
-        if self.sampling_mode == "multi_anchor" and self.max_chunk_size != self.num_chunks:
+        if (
+            self.sampling_mode == "multi_anchor"
+            and self.max_chunk_size != self.num_chunks
+        ):
             logger.warning(
                 "DreamZeroLeRobotDataset: actor.model.num_chunks=%s differs from "
                 "diffusion_model_cfg.max_chunk_size=%s; multi_anchor offsets use max_chunk_size.",
                 self.num_chunks,
                 self.max_chunk_size,
             )
-        self.multi_anchor_resample_attempts = max(1, int(multi_anchor_resample_attempts))
+        self.multi_anchor_resample_attempts = max(
+            1, int(multi_anchor_resample_attempts)
+        )
         if self.state_horizon <= 0:
             raise ValueError(f"state_horizon must be positive, got {state_horizon!r}")
         if self.action_horizon <= 0:
             raise ValueError(f"action_horizon must be positive, got {action_horizon!r}")
         if self.max_chunk_size <= 0:
-            raise ValueError(
-                f"max_chunk_size must be positive, got {max_chunk_size!r}"
-            )
+            raise ValueError(f"max_chunk_size must be positive, got {max_chunk_size!r}")
         if self.sampling_mode == "fixed_window" and self.num_video_frames <= 0:
-            raise ValueError(f"num_video_frames must be positive, got {num_video_frames!r}")
+            raise ValueError(
+                f"num_video_frames must be positive, got {num_video_frames!r}"
+            )
         self.relative_action = bool(relative_action)
         self.relative_action_keys = list(relative_action_keys or [])
         self.data_transform = data_transform
@@ -125,7 +132,9 @@ class DreamZeroLeRobotDataset(Dataset):
                 f"got video={self.video_keys}, state={self.state_keys}, action={self.action_keys}"
             )
         if not self.language_keys:
-            raise ValueError("DreamZeroLeRobotDataset requires at least one language key.")
+            raise ValueError(
+                "DreamZeroLeRobotDataset requires at least one language key."
+            )
 
         self._root = Path(self.data_path).resolve()
         self._meta_dir = self._root / "meta"
@@ -166,7 +175,11 @@ class DreamZeroLeRobotDataset(Dataset):
             and self._root.exists()
         )
         self._video_backend = str(video_backend)
-        if self.sampling_mode == "multi_anchor" and not self.lazy_load and not self._use_image_parquet_tree:
+        if (
+            self.sampling_mode == "multi_anchor"
+            and not self.lazy_load
+            and not self._use_image_parquet_tree
+        ):
             raise ValueError(
                 "DreamZeroLeRobotDataset sampling_mode='multi_anchor' requires lazy_load=True "
                 "or a v2 image-parquet layout (no mp4 video_path)."
@@ -200,10 +213,14 @@ class DreamZeroLeRobotDataset(Dataset):
         if not source_keys:
             return False
         source_features = [self._features.get(key) or {} for key in source_keys]
-        has_video_feature = any(feature.get("dtype") == "video" for feature in source_features)
+        has_video_feature = any(
+            feature.get("dtype") == "video" for feature in source_features
+        )
         if has_video_feature:
             return False
-        all_image_features = all(feature.get("dtype") == "image" for feature in source_features)
+        all_image_features = all(
+            feature.get("dtype") == "image" for feature in source_features
+        )
         if not all_image_features:
             return False
         return (
@@ -269,7 +286,9 @@ class DreamZeroLeRobotDataset(Dataset):
             if entry is None:
                 missing_keys.append(key)
                 continue
-            source = str(entry.get("original_key") or self._default_vector_source_key(modality))
+            source = str(
+                entry.get("original_key") or self._default_vector_source_key(modality)
+            )
             start = int(entry.get("start", 0))
             end = entry.get("end")
             sources[key] = (source, slice(start, None if end is None else int(end)))
@@ -278,11 +297,15 @@ class DreamZeroLeRobotDataset(Dataset):
 
         missing_short_keys = [self._short_modality_key(k) for k in missing_keys]
         if modality == "state":
-            feature = self._features.get("observation.state") or self._features.get(
-                "state"
-            ) or {}
+            feature = (
+                self._features.get("observation.state")
+                or self._features.get("state")
+                or {}
+            )
         else:
-            feature = self._features.get("action") or self._features.get("actions") or {}
+            feature = (
+                self._features.get("action") or self._features.get("actions") or {}
+            )
         dim = int((feature.get("shape") or [0])[0] or 0)
         inferred = infer_named_component_slices(
             feature.get("names"), dim, missing_short_keys
@@ -322,7 +345,9 @@ class DreamZeroLeRobotDataset(Dataset):
         self, pq_cache_max_episodes: int, video_tolerance_s: float
     ) -> None:
         if not self._root.exists():
-            raise FileNotFoundError(f"DreamZero data_path must be local: {self.data_path}")
+            raise FileNotFoundError(
+                f"DreamZero data_path must be local: {self.data_path}"
+            )
         self._chunks_size = int(self._info.get("chunks_size") or 1000)
         self._data_tmpl = str(self._info.get("data_path") or "")
         self._video_tmpl = str(self._info.get("video_path") or "")
@@ -362,7 +387,9 @@ class DreamZeroLeRobotDataset(Dataset):
         self._video_decode_fps_cache_max = 512
         self._video_tolerance_s = float(video_tolerance_s)
         if self._video_tolerance_s <= 0:
-            raise ValueError(f"video_tolerance_s must be positive, got {video_tolerance_s!r}")
+            raise ValueError(
+                f"video_tolerance_s must be positive, got {video_tolerance_s!r}"
+            )
 
     def _init_lerobot_or_v2_parquet(self) -> None:
         if self._use_image_parquet_tree:
@@ -412,7 +439,11 @@ class DreamZeroLeRobotDataset(Dataset):
         self._ep_parquet_paths = []
         for ep in self._episodes_meta:
             ep_idx = int(ep["episode_index"])
-            pq_path = data_root / f"chunk-{ep_idx // 1000:03d}" / f"episode_{ep_idx:06d}.parquet"
+            pq_path = (
+                data_root
+                / f"chunk-{ep_idx // 1000:03d}"
+                / f"episode_{ep_idx:06d}.parquet"
+            )
             table = pq.read_table(pq_path)
             self._ep_frames.append(len(table))
             self._ep_parquet_paths.append(pq_path)
@@ -493,7 +524,9 @@ class DreamZeroLeRobotDataset(Dataset):
     def _infer_episode_length_from_parquet(self, episode_index: int) -> int:
         import pyarrow.parquet as pq
 
-        return int(pq.read_metadata(str(self._get_parquet_path(episode_index))).num_rows)
+        return int(
+            pq.read_metadata(str(self._get_parquet_path(episode_index))).num_rows
+        )
 
     def _get_parquet_path(self, episode_index: int) -> Path:
         ep_chunk = int(episode_index) // self._chunks_size
@@ -504,7 +537,9 @@ class DreamZeroLeRobotDataset(Dataset):
         )
         p = (self._root / rel).resolve()
         if not p.is_file():
-            raise FileNotFoundError(f"Parquet file not found for episode {episode_index}: {p}")
+            raise FileNotFoundError(
+                f"Parquet file not found for episode {episode_index}: {p}"
+            )
         return p
 
     def _get_video_path(self, episode_index: int, video_key: str) -> Path:
@@ -602,7 +637,9 @@ class DreamZeroLeRobotDataset(Dataset):
     @staticmethod
     def _read_list_column(table, name: str, indices: np.ndarray) -> np.ndarray:
         col = table.column(name)
-        return np.asarray([col[int(i)].as_py() for i in indices.tolist()], dtype=np.float32)
+        return np.asarray(
+            [col[int(i)].as_py() for i in indices.tolist()], dtype=np.float32
+        )
 
     @staticmethod
     def _read_struct_list_field(
@@ -611,7 +648,9 @@ class DreamZeroLeRobotDataset(Dataset):
         col = table.column(struct_col)
         arr = col.chunk(0) if hasattr(col, "num_chunks") and col.num_chunks > 0 else col
         field_arr = arr.field(field)
-        return np.asarray([field_arr[int(i)].as_py() for i in indices.tolist()], dtype=np.float32)
+        return np.asarray(
+            [field_arr[int(i)].as_py() for i in indices.tolist()], dtype=np.float32
+        )
 
     def _resolve_index_context(self, idx: int) -> tuple[int, int, int]:
         """Return ``(frame_in_ep, episode_index, episode_length)`` for a global index."""
@@ -632,8 +671,12 @@ class DreamZeroLeRobotDataset(Dataset):
                     f"Index {idx} out of range for dataset of len {self._total_frames}"
                 )
             ep_pos = int(np.searchsorted(self._cumulative, idx, side="right"))
-            frame_in_ep = int(idx) if ep_pos == 0 else int(idx - self._cumulative[ep_pos - 1])
-            episode_index = int(self._episodes_meta[ep_pos].get("episode_index", ep_pos))
+            frame_in_ep = (
+                int(idx) if ep_pos == 0 else int(idx - self._cumulative[ep_pos - 1])
+            )
+            episode_index = int(
+                self._episodes_meta[ep_pos].get("episode_index", ep_pos)
+            )
             ep_len = int(self._ep_frames[ep_pos])
             return frame_in_ep, episode_index, ep_len
         raise RuntimeError(
@@ -727,17 +770,23 @@ class DreamZeroLeRobotDataset(Dataset):
                 continue
             if self._col_exists(table, source):
                 sample[source] = self._read_list_column(table, source, state_idx)
-            elif source == "observation.state" and self._col_exists(table, "observation"):
+            elif source == "observation.state" and self._col_exists(
+                table, "observation"
+            ):
                 sample[source] = self._read_struct_list_field(
                     table, "observation", "state", state_idx
                 )
             else:
-                raise KeyError(f"episode parquet missing state source column {source!r}")
+                raise KeyError(
+                    f"episode parquet missing state source column {source!r}"
+                )
         for source, _ in self._action_components.values():
             if source in sample:
                 continue
             if not self._col_exists(table, source):
-                raise KeyError(f"episode parquet missing action source column {source!r}")
+                raise KeyError(
+                    f"episode parquet missing action source column {source!r}"
+                )
             sample[source] = self._read_list_column(table, source, action_idx)
         return sample
 
@@ -969,9 +1018,7 @@ class DreamZeroCollator:
         return batch
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
-        return self.collate_batch(
-            features, self.tokenizer, self.embodiment_tag_mapping
-        )
+        return self.collate_batch(features, self.tokenizer, self.embodiment_tag_mapping)
 
 
 def build_dreamzero_sft_dataloader(
@@ -1007,9 +1054,7 @@ def build_dreamzero_sft_dataloader(
 
     metadata = load_dreamzero_dataset_metadata(model_cfg)
     data_transform = build_dreamzero_composed_transform(model_cfg, tokenizer_path)
-    assert isinstance(data_transform, ComposedModalityTransform), (
-        f"{data_transform=}"
-    )
+    assert isinstance(data_transform, ComposedModalityTransform), f"{data_transform=}"
     data_transform.set_metadata(metadata)
     if eval_dataset:
         data_transform.eval()

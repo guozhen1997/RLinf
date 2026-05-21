@@ -247,7 +247,9 @@ def feature_component_spans(names: Any, feature_dim: int) -> dict[str, slice]:
         elif isinstance(entry, dict):
             key = str(entry.get("name", ""))
             shape = entry.get("shape")
-            width = int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
+            width = (
+                int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
+            )
         else:
             continue
         if key:
@@ -258,12 +260,19 @@ def feature_component_spans(names: Any, feature_dim: int) -> dict[str, slice]:
 
 def infer_modality_json_from_features(features: dict[str, Any]) -> dict[str, Any]:
     """Best-effort modality metadata for LeRobot trees without meta/modality.json."""
-    modality: dict[str, Any] = {"video": {}, "state": {}, "action": {}, "annotation": {}}
+    modality: dict[str, Any] = {
+        "video": {},
+        "state": {},
+        "action": {},
+        "annotation": {},
+    }
 
     for source_key, feature in features.items():
         if not isinstance(feature, dict):
             continue
-        if feature.get("dtype") == "video" or source_key.startswith("observation.images."):
+        if feature.get("dtype") == "video" or source_key.startswith(
+            "observation.images."
+        ):
             short = source_key.split("observation.images.", 1)[-1]
             modality["video"][short] = {"original_key": source_key}
         elif source_key in ("image", "wrist_image"):
@@ -281,7 +290,9 @@ def infer_modality_json_from_features(features: dict[str, Any]) -> dict[str, Any
             continue
         feature = features.get(source_key) or {}
         feature_dim = int((feature.get("shape") or [0])[0] or 0)
-        for key, span in feature_component_spans(feature.get("names"), feature_dim).items():
+        for key, span in feature_component_spans(
+            feature.get("names"), feature_dim
+        ).items():
             modality[modality_name][key] = {
                 "original_key": source_key,
                 "start": int(span.start or 0),
@@ -428,7 +439,9 @@ def infer_named_component_slices(
         elif isinstance(entry, dict):
             key = str(entry.get("name", ""))
             shape = entry.get("shape")
-            width = int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
+            width = (
+                int(np.prod(shape)) if shape is not None else int(entry.get("dim", 1))
+            )
         else:
             continue
         spans[key] = slice(cursor, cursor + width)

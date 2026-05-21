@@ -20,7 +20,9 @@ from typing import Any
 from groot.vla.data.schema import DatasetMetadata
 from groot.vla.data.transform.base import ComposedModalityTransform
 
-from rlinf.data.datasets.dreamzero.data_transforms.base import DreamZeroEmbodimentTransform
+from rlinf.data.datasets.dreamzero.data_transforms.base import (
+    DreamZeroEmbodimentTransform,
+)
 from rlinf.data.datasets.dreamzero.data_transforms.libero_sim import (
     LiberoSimDataTransform,
 )
@@ -34,8 +36,7 @@ _EMBODIMENT_REGISTRY: dict[str, type[DreamZeroEmbodimentTransform]] = {
 }
 
 DEFAULT_EMBODIMENT_TAG_MAPPING: dict[str, dict[str, int]] = {
-    tag: dict(cls.DEFAULT_TAG_MAPPING)
-    for tag, cls in _EMBODIMENT_REGISTRY.items()
+    tag: dict(cls.DEFAULT_TAG_MAPPING) for tag, cls in _EMBODIMENT_REGISTRY.items()
 }
 
 __all__ = [

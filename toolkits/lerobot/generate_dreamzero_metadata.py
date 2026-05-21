@@ -117,7 +117,9 @@ def _column_to_2d_array(table: Any, column_name: str) -> np.ndarray:
     if arr.ndim == 1:
         arr = arr[:, None]
     if arr.ndim != 2:
-        raise ValueError(f"{column_name} must be a 1D/2D vector column, got {arr.shape}")
+        raise ValueError(
+            f"{column_name} must be a 1D/2D vector column, got {arr.shape}"
+        )
     return arr
 
 
@@ -135,7 +137,9 @@ def _compute_stats(arr: np.ndarray) -> dict[str, list[float]]:
     }
 
 
-def _slice_stats(full_stats: dict[str, list[float]], start: int, end: int) -> dict[str, list[float]]:
+def _slice_stats(
+    full_stats: dict[str, list[float]], start: int, end: int
+) -> dict[str, list[float]]:
     return {key: values[start:end] for key, values in full_stats.items()}
 
 
@@ -159,12 +163,12 @@ def _video_metadata_from_feature(
 ) -> dict[str, Any]:
     feature = (info.get("features") or {}).get(feature_key, {})
     video_info = feature.get("video_info") or feature.get("info") or {}
-    fps = float(
-        video_info.get("video.fps", info.get("fps", 10))
-    )
+    fps = float(video_info.get("video.fps", info.get("fps", 10)))
     channels = 3
     if "channel" in (feature.get("names") or []):
-        channels = int(shape_val) if (shape_val := _shape_dim(feature, "channel")) else 3
+        channels = (
+            int(shape_val) if (shape_val := _shape_dim(feature, "channel")) else 3
+        )
     elif len(feature.get("shape") or []) >= 3:
         channels = int(feature["shape"][-1])
     return {
@@ -298,8 +302,12 @@ def build_metadata(
     action_stats_full = _compute_stats(action)
 
     if use_modality_json:
-        state_stats = _build_split_statistics(state_stats_full, modality_cfg, kind="state")
-        action_stats = _build_split_statistics(action_stats_full, modality_cfg, kind="action")
+        state_stats = _build_split_statistics(
+            state_stats_full, modality_cfg, kind="state"
+        )
+        action_stats = _build_split_statistics(
+            action_stats_full, modality_cfg, kind="action"
+        )
         state_modalities = _build_split_modalities(
             modality_cfg, kind="state", full_dim=int(state.shape[-1])
         )
@@ -313,10 +321,14 @@ def build_metadata(
         }
         for subkey, spec in (modality_cfg.get("state") or {}).items():
             start, end = int(spec["start"]), int(spec["end"])
-            lerobot_stats[f"state.{subkey}"] = _slice_stats(state_stats_full, start, end)
+            lerobot_stats[f"state.{subkey}"] = _slice_stats(
+                state_stats_full, start, end
+            )
         for subkey, spec in (modality_cfg.get("action") or {}).items():
             start, end = int(spec["start"]), int(spec["end"])
-            lerobot_stats[f"action.{subkey}"] = _slice_stats(action_stats_full, start, end)
+            lerobot_stats[f"action.{subkey}"] = _slice_stats(
+                action_stats_full, start, end
+            )
     else:
         if not video_keys:
             raise ValueError("video_keys required when use_modality_json=False")
@@ -399,7 +411,9 @@ def main() -> None:
         default=None,
         help="Optional stats.json paths (one per dataset). Defaults to DATASET_ROOT/meta/stats.json.",
     )
-    parser.add_argument("--merge", action="store_true", help="Merge into existing output file.")
+    parser.add_argument(
+        "--merge", action="store_true", help="Merge into existing output file."
+    )
     parser.add_argument("--embodiment-tag", default=None)
     parser.add_argument("--state-key", default=None)
     parser.add_argument("--action-key", default=None)
@@ -446,7 +460,9 @@ def main() -> None:
 
             stats_path = None
             if args.output_stats:
-                stats_path = args.output_stats[idx] if idx < len(args.output_stats) else None
+                stats_path = (
+                    args.output_stats[idx] if idx < len(args.output_stats) else None
+                )
             stats_path = stats_path or (root / "meta" / "stats.json")
             stats_path.parent.mkdir(parents=True, exist_ok=True)
             with open(stats_path, "w", encoding="utf-8") as f:

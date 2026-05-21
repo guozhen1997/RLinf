@@ -17,10 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from omegaconf import OmegaConf
-
 from groot.vla.data.transform import ComposedModalityTransform
 from groot.vla.model.dreamzero.base_vla import VLAConfig
+from omegaconf import OmegaConf
 from transformers.configuration_utils import PretrainedConfig
 
 

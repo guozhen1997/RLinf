@@ -29,8 +29,8 @@ from groot.vla.data.transform.video import (
     VideoToNumpy,
     VideoToTensor,
 )
-from rlinf.data.datasets.dreamzero.data_transforms.dream_transform import DreamTransform
 
+from rlinf.data.datasets.dreamzero.data_transforms.dream_transform import DreamTransform
 
 _VIDEO_KEYS = [
     "video.exterior_image_1_left",
