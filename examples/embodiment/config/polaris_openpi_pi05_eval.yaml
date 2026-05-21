@@ -1,7 +1,7 @@
 defaults:
-  - env/polaris_droid_movelattecup@env.eval
-  - env/polaris_droid_movelattecup@env.train
-  - model/pi0@actor.model
+  - env/polaris_droid_panclean@env.eval
+  - env/polaris_droid_panclean@env.train
+  - model/pi0_5@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
@@ -42,7 +42,7 @@ algorithm:
   group_size: 1
   reward_coef: 1.0
   rollout_epoch: 1
-  eval_rollout_epoch: 25
+  eval_rollout_epoch: 50
 
   reward_type: chunk_level
   logprob_type: chunk_level
@@ -103,7 +103,7 @@ rollout:
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/model/pi0_droid_jointpos_polaris/"
+    model_path: "/path/to/model/RLinf-Pi05-Polaris-droid_jointpos/"
     precision: ${actor.model.precision}
 
 actor:
@@ -115,20 +115,20 @@ actor:
   enable_offload: False
 
   model:
-    model_path: "/path/to/model/pi0_droid_jointpos_polaris/"
+    model_path: "/path/to/model/RLinf-Pi05-Polaris-droid_jointpos/"
     model_type: "openpi"
     action_dim: 8
     num_action_chunks: 8
     num_steps: 10
     add_value_head: True
     openpi:
-      config_name: "pi0_droid_polaris"
+      config_name: "pi05_droid_polaris"
       action_chunk: ${actor.model.num_action_chunks}
       num_images_in_input: 2
       noise_level: 0.5
       joint_logprob: False
       num_steps: ${actor.model.num_steps}
-      value_after_vlm: False
+      value_after_vlm: True
       detach_critic_input: True
 
   optim:
