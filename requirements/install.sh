@@ -1112,8 +1112,6 @@ install_openpi_model() {
             install_roboverse_env
             ;;
         polaris)
-            TORCH_VERSION="2.7.0"
-            apply_torch_override
             create_and_sync_venv
             install_common_embodied_deps
             install_polaris_env
@@ -1502,7 +1500,12 @@ install_polaris_env() {
     if ! grep -q '^export OMNI_KIT_ACCEPT_EULA=' "$VENV_DIR/bin/activate" 2>/dev/null; then
         echo "export OMNI_KIT_ACCEPT_EULA=YES" >> "$VENV_DIR/bin/activate"
     fi
+
+    uv pip install "setuptools<82"
+    uv pip install "flatdict==4.0.1" --no-build-isolation
+    uv pip install sympy==1.13.3
     uv pip install -e "$polaris_dir"
+    
     python - <<'EOF'
 import isaacsim
 EOF

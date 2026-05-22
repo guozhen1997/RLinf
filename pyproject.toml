@@ -179,6 +179,7 @@ override-dependencies = [
     "setuptools>=69.5.1,<75.9",
     "datasets==3.6.0",
     "pywin32==306; sys_platform == 'win32'",
+    "sympy>=1.13.1",
 ]
 
 [tool.setuptools]
