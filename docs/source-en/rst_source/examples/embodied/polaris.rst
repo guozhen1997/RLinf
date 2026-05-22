@@ -98,15 +98,6 @@ Install dependencies directly in your environment by running the following comma
    bash requirements/install.sh embodied --model openpi --env polaris
    source .venv/bin/activate
 
-.. note::
-
-   After installation, the first run may hang because ``isaacsim`` requires you to accept its EULA.
-   Manually import it once to complete the agreement:
-
-   .. code:: bash
-
-      python
-      >>> import isaacsim
 
 Dataset Download
 ----------------
