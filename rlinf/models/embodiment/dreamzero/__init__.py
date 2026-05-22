@@ -174,7 +174,7 @@ def get_model(cfg: DictConfig, torch_dtype=None):
             with open(st_index, "r") as f:
                 index = json.load(f)
             for shard_file in sorted(set(index["weight_map"].values())):
-                state_dict.update(load_file(str(model_path / shard_file)))
+                state_dict.update(load_file(str(ckpt / shard_file)))
         elif st is not None and st.exists():
             state_dict.update(load_file(str(st)))
         if any(".base_layer." in k for k in state_dict):
