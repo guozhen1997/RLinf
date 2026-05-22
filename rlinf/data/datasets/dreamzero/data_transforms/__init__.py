@@ -117,7 +117,9 @@ def rollout_obs_layout_for_embodiment(tag: str) -> RolloutObsLayout:
     return _require_embodiment(tag).ROLLOUT_OBS_LAYOUT
 
 
-def convert_rollout_env_obs(embodiment_tag: str, env_obs: dict[str, Any]) -> dict[str, Any]:
+def convert_rollout_env_obs(
+    embodiment_tag: str, env_obs: dict[str, Any]
+) -> dict[str, Any]:
     """Convert RLinf rollout ``env_obs`` to DreamZero modality keys for inference."""
     tag = str(embodiment_tag)
     cls = _require_embodiment(tag)

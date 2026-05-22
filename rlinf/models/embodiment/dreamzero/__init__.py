@@ -122,7 +122,9 @@ def get_model(cfg: DictConfig, torch_dtype=None):
 
     config_dict = OmegaConf.to_container(cfg, resolve=True)
     if not isinstance(config_dict, dict):
-        raise ValueError("DreamZero actor.model must resolve to a mapping after validate_sft_cfg().")
+        raise ValueError(
+            "DreamZero actor.model must resolve to a mapping after validate_sft_cfg()."
+        )
 
     dreamzero_config = DreamZeroConfig(**config_dict)
 

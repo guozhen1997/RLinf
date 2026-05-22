@@ -65,9 +65,7 @@ class OxeDroidDataTransform:
             ("extra_view_images", "video.exterior_image_2_left"),
             ("wrist_images", "video.wrist_image_left"),
         ),
-        state_fields=(
-            ("states", ("state.joint_position", "state.gripper_position")),
-        ),
+        state_fields=(("states", ("state.joint_position", "state.gripper_position")),),
         binarize_gripper=True,
         fill_missing_video_keys=True,
     )

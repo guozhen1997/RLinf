@@ -183,14 +183,14 @@ def validate_dreamzero_sft_model_cfg(model_cfg: DictConfig) -> DictConfig:
             _merge_checkpoint_with_yaml(loaded_dict, yaml_snapshot)
         )
 
-    assert model_cfg.get("embodiment_tag"), "DreamZero SFT requires actor.model.embodiment_tag"
+    assert model_cfg.get("embodiment_tag"), (
+        "DreamZero SFT requires actor.model.embodiment_tag"
+    )
     assert model_cfg.get("tokenizer_path"), (
         "DreamZero SFT requires actor.model.tokenizer_path"
     )
 
-    max_chunk_size = (
-        model_cfg.action_head_cfg.config.diffusion_model_cfg.max_chunk_size
-    )
+    max_chunk_size = model_cfg.action_head_cfg.config.diffusion_model_cfg.max_chunk_size
     num_frames = model_cfg.action_head_cfg.config.num_frames
     action_horizon = model_cfg.action_horizon
 
@@ -205,7 +205,9 @@ def validate_dreamzero_sft_model_cfg(model_cfg: DictConfig) -> DictConfig:
     )
     assert int(num_frames) > 0, f"num_frames must be positive, got {num_frames!r}"
     assert action_horizon is not None, "DreamZero SFT requires action_horizon"
-    assert int(action_horizon) > 0, f"action_horizon must be positive, got {action_horizon!r}"
+    assert int(action_horizon) > 0, (
+        f"action_horizon must be positive, got {action_horizon!r}"
+    )
     return model_cfg
 
 

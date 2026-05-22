@@ -280,5 +280,6 @@ def main(cfg) -> None:
 
     print(f"Saved checkpoint to {cfg.convertor.save_path}")
 
+
 if __name__ == "__main__":
     main()
