@@ -30,6 +30,7 @@ from groot.vla.data.transform.video import (
     VideoToTensor,
 )
 
+from rlinf.data.datasets.dreamzero.data_transforms.base import RolloutObsLayout
 from rlinf.data.datasets.dreamzero.data_transforms.dream_transform import DreamTransform
 
 _VIDEO_KEYS = [
@@ -58,6 +59,18 @@ class OxeDroidDataTransform:
     TAG = "oxe_droid"
     DEFAULT_TAG_MAPPING = {"oxe_droid": 17}
     DEFAULT_ACTION_HORIZON = 24
+    ROLLOUT_OBS_LAYOUT = RolloutObsLayout(
+        video_fields=(
+            ("main_images", "video.exterior_image_1_left"),
+            ("extra_view_images", "video.exterior_image_2_left"),
+            ("wrist_images", "video.wrist_image_left"),
+        ),
+        state_fields=(
+            ("states", ("state.joint_position", "state.gripper_position")),
+        ),
+        binarize_gripper=True,
+        fill_missing_video_keys=True,
+    )
 
     @staticmethod
     def format_training_prompt(instruction: str) -> str:

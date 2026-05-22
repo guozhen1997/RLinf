@@ -224,9 +224,6 @@ class DreamZeroConfig(VLAConfig):
 
     action_dim: int = field(default=None, metadata={"help": "Action dimension."})
 
-    env_action_dim: int = field(
-        default=None, metadata={"help": "Environment action dimension."}
-    )
     num_action_chunks: int = field(
         default=16, metadata={"help": "Number of action chunks."}
     )
@@ -244,6 +241,10 @@ class DreamZeroConfig(VLAConfig):
         metadata={
             "help": "Transforming data modalities, e.g. video frame augmentation or action normalization."
         },
+    )
+
+    embodiment_tag: str = field(
+        default=None, metadata={"help": "Embodiment tag for rollout obs mapping."}
     )
 
     def __init__(self, **kwargs):

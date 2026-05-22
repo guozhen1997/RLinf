@@ -30,6 +30,30 @@ from rlinf.models.embodiment.dreamzero.dreamzero_policy import DreamZeroPolicy
 from rlinf.utils.logging import get_logger
 
 
+def _configure_torch_dynamo_for_dreamzero_inference() -> None:
+    """Raise Dynamo limits for DreamZero flow scheduler ``torch.compile`` during rollout.
+
+    ``FlowUniPCMultistepScheduler.multistep_uni_p_bh_update`` is compiled with
+    ``fullgraph=True, dynamic=False``. UniPC multistep order / history tensors can change
+    rank across denoising steps (e.g. 3D action vs 5D video), which triggers recompiles.
+    The default ``recompile_limit`` (8) is too low for embodied eval and raises
+    ``FailOnRecompileLimitHit`` — same mitigation as ``dreamzero/eval_utils/serve_dreamzero_wan22.py``.
+    """
+    _dynamo = torch._dynamo.config
+    if hasattr(_dynamo, "cache_size_limit"):
+        _dynamo.cache_size_limit = max(getattr(_dynamo, "cache_size_limit", 8), 1000)
+    if hasattr(_dynamo, "recompile_limit"):
+        _dynamo.recompile_limit = max(getattr(_dynamo, "recompile_limit", 8), 800)
+    if hasattr(_dynamo, "accumulated_cache_size_limit"):
+        _dynamo.accumulated_cache_size_limit = max(
+            getattr(_dynamo, "accumulated_cache_size_limit", 8), 1000
+        )
+    if hasattr(_dynamo, "accumulated_recompile_limit"):
+        _dynamo.accumulated_recompile_limit = max(
+            getattr(_dynamo, "accumulated_recompile_limit", 8), 2000
+        )
+
+
 def _promote_scalar_params_to_1d(model):
     """FSDP does not support 0-d parameters, so we promote scalar Parameters to shape=[1]."""
     scalar_param_names = [name for name, p in model.named_parameters() if p.ndim == 0]
@@ -53,6 +77,8 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     """Load DreamZero policy from checkpoint."""
 
     from rlinf.utils.patcher import Patcher
+
+    _configure_torch_dynamo_for_dreamzero_inference()
 
     Patcher.clear()
     Patcher.add_patch(
@@ -119,16 +145,16 @@ def get_model(cfg: DictConfig, torch_dtype=None):
             has_full_model_weights
         )
 
-    dreamzero_config.env_action_dim = cfg.get("action_dim", 7)
-    dreamzero_config.gradient_checkpointing = cfg.get("gradient_checkpointing", False)
-
     metadata = load_dreamzero_dataset_metadata(cfg)
     data_transforms = build_dreamzero_composed_transform(cfg, tokenizer_path)
     assert isinstance(data_transforms, ComposedModalityTransform), f"{data_transforms=}"
     data_transforms.set_metadata(metadata)
     data_transforms.eval()
 
+    embodiment_tag = str(cfg.embodiment_tag)
+
     dreamzero_config.data_transforms = data_transforms
+    dreamzero_config.embodiment_tag = embodiment_tag
     dreamzero_config.relative_action = bool(cfg.get("relative_action", False))
     dreamzero_config.relative_action_per_horizon = bool(
         cfg.get("relative_action_per_horizon", False)

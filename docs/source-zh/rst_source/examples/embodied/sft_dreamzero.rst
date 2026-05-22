@@ -1,7 +1,7 @@
 DreamZero 监督微调
 ====================================
 
-本文档介绍如何在 RLinf 中运行 DreamZero 监督微调（SFT），覆盖从 **模型与数据准备**、 **配置填写** 到 **启动训练** 与 **排错** 的完整流程。
+本文档介绍如何在 RLinf 中运行 DreamZero 监督微调（SFT），覆盖从 **模型与数据准备**、 **配置填写** 到 **启动训练**、 **评测** 与 **排错** 的完整流程。
 
 当前支持：
 
@@ -337,6 +337,81 @@ YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
 断点续训可设置 ``runner.resume_dir`` 指向 checkpoint 目录。
 
 
+评测
+--------
+
+SFT 完成后，可在数据集对应具身环境中评测策略。下文以 **LIBERO** 仿真环境为例说明完整流程（任务套件为 LIBERO Spatial）；对应示例配置为 ``examples/embodiment/config/libero_spatial_eval_dreamzero.yaml``。其它支持 ``env.eval`` 的仿真环境亦可按相同方式编写配置并调用 ``eval_embodiment.sh``。
+
+**前置条件**
+
+1. 安装时需包含 LIBERO 仿真环境（见上文 **环境准备** 中的 ``--env libero``）。
+2. 已设置 ``DREAMZERO_PATH`` 指向 DreamZero 代码库根目录（``eval_embodiment.sh`` 会将其加入 ``PYTHONPATH``）。
+3. 已准备与训练一致的 ``metadata.json``（``actor.model.metadata_json_path``）。
+
+**配置评测 YAML**
+
+复制或编辑 ``examples/embodiment/config/libero_spatial_eval_dreamzero.yaml``，至少修改以下字段：
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - 字段
+     - 说明
+   * - ``runner.ckpt_path``
+     - 待评测的 SFT 权重（``.pt``）。训练保存路径一般为 ``{log_path}/{experiment_name}/checkpoints/global_step_<N>/actor/model_state_dict/full_weights.pt``。若仅有 ``.distcp`` 格式，请先按 :doc:`Checkpoint 转换 <../../tutorials/advance/convertor>` 转为 ``.pt``。
+   * - ``actor.model.*_pretrained_path`` / ``tokenizer_path``
+     - 与 SFT 冷启动配置一致（``model_path: null`` 时从各预训练路径构建骨干，再由 ``ckpt_path`` 覆盖可训练权重）。
+   * - ``actor.model.metadata_json_path``
+     - LIBERO 归一化统计（``embodiment_tag: libero_sim`` 时与 SFT 使用同一份 ``metadata.json``）。
+   * - ``actor.model.embodiment_tag``
+     - 须为 ``libero_sim``，与 LIBERO 数据及 rollout 观测变换一致。
+   * - ``actor.model.action_horizon`` / ``num_action_chunks``
+     - 与 SFT 一致（LIBERO 常用 16）。
+   * - ``algorithm.eval_rollout_epoch``
+     - 评测轮数；每轮在相同种子下跑完测试集，最终指标为多轮平均。
+   * - ``env.eval.total_num_envs`` / ``auto_reset`` / ``max_steps_per_rollout_epoch``
+     - 并行环境数与是否通过 ``auto_reset`` 覆盖更大测试集；详见 :doc:`评估教程 <../../start/vla-eval>`。
+   * - ``env.eval.video_cfg.save_video``
+     - 设为 ``True`` 可在 ``{log_path}/video/eval`` 下保存评测视频。
+
+配置片段示例：
+
+.. code:: yaml
+
+   runner:
+     only_eval: True
+     ckpt_path: /path/to/logs/libero_sft_dreamzero/checkpoints/global_step_3000/actor/model_state_dict/full_weights.pt
+
+   actor:
+     model:
+       model_path: null
+       metadata_json_path: /path/to/metadata.json
+       embodiment_tag: libero_sim
+       action_horizon: 16
+       num_action_chunks: 16
+
+   env:
+     eval:
+       total_num_envs: 64
+       auto_reset: True
+       ignore_terminations: True
+       max_episode_steps: 480
+       max_steps_per_rollout_epoch: 480
+
+**启动评测**
+
+在仓库根目录、已激活 DreamZero 环境且 ``DREAMZERO_PATH`` 已设置时执行：
+
+.. code:: bash
+
+   bash examples/embodiment/eval_embodiment.sh libero_spatial_eval_dreamzero
+
+脚本会调用 ``eval_embodied_agent.py``，将日志写入 ``logs/<时间戳>-libero_spatial_eval_dreamzero/eval_embodiment.log``，并在终端输出 ``eval/success_once``、 ``eval/return`` 等指标。更多通用评测参数说明见 :doc:`评估教程 <../../start/vla-eval>`。
+
+可选：若需将 SFT 的 ``full_weights.pt`` 转为 Hugging Face ``safetensors`` 目录（便于外部推理或发布），可使用 ``fsdp_dreamzero_convertor`` 配置运行 ``convert_pt_to_hf``（见 ``rlinf/utils/ckpt_convertor/fsdp_convertor/config/fsdp_dreamzero_convertor.yaml``）。在 LIBERO 等仿真环境中评测时，只需将 ``runner.ckpt_path`` 指向 ``.pt`` 权重文件即可。
+
+
 监控与 sanity check
 -------------------------------
 
@@ -397,6 +472,8 @@ YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
      - 为多视角布局生成 T5 文本前缀（须与 Groot 训练模板语义一致）。
    * - ``concat_multiview_video(images)``
      - 将 ``(v, t, c, h, w)`` 拼成 ``(1, t, c, H, W)``；布局须与 ``format_training_prompt`` 描述一致。
+   * - ``ROLLOUT_OBS_LAYOUT``
+     - ``RolloutObsLayout`` 实例：将 RLinf rollout 的 ``main_images`` / ``wrist_images`` / ``states`` / ``task_descriptions`` 映射到上述 ``modality_keys``。推理时由 ``convert_rollout_env_obs(embodiment_tag, env_obs)`` 调用（见 ``data_transforms/__init__.py``）。
 
 ``modality_keys`` 命名约定（与 ``DreamZeroLeRobotDataset`` 解析逻辑挂钩）：
 

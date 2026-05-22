@@ -22,6 +22,8 @@ from groot.vla.data.transform.base import ComposedModalityTransform
 
 from rlinf.data.datasets.dreamzero.data_transforms.base import (
     DreamZeroEmbodimentTransform,
+    RolloutObsLayout,
+    convert_rollout_env_obs_with_layout,
 )
 from rlinf.data.datasets.dreamzero.data_transforms.libero_sim import (
     LiberoSimDataTransform,
@@ -40,12 +42,15 @@ DEFAULT_EMBODIMENT_TAG_MAPPING: dict[str, dict[str, int]] = {
 }
 
 __all__ = [
+    "RolloutObsLayout",
     "build_dreamzero_composed_transform",
     "collect_dreamzero_dataset_keys",
+    "convert_rollout_env_obs",
     "embodiment_tag_mapping_for_embodiment",
     "load_dreamzero_dataset_metadata",
     "format_training_prompt",
     "normalize_instruction_text",
+    "rollout_obs_layout_for_embodiment",
 ]
 
 
@@ -105,6 +110,21 @@ def embodiment_tag_mapping_for_embodiment(
     if override is not None:
         return dict(override)
     return dict(_require_embodiment(tag).DEFAULT_TAG_MAPPING)
+
+
+def rollout_obs_layout_for_embodiment(tag: str) -> RolloutObsLayout:
+    """Return rollout observation layout for ``embodiment_tag``."""
+    return _require_embodiment(tag).ROLLOUT_OBS_LAYOUT
+
+
+def convert_rollout_env_obs(embodiment_tag: str, env_obs: dict[str, Any]) -> dict[str, Any]:
+    """Convert RLinf rollout ``env_obs`` to DreamZero modality keys for inference."""
+    tag = str(embodiment_tag)
+    cls = _require_embodiment(tag)
+    language_key = _language_keys_for_tag(tag)[0]
+    return convert_rollout_env_obs_with_layout(
+        env_obs, cls.ROLLOUT_OBS_LAYOUT, language_key
+    )
 
 
 def collect_dreamzero_dataset_keys(

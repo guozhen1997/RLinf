@@ -30,6 +30,7 @@ from groot.vla.data.transform.video import (
     VideoToTensor,
 )
 
+from rlinf.data.datasets.dreamzero.data_transforms.base import RolloutObsLayout
 from rlinf.data.datasets.dreamzero.data_transforms.dream_transform import DreamTransform
 
 _VIDEO_KEYS = [
@@ -54,6 +55,14 @@ class LiberoSimDataTransform:
     TAG = "libero_sim"
     DEFAULT_TAG_MAPPING = {"libero_sim": 21}
     DEFAULT_ACTION_HORIZON = 16
+    ROLLOUT_OBS_LAYOUT = RolloutObsLayout(
+        video_fields=(
+            ("main_images", "video.image"),
+            ("wrist_images", "video.wrist_image"),
+        ),
+        state_fields=(("states", "state.state"),),
+        binarize_gripper=True,
+    )
 
     @staticmethod
     def format_training_prompt(instruction: str) -> str:

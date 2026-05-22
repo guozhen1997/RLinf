@@ -62,6 +62,24 @@ def concat_multiview_video(embodiment_tag: Any, images: Any) -> np.ndarray:
 class DreamTransform(DreamTransformBase):
     """DreamTransform that delegates multi-view layout to ``data_transforms`` registry."""
 
+    def apply_batch(self, data: dict, batch_size: int) -> dict:
+        """Collate with RLinf prompt wrapping (supports all registered embodiments)."""
+        import tree
+
+        from rlinf.data.datasets.dreamzero.dreamzero import DreamZeroCollator
+
+        data.pop("lapa_action", None)
+        data.pop("dream_actions", None)
+        data_split = [
+            tree.map_structure(lambda x: x[i], data) for i in range(batch_size)
+        ]
+        data_split_processed = [self.apply_single(elem) for elem in data_split]
+        return DreamZeroCollator.collate_batch(
+            data_split_processed,
+            self.tokenizer,
+            self.embodiment_tag_mapping,
+        )
+
     def _prepare_video(self, data: dict):
         """Process, stack, and pad images from data['video']."""
         images = rearrange(
