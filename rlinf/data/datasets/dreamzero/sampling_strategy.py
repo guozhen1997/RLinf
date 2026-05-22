@@ -18,16 +18,16 @@ Two modes (relative frame offsets before adding ``frame_in_ep``):
 
 **fixed_window** — one contiguous span from the dataset index (legacy RLinf).
 
-Config: ``num_video_frames``, ``num_chunks``, ``action_horizon``.
+Config: ``num_frames``, ``max_chunk_size`` (macro blocks), ``action_horizon``.
 
 ::
 
     episode timeline (same language segment optional)
     ...|--- anchor t ---[==== video window ====]--->...
 
-    video :  t+0, t+1, ..., t+(num_video_frames-1)     # contiguous
+    video :  t+0, t+1, ..., t+(num_frames-1)     # contiguous
 
-    action/state (num_chunks macro blocks, stride = action_horizon):
+    action/state (max_chunk_size macro blocks, stride = action_horizon):
     chunk0  [0 .. H-1]   chunk1  [H .. 2H-1]   ...   chunk_{K-1}
             |<- H act ->|       |<- H act ->|
 
@@ -365,18 +365,18 @@ def require_multi_anchor_temporal_indices(
 
 
 def build_fixed_window_offsets(
-    num_video_frames: int,
+    num_frames: int,
     state_horizon: int,
     action_horizon: int,
-    num_chunks: int,
+    max_chunk_size: int,
 ) -> TemporalIndices:
-    """Fixed contiguous offsets (``action_horizon * num_chunks`` window)."""
+    """Fixed contiguous offsets; video length ``num_frames`` from config."""
     return TemporalIndices(
-        video=np.arange(num_video_frames, dtype=np.int64),
+        video=np.arange(num_frames, dtype=np.int64),
         state=np.asarray(
             [
                 chunk_idx * action_horizon + state_idx
-                for chunk_idx in range(num_chunks)
+                for chunk_idx in range(max_chunk_size)
                 for state_idx in range(state_horizon)
             ],
             dtype=np.int64,
@@ -384,10 +384,10 @@ def build_fixed_window_offsets(
         action=np.asarray(
             [
                 chunk_idx * action_horizon + action_idx
-                for chunk_idx in range(num_chunks)
+                for chunk_idx in range(max_chunk_size)
                 for action_idx in range(action_horizon)
             ],
             dtype=np.int64,
         ),
-        num_video_chunks=num_chunks,
+        num_video_chunks=max_chunk_size,
     )

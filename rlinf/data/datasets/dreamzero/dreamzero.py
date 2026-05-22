@@ -68,10 +68,9 @@ class DreamZeroLeRobotDataset(Dataset):
         language_keys: list[str],
         data_transform: Any,
         lazy_load: bool,
-        num_video_frames: int,
+        num_frames: int,
         state_horizon: int,
         action_horizon: int,
-        num_chunks: int,
         max_chunk_size: int,
         relative_action: bool = False,
         relative_action_keys: list[str] | None = None,
@@ -90,21 +89,10 @@ class DreamZeroLeRobotDataset(Dataset):
         self.data_path = str(data_path)
         self.lazy_load = bool(lazy_load)
         self.sampling_mode: SamplingMode = sampling_mode
-        self.num_video_frames = int(num_video_frames)
         self.state_horizon = int(state_horizon)
         self.action_horizon = int(action_horizon)
-        self.num_chunks = int(num_chunks)
         self.max_chunk_size = int(max_chunk_size)
-        if (
-            self.sampling_mode == "multi_anchor"
-            and self.max_chunk_size != self.num_chunks
-        ):
-            logger.warning(
-                "DreamZeroLeRobotDataset: actor.model.num_chunks=%s differs from "
-                "diffusion_model_cfg.max_chunk_size=%s; multi_anchor offsets use max_chunk_size.",
-                self.num_chunks,
-                self.max_chunk_size,
-            )
+        self.num_frames = int(num_frames)
         self.multi_anchor_resample_attempts = max(
             1, int(multi_anchor_resample_attempts)
         )
@@ -114,10 +102,6 @@ class DreamZeroLeRobotDataset(Dataset):
             raise ValueError(f"action_horizon must be positive, got {action_horizon!r}")
         if self.max_chunk_size <= 0:
             raise ValueError(f"max_chunk_size must be positive, got {max_chunk_size!r}")
-        if self.sampling_mode == "fixed_window" and self.num_video_frames <= 0:
-            raise ValueError(
-                f"num_video_frames must be positive, got {num_video_frames!r}"
-            )
         self.relative_action = bool(relative_action)
         self.relative_action_keys = list(relative_action_keys or [])
         self.data_transform = data_transform
@@ -186,10 +170,10 @@ class DreamZeroLeRobotDataset(Dataset):
             )
         if self.sampling_mode == "fixed_window":
             self._fixed_window_temporal: TemporalIndices = build_fixed_window_offsets(
-                self.num_video_frames,
+                self.num_frames,
                 self.state_horizon,
                 self.action_horizon,
-                self.num_chunks,
+                self.max_chunk_size,
             )
             self._multi_anchor_cfg = None
         else:
@@ -866,18 +850,18 @@ class DreamZeroLeRobotDataset(Dataset):
                 return v
             return value.astype(np.float32) - state_arr[0:1, :ad]
 
-        exp_act = self.num_chunks * self.action_horizon
-        exp_st = self.num_chunks * self.state_horizon
+        exp_act = self.max_chunk_size * self.action_horizon
+        exp_st = self.max_chunk_size * self.state_horizon
         if (
             t_act == exp_act
             and n_st == exp_st
-            and self.num_chunks > 0
+            and self.max_chunk_size > 0
             and self.action_horizon > 0
             and self.state_horizon > 0
         ):
             v = value.astype(np.float32, copy=True)
             d_ref = min(ad, sd)
-            for c in range(self.num_chunks):
+            for c in range(self.max_chunk_size):
                 r = c * self.state_horizon
                 ref = state_arr[r : r + 1, :d_ref]
                 rs = c * self.action_horizon
@@ -1030,9 +1014,6 @@ def build_dreamzero_sft_dataloader(
 ):
     """Build DreamZero SFT dataloader -- callable from FSDPVlaSftWorker.
 
-    Uses the same ``build_dreamzero_composed_transform`` / ``load_dreamzero_dataset_metadata``
-    path as :func:`rlinf.models.embodiment.dreamzero.get_model`.
-
     Uses DistributedSampler to shard data across GPUs:
       - Each of the 8 GPUs sees 1/8 of the dataset per epoch
       - micro_batch_size samples are returned per iteration per GPU
@@ -1072,10 +1053,9 @@ def build_dreamzero_sft_dataloader(
             "use 'multi_anchor' or 'fixed_window'."
         )
     max_chunk_size = model_cfg.action_head_cfg.config.diffusion_model_cfg.max_chunk_size
-    num_video_frames = model_cfg.num_video_frames
+    num_frames = model_cfg.action_head_cfg.config.num_frames
     state_horizon = model_cfg.get("state_horizon", 1)
     action_horizon = model_cfg.action_horizon
-    num_chunks = model_cfg.num_chunks
     max_seq_len = int(model_cfg.get("max_seq_len", 512))
     embodiment_tag_mapping = embodiment_tag_mapping_for_embodiment(
         embodiment_tag, model_cfg.get("embodiment_tag_mapping")
@@ -1089,10 +1069,9 @@ def build_dreamzero_sft_dataloader(
         language_keys=language_keys,
         data_transform=data_transform,
         lazy_load=cfg.data.get("lazy_load", True),
-        num_video_frames=num_video_frames,
+        num_frames=num_frames,
         state_horizon=state_horizon,
         action_horizon=action_horizon,
-        num_chunks=num_chunks,
         relative_action=bool(model_cfg.get("relative_action", False)),
         relative_action_keys=list(model_cfg.get("relative_action_keys", [])),
         pq_cache_max_episodes=cfg.data.get("parquet_cache_size", 128),

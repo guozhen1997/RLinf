@@ -27,43 +27,6 @@ from rlinf.utils.logging import get_logger
 logger = get_logger()
 
 
-def nested_cfg_get(cfg: Any, *keys: str) -> Any:
-    """Walk nested dict / OmegaConf / object attributes."""
-    cur: Any = cfg
-    for key in keys:
-        if cur is None:
-            return None
-        if isinstance(cur, dict):
-            cur = cur.get(key)
-        elif hasattr(cur, "get"):
-            cur = cur.get(key)
-        else:
-            cur = getattr(cur, key, None)
-    return cur
-
-
-def resolve_diffusion_max_chunk_size(model_cfg: Any) -> int:
-    """Read multi-anchor macro block count from ``diffusion_model_cfg.max_chunk_size``."""
-    value = nested_cfg_get(
-        model_cfg,
-        "action_head_cfg",
-        "config",
-        "diffusion_model_cfg",
-        "max_chunk_size",
-    )
-    if value is None:
-        raise ValueError(
-            "DreamZero multi_anchor sampling requires "
-            "actor.model.action_head_cfg.config.diffusion_model_cfg.max_chunk_size"
-        )
-    max_chunk_size = int(value)
-    if max_chunk_size <= 0:
-        raise ValueError(
-            f"diffusion_model_cfg.max_chunk_size must be positive, got {value!r}"
-        )
-    return max_chunk_size
-
-
 def load_task_texts(meta_dir: Path) -> dict[int, str]:
     """Build task_index -> instruction string mapping from tasks.jsonl or tasks.parquet."""
     import pandas as pd

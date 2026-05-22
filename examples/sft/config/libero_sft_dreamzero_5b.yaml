@@ -61,7 +61,6 @@ actor:
     # Must be explicitly specified unless it exists at model_path/experiment_cfg/metadata.json.
     metadata_json_path: /path/to/metadata.json
     action_horizon: 16
-    num_chunks: 4
     num_action_per_block: 16
     target_video_height: 160
     target_video_width: 320

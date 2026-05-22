@@ -49,8 +49,6 @@ actor:
     max_seq_len: 512
     # Same temporal keys as ``build_dreamzero_composed_transform`` / ``dreamzero_config``.
     action_horizon: 24
-    num_chunks: 4
-    num_video_frames: 33
     relative_action_keys:
       - joint_position
     is_lora: False

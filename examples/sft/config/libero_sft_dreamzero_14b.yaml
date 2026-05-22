@@ -60,7 +60,6 @@ actor:
     
     action_horizon: 16
     state_horizon: 1
-    num_chunks: 4
     is_lora: False
     embodiment_tag: "libero_sim"
 

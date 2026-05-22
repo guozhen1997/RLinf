@@ -1077,6 +1077,15 @@ def validate_sft_cfg(cfg: DictConfig) -> DictConfig:
         else:
             # set the val_check_interval to -1 if there is no eval data or is not set
             cfg.runner.val_check_interval = cfg.runner.get("val_check_interval", -1)
+
+        model_type = cfg.actor.model.get("model_type", None)
+        if model_type is not None and SupportedModel(model_type) == SupportedModel.DREAMZERO:
+            from rlinf.models.embodiment.dreamzero.dreamzero_config import (
+                validate_dreamzero_sft_model_cfg,
+            )
+
+            cfg.actor.model = validate_dreamzero_sft_model_cfg(cfg.actor.model)
+
     return cfg
 
 

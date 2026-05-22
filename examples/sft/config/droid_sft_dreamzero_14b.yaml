@@ -66,8 +66,6 @@ actor:
     # DreamTransform per-block action steps.
     action_horizon: 24
     state_horizon: 1
-    num_chunks: 4
-    num_video_frames: 33
     relative_action_keys:
       - joint_position
     is_lora: False

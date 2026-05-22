@@ -18,17 +18,14 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from groot.vla.data.transform import ComposedModalityTransform
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from safetensors.torch import load_file
 
 from rlinf.data.datasets.dreamzero.data_transforms import (
     build_dreamzero_composed_transform,
     load_dreamzero_dataset_metadata,
 )
-from rlinf.models.embodiment.dreamzero.dreamzero_config import (
-    DreamZeroConfig,
-    load_dreamzero_config_dict,
-)
+from rlinf.models.embodiment.dreamzero.dreamzero_config import DreamZeroConfig
 from rlinf.models.embodiment.dreamzero.dreamzero_policy import DreamZeroPolicy
 from rlinf.utils.logging import get_logger
 
@@ -97,7 +94,9 @@ def get_model(cfg: DictConfig, torch_dtype=None):
 
     tokenizer_path = cfg.get("tokenizer_path", "google/umt5-xxl")
 
-    config_dict = load_dreamzero_config_dict(cfg)
+    config_dict = OmegaConf.to_container(cfg, resolve=True)
+    if not isinstance(config_dict, dict):
+        raise ValueError("DreamZero actor.model must resolve to a mapping after validate_sft_cfg().")
 
     dreamzero_config = DreamZeroConfig(**config_dict)
 

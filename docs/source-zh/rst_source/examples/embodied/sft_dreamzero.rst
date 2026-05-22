@@ -1,4 +1,4 @@
-DreamZero 监督微调（SFT）
+DreamZero 监督微调
 ====================================
 
 本文档介绍如何在 RLinf 中运行 DreamZero 监督微调（SFT），覆盖从 **模型与数据准备**、 **配置填写** 到 **启动训练** 与 **排错** 的完整流程。
@@ -7,38 +7,6 @@ DreamZero 监督微调（SFT）
 
 - **数据集**：LIBERO（LeRobot）、LeRobot / OXE DROID
 - **骨干网络**：WAN2.1（如 DreamZero-DROID 14B）、WAN2.2（如 Wan2.2-TI2V-5B 冷启动）
-
-
-支持的训练组合
-----------------------------
-
-推荐配置文件（``examples/sft/config/``）：
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 18 18 42
-
-   * - 配置文件
-     - 数据集 / ``embodiment_tag``
-     - Hydra 预设
-     - 典型用法
-   * - ``libero_sft_dreamzero_14b.yaml``
-     - LIBERO / ``libero_sim``
-     - ``model/dreamzero_14b``
-     - **WAN2.1**：设置 ``model_path`` 指向完整 checkpoint（如官方 DreamZero 权重目录），从 ``config.json`` 加载架构与权重；需 ``metadata_json_path`` 或 ``experiment_cfg/metadata.json``。
-   * - ``libero_sft_dreamzero_5b.yaml``
-     - LIBERO / ``libero_sim``
-     - ``model/dreamzero_5b``
-     - **WAN2.2 冷启动**：``model_path: null``，填写 Wan2.2-TI2V-5B 等各 ``*_pretrained_path`` 与 ``metadata_json_path``。
-   * - ``droid_sft_dreamzero_14b.yaml``
-     - DROID / ``oxe_droid``
-     - ``model/dreamzero_14b``
-     - **DROID SFT（WAN2.1）**：``defaults`` 含 ``dreamzero_14b``；默认 ``model_path`` 指向 DreamZero-DROID，从 ``config.json`` 加载架构与权重。含 ``relative_action``、``sampling_mode: multi_anchor`` 等 DROID 项。
-
-常见起点：
-
-- **从已发布 checkpoint 继续 SFT**（ ``libero_sft_dreamzero_14b``、 ``droid_sft_dreamzero_14b`` 且 ``model_path`` 非空）：收敛更快、更稳定。
-- **从 WAN2.2 组件冷启动**（ ``libero_sft_dreamzero_5b``， ``model_path: null``）：更灵活，需更多数据与 ``metadata.json``。
 
 
 环境准备
@@ -51,7 +19,7 @@ DreamZero 监督微调（SFT）
    git clone https://github.com/RLinf/RLinf.git
    cd RLinf
 
-2. 使用 ``requirements/install.sh`` 创建并同步 **DreamZero 专用 uv 虚拟环境**（ 默认目录 ``.venv``，Python 3.11.14）：
+2. 使用 ``requirements/install.sh`` 创建并安装 **DreamZero 专用 uv 虚拟环境** ：
 
 .. code:: bash
 
@@ -63,7 +31,6 @@ DreamZero 监督微调（SFT）
 
 说明：
 
-- 安装过程会：用 ``uv`` 创建/复用 ``.venv`` → ``uv sync --extra embodied`` → 安装 ``requirements/embodied/models/dreamzero.txt``（含 ``lerobot``、``diffusers``、``torchcodec`` 等）→ 在 NVIDIA 平台上安装 ``flash-attn``。
 - 国内网络可加 ``--use-mirror`` 加速 PyPI / Python / GitHub 下载。
 - 自定义 venv 目录： ``--venv <dir>``；无 root 且系统依赖已就绪： ``--no-root``。
 
@@ -73,60 +40,32 @@ DreamZero 监督微调（SFT）
 
    source .venv/bin/activate
 
-3. 单独克隆 **DreamZero（Groot）** 代码库，并设置 ``DREAMZERO_PATH`` 指向其中 **Python 包根目录**（ 内含 ``groot`` 包，CI 中多为 ``<DreamZero>/dreamzero``）：
+3. 单独克隆 `DreamZero 代码库 <https://github.com/RLinf/dreamzero>`_，并设置 ``DREAMZERO_PATH`` 指向其 Python 包根目录：
 
 .. code:: bash
 
-   # 克隆官方 DreamZero / Groot 仓库（URL 以项目发布说明为准）
-   export DREAMZERO_PATH=/path/to/DreamZero/dreamzero   # 须包含 import groot 的包根目录
+   git clone https://github.com/RLinf/dreamzero.git
+   export DREAMZERO_PATH=/path/to/dreamzero
 
 模型准备
 ----------------
 
-Hydra 通过 ``defaults`` 组合 ``actor.model``（例如 ``libero_sft_dreamzero_5b.yaml`` 中的 ``model/dreamzero_5b@actor.model``）。训练 YAML 可覆盖 ``actor.model`` 下任意字段。
+从 checkpoint 继续训练
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**策略架构的两种加载方式**
+设置 ``actor.model.model_path`` 为已下载的权重目录；架构与权重从该目录加载。可选 checkpoint：
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+- DreamZero 14B（DROID / AgiBot）： `DreamZero-DROID <https://huggingface.co/GEAR-Dreams/DreamZero-DROID>`_、 `DreamZero-AgiBot <https://huggingface.co/GEAR-Dreams/DreamZero-AgiBot>`_ — 参考 ``droid_sft_dreamzero_14b.yaml``
+- RLinf 5B（LIBERO SFT）： `RLinf-DreamZero-WAN2.2-sft-LIBERO-Step21000 <https://huggingface.co/RLinf/RLinf-DreamZero-WAN2.2-sft-LIBERO-Step21000>`_ — 参考 ``libero_sft_dreamzero_14b.yaml`` 并将 ``model_path`` 指向该目录
 
-   * - 方式
-     - 说明
-   * - ``model_path`` 已设置
-     - 从 ``<model_path>/config.json`` 读取**完整模型架构**；YAML 中其余架构字段会被忽略（会打 warning）。权重从该目录加载（ ``model.safetensors`` 或分片索引）。
-   * - ``model_path: null``
-     - 完全使用 Hydra 解析后的 ``actor.model`` 字典（或 ``model/dreamzero_5b.yaml`` 等预设）。以下路径 **必须非空**： ``tokenizer_path``、 ``diffusion_model_pretrained_path``、 ``image_encoder_pretrained_path``、 ``text_encoder_pretrained_path``、 ``vae_pretrained_path``。
+下载示例：
 
-**归一化统计（metadata.json）**
+.. code:: bash
 
-动作 / 状态的归一化统计来自数据集生成的 ``metadata.json``。指定方式：
+   pip install -U huggingface_hub
+   huggingface-cli download GEAR-Dreams/DreamZero-DROID --local-dir ./DreamZero-DROID
 
-- ``actor.model.metadata_json_path``：显式路径；或
-- ``<model_path>/experiment_cfg/metadata.json``（按 ``embodiment_tag`` 取对应条目）
-
-若使用冷启动且 checkpoint 目录中没有该文件，需先用下文工具生成并填写 ``metadata_json_path``。
-
-**数据变换（transform）**
-
-无论 ``model_path`` 是否设置， **数据变换链均在 Python 中按 ``embodiment_tag`` 构建** （见 ``rlinf/data/datasets/dreamzero/data_transforms/__init__.py``）。内置标签：
-
-- ``libero_sim``：LIBERO 仿真
-- ``oxe_droid``：LeRobot / OXE DROID
-
-WAN2.1：使用完整 DreamZero checkpoint
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-将 ``actor.model.model_path`` 指向官方或自训的 DreamZero 目录，通常包含：
-
-- ``config.json``：模型架构
-- ``experiment_cfg/metadata.json``：数据集归一化统计（可选，也可用 ``metadata_json_path`` 覆盖）
-- ``model.safetensors``（ 或分片 safetensors）
-- ``tokenizer_path``：仍须在 YAML 中指定（ 如 ``umt5-xxl``）
-
-在 ``defaults`` 中引入 ``model/dreamzero_14b@actor.model``（见 ``libero_sft_dreamzero_14b.yaml``）。
-
-示例（LIBERO + 14B checkpoint）：
+YAML 示例（DROID + 官方 14B，见 ``droid_sft_dreamzero_14b.yaml``）：
 
 .. code:: yaml
 
@@ -135,42 +74,31 @@ WAN2.1：使用完整 DreamZero checkpoint
 
    actor:
      model:
-       model_path: /path/to/models/<your-checkpoint>   # 示例见 libero_sft_dreamzero_14b.yaml
-       metadata_json_path: /path/to/dataset/metadata.json
-       tokenizer_path: /path/to/models/umt5-xxl
-       embodiment_tag: "libero_sim"
-       action_horizon: 16
+       model_path: ./DreamZero-DROID
+       tokenizer_path: google/umt5-xxl
+       embodiment_tag: oxe_droid
 
-示例（DROID，见 ``droid_sft_dreamzero_14b.yaml``； ``defaults`` 含 ``dreamzero_14b``， ``model_path`` 非空时从 checkpoint 读架构与权重）：
+AgiBot 数据将 ``model_path`` 换为 ``./DreamZero-AgiBot`` 即可。
 
-.. code:: yaml
+从头训练（WAN2.2 组件冷启动）
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   actor:
-     model:
-       model_type: "dreamzero"
-       model_path: /path/to/models/DreamZero-DROID
-       metadata_json_path: /path/to/dataset/metadata.json
-       tokenizer_path: /path/to/models/umt5-xxl
-       embodiment_tag: "oxe_droid"
-       action_horizon: 24
-       relative_action: True
+设置 ``model_path: null``，并填写各 ``*_pretrained_path``。需从 Hugging Face 下载：
 
-WAN2.2：从组件冷启动 （ 5B 等 ）
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- `Wan-AI/Wan2.2-TI2V-5B <https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B>`_ （DiT、T5、VAE）
+- `Wan2.1 CLIP <https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P>`_  （ ``models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth`` 不在 5B 包内）
+- `google/umt5-xxl <https://huggingface.co/google/umt5-xxl>`_
 
-WAN2.2 训练通常需要：
+下载示例：
 
-- WAN2.2 骨干权重（DiT + T5 + VAE）
-- WAN2.1 CLIP 图像编码器（ **不包含** 在 Wan2.2-TI2V-5B 包内，需单独下载）
-- 分词器 ``google/umt5-xxl``
+.. code:: bash
 
-在 ``defaults`` 中引入 ``model/dreamzero_5b@actor.model``，并设置 ``model_path: null``，填写各 ``*_pretrained_path``。``config.json`` 或预设中的架构需与权重一致，例如：
+   huggingface-cli download Wan-AI/Wan2.2-TI2V-5B --local-dir ./Wan2.2-TI2V-5B
+   huggingface-cli download Wan-AI/Wan2.1-I2V-14B-480P \
+     models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth --local-dir ./Wan2.1-CLIP
+   huggingface-cli download google/umt5-xxl --local-dir ./umt5-xxl
 
-- ``diffusion_model_cfg``：``model_type=ti2v``，``in_dim=48``，``out_dim=48``，``frame_seqlen=50``
-- ``vae_cfg``：``WanVideoVAE38``
-- ``image_encoder_pretrained_path`` 指向 WAN2.1 CLIP 权重
-
-示例（LIBERO + 5B 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
+YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
 
 .. code:: yaml
 
@@ -186,40 +114,31 @@ WAN2.2 训练通常需要：
        text_encoder_pretrained_path: Wan-AI/Wan2.2-TI2V-5B/models_t5_umt5-xxl-enc-bf16.pth
        vae_pretrained_path: Wan-AI/Wan2.2-TI2V-5B/Wan2.2_VAE.pth
        metadata_json_path: /path/to/metadata.json
-       embodiment_tag: "libero_sim"
-
-预设文件 ``examples/sft/config/model/dreamzero_5b.yaml``（WAN2.2 / 5B）与 ``dreamzero_14b.yaml``（WAN2.1 / 14B）通过 Hydra ``defaults`` 引入， **不要** 用单独的顶层 ``dreamzero_*`` 键选择。LIBERO / DROID 的 14B 示例写 ``model/dreamzero_14b@actor.model``，LIBERO 5B 冷启动写 ``model/dreamzero_5b@actor.model``。
+       embodiment_tag: libero_sim
 
 
 数据准备
 ----------------
 
-数据格式为 **LeRobot v2** 布局（含 ``meta/``、 ``data/`` 等）。训练时通过 ``data.train_data_paths`` 指定数据集根目录或 HuggingFace 数据集 ID。
+训练数据需为 LeRobot v2/v3 布局（含 ``meta/``、``data/`` 等）。通过 ``data.train_data_paths`` 指定本地目录或 Hugging Face 数据集 ID。
 
-LIBERO
-~~~~~~~~~~~~
+数据集下载
+~~~~~~~~~~~~~~~~
 
-- 配置： ``libero_sft_dreamzero_14b.yaml`` （WAN2.1 / checkpoint）或 ``libero_sft_dreamzero_5b.yaml`` （ WAN2.2 冷启动 ）
-- ``actor.model.embodiment_tag`` 必须为 ``libero_sim``
-- 数据路径示例：
+当前支持：
 
-.. code:: yaml
+- LIBERO： `physical-intelligence/libero <https://huggingface.co/datasets/physical-intelligence/libero>`_ — ``embodiment_tag: libero_sim``，配置见 ``libero_sft_dreamzero_14b.yaml`` / ``libero_sft_dreamzero_5b.yaml``
+- DROID： `GEAR-Dreams/DreamZero-DROID-Data <https://huggingface.co/datasets/GEAR-Dreams/DreamZero-DROID-Data>`_ — ``embodiment_tag: oxe_droid``，配置见 ``droid_sft_dreamzero_14b.yaml``
 
-   data:
-     train_data_paths: physical-intelligence/libero   # 或本地 LeRobot 根目录
+下载示例：
 
-LeRobot / OXE DROID
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code:: bash
 
-- 配置： ``droid_sft_dreamzero_14b.yaml``
-- ``actor.model.embodiment_tag`` 必须为 ``oxe_droid``
-- 建议 ``data.sampling_mode: multi_anchor``、 ``data.lazy_load: True``（示例已默认开启）
-- 目录需符合 LeRobot DROID 布局（含 ``meta/modality.json`` 等）
-
-.. code:: yaml
-
-   data:
-     train_data_paths: /path/to/droid_lerobot
+   pip install -U huggingface_hub
+   # LIBERO
+   huggingface-cli download physical-intelligence/libero --repo-type dataset --local-dir ./libero
+   # DROID
+   huggingface-cli download GEAR-Dreams/DreamZero-DROID-Data --repo-type dataset --local-dir ./DreamZero-DROID-Data
 
 生成 metadata.json
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -241,13 +160,13 @@ LeRobot / OXE DROID
      --output-metadata /path/to/metadata.json \
      --merge
 
-然后在配置中设置 ``actor.model.metadata_json_path``（ 或放到 ``model_path/experiment_cfg/metadata.json`` ） 。
+然后在配置中设置 ``actor.model.metadata_json_path`` （ 或放到 ``model_path/experiment_cfg/metadata.json`` ） 。
 
 
 配置说明
 ---------------
 
-配置文件由 Hydra 管理，入口脚本为 ``examples/sft/train_vla_sft.py``。下面按 **数据相关**（ ``data.*`` ）与 **模型相关**（ ``actor.model.*``） 及训练超参分别说明含义与作用。
+配置文件由 Hydra 管理，入口脚本为 ``examples/sft/train_vla_sft.py``。下面按 **数据相关** 与 **模型及训练超参相关** 分别说明含义与作用。
 
 数据相关配置
 ~~~~~~~~~~~~~~~~~~~~~
@@ -263,9 +182,7 @@ LeRobot / OXE DROID
    * - ``lazy_load``
      - 是否懒加载 mp4 视频。 ``multi_anchor`` 采样模式下必须将 ``lazy_load`` 设为 ``True`` （否则无法按锚点随机取帧）。
    * - ``sampling_mode``
-     - ``multi_anchor`` （默认，推荐）：在同一语言片段内按多个时间锚点采样，与 Groot ``lerobot_sharded`` 语义一致；宏观时间块数由 ``max_chunk_size`` 决定。``fixed_window`` 为连续固定窗口，需配合 ``num_video_frames``。
-   * - ``multi_anchor_resample_attempts``
-     - ``multi_anchor`` 下若某次采样无有效索引，重试次数（map-style dataloader）。
+     - ``multi_anchor`` （默认，推荐）：在同一语言片段内按多个时间锚点采样；宏观时间块数由 ``max_chunk_size`` 决定。``fixed_window`` 为连续固定窗口。
    * - ``video_backend``
      - LeRobot 视频解码后端：``pyav`` 或 ``torchcodec``，影响懒加载 mp4 的速度与兼容性，推荐使用 ``torchcodec``。
    * - ``video_tolerance_s``
@@ -280,8 +197,7 @@ LeRobot / OXE DROID
 - 宏观时间块数来自 ``actor.model.action_head_cfg.config.diffusion_model_cfg.max_chunk_size`` （常见为 4；官方 Groot DROID 配方可为 5）。
 - ``actor.model.action_horizon`` 是 DreamTransform / WAN 每个块内的动作步数（LIBERO 常用 16，DROID 常用 24），不是数据集宏观步长。
 - ``multi_anchor`` 下，数据集侧动作序列长度约为 ``action_horizon * max_chunk_size`` （如 LIBERO 64、DROID 96）。
-- ``actor.model.num_chunks`` 主要用于 ``fixed_window`` 连续分块；``multi_anchor`` 使用 ``max_chunk_size``，若与 ``num_chunks`` 不一致会打 warning。
-- ``actor.model.num_video_frames`` 仅在 ``sampling_mode: fixed_window`` 时使用；``multi_anchor`` 下视频帧数为 ``8 * max_chunk_size + 1`` （如 33）。
+- 视频时间维在预设里配置 ``action_head_cfg.config.num_frames`` （DreamZero 默认 33，对应 ``8 * max_chunk_size + 1``）；未设置时自动推导。
 
 模型与训练相关配置
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -325,14 +241,10 @@ LeRobot / OXE DROID
      - 每个 WAN 时间块内的动作步数（LIBERO 16，DROID 24）。
    * - ``state_horizon``
      - 每个样本的状态行数（通常为 1，每个宏观锚点一个状态）。
-   * - ``num_chunks``
-     - ``fixed_window`` 模式下的连续块数；``multi_anchor`` 下以 ``max_chunk_size`` 为准。
    * - ``num_action_per_block``
      - 与 ``action_head_cfg`` 中 DiT 的 ``num_action_per_block`` 对齐（常等于 ``action_horizon``）。
    * - ``action_head_cfg...diffusion_model_cfg.max_chunk_size``
-     - 多锚点宏观时间块数 / Causal DiT 容量；与 ``data.sampling_mode: multi_anchor`` 强相关。
-   * - ``num_video_frames``
-     - 仅 ``fixed_window`` 有效。
+     - 多锚点宏观时间块数 / Causal DiT 容量；与 ``data.sampling_mode: multi_anchor`` 强相关。视频帧数 ``num_frames`` 由 ``8 * max_chunk_size + 1`` 推导。
    * - ``max_action_dim`` / ``max_state_dim`` / ``max_seq_len``
      - DreamTransform 填充与文本序列上限。
 
