@@ -57,7 +57,7 @@ Resume from a checkpoint
 Set ``actor.model.model_path`` to a downloaded checkpoint directory; architecture and weights load from that path. Options:
 
 - DreamZero 14B (DROID / AgiBot): `DreamZero-DROID <https://huggingface.co/GEAR-Dreams/DreamZero-DROID>`_, `DreamZero-AgiBot <https://huggingface.co/GEAR-Dreams/DreamZero-AgiBot>`_ — see ``droid_sft_dreamzero_14b.yaml``
-- RLinf 5B (LIBERO SFT): `RLinf-DreamZero-WAN2.2-sft-LIBERO-Step21000 <https://huggingface.co/RLinf/RLinf-DreamZero-WAN2.2-sft-LIBERO-Step21000>`_ — see ``libero_sft_dreamzero_14b.yaml`` and point ``model_path`` at that directory
+- RLinf 5B (LIBERO SFT): `RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000 <https://huggingface.co/RLinf/RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000>`_ — see ``libero_sft_dreamzero_5b.yaml`` and point ``model_path`` at that directory
 
 Download example:
 
@@ -414,6 +414,30 @@ Logs go to ``logs/<timestamp>-libero_spatial_eval_dreamzero/eval_embodiment.log`
 
 Optional: convert SFT ``full_weights.pt`` to Hugging Face ``safetensors`` with ``fsdp_dreamzero_convertor`` and ``convert_pt_to_hf`` (``rlinf/utils/ckpt_convertor/fsdp_convertor/config/fsdp_dreamzero_convertor.yaml``). For eval in LIBERO and similar simulators, set ``runner.ckpt_path`` to your ``.pt`` checkpoint.
 
+**Pretrained checkpoint evaluation results**
+
+Evaluation on LIBERO Spatial for `RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000 <https://huggingface.co/RLinf/RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000>`_ (``num_trajectory=512``):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 50 50
+
+   * - Training step
+     - success_once
+   * - 3000
+     - 7.81%
+   * - 6000
+     - 66.41%
+   * - 9000
+     - 89.06%
+   * - 12000
+     - 88.48%
+   * - 15000
+     - 66.60%
+   * - 18000
+     - 96.68%
+   * - 21000
+     - 90.43%
 
 Monitoring and sanity checks
 ----------------------------

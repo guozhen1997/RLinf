@@ -56,7 +56,7 @@ DreamZero 监督微调
 设置 ``actor.model.model_path`` 为已下载的权重目录；架构与权重从该目录加载。可选 checkpoint：
 
 - DreamZero 14B（DROID / AgiBot）： `DreamZero-DROID <https://huggingface.co/GEAR-Dreams/DreamZero-DROID>`_、 `DreamZero-AgiBot <https://huggingface.co/GEAR-Dreams/DreamZero-AgiBot>`_ — 参考 ``droid_sft_dreamzero_14b.yaml``
-- RLinf 5B（LIBERO SFT）： `RLinf-DreamZero-WAN2.2-sft-LIBERO-Step21000 <https://huggingface.co/RLinf/RLinf-DreamZero-WAN2.2-sft-LIBERO-Step21000>`_ — 参考 ``libero_sft_dreamzero_14b.yaml`` 并将 ``model_path`` 指向该目录
+- RLinf 5B（LIBERO SFT）： `RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000 <https://huggingface.co/RLinf/RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000>`_ — 参考 ``libero_sft_dreamzero_5b.yaml`` 并将 ``model_path`` 指向该目录
 
 下载示例：
 
@@ -411,6 +411,30 @@ SFT 完成后，可在数据集对应具身环境中评测策略。下文以 **L
 
 可选：若需将 SFT 的 ``full_weights.pt`` 转为 Hugging Face ``safetensors`` 目录（便于外部推理或发布），可使用 ``fsdp_dreamzero_convertor`` 配置运行 ``convert_pt_to_hf``（见 ``rlinf/utils/ckpt_convertor/fsdp_convertor/config/fsdp_dreamzero_convertor.yaml``）。在 LIBERO 等仿真环境中评测时，只需将 ``runner.ckpt_path`` 指向 ``.pt`` 权重文件即可。
 
+**预训练 checkpoint 评测结果**
+
+`RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000 <https://huggingface.co/RLinf/RLinf-DreamZero-WAN2.2-5B-LIBERO-SFT-Step18000>`_ 在 LIBERO Spatial 上的评测结果（``num_trajectory=512``）：
+
+.. list-table::
+   :header-rows: 1
+   :widths: 50 50
+
+   * - 训练步数
+     - success_once
+   * - 3000
+     - 7.81%
+   * - 6000
+     - 66.41%
+   * - 9000
+     - 89.06%
+   * - 12000
+     - 88.48%
+   * - 15000
+     - 66.60%
+   * - 18000
+     - 96.68%
+   * - 21000
+     - 90.43%
 
 监控与 sanity check
 -------------------------------

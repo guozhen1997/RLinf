@@ -6,4 +6,4 @@ if [ -z "$TARGET" ]; then
   TARGET="en"
 fi
 
-sphinx-build -E source-$TARGET build/html && sphinx-autobuild source-$TARGET build/html
+sphinx-build -W source-$TARGET build/html && sphinx-autobuild source-$TARGET build/html

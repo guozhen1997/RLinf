@@ -68,6 +68,17 @@ PRESETS: dict[str, dict[str, Any]] = {
         "use_modality_json": True,
         "default_dataset_root": None,
     },
+    "real_panda_single_arm": {
+        "embodiment_tag": "real_panda_single_arm",
+        "state_key": "state",
+        "action_key": "actions",
+        "video_keys": [
+            "observation.images.image",
+            "observation.images.wrist_image",
+        ],
+        "use_modality_json": False,
+        "default_dataset_root": None,
+    },
 }
 
 
@@ -245,6 +256,22 @@ def _video_modalities_from_modality(
     return result
 
 
+def _infer_video_keys(info: dict[str, Any]) -> list[str]:
+    """Pick LeRobot feature keys for video modalities from meta/info.json."""
+    features = info.get("features") or {}
+    video_keys = [key for key, feat in features.items() if feat.get("dtype") == "video"]
+    if video_keys:
+        return sorted(video_keys)
+    for key in ("image", "wrist_image"):
+        if key in features and features[key].get("dtype") == "image":
+            video_keys.append(key)
+    if video_keys:
+        return video_keys
+    raise ValueError(
+        "Could not infer video_keys from meta/info.json; pass --video-keys explicitly"
+    )
+
+
 def _video_modalities_simple(
     info: dict[str, Any],
     video_keys: list[str],
@@ -331,7 +358,7 @@ def build_metadata(
             )
     else:
         if not video_keys:
-            raise ValueError("video_keys required when use_modality_json=False")
+            video_keys = _infer_video_keys(info)
         state_stats = {"state": state_stats_full}
         action_stats = {"actions": action_stats_full}
         state_modalities = {
@@ -390,7 +417,7 @@ def main() -> None:
         "--preset",
         nargs="+",
         default=None,
-        help=f"Built-in presets: {', '.join(sorted({k for k in PRESETS if '-' in k or k == 'oxe_droid'}))}",
+        help=f"Built-in presets: {', '.join(sorted(PRESETS))}",
     )
     parser.add_argument(
         "--dataset-root",
