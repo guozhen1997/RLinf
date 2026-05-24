@@ -815,7 +815,7 @@ def validate_embodied_cfg(cfg):
     # NOTE: Currently we only support actor_critic as PPO algorithm loss, and only support value_head as critic model.
     # This will be updated in the future to support more algorithms and critic models.
     # Check that actor_critic loss requires value_head (training only; eval does not need critic)
-    if not cfg.runner.only_eval and (
+    if not cfg.runner.get("only_eval", False) and (
         cfg.algorithm.loss_type == "actor_critic"
         or cfg.algorithm.loss_type == "decoupled_actor_critic"
     ):
@@ -831,7 +831,7 @@ def validate_embodied_cfg(cfg):
     stage_num = cfg.rollout.pipeline_stage_num
     env_world_size = component_placement.get_world_size("env")
 
-    if cfg.runner.val_check_interval > 0 or cfg.runner.only_eval:
+    if cfg.runner.val_check_interval > 0 or cfg.runner.get("only_eval", False):
         assert cfg.env.eval.total_num_envs > 0, (
             "Total number of parallel environments for evaluation must be greater than 0"
         )
@@ -860,7 +860,7 @@ def validate_embodied_cfg(cfg):
             "env.eval.max_steps_per_rollout_epoch must be divisible by actor.model.num_action_chunks"
         )
 
-    if not cfg.runner.only_eval:
+    if not cfg.runner.get("only_eval", False):
         assert cfg.env.train.total_num_envs > 0, (
             "Total number of parallel environments for training must be greater than 0"
         )
@@ -1247,7 +1247,7 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
     elif cfg.runner.task_type == "offline":
         cfg = validate_offline_cfg(cfg)
 
-    if cfg.runner.task_type != "sft" and not cfg.runner.only_eval:
+    if cfg.runner.task_type != "sft" and not cfg.runner.get("only_eval", False):
         if cfg.algorithm.adv_type in ("grpo", "grpo_dynamic", "reinpp_baseline"):
             assert cfg.algorithm.group_size > 1
 
