@@ -15,7 +15,7 @@
 import logging
 import os
 from abc import abstractmethod
-from typing import Any
+from typing import Any, Tuple
 
 import numpy as np
 import torch
@@ -137,7 +137,6 @@ class FSDPSftWorker(FSDPModelManager, Worker):
             self.model.train()
 
             metrics = {}
-            avg_loss = 0.0
 
             for idx in range(self.gradient_accumulation):
                 # set the gradient accumulation backward_ctx
@@ -162,18 +161,10 @@ class FSDPSftWorker(FSDPModelManager, Worker):
                     batch = next(self.data_iter)
                     self._data_iter_offset = 1
 
-                losses = self.get_train_model_output(batch)
-
-                if isinstance(losses, (list, tuple)):
-                    losses = torch.stack(losses)
-                elif not isinstance(losses, torch.Tensor):
-                    losses = torch.tensor(
-                        losses, device=self.device, dtype=torch.float32
-                    )
-                loss = losses.mean()
+                loss, step_metrics = self.get_train_model_output(batch)
+                append_to_dict(metrics, step_metrics)
 
                 loss = loss / self.gradient_accumulation
-                avg_loss += loss.item()
                 with backward_ctx:
                     self.grad_scaler.scale(loss).backward()
 
@@ -189,7 +180,6 @@ class FSDPSftWorker(FSDPModelManager, Worker):
             append_to_dict(
                 metrics,
                 {
-                    "loss": avg_loss,
                     "learning_rate": lr_value,
                     "grad_norm": grad_norm_value,
                 },
@@ -210,7 +200,7 @@ class FSDPSftWorker(FSDPModelManager, Worker):
         raise NotImplementedError
 
     @abstractmethod
-    def get_train_model_output(self, batch: dict[str, Any]):
+    def get_train_model_output(self, batch: dict[str, Any]) -> Tuple[torch.Tensor, dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod
