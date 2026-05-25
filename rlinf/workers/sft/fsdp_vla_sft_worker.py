@@ -106,13 +106,13 @@ class FSDPVlaSftWorker(FSDPSftWorker):
 
             torch.distributed.barrier()
 
-        rng_state = get_rng_state()
-        all_rng_states = [None] * self._world_size
-        torch.distributed.all_gather_object(all_rng_states, rng_state)
-        if self._rank == 0:
-            torch.save(all_rng_states, os.path.join(save_path, "rng.pt"))
+            rng_state = get_rng_state()
+            all_rng_states = [None] * self._world_size
+            torch.distributed.all_gather_object(all_rng_states, rng_state)
+            if self._rank == 0:
+                torch.save(all_rng_states, os.path.join(save_path, "rng.pt"))
 
-        torch.distributed.barrier()
+            torch.distributed.barrier()
 
     def load_checkpoint(self, load_path: str) -> None:
         super().load_checkpoint(load_path)
@@ -125,12 +125,12 @@ class FSDPVlaSftWorker(FSDPSftWorker):
             self.data_loader.load_state_dict(state)
             self.data_iter = iter(self.data_loader)
 
-        rng_path = os.path.join(load_path, "rng.pt")
-        if os.path.exists(rng_path):
-            all_rng_states = torch.load(rng_path, weights_only=False)
-            set_rng_state(all_rng_states[self._rank])
+            rng_path = os.path.join(load_path, "rng.pt")
+            if os.path.exists(rng_path):
+                all_rng_states = torch.load(rng_path, weights_only=False)
+                set_rng_state(all_rng_states[self._rank])
 
-        torch.distributed.barrier()
+            torch.distributed.barrier()
 
     def get_max_steps_per_epoch(self):
         if self.data_loader is None:
