@@ -15,7 +15,7 @@
 import logging
 import os
 from abc import abstractmethod
-from typing import Any, Tuple
+from typing import Any
 
 import numpy as np
 import torch
@@ -200,7 +200,9 @@ class FSDPSftWorker(FSDPModelManager, Worker):
         raise NotImplementedError
 
     @abstractmethod
-    def get_train_model_output(self, batch: dict[str, Any]) -> Tuple[torch.Tensor, dict[str, Any]]:
+    def get_train_model_output(
+        self, batch: dict[str, Any]
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod

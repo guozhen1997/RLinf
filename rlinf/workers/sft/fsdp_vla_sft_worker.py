@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from omegaconf import DictConfig
@@ -73,9 +73,7 @@ class FSDPVlaSftWorker(FSDPSftWorker):
         # now the eval is not supported for embodied sft
         raise NotImplementedError("eval is not supported for embodied sft right now.")
 
-    def get_train_model_output(
-        self, batch: Any
-    ) -> Tuple[torch.Tensor, dict[str, Any]]:
+    def get_train_model_output(self, batch: Any) -> tuple[torch.Tensor, dict[str, Any]]:
         with self.amp_context:
             output = self.model(forward_type=ForwardType.SFT, data=batch)
 

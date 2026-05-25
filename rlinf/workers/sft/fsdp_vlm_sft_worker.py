@@ -15,7 +15,7 @@
 import json
 import logging
 import os
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from omegaconf import DictConfig
@@ -211,7 +211,7 @@ class FSDPVlmSftWorker(FSDPSftWorker):
 
     def get_train_model_output(
         self, batch: dict[str, Any]
-    ) -> Tuple[torch.Tensor, dict[str, Any]]:
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         # hundle the input batch
         input_ids = batch["prompt"].to(self.device)
         attention_mask = batch["attention_mask"].to(self.device, dtype=torch.bool)

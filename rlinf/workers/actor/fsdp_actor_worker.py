@@ -23,7 +23,6 @@ from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.distributed.tensor import DTensor
 from torch.multiprocessing.reductions import reduce_tensor
-from torch.utils._pytree import tree_map
 
 import rlinf.algorithms  # noqa: F401
 from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
@@ -75,7 +74,6 @@ from rlinf.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
 )
-from rlinf.utils.pytree import register_pytree_dataclasses
 from rlinf.utils.utils import (
     clear_memory,
     compute_entropy_from_logits,
