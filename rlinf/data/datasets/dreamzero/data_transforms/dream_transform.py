@@ -66,7 +66,7 @@ class DreamTransform(DreamTransformBase):
         """Collate with RLinf prompt wrapping (supports all registered embodiments)."""
         import tree
 
-        from rlinf.data.datasets.dreamzero.dreamzero import DreamZeroCollator
+        from rlinf.data.datasets.dreamzero.dataloader import DreamZeroCollator
 
         data.pop("lapa_action", None)
         data.pop("dream_actions", None)

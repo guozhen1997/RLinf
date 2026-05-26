@@ -23,6 +23,8 @@ from typing import Any, Protocol, Sequence, runtime_checkable
 import numpy as np
 from torch.utils.data import Dataset
 
+from rlinf.data.utils import forward_set_epoch
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,14 +34,6 @@ class SizedDataset(Protocol):
 
     def __len__(self) -> int: ...
     def __getitem__(self, index: int) -> Any: ...
-
-
-def forward_set_epoch(data_loader: Any, epoch: int) -> None:
-    """Forward ``set_epoch`` to the wrapped sampler and dataset when present."""
-    if hasattr(data_loader, "sampler") and hasattr(data_loader.sampler, "set_epoch"):
-        data_loader.sampler.set_epoch(epoch)
-    if hasattr(data_loader, "dataset") and hasattr(data_loader.dataset, "set_epoch"):
-        data_loader.dataset.set_epoch(epoch)
 
 
 class BaseDataLoaderImpl:

@@ -505,7 +505,7 @@ Create ``rlinf/data/datasets/dreamzero/data_transforms/<your_tag>.py`` implement
 **``modality_keys`` naming** (wired to ``DreamZeroLeRobotDataset``):
 
 - Video: ``video.<short_name>`` (e.g. ``video.image``); short names resolve via ``meta/modality.json`` ``original_key`` or ``info.json`` ``observation.images.*`` / bare column names.
-- State/action: ``state.<name>``, ``action.<name>``; with ``meta/modality.json``, use ``start``/``end`` slices; otherwise fallback to full ``observation.state`` / ``action`` columns or heuristics (see ``_build_component_sources`` in ``dreamzero.py``).
+- State/action: ``state.<name>``, ``action.<name>``; with ``meta/modality.json``, use ``start``/``end`` slices; otherwise fallback to full ``observation.state`` / ``action`` columns or heuristics (see ``_build_component_sources`` in ``lerobot_dataset.py``).
 - Keys in training YAML must match ``*_concat_order`` in ``ConcatTransform``.
 
 Step 2: Register in RLinf
