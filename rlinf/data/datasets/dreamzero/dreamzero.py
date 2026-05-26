@@ -29,6 +29,7 @@ from rlinf.data.datasets.dreamzero.data_transforms import (
     normalize_instruction_text,
 )
 from rlinf.data.datasets.dreamzero.sampling_strategy import (
+    DEFAULT_VIDEO_IN_CHUNK_OFFSETS,
     EmptyTemporalSampleError,
     MultiAnchorTemporalConfig,
     SamplingMode,
@@ -80,6 +81,8 @@ class DreamZeroLeRobotDataset(Dataset):
         video_backend: str = "pyav",
         sampling_mode: SamplingMode = "multi_anchor",
         multi_anchor_resample_attempts: int = 8,
+        macro_stride: int | None = None,
+        video_in_chunk_offsets: tuple[int, ...] | list[int] | None = None,
     ):
         if isinstance(data_path, (list, tuple)):
             if len(data_path) == 0:
@@ -179,9 +182,19 @@ class DreamZeroLeRobotDataset(Dataset):
             self._multi_anchor_cfg = None
         else:
             self._fixed_window_temporal = None
+            if macro_stride is None:
+                resolved_macro_stride = self.action_horizon
+            else:
+                resolved_macro_stride = int(macro_stride)
+            if video_in_chunk_offsets is None:
+                resolved_video_offsets = DEFAULT_VIDEO_IN_CHUNK_OFFSETS
+            else:
+                resolved_video_offsets = tuple(int(x) for x in video_in_chunk_offsets)
             self._multi_anchor_cfg = MultiAnchorTemporalConfig(
                 max_chunk_size=self.max_chunk_size,
                 action_horizon=self.action_horizon,
+                macro_stride=resolved_macro_stride,
+                video_in_chunk_offsets=resolved_video_offsets,
             )
         if self._use_lazy_video_tree:
             self._init_lazy_map_style(pq_cache_max_episodes, video_tolerance_s)
@@ -1059,6 +1072,12 @@ def build_dreamzero_sft_dataloader(
     state_horizon = model_cfg.get("state_horizon", 1)
     action_horizon = model_cfg.action_horizon
     max_seq_len = int(model_cfg.get("max_seq_len", 512))
+    macro_stride = data_cfg.get("macro_stride")
+    if macro_stride is not None:
+        macro_stride = int(macro_stride)
+    video_in_chunk_offsets = data_cfg.get("video_in_chunk_offsets")
+    if video_in_chunk_offsets is not None:
+        video_in_chunk_offsets = tuple(int(x) for x in video_in_chunk_offsets)
     embodiment_tag_mapping = embodiment_tag_mapping_for_embodiment(
         embodiment_tag, model_cfg.get("embodiment_tag_mapping")
     )
@@ -1084,14 +1103,20 @@ def build_dreamzero_sft_dataloader(
         multi_anchor_resample_attempts=data_cfg.get(
             "multi_anchor_resample_attempts", 8
         ),
+        macro_stride=macro_stride,
+        video_in_chunk_offsets=video_in_chunk_offsets,
     )
+    multi_anchor_cfg = dataset._multi_anchor_cfg
     logger.info(
         "DreamZero LeRobot dataset: embodiment=%s sampling_mode=%s max_chunk_size=%s "
-        "action_horizon(transform)=%s video_keys=%s state_keys=%s action_keys=%s language_keys=%s",
+        "action_horizon(transform)=%s macro_stride=%s video_in_chunk_offsets=%s "
+        "video_keys=%s state_keys=%s action_keys=%s language_keys=%s",
         embodiment_tag,
         dataset.sampling_mode,
         dataset.max_chunk_size,
         dataset.action_horizon,
+        None if multi_anchor_cfg is None else multi_anchor_cfg.macro_stride,
+        None if multi_anchor_cfg is None else multi_anchor_cfg.video_in_chunk_offsets,
         dataset.video_keys,
         dataset.state_keys,
         dataset.action_keys,
