@@ -114,6 +114,11 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         f"{_dit_chunk}.CausalWanModel._forward_train",
         "rlinf.models.embodiment.dreamzero.patch.wan_causal_model_forward_train._forward_train",
     )
+    from rlinf.data.datasets.dreamzero.data_transforms.embodiment_tag import (
+        add_embodiment_tag_patches,
+    )
+
+    add_embodiment_tag_patches(Patcher)
     Patcher.apply()
 
     model_path = cfg.get("model_path", None)

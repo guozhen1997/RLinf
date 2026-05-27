@@ -31,10 +31,14 @@ from rlinf.data.datasets.dreamzero.data_transforms.libero_sim import (
 from rlinf.data.datasets.dreamzero.data_transforms.oxe_droid import (
     OxeDroidDataTransform,
 )
+from rlinf.data.datasets.dreamzero.data_transforms.franka_pnp import (
+    FrankaPnpDataTransform,
+)
 
 _EMBODIMENT_REGISTRY: dict[str, type[DreamZeroEmbodimentTransform]] = {
     LiberoSimDataTransform.TAG: LiberoSimDataTransform,
     OxeDroidDataTransform.TAG: OxeDroidDataTransform,
+    FrankaPnpDataTransform.TAG: FrankaPnpDataTransform,
 }
 
 DEFAULT_EMBODIMENT_TAG_MAPPING: dict[str, dict[str, int]] = {
@@ -147,6 +151,11 @@ def collect_dreamzero_dataset_keys(
 
 def load_dreamzero_dataset_metadata(cfg: Any) -> DatasetMetadata:
     """Load :class:`DatasetMetadata` for ``embodiment_tag``."""
+    from rlinf.data.datasets.dreamzero.data_transforms.embodiment_tag import (
+        ensure_groot_embodiment_tag_patched,
+    )
+
+    ensure_groot_embodiment_tag_patched()
     tag = cfg.embodiment_tag
     if cfg.get("metadata_json_path", None):
         path = Path(str(cfg["metadata_json_path"])).expanduser()
