@@ -5,7 +5,7 @@ DreamZero 监督微调
 
 当前支持：
 
-- **数据集**：LIBERO（``libero_sim``）、OXE DROID（``oxe_droid``）、Franka 抓取放置（``franka_pnp``）；支持多 embodiment **混合训练**（见 ``libero_franka_mix_sft_dreamzero_5b.yaml``）
+- **数据集**: LIBERO (``libero_sim``)、OXE DROID (``oxe_droid``)、Franka 抓取放置 (``franka_pnp``)；支持多 embodiment **混合训练** (见 ``libero_franka_mix_sft_dreamzero_5b.yaml``)
 - **骨干网络**：WAN2.1（如 DreamZero-DROID 14B）、WAN2.2（如 Wan2.2-TI2V-5B 冷启动）
 
 
@@ -631,9 +631,9 @@ SFT 完成后，可在数据集对应具身环境中评测策略。下文以 **L
 
    - 设置 ``data.lazy_load: True``
 
-7. **``AttributeError: GR1_UNIFIED_SEGMENTATION`` 或未知 ``EmbodimentTag``**
+7. ``AttributeError: GR1_UNIFIED_SEGMENTATION`` 或未知 ``EmbodimentTag``
 
-   - 数据 transform 链须使用 ``dream_transform.DreamTransform``（RLinf 子类），勿直接实例化 Groot 基类
+   - 数据 transform 链须使用 ``dream_transform.DreamTransform`` (RLinf 子类)，勿直接实例化 Groot 基类
    - 新 tag 须在 ``embodiment_tag.py`` 与 ``_EMBODIMENT_REGISTRY`` 注册；训练经 ``get_model()`` 加载模型时会 patch Groot 枚举
 
 
