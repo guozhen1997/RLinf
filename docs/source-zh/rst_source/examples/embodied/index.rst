@@ -239,6 +239,9 @@
        </p>
      </div>
 
+   </div>
+
+   <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <img src="https://github.com/RLinf/misc/raw/main/pic/3_layer_mlp.jpg"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);"
@@ -250,16 +253,18 @@
          使用 PPO/SAC/GRPO 训练 PPO 策略
        </p>
      </div>
-    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-      <img src="https://github.com/RLinf/misc/raw/main/pic/sac-flow-overview.png"
-           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-        <a href="sac_flow.html" style="text-decoration: underline; color: blue;">
-          <b>SAC-Flow 策略训练</b>
-        </a><br>
-        使用 SAC 训练 Flow Matching 策略 (Sim & Real)
-      </p>
-    </div>
+
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/sac-flow-overview.png"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="sac_flow.html" style="text-decoration: underline; color: blue;">
+           <b>SAC-Flow 策略训练</b>
+         </a><br>
+         使用 SAC 训练 Flow Matching 策略 (Sim & Real)
+       </p>
+     </div>
+
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <!-- TODO(thumbnail): replace placeholder cover image URL for sft_openpi -->
        <img src="https://github.com/RLinf/misc/raw/main/pic/pi0_icon.jpg"
@@ -272,6 +277,9 @@
        </p>
      </div>
    
+   </div>
+
+   <div style="display: flex; justify-content: center; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <img src="https://github.com/RLinf/misc/raw/main/pic/release_0.2/qwen2_5_sft_vlm.png"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
@@ -283,17 +291,6 @@
        </p>
      </div>
 
-     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <!-- TODO(thumbnail): replace placeholder cover image URL for nft_openpi -->
-       <img src="https://github.com/RLinf/misc/raw/main/pic/pi0_icon.jpg"
-            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-         <a href="nft_openpi.html" style="text-decoration: underline; color: blue;">
-           <b>NFT：π₀ 正负样本对比强化学习</b>
-         </a><br>
-         对预训练 π₀ flow-matching 策略进行无需 critic 的在线强化学习微调
-       </p>
-     </div>
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <img src="https://github.com/RLinf/misc/raw/main/pic/dsrl.png"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
@@ -328,7 +325,7 @@
      </div>
 
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+       <img src="https://github.com/RLinf/misc/raw/main/pic/co_training.jpeg"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
          <a href="co_training.html" style="text-decoration: underline; color: blue;">
@@ -349,8 +346,7 @@
      </div>
 
       <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-      <!-- TODO(thumbnail): replace placeholder cover image URL for franka_reward_model -->
-       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_reward_model.jpeg"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
          <a href="franka_reward_model.html" style="text-decoration: underline; color: blue;">
@@ -361,8 +357,7 @@
       </div>
 
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <!-- TODO(thumbnail): replace placeholder cover image URL for franka_zed_robotiq -->
-       <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+       <img src="https://github.com/RLinf/misc/raw/main/pic/robotiq_zed.jpeg"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
          <a href="franka_zed_robotiq.html" style="text-decoration: underline; color: blue;">
@@ -372,8 +367,7 @@
        </p>
      </div>
     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-      <!-- TODO(thumbnail): replace placeholder cover image URL for franka_gello -->
-      <img src="https://github.com/RLinf/misc/raw/main/pic/franka_arm_small.jpg"
+      <img src="https://github.com/RLinf/misc/raw/main/pic/gello.jpeg"
            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
         <a href="franka_gello.html" style="text-decoration: underline; color: blue;">
@@ -394,6 +388,30 @@
       </p>
     </div>
 
+    <!-- TODO: 待 GimArm peg-insertion 的图片/视频上传到 RLinf/misc 后替换下方 src
+         （PR #1016 中 zanghz21 的评审意见）。 -->
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <img src="https://github.com/RLinf/misc/raw/main/pic/gim_arm.jpg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="gim_arm.html" style="text-decoration: underline; color: blue;">
+          <b>GimArm 真机强化学习</b>
+        </a><br>
+        GimArm 六自由度机械臂 + peg-insertion 任务，通过 SocketCAN 通信，并基于 Pinocchio 做正运动学
+      </p>
+    </div>
+
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <img src="https://github.com/RLinf/misc/raw/main/pic/pi0_icon.jpg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="franka_pi0_sft_deploy.html" style="text-decoration: underline; color: blue;">
+          <b>Franka真机Pi0监督微调与部署全流程</b>
+        </a><br>
+        数据采集 + Pi0 SFT + 真机部署的完整端到端演示
+      </p>
+    </div>
+
     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
       <img src="https://github.com/RLinf/misc/raw/main/pic/xsquare_turtle2_arm_small.jpg"
            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
@@ -402,6 +420,30 @@
           <b>XSquare Turtle2 真机强化学习</b>
         </a><br>
         SAC + CNN 策略在 XSquare Turtle2 双臂机器人上的真机训练
+      </p>
+    </div>
+
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <!-- TODO(thumbnail): replace placeholder cover image URL for dosw1 -->
+      <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/dos-w1.png"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="dosw1.html" style="text-decoration: underline; color: blue;">
+          <b>Dexmal DOS-W1 真机强化学习</b>
+        </a><br>
+        基于 Flow Matching 策略 + SAC 的 Dexmal DOS-W1 双臂抓取任务
+      </p>
+    </div>
+
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <!-- TODO(thumbnail): replace placeholder cover image URL for dosw1 -->
+      <img src="https://github.com/RLinf/misc/raw/main/pic/gim-arm.png"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="gim_arm.html" style="text-decoration: underline; color: blue;">
+          <b>GimArm</b>
+        </a><br>
+        集成 GimArm 机械臂的数据采集
       </p>
     </div>
    </div>
@@ -434,8 +476,8 @@
    mlp
    sac_flow
    sft_openpi
+   sft_dreamzero
    sft_vlm
-   nft_openpi
    dsrl
    dagger
    recap
@@ -444,5 +486,8 @@
    franka_reward_model
    franka_zed_robotiq
    franka_gello
+   franka_pi0_sft_deploy
    hg-dagger
+   gim_arm
    xsquare_turtle2
+   dosw1
