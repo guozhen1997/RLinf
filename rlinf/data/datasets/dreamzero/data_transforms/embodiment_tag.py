@@ -12,33 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from groot.vla.data.schema.embodiment_tags import EmbodimentTag as DefaultTags
+"""RLinf DreamZero embodiment tags.
 
-_PATCH_PATH = (
-    "rlinf.data.datasets.dreamzero.data_transforms.embodiment_tag.EmbodimentTag"
-)
-_PATCH_TARGETS = (
-    "groot.vla.data.schema.embodiment_tags.EmbodimentTag",
-    "groot.vla.data.schema.EmbodimentTag",
-)
+When adding a new embodiment, register it in ``data_transforms/__init__.py`` and
+add the corresponding member below.
+"""
+
+from enum import Enum
 
 
-class EmbodimentTag(DefaultTags):
+class EmbodimentTag(Enum):
+    """Embodiment tags supported by RLinf DreamZero SFT / eval."""
+
+    LIBERO_SIM = "libero_sim"
+    OXE_DROID = "oxe_droid"
     FRANKA_PNP = "franka_pnp"
-
-
-def add_embodiment_tag_patches(patcher) -> None:
-    for target in _PATCH_TARGETS:
-        if target not in patcher._mappings_dict:
-            patcher.add_patch(target, _PATCH_PATH)
-
-
-def ensure_groot_embodiment_tag_patched() -> None:
-    from groot.vla.data.schema import embodiment_tags as groot_tags
-
-    if groot_tags.EmbodimentTag is EmbodimentTag:
-        return
-    from rlinf.utils.patcher import Patcher
-
-    add_embodiment_tag_patches(Patcher)
-    Patcher.apply()

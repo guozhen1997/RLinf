@@ -45,7 +45,7 @@ data:
         - /path/to/franka_a
         - /path/to/franka_b
       weight: 1.0
-      distribute_weights: true  # 多路径时是否按长度分配 weight
+      distribute_weights: true  # When multiple paths are listed, scale weight by dataset length
       embodiment_tag: "franka_pnp"
 
   lazy_load: True
@@ -91,13 +91,6 @@ actor:
     embodiment_tag: "franka_pnp"
     relative_action: False
     relative_action_per_horizon: False
-
-    action_head_cfg:
-      config:
-        action_loss_embodiment_ids:
-        - 26
-        - 21
-        - 17
 
   optim:
     lr: 1.0e-5

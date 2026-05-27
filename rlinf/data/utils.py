@@ -13,8 +13,9 @@
 # limitations under the License.
 
 
-import torch
 from typing import Any
+
+import torch
 
 
 def forward_set_epoch(data_loader: Any, epoch: int) -> None:

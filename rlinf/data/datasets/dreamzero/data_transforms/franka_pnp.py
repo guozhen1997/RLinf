@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DreamZero transforms for Franka pick-and-place (dual-view, state/actions columns).
-"""
+"""DreamZero transforms for Franka pick-and-place (dual-view, state/actions columns)."""
 
 from typing import Any
 
@@ -34,11 +33,11 @@ from groot.vla.data.transform.video import (
 
 from rlinf.data.datasets.dreamzero.data_transforms.dream_transform import DreamTransform
 from rlinf.data.datasets.dreamzero.data_transforms.libero_sim import (
-    LiberoSimDataTransform,
     _ACTION_KEYS,
     _STATE_KEYS,
     _VIDEO_BACKEND,
     _VIDEO_KEYS,
+    LiberoSimDataTransform,
 )
 
 _DEFAULT_VIDEO_HEIGHT = 176
@@ -68,7 +67,9 @@ class FrankaPnpDataTransform(LiberoSimDataTransform):
                 modality_keys=list(_STATE_KEYS),
             ),
             "action": ModalityConfig(
-                delta_indices=list(range(FrankaPnpDataTransform.DEFAULT_ACTION_HORIZON)),
+                delta_indices=list(
+                    range(FrankaPnpDataTransform.DEFAULT_ACTION_HORIZON)
+                ),
                 modality_keys=list(_ACTION_KEYS),
             ),
             "language": ModalityConfig(

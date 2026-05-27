@@ -963,7 +963,6 @@ class DreamZeroLeRobotDataset(Dataset):
         return out
 
 
-
 def _safe_hash(input_tuple: tuple[Any, ...]) -> int:
     """Create a deterministic hash for seeding RNG."""
     tuple_string = repr(input_tuple).encode("utf-8")
@@ -979,10 +978,13 @@ def is_dreamzero_mixture_spec(data_paths: Any) -> bool:
         return False
     if isinstance(data_paths, str):
         return False
-    if not isinstance(data_paths, (list, tuple)):
+    # OmegaConf ListConfig is not a list/tuple subclass.
+    if not (isinstance(data_paths, (list, tuple)) or OmegaConf.is_list(data_paths)):
         return False
     if len(data_paths) == 0:
-        raise ValueError("DreamZero mixture spec must contain at least one dataset entry.")
+        raise ValueError(
+            "DreamZero mixture spec must contain at least one dataset entry."
+        )
     first = data_paths[0]
     return isinstance(first, Mapping) or OmegaConf.is_dict(first)
 
@@ -1029,9 +1031,9 @@ def build_single_dreamzero_lerobot_dataset(
     from rlinf.data.datasets.dreamzero.data_transforms import (
         build_dreamzero_composed_transform,
         collect_dreamzero_dataset_keys,
-        embodiment_tag_mapping_for_embodiment,
         load_dreamzero_dataset_metadata,
     )
+
     data_cfg = cfg.data
     model_cfg = cfg.actor.model
     tokenizer_path = model_cfg.get("tokenizer_path", "google/umt5-xxl")
@@ -1133,7 +1135,9 @@ class DreamZeroLeRobotMixtureDataset(Dataset):
         seed: int = 42,
     ):
         if not data_mixture:
-            raise ValueError("DreamZeroLeRobotMixtureDataset requires at least one dataset.")
+            raise ValueError(
+                "DreamZeroLeRobotMixtureDataset requires at least one dataset."
+            )
 
         datasets: list[Any] = []
         raw_weights: list[float] = []
@@ -1145,13 +1149,17 @@ class DreamZeroLeRobotMixtureDataset(Dataset):
             raw_weights.append(float(weight))
 
         if not datasets:
-            raise ValueError("No valid (non-empty) DreamZero LeRobot datasets provided.")
+            raise ValueError(
+                "No valid (non-empty) DreamZero LeRobot datasets provided."
+            )
 
         self.datasets = datasets
         self.training = bool(training)
         self.seed = int(seed)
 
-        self._dataset_lengths = np.array([len(dataset) for dataset in self.datasets], dtype=np.int64)
+        self._dataset_lengths = np.array(
+            [len(dataset) for dataset in self.datasets], dtype=np.int64
+        )
         self._raw_weights = np.array(raw_weights, dtype=np.float64)
 
         self._dataset_sampling_weights = self._raw_weights.copy()
@@ -1171,9 +1179,7 @@ class DreamZeroLeRobotMixtureDataset(Dataset):
         logger.info("  Total samples: %s", int(self._dataset_lengths.sum()))
         logger.info("  Dataset lengths: %s", self._dataset_lengths.tolist())
         logger.info("  Raw weights: %s", self._raw_weights.tolist())
-        logger.info(
-            "  Sampling weights: %s", self._dataset_sampling_weights.tolist()
-        )
+        logger.info("  Sampling weights: %s", self._dataset_sampling_weights.tolist())
         logger.info("  Training mode: %s", self.training)
 
     @property
@@ -1261,7 +1267,9 @@ def build_dreamzero_mixture_dataset_from_spec(
         ]
 
         if distribute_weights and len(datasets_for_spec) > 1:
-            lengths = np.array([len(dataset) for dataset in datasets_for_spec], dtype=np.float64)
+            lengths = np.array(
+                [len(dataset) for dataset in datasets_for_spec], dtype=np.float64
+            )
             relative_lengths = lengths / lengths.sum()
             for dataset, relative_length in zip(datasets_for_spec, relative_lengths):
                 data_mixture.append((dataset, weight * float(relative_length)))

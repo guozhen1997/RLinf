@@ -72,7 +72,7 @@ actor:
     target_video_width: 320
 
     is_lora: False
-    embodiment_tag: "real_panda_single_arm"
+    embodiment_tag: "franka_pnp"
     relative_action: False
     relative_action_per_horizon: False
 
