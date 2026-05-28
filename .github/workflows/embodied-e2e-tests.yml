@@ -36,6 +36,14 @@ jobs:
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run_async.sh maniskill_sac_mlp_async
 
+      - name: ManiSkill Async SAC test with env decoupled mode
+        timeout-minutes: 20
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/embodied/run_async.sh maniskill_sac_mlp_async_decoupled
+
       - name: ManiSkill SAC Flow State test
         timeout-minutes: 20
         run: |
@@ -137,6 +145,34 @@ jobs:
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run.sh realworld_xsquare_turtle2_dummy_sac_cnn
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+
+  embodied-mlp-realworld-dosw1-dummy-sac-test:
+    runs-on: embodied
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create embodied environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          bash requirements/install.sh embodied --env dosw1
+
+      - name: DOSW1 Pick SAC dummy test
+        timeout-minutes: 20
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/embodied/run.sh dosw1_dummy_sac_mlp_pick
 
       - name: Clean up
         run: |
@@ -486,13 +522,13 @@ jobs:
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run.sh libero_spatial_ppo_openpi
 
-      - name: Libero-Goal NFT test
+      - name: Libero-Object NFT test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
-          bash tests/e2e_tests/embodied/run.sh libero_goal_nft_openpi
+          bash tests/e2e_tests/embodied/run.sh libero_object_nft_openpi
 
       - name: Libero-Spatial DAgger test
         timeout-minutes: 20
