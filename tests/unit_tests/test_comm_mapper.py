@@ -14,8 +14,7 @@
 
 import torch
 
-from rlinf.data.embodied_io_struct import EnvOutput
-from rlinf.data.embodied_io_struct import RolloutResult
+from rlinf.data.embodied_io_struct import EnvOutput, RolloutResult
 from rlinf.scheduler.worker.routing import (
     build_recv_plan,
     build_route_channel_key,
@@ -167,6 +166,7 @@ def test_build_route_channel_key_is_stable():
         3,
     )
 
+
 def test_split_and_merge_nested_batches():
     batch = {
         "obs": _make_obs(0, 6),
@@ -206,8 +206,12 @@ def test_rollout_result_split_merge_invariant():
     assert torch.equal(merged.prev_values, rollout_result.prev_values)
     assert torch.equal(merged.bootstrap_values, rollout_result.bootstrap_values)
     assert torch.equal(merged.save_flags, rollout_result.save_flags)
-    assert torch.equal(merged.forward_inputs["action"], rollout_result.forward_inputs["action"])
-    assert torch.equal(merged.forward_inputs["states"], rollout_result.forward_inputs["states"])
+    assert torch.equal(
+        merged.forward_inputs["action"], rollout_result.forward_inputs["action"]
+    )
+    assert torch.equal(
+        merged.forward_inputs["states"], rollout_result.forward_inputs["states"]
+    )
     assert torch.equal(merged.versions, rollout_result.versions)
 
 

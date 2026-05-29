@@ -14,6 +14,7 @@
 
 from .channel import Channel, ChannelWorker, WeightedItem
 from .cluster import Cluster, ClusterConfig
+from .collective import CollectiveGroupOptions
 from .hardware import (
     AcceleratorType,
     AcceleratorUtil,
@@ -32,6 +33,7 @@ from .placement import (
     PackedPlacementStrategy,
     PlacementStrategy,
 )
+from .worker import Worker, WorkerAddress, WorkerGroupFuncResult
 from .worker.routing import (
     RouteEntry,
     RoutePlan,
@@ -42,8 +44,6 @@ from .worker.routing import (
     merge_batches,
     split_batch,
 )
-from .worker import Worker, WorkerAddress, WorkerGroupFuncResult
-from .collective import CollectiveGroupOptions
 
 __all__ = [
     "AcceleratorUtil",

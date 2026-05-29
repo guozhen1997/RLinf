@@ -865,12 +865,25 @@ class Worker(metaclass=WorkerMeta):
         The rollout worker will receive the data and handle it to this env worker.
 
         Args:
-            enable_p2p: If True, use collective ``send``/``recv`` instead of a Channel.
-            options: Optional collective options; forwarded to ``send`` (same semantics as :meth:`send`).
-            env_decoupled_mode: If True, the data is received in env decoupled mode.
-            batch_index_map: The map of batch index for each send data.
-        """
+            group_name: Destination worker group name.
+            channel: Channel used for routed transfer. May be ``None`` when
+                ``enable_p2p`` is True.
+            data: Payload to send.
+            route_key: Optional key that separates independent routed streams.
+            tag: Optional routing tag used to build channel keys.
+            async_op: If True, return an async work handle.
+            batch_size: Optional local batch size. If omitted, it is inferred
+                from ``data``.
+            split_fn: Optional custom function for splitting ``data`` by shard
+                sizes.
+            enable_p2p: If True, use collective ``send`` instead of
+                ``channel.put``.
+            options: Optional collective options forwarded to ``send``.
+            env_decoupled_mode: If True, build an env-decoupled route plan.
 
+        Returns:
+            AsyncRouteWork if ``async_op`` is True, otherwise None.
+        """
         from ..collective import AsyncRouteWork
         from .routing import (
             build_send_plan,
@@ -879,9 +892,14 @@ class Worker(metaclass=WorkerMeta):
             infer_batch_size,
             split_batch,
         )
+
         if env_decoupled_mode:
-            assert getattr(self, "batch_index_map", None) is not None, "batch_index_map must be provided when env_decoupled_mode is True."
-            assert getattr(self, "split_size", None) is not None, "split_size must be provided when env_decoupled_mode is True."
+            assert getattr(self, "batch_index_map", None) is not None, (
+                "batch_index_map must be provided when env_decoupled_mode is True."
+            )
+            assert getattr(self, "split_size", None) is not None, (
+                "split_size must be provided when env_decoupled_mode is True."
+            )
 
         if not enable_p2p and channel is None:
             raise ValueError("send_to requires ``channel`` when enable_p2p is False.")
@@ -965,15 +983,32 @@ class Worker(metaclass=WorkerMeta):
         rank instead of ``channel.get``. ``channel`` may be ``None``.
 
         Args:
-            enable_p2p: If True, use collective ``recv`` instead of a Channel.
-            options: Optional collective options; forwarded to ``recv`` (same semantics as :meth:`recv`).
-            env_decoupled_mode: If True, the data is received in env decoupled mode.
-            batch_index_map: The map of batch index for each recv data.
-        """
+            group_name: Source worker group name.
+            channel: Channel used for routed transfer. May be ``None`` when
+                ``enable_p2p`` is True.
+            route_key: Optional key that separates independent routed streams.
+            tag: Optional routing tag used to build channel keys.
+            async_op: If True, return an async work handle.
+            batch_size: Optional expected local batch size after routing.
+            merge_fn: Optional custom function for merging received shards.
+            infer_batch_size_fn: Optional custom function for inferring shard
+                batch size during validation.
+            enable_p2p: If True, use collective ``recv`` instead of
+                ``channel.get``.
+            options: Optional collective options forwarded to ``recv``.
+            env_decoupled_mode: If True, build an env-decoupled receive plan.
 
+        Returns:
+            The received payload, a merged payload, or AsyncRouteWork when
+            ``async_op`` is True.
+        """
         if env_decoupled_mode:
-            assert getattr(self, "batch_index_map", None) is not None, "batch_index_map must be provided when env_decoupled_mode is True."
-            assert getattr(self, "split_size", None) is not None, "split_size must be provided when env_decoupled_mode is True."
+            assert getattr(self, "batch_index_map", None) is not None, (
+                "batch_index_map must be provided when env_decoupled_mode is True."
+            )
+            assert getattr(self, "split_size", None) is not None, (
+                "split_size must be provided when env_decoupled_mode is True."
+            )
 
         from ..collective import AsyncRouteWork
         from .routing import (

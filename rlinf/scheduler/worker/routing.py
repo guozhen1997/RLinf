@@ -20,9 +20,9 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import torch
 
-from ..manager import WorkerAddress, WorkerInfo
 from rlinf.utils.comm_mapping import CommMapper
 
+from ..manager import WorkerAddress, WorkerInfo
 
 ROUTING_KEY_PREFIX = "scheduler_route"
 ROUTING_DEFAULT_TAG = "default"
@@ -53,10 +53,12 @@ class RoutePlan:
 
 
 def normalize_route_tag(tag: str | None) -> str:
+    """Normalize an optional route tag to the default routing tag."""
     return tag or ROUTING_DEFAULT_TAG
 
 
 def normalize_route_key(route_key: Any) -> str:
+    """Normalize a route key into a stable string representation."""
     if route_key is None:
         return ""
     if isinstance(route_key, str):
@@ -73,7 +75,6 @@ def build_route_channel_key(
     route_key: Any = None,
 ) -> tuple[str, str, str, str, str, int, int]:
     """Build a canonical key for routed channel messages."""
-
     return (
         ROUTING_KEY_PREFIX,
         src_group_name,
@@ -89,6 +90,18 @@ def get_group_info(
     manager_proxy: Any,
     group_name: str,
 ) -> WorkerInfo:
+    """Return worker group metadata from the manager proxy.
+
+    Args:
+        manager_proxy: Worker manager proxy used to query worker metadata.
+        group_name: Name of the worker group to query.
+
+    Returns:
+        WorkerInfo for the requested group.
+
+    Raises:
+        ValueError: If the worker group is not registered.
+    """
     info = manager_proxy.get_worker_info(WorkerAddress(group_name, ranks=0))
     if info is None:
         raise ValueError(f"Worker group '{group_name}' is not registered.")
@@ -96,6 +109,7 @@ def get_group_info(
 
 
 def get_group_world_size(manager_proxy: Any, group_name: str) -> int:
+    """Return the world size of a worker group."""
     return get_group_info(manager_proxy, group_name).group_world_size
 
 
@@ -111,7 +125,6 @@ def build_send_plan(
     local_batch_size: int,
 ) -> RoutePlan:
     """Build the route plan for one sender rank."""
-
     entries: list[RouteEntry] = []
     stage_batch_size = local_batch_size * src_world_size
     for dst_rank, batch_size in CommMapper.get_dst_ranks(
@@ -147,6 +160,7 @@ def build_send_plan(
         entries=entries,
     )
 
+
 def env_decoupled_build_send_plan(
     *,
     src_group_name: str,
@@ -160,7 +174,6 @@ def env_decoupled_build_send_plan(
     split_size: int,
 ) -> RoutePlan:
     """Build the route plan for one sender rank."""
-
     entries: list[RouteEntry] = []
     stage_batch_size = local_batch_size * src_world_size
     for batch_size in CommMapper.decoupled_get_batch_size(
@@ -209,7 +222,6 @@ def build_recv_plan(
     local_batch_size: int,
 ) -> RoutePlan:
     """Build the route plan for one receiver rank."""
-
     entries: list[RouteEntry] = []
     stage_batch_size = local_batch_size * dst_world_size
     for src_rank, batch_size in CommMapper.get_src_ranks(
@@ -245,6 +257,7 @@ def build_recv_plan(
         entries=entries,
     )
 
+
 def env_decoupled_build_recv_plan(
     *,
     src_group_name: str,
@@ -257,7 +270,6 @@ def env_decoupled_build_recv_plan(
     split_size: int,
 ) -> RoutePlan:
     """Build the route plan for one receiver rank."""
-
     entries: list[RouteEntry] = []
     stage_batch_size = local_batch_size * dst_world_size
     for batch_size in CommMapper.decoupled_get_batch_size(
@@ -296,13 +308,14 @@ def env_decoupled_build_recv_plan(
 
 def infer_batch_size(data: Any) -> int:
     """Infer a batch size from common routed payloads."""
-
     if isinstance(data, torch.Tensor) or isinstance(data, np.ndarray):
         return int(data.shape[0])
     if isinstance(data, list):
         return len(data)
     if isinstance(data, dict):
-        first_non_none = next((value for value in data.values() if value is not None), None)
+        first_non_none = next(
+            (value for value in data.values() if value is not None), None
+        )
         if first_non_none is None:
             raise ValueError("Cannot infer batch size from an all-None dict payload.")
         return infer_batch_size(first_non_none)
@@ -311,9 +324,10 @@ def infer_batch_size(data: Any) -> int:
 
 def split_batch(data: Any, split_sizes: Sequence[int]) -> list[Any]:
     """Split a common batch payload on batch dimension."""
-
     if isinstance(data, torch.Tensor):
-        return [chunk.contiguous() for chunk in torch.split(data, list(split_sizes), dim=0)]
+        return [
+            chunk.contiguous() for chunk in torch.split(data, list(split_sizes), dim=0)
+        ]
     if isinstance(data, np.ndarray):
         split_indices = np.cumsum(split_sizes[:-1]).tolist()
         return list(np.split(data, split_indices, axis=0))
@@ -341,7 +355,6 @@ def split_batch(data: Any, split_sizes: Sequence[int]) -> list[Any]:
 
 def merge_batches(batches: Sequence[Any]) -> Any:
     """Merge common routed payloads on batch dimension."""
-
     if len(batches) == 0:
         raise ValueError("Cannot merge an empty batch list.")
     if len(batches) == 1:
@@ -351,7 +364,9 @@ def merge_batches(batches: Sequence[Any]) -> Any:
     if first_non_none is None:
         return None
     if any(batch is None for batch in batches):
-        raise ValueError("Cannot merge a mix of None and non-None payloads generically.")
+        raise ValueError(
+            "Cannot merge a mix of None and non-None payloads generically."
+        )
 
     if isinstance(first_non_none, torch.Tensor):
         return torch.cat(list(batches), dim=0)
@@ -369,7 +384,9 @@ def merge_batches(batches: Sequence[Any]) -> Any:
         return merged
     if all(batch == first_non_none for batch in batches):
         return first_non_none
-    raise ValueError(f"Unsupported payload type for batch merge: {type(first_non_none)}")
+    raise ValueError(
+        f"Unsupported payload type for batch merge: {type(first_non_none)}"
+    )
 
 
 def validate_batch_size(
@@ -377,6 +394,17 @@ def validate_batch_size(
     expected_batch_size: int | None,
     infer_batch_size_fn: Callable[[Any], int] | None = None,
 ) -> None:
+    """Validate that a routed payload matches the expected batch size.
+
+    Args:
+        data: Routed payload to validate.
+        expected_batch_size: Expected leading-dimension batch size. If ``None``,
+            validation is skipped.
+        infer_batch_size_fn: Optional custom function for inferring batch size.
+
+    Raises:
+        ValueError: If the inferred batch size does not match the expected size.
+    """
     if expected_batch_size is None:
         return
     infer_fn = infer_batch_size_fn or infer_batch_size

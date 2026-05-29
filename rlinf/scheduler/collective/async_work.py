@@ -394,12 +394,19 @@ class AsyncRouteWork(AsyncWork):
         works: Sequence[AsyncWork],
         finalize_fn: Callable[[list[Any]], Any],
     ):
+        """Initialize an async routed work handle.
+
+        Args:
+            works: Async work handles for each routed shard.
+            finalize_fn: Function that validates and merges completed shard results.
+        """
         self._works = list(works)
         self._finalize_fn = finalize_fn
         self._result: Any = None
         self._has_result = False
 
     async def async_wait(self):
+        """Wait asynchronously for all routed works and return the finalized result."""
         if self._has_result:
             return self._result
         results = [await work.async_wait() for work in self._works]
@@ -408,6 +415,7 @@ class AsyncRouteWork(AsyncWork):
         return self._result
 
     def wait(self):
+        """Wait synchronously for all routed works and return the finalized result."""
         if self._has_result:
             return self._result
         results = [work.wait() for work in self._works]
@@ -416,12 +424,19 @@ class AsyncRouteWork(AsyncWork):
         return self._result
 
     def then(self, func: Callable, *args, **kwargs):
+        """Register a chained callback.
+
+        Raises:
+            NotImplementedError: AsyncRouteWork does not support chained callbacks.
+        """
         raise NotImplementedError("AsyncRouteWork does not support chained callbacks.")
 
     def done(self):
+        """Return whether all routed works have completed."""
         if self._has_result:
             return True
         return all(work.done() for work in self._works)
 
     def get_next_work(self):
+        """Return the next pending work if supported."""
         return None

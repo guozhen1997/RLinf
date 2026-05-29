@@ -14,7 +14,7 @@
 
 import asyncio
 from collections import defaultdict
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import torch
@@ -37,7 +37,6 @@ from rlinf.utils.nested_dict_process import (
     update_nested_cfg,
 )
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.utils.utils import _build_channel_message, _split_channel_message
 
 
 class EnvWorker(Worker):

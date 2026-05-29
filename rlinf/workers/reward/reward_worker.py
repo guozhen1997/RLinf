@@ -14,7 +14,7 @@
 
 import asyncio
 import os
-from typing import Literal, Optional
+from typing import Optional
 
 import numpy as np
 import torch
@@ -40,8 +40,6 @@ from rlinf.utils.placement import (
     HybridComponentPlacement,
 )
 from rlinf.utils.utils import (
-    _build_channel_message,
-    _split_channel_message,
     clear_memory,
 )
 
@@ -217,7 +215,9 @@ class EmbodiedRewardWorker(Worker):
             self.total_num_eval_envs = cfg.env.eval.total_num_envs
             self.num_pipeline_stages = cfg.rollout.pipeline_stage_num
             self.train_batch_size = (
-                self.total_num_train_envs // self._world_size // self.num_pipeline_stages
+                self.total_num_train_envs
+                // self._world_size
+                // self.num_pipeline_stages
             )
             self.eval_batch_size = (
                 self.total_num_eval_envs // self._world_size // self.num_pipeline_stages
@@ -246,7 +246,7 @@ class EmbodiedRewardWorker(Worker):
             # save the run-time imformation in communicate channel for decoupled mode
             self.batch_index_map = {
                 "train": [],
-            } 
+            }
 
     def model_provider_func(self):
         from rlinf.models.embodiment.reward import get_reward_model_class
