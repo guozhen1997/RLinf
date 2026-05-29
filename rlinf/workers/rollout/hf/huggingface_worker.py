@@ -90,6 +90,19 @@ class MultiStepRolloutWorker(Worker):
         )
         self.weight_syncer = WeightSyncer.create(weight_syncer_cfg)
 
+        # check env mode
+        env_mode = self.cfg.env.train.get("env_mode", None)
+        assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
+        self.env_decoupled_mode = env_mode == "decoupled"
+
+        if self.env_decoupled_mode:
+            # in env decoupled mode, the split size is the world size of the env worker
+            self.split_size = self.placement.get_world_size("env")
+            # save the run-time imformation in communicate channel for decoupled mode
+            self.batch_index_map = {
+                "train": [],
+            }
+
     def init_worker(self):
         rollout_model_config = copy.deepcopy(self.cfg.actor.model)
         with open_dict(rollout_model_config):

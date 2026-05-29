@@ -373,7 +373,16 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     await self._poll_background_weight_sync()
                 await self.wait_if_stale()
                 decoupled_generate_time = decoupled_generate_time + 1
-            env_output = await self.recv_env_output_from_channel(input_channel)
+            env_output = await self.recv_from(
+                group_name=self.cfg.env.group_name,
+                channel=input_channel,
+                tag="train_obs",
+                async_op=True,
+                batch_size=self.train_batch_size,
+                merge_fn=self._merge_obs_batches,
+                infer_batch_size_fn=self._infer_env_batch_size,
+                env_decoupled_mode=self.env_decoupled_mode,
+            ).async_wait()
             actions, result = self.predict(env_output["obs"])
             save_flags = None
             if result.get("expert_label_flag", False):
@@ -400,8 +409,15 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     dtype=torch.float32,
                 ),
             )
-            self.send_rollout_result_to_channel(
-                output_channel, rollout_result, mode="train"
+            self.send_to(
+                group_name=self.cfg.env.group_name,
+                channel=output_channel,
+                data=rollout_result,
+                tag="train_rollout_results",
+                async_op=True,
+                batch_size=self.train_batch_size,
+                split_fn=self._split_rollout_result,
+                env_decoupled_mode=self.env_decoupled_mode,
             )
 
     def send_chunk_actions_to_channel(

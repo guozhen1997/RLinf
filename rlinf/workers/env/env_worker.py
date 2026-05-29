@@ -128,6 +128,19 @@ class EnvWorker(Worker):
             True,
             groups=[(self._group_name, list(range(self._world_size)))],
         )
+        # check env mode
+        env_mode = self.cfg.env.train.get("env_mode", None)
+        assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
+        self.env_decoupled_mode = env_mode == "decoupled"
+        self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
+
+        if self.env_decoupled_mode:
+            # in env decoupled mode, the split size is the world size of the env worker
+            self.split_size = self._component_placement.get_world_size("env")
+            # save the run-time imformation in communicate channel for decoupled mode
+            self.batch_index_map = {
+                "train": [],
+            }
 
         self.update_env_cfg()
 
@@ -584,12 +597,14 @@ class EnvWorker(Worker):
             data=reward_input,
             tag="train_reward_input",
             async_op=True,
+            env_decoupled_mode=self.env_decoupled_mode,
         )
         reward_output = self.recv_from(
             group_name=self.cfg.reward.group_name,
             channel=recv_channel,
             tag="reward_output",
             batch_size=self.train_num_envs_per_stage,
+            env_decoupled_mode=self.env_decoupled_mode,
         )
         if self.reward_mode != "terminal" or reward_output is None:
             return reward_output
@@ -672,22 +687,16 @@ class EnvWorker(Worker):
         for stage_id in range(self.stage_num):
             env_output: EnvOutput = env_outputs[stage_id]
             env_batch = env_output.to_dict()
-            if self.env_decoupled_mode:
-                self.send_env_batch_to_channel(
-                    rollout_channel,
-                    {
-                        "obs": env_batch["obs"],
-                        "final_obs": env_batch["final_obs"],
-                    },
-                )
-            else:
-                self.send_env_batch(
-                    rollout_channel,
-                    {
-                        "obs": env_batch["obs"],
-                        "final_obs": env_batch["final_obs"],
-                    },
-                )
+            self.send_to(
+                group_name=self.cfg.rollout.group_name,
+                channel=rollout_channel,
+                data={
+                    "obs": env_batch["obs"],
+                    "final_obs": env_batch["final_obs"],
+                },
+                tag="train_obs",
+                env_decoupled_mode=self.env_decoupled_mode,
+            )
 
     def _bootstrap_and_send_train(self, rollout_channel: Channel) -> list[EnvOutput]:
         env_outputs = self.bootstrap_step()
@@ -757,17 +766,11 @@ class EnvWorker(Worker):
         for epoch in range(self.rollout_epoch):
             env_outputs = self.bootstrap_step()
             for stage_id in range(self.stage_num):
-                env_output: EnvOutput = env_outputs[stage_id]
-                env_batch = env_output.to_dict()
-                self.send_to(
-                    group_name=self.cfg.rollout.group_name,
-                    channel=rollout_channel,
-                    data={
-                        "obs": env_batch["obs"],
-                        "final_obs": env_batch["final_obs"],
-                    },
-                    tag="train_obs",
-                )
+                if epoch == 0 and self._prefetched_train_bootstrap is not None:
+                    env_outputs = self._prefetched_train_bootstrap
+                    self._prefetched_train_bootstrap = None
+                else:
+                    env_outputs = self._bootstrap_and_send_train(rollout_channel)
 
             for chunk_step_idx in range(self.n_train_chunk_steps):
                 for stage_id in range(self.stage_num):
@@ -801,6 +804,7 @@ class EnvWorker(Worker):
                         batch_size=self.train_num_envs_per_stage,
                         merge_fn=RolloutResult.merge_rollout_results,
                         infer_batch_size_fn=self._infer_rollout_batch_size,
+                        env_decoupled_mode=self.env_decoupled_mode,
                     )
                     rewards = self.compute_bootstrap_rewards(
                         env_output, rollout_result.bootstrap_values, reward_model_output
@@ -842,6 +846,7 @@ class EnvWorker(Worker):
                             "final_obs": env_batch["final_obs"],
                         },
                         tag="train_obs",
+                        env_decoupled_mode=self.env_decoupled_mode,
                     )
                     if self.collect_transitions:
                         next_obs = (
@@ -884,6 +889,7 @@ class EnvWorker(Worker):
                     batch_size=self.train_num_envs_per_stage,
                     merge_fn=RolloutResult.merge_rollout_results,
                     infer_batch_size_fn=self._infer_rollout_batch_size,
+                    env_decoupled_mode=self.env_decoupled_mode,
                 )
                 rewards = self.compute_bootstrap_rewards(
                     env_output, rollout_result.bootstrap_values, reward_model_output

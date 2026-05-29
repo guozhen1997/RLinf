@@ -147,6 +147,55 @@ def build_send_plan(
         entries=entries,
     )
 
+def env_decoupled_build_send_plan(
+    *,
+    src_group_name: str,
+    dst_group_name: str,
+    src_world_size: int,
+    dst_world_size: int,
+    tag: str | None,
+    route_key: Any = None,
+    local_batch_size: int,
+    env_decoupled_mode: bool = False,
+    split_size: int,
+) -> RoutePlan:
+    """Build the route plan for one sender rank."""
+
+    entries: list[RouteEntry] = []
+    stage_batch_size = local_batch_size * src_world_size
+    for batch_size in CommMapper.decoupled_get_batch_size(
+        batch_size=stage_batch_size,
+        src_world_size=src_world_size,
+        dst_world_size=dst_world_size,
+        split_size=split_size,
+    ):
+        entries.append(
+            RouteEntry(
+                peer_rank=None,
+                batch_size=batch_size,
+                key=build_route_channel_key(
+                    src_group_name=src_group_name,
+                    dst_group_name=dst_group_name,
+                    src_rank=None,
+                    dst_rank=None,
+                    tag=tag,
+                    route_key=route_key,
+                ),
+            )
+        )
+
+    return RoutePlan(
+        src_group_name=src_group_name,
+        dst_group_name=dst_group_name,
+        src_rank=None,
+        dst_rank=None,
+        src_world_size=src_world_size,
+        dst_world_size=dst_world_size,
+        tag=normalize_route_tag(tag),
+        route_key=route_key,
+        entries=entries,
+    )
+
 
 def build_recv_plan(
     *,
@@ -189,6 +238,54 @@ def build_recv_plan(
         dst_group_name=dst_group_name,
         src_rank=None,
         dst_rank=dst_rank,
+        src_world_size=src_world_size,
+        dst_world_size=dst_world_size,
+        tag=normalize_route_tag(tag),
+        route_key=route_key,
+        entries=entries,
+    )
+
+def env_decoupled_build_recv_plan(
+    *,
+    src_group_name: str,
+    dst_group_name: str,
+    src_world_size: int,
+    dst_world_size: int,
+    tag: str | None,
+    route_key: Any = None,
+    local_batch_size: int,
+    split_size: int,
+) -> RoutePlan:
+    """Build the route plan for one receiver rank."""
+
+    entries: list[RouteEntry] = []
+    stage_batch_size = local_batch_size * dst_world_size
+    for batch_size in CommMapper.decoupled_get_batch_size(
+        batch_size=stage_batch_size,
+        src_world_size=src_world_size,
+        dst_world_size=dst_world_size,
+        split_size=split_size,
+    ):
+        entries.append(
+            RouteEntry(
+                peer_rank=None,
+                batch_size=batch_size,
+                key=build_route_channel_key(
+                    src_group_name=src_group_name,
+                    dst_group_name=dst_group_name,
+                    src_rank=None,
+                    dst_rank=None,
+                    tag=tag,
+                    route_key=route_key,
+                ),
+            )
+        )
+
+    return RoutePlan(
+        src_group_name=src_group_name,
+        dst_group_name=dst_group_name,
+        src_rank=None,
+        dst_rank=None,
         src_world_size=src_world_size,
         dst_world_size=dst_world_size,
         tag=normalize_route_tag(tag),

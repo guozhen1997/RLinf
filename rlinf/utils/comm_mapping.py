@@ -25,7 +25,7 @@ class CommMapper:
         return f"{src_rank}_{dst_rank}_{extra}"
 
     @staticmethod
-    def decoupled_get_batch_index(
+    def decoupled_get_batch_size(
         batch_size: int,
         src_world_size: int,
         dst_world_size: int,

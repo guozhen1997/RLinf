@@ -853,6 +853,7 @@ class Worker(metaclass=WorkerMeta):
         split_fn: Optional[Callable[[Any, list[int]], list[Any]]] = None,
         enable_p2p: bool = False,
         options: Optional["CollectiveGroupOptions"] = None,
+        env_decoupled_mode: bool = False,
     ):
         """Route one payload to a worker group through a channel or direct P2P send.
 
@@ -860,18 +861,27 @@ class Worker(metaclass=WorkerMeta):
         each shard is sent with :meth:`send` to the destination rank instead of ``channel.put``.
         In that case ``channel`` may be omitted (pass ``None``).
 
+        When ``env_decoupled_mode`` is True, this function will change the plan.entries to send the data to one of the rollout workers.
+        The rollout worker will receive the data and handle it to this env worker.
+
         Args:
             enable_p2p: If True, use collective ``send``/``recv`` instead of a Channel.
             options: Optional collective options; forwarded to ``send`` (same semantics as :meth:`send`).
+            env_decoupled_mode: If True, the data is received in env decoupled mode.
+            batch_index_map: The map of batch index for each send data.
         """
 
         from ..collective import AsyncRouteWork
         from .routing import (
             build_send_plan,
+            env_decoupled_build_send_plan,
             get_group_world_size,
             infer_batch_size,
             split_batch,
         )
+        if env_decoupled_mode:
+            assert getattr(self, "batch_index_map", None) is not None, "batch_index_map must be provided when env_decoupled_mode is True."
+            assert getattr(self, "split_size", None) is not None, "split_size must be provided when env_decoupled_mode is True."
 
         if not enable_p2p and channel is None:
             raise ValueError("send_to requires ``channel`` when enable_p2p is False.")
@@ -881,16 +891,28 @@ class Worker(metaclass=WorkerMeta):
         if local_batch_size is None:
             local_batch_size = infer_batch_size(data)
 
-        plan = build_send_plan(
-            src_group_name=self.worker_address.root_group_name,
-            dst_group_name=group_name,
-            src_rank=self._rank,
-            src_world_size=self._world_size,
-            dst_world_size=dst_world_size,
-            tag=tag,
-            route_key=route_key,
-            local_batch_size=local_batch_size,
-        )
+        if not env_decoupled_mode:
+            plan = build_send_plan(
+                src_group_name=self.worker_address.root_group_name,
+                dst_group_name=group_name,
+                src_rank=self._rank,
+                src_world_size=self._world_size,
+                dst_world_size=dst_world_size,
+                tag=tag,
+                route_key=route_key,
+                local_batch_size=local_batch_size,
+            )
+        else:
+            plan = env_decoupled_build_send_plan(
+                src_group_name=self.worker_address.root_group_name,
+                dst_group_name=group_name,
+                src_world_size=self._world_size,
+                dst_world_size=dst_world_size,
+                tag=tag,
+                route_key=route_key,
+                local_batch_size=local_batch_size,
+                split_size=self.split_size,
+            )
 
         split_sizes = [entry.batch_size for entry in plan.entries]
         payloads = (
@@ -935,6 +957,7 @@ class Worker(metaclass=WorkerMeta):
         infer_batch_size_fn: Optional[Callable[[Any], int]] = None,
         enable_p2p: bool = False,
         options: Optional["CollectiveGroupOptions"] = None,
+        env_decoupled_mode: bool = False,
     ):
         """Receive one routed payload or shard set from a worker group via channel or P2P recv.
 
@@ -944,11 +967,18 @@ class Worker(metaclass=WorkerMeta):
         Args:
             enable_p2p: If True, use collective ``recv`` instead of a Channel.
             options: Optional collective options; forwarded to ``recv`` (same semantics as :meth:`recv`).
+            env_decoupled_mode: If True, the data is received in env decoupled mode.
+            batch_index_map: The map of batch index for each recv data.
         """
+
+        if env_decoupled_mode:
+            assert getattr(self, "batch_index_map", None) is not None, "batch_index_map must be provided when env_decoupled_mode is True."
+            assert getattr(self, "split_size", None) is not None, "split_size must be provided when env_decoupled_mode is True."
 
         from ..collective import AsyncRouteWork
         from .routing import (
             build_recv_plan,
+            env_decoupled_build_recv_plan,
             get_group_world_size,
             merge_batches,
             validate_batch_size,
@@ -958,16 +988,30 @@ class Worker(metaclass=WorkerMeta):
             raise ValueError("recv_from requires ``channel`` when enable_p2p is False.")
 
         src_world_size = get_group_world_size(self._manager_proxy, group_name)
-        plan = build_recv_plan(
-            src_group_name=group_name,
-            dst_group_name=self.worker_address.root_group_name,
-            dst_rank=self._rank,
-            src_world_size=src_world_size,
-            dst_world_size=self._world_size,
-            tag=tag,
-            route_key=route_key,
-            local_batch_size=batch_size,
-        )
+
+        if not env_decoupled_mode:
+            plan = build_recv_plan(
+                src_group_name=group_name,
+                dst_group_name=self.worker_address.root_group_name,
+                dst_rank=self._rank,
+                src_world_size=src_world_size,
+                dst_world_size=self._world_size,
+                tag=tag,
+                route_key=route_key,
+                local_batch_size=batch_size,
+                env_decoupled_mode=env_decoupled_mode,
+            )
+        else:
+            plan = env_decoupled_build_recv_plan(
+                src_group_name=group_name,
+                dst_group_name=self.worker_address.root_group_name,
+                src_world_size=src_world_size,
+                dst_world_size=self._world_size,
+                tag=tag,
+                route_key=route_key,
+                local_batch_size=batch_size,
+                split_size=self.split_size,
+            )
 
         def _finalize(received_items: list[Any]):
             if not received_items:
