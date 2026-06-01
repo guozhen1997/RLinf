@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import bisect
-import hashlib
 import json
 import random
 from collections import OrderedDict
@@ -52,6 +51,7 @@ from rlinf.data.datasets.dreamzero.utils import (
     safe_lang_text,
 )
 from rlinf.data.lerobot_paths import resolve_lerobot_dataset_root
+from rlinf.data.utils import safe_hash
 from rlinf.utils.logging import get_logger
 
 logger = get_logger()
@@ -963,15 +963,6 @@ class DreamZeroLeRobotDataset(Dataset):
         return out
 
 
-def _safe_hash(input_tuple: tuple[Any, ...]) -> int:
-    """Create a deterministic hash for seeding RNG."""
-    tuple_string = repr(input_tuple).encode("utf-8")
-    sha256 = hashlib.sha256()
-    sha256.update(tuple_string)
-    seed = int(sha256.hexdigest(), 16)
-    return seed & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-
-
 def is_dreamzero_mixture_spec(data_paths: Any) -> bool:
     """Return True when ``data_paths`` is a list of per-dataset mixture specs."""
     if data_paths is None:
@@ -1206,7 +1197,7 @@ class DreamZeroLeRobotMixtureDataset(Dataset):
 
     def _sample_step(self, index: int) -> tuple[Any, int]:
         if self.training:
-            seed = _safe_hash((self._epoch, index, self.seed))
+            seed = safe_hash((self._epoch, index, self.seed))
             rng = np.random.default_rng(seed)
             dataset_index = int(
                 rng.choice(len(self.datasets), p=self._dataset_sampling_weights)

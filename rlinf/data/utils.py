@@ -13,9 +13,19 @@
 # limitations under the License.
 
 
+import hashlib
 from typing import Any
 
 import torch
+
+
+def safe_hash(input_tuple: tuple[Any, ...]) -> int:
+    """Create a deterministic hash for seeding RNG."""
+    tuple_string = repr(input_tuple).encode("utf-8")
+    sha256 = hashlib.sha256()
+    sha256.update(tuple_string)
+    seed = int(sha256.hexdigest(), 16)
+    return seed & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
 
 def forward_set_epoch(data_loader: Any, epoch: int) -> None:

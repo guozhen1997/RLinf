@@ -16,14 +16,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from typing import Any, Protocol, Sequence, runtime_checkable
 
 import numpy as np
 from torch.utils.data import Dataset
 
-from rlinf.data.utils import forward_set_epoch
+from rlinf.data.utils import forward_set_epoch, safe_hash
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +50,6 @@ class BaseDataLoaderImpl:
 
     def set_epoch(self, epoch: int) -> None:
         forward_set_epoch(self._data_loader, epoch)
-
-
-def _safe_hash(input_tuple) -> int:
-    """Create a deterministic hash for seeding RNG."""
-    tuple_string = repr(input_tuple).encode("utf-8")
-    sha256 = hashlib.sha256()
-    sha256.update(tuple_string)
-    seed = int(sha256.hexdigest(), 16)
-    return seed & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
 
 class ReCapMixtureDataset(Dataset):
@@ -148,7 +138,7 @@ class ReCapMixtureDataset(Dataset):
         seed = (
             index
             if self.mode != "train"
-            else _safe_hash((self._epoch, index, self.seed))
+            else safe_hash((self._epoch, index, self.seed))
         )
         rng = np.random.default_rng(seed)
         ds_idx = rng.choice(len(self.datasets), p=self._dataset_sampling_weights)
