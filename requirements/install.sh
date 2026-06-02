@@ -1241,10 +1241,8 @@ install_gr00t_n1d6_model() {
     create_and_sync_venv
     install_common_embodied_deps
 
-    git lfs install
-    export GIT_LFS_SKIP_SMUDGE=1
     local gr00t_path
-    gr00t_path=$(clone_or_reuse_repo GR00T_PATH "$VENV_DIR/gr00t" "${GITHUB_PREFIX}https://github.com/RLinf/Isaac-GR00T.git")
+    gr00t_path=$(clone_or_reuse_repo GR00T_PATH "$VENV_DIR/gr00t" "https://github.com/RLinf/Isaac-GR00T.git" -b n1.6.1-release)
     uv pip install -e "$gr00t_path" --no-deps
     uv pip install -r "$SCRIPT_DIR/embodied/models/gr00t_n1d6.txt"
 
