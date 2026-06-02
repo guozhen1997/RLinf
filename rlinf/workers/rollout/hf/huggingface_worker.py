@@ -96,11 +96,9 @@ class MultiStepRolloutWorker(Worker):
         self.env_decoupled_mode = env_mode == "decoupled"
 
         if self.env_decoupled_mode:
-            # in env decoupled mode, the split size is the world size of the env worker
-            self.split_size = self.placement.get_world_size("env")
             # save the run-time imformation in communicate channel for decoupled mode
             self.batch_index_map = {
-                "train": [],
+                "train_rollout_results": [],
             }
 
     def init_worker(self):

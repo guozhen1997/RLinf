@@ -27,10 +27,10 @@ import torch.nn.functional as F
 from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 
-from rlinf.scheduler import Worker
-
 
 def clear_memory(sync=True):
+    from rlinf.scheduler.worker.worker import Worker
+
     if sync:
         Worker.torch_platform.synchronize()
     gc.collect()
@@ -87,6 +87,7 @@ def retrieve_model_state_dict_in_cpu(model, offloaded_buffer=None):
                 offloaded_buffer[name] = item
         else:
             offloaded_buffer[name] = item
+    from rlinf.scheduler.worker.worker import Worker
 
     Worker.torch_platform.synchronize()
     return offloaded_buffer
@@ -478,6 +479,8 @@ def get_rng_state() -> dict:
         "numpy": np.random.get_state(),
         "random": random.getstate(),
     }
+    from rlinf.scheduler.worker.worker import Worker
+
     if Worker.torch_platform.is_available():
         rng_state[Worker.torch_device_type] = Worker.torch_platform.get_rng_state()
     return rng_state
@@ -497,52 +500,47 @@ def set_rng_state(rng_state: dict) -> None:
     torch.set_rng_state(rng_state["cpu"])
     np.random.set_state(rng_state["numpy"])
     random.setstate(rng_state["random"])
+    from rlinf.scheduler.worker.worker import Worker
+
     if Worker.torch_platform.is_available() and Worker.torch_device_type in rng_state:
         Worker.torch_platform.set_rng_state(rng_state[Worker.torch_device_type])
 
 
 def _build_channel_message(
-    env_rank: int,
+    send_rank: int,
     batch_idx: int,
-    mode: str,
-    last_run: bool,
-    message_type: str,
+    tag: str,
 ) -> str:
     """
     Construct a channel message key that matches the expected communication schema.
 
     Schema:
-        {env_rank}_{batch_idx}_{mode}_{last_run}_{message_type}
+        {send_rank}_{batch_idx}_{tag}
 
     Args:
-        env_rank: Environment worker rank.
+        send_rank: Send worker rank.
         batch_idx: Batch index within the worker.
-        mode: Execution mode (e.g., "train", "eval").
-        last_run: Whether this is the last run segment.
-        message_type: Type of message (e.g., "obs", "rollout_results").
+        tag: Type of message (e.g., "train_obs", "rollout_results").
 
     Returns:
         A formatted channel message string.
     """
-    assert mode in ("train", "eval"), f"Unsupported mode: {mode}"
-    assert isinstance(last_run, bool), f"last_run must be bool, got {type(last_run)}"
 
-    return f"{env_rank}_{batch_idx}_{mode}_{last_run}_{message_type}"
+    return f"{send_rank}_{batch_idx}_{tag}"
 
 
-def _split_channel_message(channel_message: str) -> tuple[int, int, str, bool, str]:
+def _split_channel_message(channel_message: str) -> tuple[int, int, str]:
     """
     This function is used to get the rollout worker and env worker communication without the rankmap,
-    To get the env_rank, batch_idx, mode, last_run from the communication.
-    channel_message: {self._rank}_{index}_{mode}_{last_run}_{message_type}
-    This func split the channel_message into env_rank, batch_idx, mode, last_run
+    To get the send_rank, batch_idx, tag from the communication.
+    channel_message: {send_rank}_{batch_idx}_{tag}
+    This func split the channel_message into send_rank, batch_idx, tag
     Args:
         channel_message: The batch index string.
     Returns:
-        A tuple of env_rank, batch_idx, mode, last_run.
+        A tuple of send_rank, batch_idx, tag.
     """
-    env_rank, batch_idx, mode, last_run, _ = channel_message.split("_", 4)
-    env_rank = int(env_rank)
+    send_rank, batch_idx, tag = channel_message.split("_", 2)
+    send_rank = int(send_rank)
     batch_idx = int(batch_idx)
-    last_run = last_run == "True"
-    return env_rank, batch_idx, mode, last_run
+    return send_rank, batch_idx, tag

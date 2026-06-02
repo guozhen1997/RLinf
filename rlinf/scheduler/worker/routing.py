@@ -20,9 +20,9 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import torch
 
+from rlinf.scheduler.manager import WorkerAddress, WorkerInfo
 from rlinf.utils.comm_mapping import CommMapper
-
-from ..manager import WorkerAddress, WorkerInfo
+from rlinf.utils.utils import _build_channel_message, _split_channel_message
 
 ROUTING_KEY_PREFIX = "scheduler_route"
 ROUTING_DEFAULT_TAG = "default"
@@ -35,6 +35,15 @@ class RouteEntry:
     peer_rank: int
     batch_size: int | None
     key: Any
+
+
+@dataclass(frozen=True)
+class DecoupledRouteEntry:
+    """One routed shard in Decoupled Env mode."""
+
+    batch_size: int | None
+    key: Any
+    batch_index: str | None
 
 
 @dataclass(frozen=True)
@@ -165,35 +174,52 @@ def env_decoupled_build_send_plan(
     *,
     src_group_name: str,
     dst_group_name: str,
+    src_rank: int | None,
     src_world_size: int,
     dst_world_size: int,
     tag: str | None,
     route_key: Any = None,
     local_batch_size: int,
-    env_decoupled_mode: bool = False,
-    split_size: int,
+    batch_index_map: list[str] | None = None,
 ) -> RoutePlan:
     """Build the route plan for one sender rank."""
-    entries: list[RouteEntry] = []
+    entries: list[DecoupledRouteEntry] = []
     stage_batch_size = local_batch_size * src_world_size
-    for batch_size in CommMapper.decoupled_get_batch_size(
-        batch_size=stage_batch_size,
-        src_world_size=src_world_size,
-        dst_world_size=dst_world_size,
-        split_size=split_size,
+
+    for index, batch_size in enumerate(
+        CommMapper.decoupled_get_batch_size(
+            batch_size=stage_batch_size,
+            src_world_size=src_world_size,
+            dst_world_size=dst_world_size,
+        )
     ):
+        if batch_index_map is not None:
+            # if the batch_index_map is provided, use the batch_index_map to get the batch_index
+            batch_index = batch_index_map[index]
+            # get the send_rank from the batch_index
+            send_rank, _, _ = _split_channel_message(batch_index)
+        else:
+            # Otherwise, use src_rank, index and tag to construct batch_index.
+            batch_index = _build_channel_message(
+                send_rank=src_rank,
+                batch_idx=index,
+                tag=tag,
+            )
+            # set the send_rank to None
+            send_rank = None
+
         entries.append(
-            RouteEntry(
-                peer_rank=None,
+            DecoupledRouteEntry(
                 batch_size=batch_size,
                 key=build_route_channel_key(
                     src_group_name=src_group_name,
                     dst_group_name=dst_group_name,
                     src_rank=None,
-                    dst_rank=None,
+                    dst_rank=send_rank,
                     tag=tag,
                     route_key=route_key,
                 ),
+                batch_index=batch_index,
             )
         )
 
@@ -201,7 +227,7 @@ def env_decoupled_build_send_plan(
         src_group_name=src_group_name,
         dst_group_name=dst_group_name,
         src_rank=None,
-        dst_rank=None,
+        dst_rank=send_rank,
         src_world_size=src_world_size,
         dst_world_size=dst_world_size,
         tag=normalize_route_tag(tag),
@@ -262,34 +288,37 @@ def env_decoupled_build_recv_plan(
     *,
     src_group_name: str,
     dst_group_name: str,
+    recv_rank: int | None,
     src_world_size: int,
     dst_world_size: int,
     tag: str | None,
     route_key: Any = None,
     local_batch_size: int,
-    split_size: int,
 ) -> RoutePlan:
     """Build the route plan for one receiver rank."""
-    entries: list[RouteEntry] = []
-    stage_batch_size = local_batch_size * dst_world_size
+    entries: list[DecoupledRouteEntry] = []
+    stage_batch_size = local_batch_size * src_world_size
+
     for batch_size in CommMapper.decoupled_get_batch_size(
         batch_size=stage_batch_size,
         src_world_size=src_world_size,
         dst_world_size=dst_world_size,
-        split_size=split_size,
     ):
         entries.append(
-            RouteEntry(
-                peer_rank=None,
+            DecoupledRouteEntry(
                 batch_size=batch_size,
                 key=build_route_channel_key(
                     src_group_name=src_group_name,
                     dst_group_name=dst_group_name,
                     src_rank=None,
-                    dst_rank=None,
+                    dst_rank=recv_rank,
                     tag=tag,
                     route_key=route_key,
                 ),
+                # In the env decoupled mode, the batch_index is not needed to be provided.
+                # None of the recv_from calls will set batch_index,
+                # Because that data will be overwritten by the received data.
+                batch_index=None,
             )
         )
 

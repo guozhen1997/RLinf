@@ -241,11 +241,9 @@ class EmbodiedRewardWorker(Worker):
         self.env_decoupled_mode = env_mode == "decoupled"
 
         if self.env_decoupled_mode:
-            # in env decoupled mode, the split size is the world size of the env worker
-            self.split_size = self.placement.get_world_size("env")
             # save the run-time imformation in communicate channel for decoupled mode
             self.batch_index_map = {
-                "train": [],
+                "train_reward_obs": [],
             }
 
     def model_provider_func(self):
@@ -284,7 +282,7 @@ class EmbodiedRewardWorker(Worker):
             merged_data = await self.recv_from(
                 group_name=self.cfg.env.group_name,
                 channel=input_channel,
-                tag="train_reward_input",
+                tag="train_reward_obs",
                 async_op=True,
                 batch_size=self.train_batch_size,
             ).async_wait()
@@ -298,7 +296,7 @@ class EmbodiedRewardWorker(Worker):
                 group_name=self.cfg.env.group_name,
                 channel=output_channel,
                 data=rewards,
-                tag="reward_output",
+                tag="train_reward_obs",
                 async_op=True,
             )
             total_last_run_count += last_run_count
@@ -358,7 +356,7 @@ class EmbodiedRewardWorker(Worker):
             merged_data = await self.recv_from(
                 group_name=self.cfg.env.group_name,
                 channel=input_channel,
-                tag="train_reward_input",
+                tag="train_reward_obs",
                 async_op=True,
                 batch_size=self.train_batch_size,
                 env_decoupled_mode=self.env_decoupled_mode,
@@ -371,7 +369,7 @@ class EmbodiedRewardWorker(Worker):
                 group_name=self.cfg.env.group_name,
                 channel=output_channel,
                 data=rewards,
-                tag="reward_output",
+                tag="train_reward_obs",
                 async_op=True,
                 env_decoupled_mode=self.env_decoupled_mode,
             )

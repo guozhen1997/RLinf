@@ -31,19 +31,21 @@ import ray.util.state
 import torch
 from omegaconf import OmegaConf
 
+from rlinf.scheduler.hardware import AcceleratorType, AcceleratorUtil, HardwareInfo
+from rlinf.scheduler.manager import WorkerAddress
+from rlinf.utils.utils import _split_channel_message
+
 from ..cluster import (
     Cluster,
     ClusterEnvVar,
     load_user_extension_module,
     without_http_proxies,
 )
-from ..hardware import AcceleratorType, AcceleratorUtil, HardwareInfo
-from ..manager import WorkerAddress
 
 if TYPE_CHECKING:
-    from ..collective import CollectiveGroupOptions
-    from ..manager import WorkerInfo
-    from .worker_group import WorkerGroup
+    from rlinf.scheduler.collective import CollectiveGroupOptions
+    from rlinf.scheduler.manager import WorkerInfo
+    from rlinf.scheduler.worker.worker_group import WorkerGroup
 
 WorkerClsType = TypeVar("WorkerClsType")
 
@@ -894,17 +896,17 @@ class Worker(metaclass=WorkerMeta):
         )
 
         if env_decoupled_mode:
+            assert not enable_p2p, (
+                "Now, enable_p2p dpn't support when env_decoupled_mode is True."
+            )
             assert getattr(self, "batch_index_map", None) is not None, (
                 "batch_index_map must be provided when env_decoupled_mode is True."
-            )
-            assert getattr(self, "split_size", None) is not None, (
-                "split_size must be provided when env_decoupled_mode is True."
             )
 
         if not enable_p2p and channel is None:
             raise ValueError("send_to requires ``channel`` when enable_p2p is False.")
 
-        dst_world_size = get_group_world_size(self._manager_proxy, group_name)
+        world_size = get_group_world_size(self._manager_proxy, group_name)
         local_batch_size = batch_size
         if local_batch_size is None:
             local_batch_size = infer_batch_size(data)
@@ -915,22 +917,45 @@ class Worker(metaclass=WorkerMeta):
                 dst_group_name=group_name,
                 src_rank=self._rank,
                 src_world_size=self._world_size,
-                dst_world_size=dst_world_size,
+                dst_world_size=world_size,
                 tag=tag,
                 route_key=route_key,
                 local_batch_size=local_batch_size,
             )
         else:
+            if getattr(self.batch_index_map, tag, None) is not None:
+                # if the batch_index_map has this tag
+                # The sending and receiving logic of batch_index_map is as follows:
+                # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
+                # Use the batch_index_map[tag] to get the batch_index to create the send plan ->
+                # Send data to the worker that originally sent it.
+                # the src_rank get from the batch_index_map[tag]
+                batch_index_map = self.batch_index_map[tag]
+                src_rank = None
+            else:
+                # if the batch_index_map does not have this tag
+                # The sending and receiving logic is as follows:
+                # Save the send_rank in batch_index -> send the data and batch_index to channel ->
+                # Any workers can recv the data and save the batch_index -> handle the data in the worker ->
+                # Send the data to the worker that originally sent it by the batch_index.
+                # the src_rank is the current worker's rank
+                batch_index_map = None
+                src_rank = self._rank
+
             plan = env_decoupled_build_send_plan(
                 src_group_name=self.worker_address.root_group_name,
                 dst_group_name=group_name,
+                src_rank=src_rank,
                 src_world_size=self._world_size,
-                dst_world_size=dst_world_size,
+                dst_world_size=world_size,
                 tag=tag,
                 route_key=route_key,
                 local_batch_size=local_batch_size,
-                split_size=self.split_size,
+                batch_index_map=batch_index_map,
             )
+            if batch_index_map is not None:
+                # delete the used batch_index_map item to avoid duplicate sending
+                self.batch_index_map[tag] = []
 
         split_sizes = [entry.batch_size for entry in plan.entries]
         payloads = (
@@ -941,7 +966,28 @@ class Worker(metaclass=WorkerMeta):
 
         works = []
         for entry, payload in zip(plan.entries, payloads):
-            if enable_p2p:
+            if self.env_decoupled_mode:
+                # After enabling env_decoupled_mode, the data sending format is as follows:
+                # {
+                #     "batch_index": batch_index,
+                #     "batch": batch,
+                # }
+                # The batch_index is the index of the batch in the data.
+                # The batch is the data to send.
+                # batch_index: {send_rank}_{batch_idx}_{tag}
+                # The send_rank is the rank of the worker that originally sent the data.
+                # The batch_idx is the index of the batch in the data.
+                # The tag is the tag of the data.
+                senditem = {
+                    "batch_index": entry.batch_index,
+                    "batch": payload,
+                }
+                work = channel.put(
+                    item=senditem,
+                    key=entry.key,
+                    async_op=async_op,
+                )
+            elif enable_p2p:
                 work = self.send(
                     payload,
                     dst_group_name=group_name,
@@ -1003,11 +1049,11 @@ class Worker(metaclass=WorkerMeta):
             ``async_op`` is True.
         """
         if env_decoupled_mode:
+            assert not enable_p2p, (
+                "Now, enable_p2p dpn't support when env_decoupled_mode is True."
+            )
             assert getattr(self, "batch_index_map", None) is not None, (
                 "batch_index_map must be provided when env_decoupled_mode is True."
-            )
-            assert getattr(self, "split_size", None) is not None, (
-                "split_size must be provided when env_decoupled_mode is True."
             )
 
         from ..collective import AsyncRouteWork
@@ -1022,35 +1068,97 @@ class Worker(metaclass=WorkerMeta):
         if not enable_p2p and channel is None:
             raise ValueError("recv_from requires ``channel`` when enable_p2p is False.")
 
-        src_world_size = get_group_world_size(self._manager_proxy, group_name)
+        world_size = get_group_world_size(self._manager_proxy, group_name)
 
         if not env_decoupled_mode:
             plan = build_recv_plan(
                 src_group_name=group_name,
                 dst_group_name=self.worker_address.root_group_name,
                 dst_rank=self._rank,
-                src_world_size=src_world_size,
+                src_world_size=world_size,
                 dst_world_size=self._world_size,
                 tag=tag,
                 route_key=route_key,
                 local_batch_size=batch_size,
-                env_decoupled_mode=env_decoupled_mode,
             )
         else:
+            # if getattr(self.batch_index_map, tag, None) is not None:
+            #     # if the batch_index_map has this tag
+            #     # The sending and receiving logic of batch_index_map is as follows:
+            #     # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
+            #     # Use the batch_index_map[tag] to get the batch_index to create the send plan ->
+            #     # Send data to the worker that originally sent it.
+            #     # the src_rank get from the batch_index_map[tag]
+            #     batch_index_map = self.batch_index_map[tag]
+            #     src_rank = None
+            # else:
+            #     # if the batch_index_map does not have this tag
+            #     # The sending and receiving logic is as follows:
+            #     # Save the send_rank in batch_index -> send the data and batch_index to channel ->
+            #     # Any workers can recv the data and save the batch_index -> handle the data in the worker ->
+            #     # Send the data to the worker that originally sent it by the batch_index.
+            #     # the src_rank is the current worker's rank
+            #     batch_index_map = None
+            #     src_rank = self._rank
+
+            if getattr(self.batch_index_map, tag, None) is not None:
+                # if the batch_index_map has this tag
+                # The sending and receiving logic of batch_index_map is as follows:
+                # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
+                # Use the batch_index_map[tag] to get the batch_index to create the send plan ->
+                # Send data to the worker that originally sent it.
+                # The recv_rank don't need to be provided
+                # The current worker will directly and arbitrarily fetch any data from the channel.
+                recv_rank = None
+            else:
+                # if the batch_index_map does not have this tag
+                # The sending and receiving logic is as follows:
+                # Save the send_rank in batch_index -> send the data and batch_index to channel ->
+                # Any workers can recv the data and save the batch_index -> handle the data in the worker ->
+                # Send the data to the worker that originally sent it by the batch_index.
+                # In this recv_from, the processed data will be received, so recv_rank needs to be set to the current worker rank
+                recv_rank = self._rank
             plan = env_decoupled_build_recv_plan(
                 src_group_name=group_name,
                 dst_group_name=self.worker_address.root_group_name,
-                src_world_size=src_world_size,
-                dst_world_size=self._world_size,
+                recv_rank=recv_rank,
+                src_world_size=self._world_size,
+                dst_world_size=world_size,
                 tag=tag,
                 route_key=route_key,
                 local_batch_size=batch_size,
-                split_size=self.split_size,
             )
 
         def _finalize(received_items: list[Any]):
             if not received_items:
                 return None
+            if self.env_decoupled_mode:
+                if getattr(self.batch_index_map, tag, None) is not None:
+                    # If the batch_index_map is provided,
+                    # Save the batch_index to the batch_index_map.
+                    list_received_items = []
+                    for item in received_items:
+                        batch_index = item["batch_index"]
+                        received_item = item["batch"]
+                        _, _, tag = _split_channel_message(batch_index)
+                        list_received_items.append(received_item)
+                        # Save the batch_index to the batch_index_map.
+                        self.batch_index_map[tag].append(batch_index)
+                    received_items = list_received_items
+                else:
+                    # Otherwise, the worker get the batch_index from the channel.
+                    # Sort the works by the batch_index.
+                    sorted_received_items = []
+                    for item in received_items:
+                        batch_index = item["batch_index"]
+                        received_item = item["batch"]
+                        # divide the batch_index into send_rank, batch_idx and tag
+                        # batch_index: {send_rank}_{batch_idx}_{tag}
+                        _, batch_idx, tag = _split_channel_message(batch_index)
+                        sorted_received_items.append((batch_idx, received_item))
+                    sorted_received_items.sort(key=lambda x: x[0])
+                    received_items = [x[1] for x in sorted_received_items]
+
             for item, entry in zip(received_items, plan.entries):
                 validate_batch_size(
                     data=item,

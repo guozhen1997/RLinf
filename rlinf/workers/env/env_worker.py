@@ -134,12 +134,8 @@ class EnvWorker(Worker):
         self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
 
         if self.env_decoupled_mode:
-            # in env decoupled mode, the split size is the world size of the env worker
-            self.split_size = self._component_placement.get_world_size("env")
-            # save the run-time imformation in communicate channel for decoupled mode
-            self.batch_index_map = {
-                "train": [],
-            }
+            # Init the batch_index_map for env decoupled mode
+            self.batch_index_map = {}
 
         self.update_env_cfg()
 
@@ -594,14 +590,14 @@ class EnvWorker(Worker):
             group_name=self.cfg.reward.group_name,
             channel=send_channel,
             data=reward_input,
-            tag="train_reward_input",
+            tag="train_reward_obs",
             async_op=True,
             env_decoupled_mode=self.env_decoupled_mode,
         )
         reward_output = self.recv_from(
             group_name=self.cfg.reward.group_name,
             channel=recv_channel,
-            tag="reward_output",
+            tag="train_reward_obs",
             batch_size=self.train_num_envs_per_stage,
             env_decoupled_mode=self.env_decoupled_mode,
         )
@@ -693,7 +689,7 @@ class EnvWorker(Worker):
                     "obs": env_batch["obs"],
                     "final_obs": env_batch["final_obs"],
                 },
-                tag="train_obs",
+                tag="train_rollout_results",
                 env_decoupled_mode=self.env_decoupled_mode,
             )
 
@@ -844,7 +840,7 @@ class EnvWorker(Worker):
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
                         },
-                        tag="train_obs",
+                        tag="train_rollout_results",
                         env_decoupled_mode=self.env_decoupled_mode,
                     )
                     if self.collect_transitions:
