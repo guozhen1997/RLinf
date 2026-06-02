@@ -172,7 +172,12 @@ class PolarisEnv(IsaaclabBaseEnv):
                             self._chunk_step_counter += 1
                             return result
                         return self.env.step(actions, expensive=True)
-                    except RuntimeError:
+                    except RuntimeError as e:
+                        import logging
+
+                        logging.getLogger(__name__).warning(
+                            f"Expensive render failed, falling back: {e}"
+                        )
                         return self.env.step(actions, expensive=False)
 
                 def close(self):

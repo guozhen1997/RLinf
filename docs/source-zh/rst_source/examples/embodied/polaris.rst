@@ -212,7 +212,7 @@ PolaRiS 目前支持以下训练配置：
 
 - **评估**
 
-  - ``examples/embodiment/config/polaris_eval_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_openpi_pi05_eval.yaml``
   - ``examples/embodiment/config/polaris_openpi_eval.yaml``
 
 每个任务有独立的环境配置文件，位于 ``examples/embodiment/config/env/`` 下：

@@ -202,7 +202,7 @@ PolaRiS currently supports the following training configurations:
 
 - **Evaluation**
 
-  - ``examples/embodiment/config/polaris_eval_openpi_pi05.yaml``
+  - ``examples/embodiment/config/polaris_openpi_pi05_eval.yaml``
   - ``examples/embodiment/config/polaris_openpi_eval.yaml``
 
 Each task has an independent environment configuration file located under ``examples/embodiment/config/env/``:
