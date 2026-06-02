@@ -395,7 +395,7 @@ class MultiStepRolloutWorker(Worker):
             env_output = await self.recv_from(
                 group_name=self.cfg.env.group_name,
                 channel=input_channel,
-                tag="train_obs",
+                tag="train_rollout_results",
                 async_op=True,
                 batch_size=self.train_batch_size,
                 merge_fn=self._merge_obs_batches,
