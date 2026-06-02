@@ -923,7 +923,7 @@ class Worker(metaclass=WorkerMeta):
                 local_batch_size=local_batch_size,
             )
         else:
-            if getattr(self.batch_index_map, tag, None) is not None:
+            if tag in self.batch_index_map:
                 # if the batch_index_map has this tag
                 # The sending and receiving logic of batch_index_map is as follows:
                 # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
@@ -1082,26 +1082,7 @@ class Worker(metaclass=WorkerMeta):
                 local_batch_size=batch_size,
             )
         else:
-            # if getattr(self.batch_index_map, tag, None) is not None:
-            #     # if the batch_index_map has this tag
-            #     # The sending and receiving logic of batch_index_map is as follows:
-            #     # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
-            #     # Use the batch_index_map[tag] to get the batch_index to create the send plan ->
-            #     # Send data to the worker that originally sent it.
-            #     # the src_rank get from the batch_index_map[tag]
-            #     batch_index_map = self.batch_index_map[tag]
-            #     src_rank = None
-            # else:
-            #     # if the batch_index_map does not have this tag
-            #     # The sending and receiving logic is as follows:
-            #     # Save the send_rank in batch_index -> send the data and batch_index to channel ->
-            #     # Any workers can recv the data and save the batch_index -> handle the data in the worker ->
-            #     # Send the data to the worker that originally sent it by the batch_index.
-            #     # the src_rank is the current worker's rank
-            #     batch_index_map = None
-            #     src_rank = self._rank
-
-            if getattr(self.batch_index_map, tag, None) is not None:
+            if tag in self.batch_index_map:
                 # if the batch_index_map has this tag
                 # The sending and receiving logic of batch_index_map is as follows:
                 # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
@@ -1133,14 +1114,15 @@ class Worker(metaclass=WorkerMeta):
             if not received_items:
                 return None
             if self.env_decoupled_mode:
-                if getattr(self.batch_index_map, tag, None) is not None:
+                # get the tag from the received_items
+                _, _, tag = _split_channel_message(received_items[0]["batch_index"])
+                if tag in self.batch_index_map:
                     # If the batch_index_map is provided,
                     # Save the batch_index to the batch_index_map.
                     list_received_items = []
                     for item in received_items:
                         batch_index = item["batch_index"]
                         received_item = item["batch"]
-                        _, _, tag = _split_channel_message(batch_index)
                         list_received_items.append(received_item)
                         # Save the batch_index to the batch_index_map.
                         self.batch_index_map[tag].append(batch_index)
@@ -1154,7 +1136,7 @@ class Worker(metaclass=WorkerMeta):
                         received_item = item["batch"]
                         # divide the batch_index into send_rank, batch_idx and tag
                         # batch_index: {send_rank}_{batch_idx}_{tag}
-                        _, batch_idx, tag = _split_channel_message(batch_index)
+                        _, batch_idx, _ = _split_channel_message(batch_index)
                         sorted_received_items.append((batch_idx, received_item))
                     sorted_received_items.sort(key=lambda x: x[0])
                     received_items = [x[1] for x in sorted_received_items]
