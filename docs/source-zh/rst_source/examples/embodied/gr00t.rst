@@ -301,8 +301,8 @@ GR00T-N1.5的动作头包含dropout层，这会干扰对数概率的计算，因
    model:
       model_type: "gr00t_n1d6"
       add_value_head: True          # 强化学习关键：动态注入价值网络预测优势
-      num_action_chunks: 1          # PPO阶段调为1，提升高频物理交互的实时性
-      denoising_steps: 1            # 控制流匹配(Flow-Matching)去噪步数
+      num_action_chunks: 16         # 每次推理预测的未来动作步数
+      denoising_steps: 4            # 控制流匹配(Flow-Matching)去噪步数
 
 **FSDP 分布式切片策略**
 
@@ -355,7 +355,7 @@ GR00T-N1.5的动作头包含dropout层，这会干扰对数概率的计算，因
 .. code:: yaml
 
    model:
-      model_path: "/path/to/GR00T-N1.6-libero-spatial-ppo"
+      model_path: "/path/to/RLinf-Gr00t-N1.6-RL-Spatial"
 
 --------------
 

@@ -301,8 +301,8 @@ Use ``noise_method`` to select different noise injection methods. Two options ar
    model:
       model_type: "gr00t_n1d6"
       add_value_head: True          # RL critical: dynamically inject value network for advantage prediction
-      num_action_chunks: 1          # Set to 1 during PPO to improve real-time physical interaction
-      denoising_steps: 1            # Controls flow-matching denoising steps
+      num_action_chunks: 16         # Number of future action steps predicted per inference
+      denoising_steps: 4            # Controls flow-matching denoising steps
 
 **FSDP Sharding Strategy**
 
@@ -355,7 +355,7 @@ Update the SFT model path:
 .. code:: yaml
 
    model:
-      model_path: "/path/to/GR00T-N1.6-libero-spatial-ppo"
+      model_path: "/path/to/RLinf-Gr00t-N1.6-RL-Spatial"
 
 --------------
 

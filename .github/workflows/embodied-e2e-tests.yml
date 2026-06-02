@@ -1220,7 +1220,7 @@ jobs:
         run: |
           rm -rf .venv
           uv cache prune
-  
+
   embodied-gr00t_n1d6-maniskill-libero-test:
     runs-on: embodied
     steps:
@@ -1249,4 +1249,4 @@ jobs:
       - name: Clean up
         run: |
           rm -rf .venv
-          uv cache prune  
+          uv cache prune
