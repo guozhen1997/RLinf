@@ -1,4 +1,4 @@
-GR00T Model Reinforcement Learning Training
+RL on GR00T Models
 ==================================================================
 
 .. |huggingface| image:: /_static/svg/hf-logo.svg
@@ -32,26 +32,24 @@ Environment
 
 **Task Description Format**
 
-**N1.5:**
+GR00T directly uses the environment-provided natural-language task description as the language model input.
 
-GR00T-N1.5 directly uses the environment-provided natural-language task description as the language model input.
+**N1.5:**
 
 **Data Structure**
 
-- **Images**: Main-view and wrist-view RGB tensors, named "main_images" and "wrist_images" with shape ``[batch_size, 224, 224, 3]``.
-- **States**: End-effector position, orientation, and gripper state.
-- **Task Descriptions**: Natural-language instructions.
-- **Rewards**: Sparse success/failure rewards.
+- **Images**: Main-view and wrist-view RGB tensors, respectively named as "main_images" and "wrist_images" with shape ``[batch_size, 224, 224, 3]``
+- **States**: End-effector position, orientation, and gripper state
+- **Task Descriptions**: Natural-language instructions
+- **Rewards**: Sparse success/failure rewards
 
 **N1.6:**
-
-GR00T-N1.6 directly uses the natural language task descriptions provided by the environment as input to the language model, utilizing the frozen backbone network to extract semantic features.
 
 **Data Structure**
 
 - **Images**: Continuous RGB video frames from the main view and wrist view, typically named ``main_images`` and ``wrist_images``. Considering timestep history, the shape is usually ``[batch_size, seq_len, 224, 224, 3]``.
 - **State**: End-effector position, pose, and gripper state (concatenated with visual features at the network bottom as state representation).
-- **Task Description**: Natural language instructions.
+- **Task Description**: Natural-language instructions.
 - **Rewards**: Sparse rewards for PPO reinforcement (1 for success, 0 for failure).
 
 Algorithm
@@ -61,10 +59,10 @@ Algorithm
 
 1. **PPO (Proximal Policy Optimization)**
 
-   - GAE (Generalized Advantage Estimation) for advantage estimation.
-   - Policy clipping with ratio limits.
-   - Value function clipping.
-   - Entropy regularization.
+   - Advantage estimation using GAE (Generalized Advantage Estimation)
+   - Policy clipping with ratio limits
+   - Value function clipping
+   - Entropy regularization
 
 Dependency Installation
 -----------------------
@@ -74,7 +72,7 @@ Dependency Installation
 
 .. code:: bash
 
-   # For faster downloads in China, you can use:
+   # For mainland China users, you can use the following for better download speed:
    # git clone https://ghfast.top/github.com/RLinf/RLinf.git
    git clone https://github.com/RLinf/RLinf.git
    cd RLinf
@@ -94,10 +92,10 @@ Use the Docker image to run the experiments.
       --name rlinf \
       -v .:/workspace/RLinf \
       rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
-      # For faster image downloads in China, you can use:
+      # For mainland China users, you can use the following for better download speed:
       # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
 
-Use the built-in ``switch_env`` tool to switch to the corresponding virtual environment:
+Please switch to the corresponding virtual environment via the built-in `switch_env` utility in the image:
 
 **N1.5:**
 
@@ -117,7 +115,7 @@ Use the built-in ``switch_env`` tool to switch to the corresponding virtual envi
 
 .. code:: bash
 
-   # You can add ``--use-mirror`` for faster downloads in China
+   # For mainland China users, you can add the `--use-mirror` flag to the install.sh command for better download speed.
    bash requirements/install.sh embodied --model gr00t --env maniskill_libero
    source .venv/bin/activate
 
@@ -125,7 +123,7 @@ Use the built-in ``switch_env`` tool to switch to the corresponding virtual envi
 
 .. code:: bash
 
-   # You can add ``--use-mirror`` for faster downloads in China
+   # For mainland China users, you can add the `--use-mirror` flag to the install.sh command for better download speed.
    bash requirements/install.sh embodied --model gr00t_n1d6 --env maniskill_libero
    source .venv/bin/activate
 
@@ -145,7 +143,7 @@ We currently support four LIBERO tasks: Spatial, Object, Goal, and Long.
    git clone https://huggingface.co/RLinf/RLinf-Gr00t-SFT-Spatial
 
    # Method 2: Using huggingface-hub
-   # For faster downloads in China, set:
+   # For mainland China users, you can use the following for better download speed:
    # export HF_ENDPOINT=https://hf-mirror.com
    pip install huggingface-hub
    hf download RLinf/RLinf-Gr00t-SFT-Spatial --local-dir RLinf-Gr00t-SFT-Spatial
@@ -400,6 +398,8 @@ Visualization & Results
   - ``actor/value_loss``: Value function loss (PPO)
   - ``actor/grad_norm``: Gradient norm
   - ``actor/approx_kl``: KL divergence between old and new policy
+  - ``actor/pg_clipfrac``: Policy clipping ratio
+  - ``actor/value_clip_ratio``: Value loss clipping ratio (PPO)
 
 - **Rollout Metrics**
 
@@ -468,6 +468,8 @@ Visualization & Results
      - |huggingface| `86.3% <https://huggingface.co/RLinf/RLinf-Gr00t-RL-Long-Step300>`_
      - **89.5%**
      - **+37.0%**
+
+We would like to point out that the results presented above utilize the identical hyperparameter settings as :math:`\pi_0`. These findings primarily serve to demonstrate the broad applicability and inherent robustness of the proposed RL training framework. Further optimization through parameter tuning is likely to yield enhanced model performance.
 
 **N1.6:**
 
