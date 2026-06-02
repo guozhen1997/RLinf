@@ -281,7 +281,7 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi05
+   bash examples/embodiment/eval_embodiment.sh polaris_openpi_pi05_eval
    # pi0
    bash examples/embodiment/eval_embodiment.sh polaris_openpi_eval
 

@@ -292,7 +292,7 @@ PolaRiS 目前支持以下训练配置：
 .. code-block:: bash
 
    # pi05
-   bash examples/embodiment/eval_embodiment.sh polaris_eval_openpi_pi05
+   bash examples/embodiment/eval_embodiment.sh polaris_openpi_pi05_eval
    # pi0
    bash examples/embodiment/eval_embodiment.sh polaris_openpi_eval
 
