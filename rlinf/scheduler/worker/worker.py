@@ -966,7 +966,7 @@ class Worker(metaclass=WorkerMeta):
 
         works = []
         for entry, payload in zip(plan.entries, payloads):
-            if self.env_decoupled_mode:
+            if env_decoupled_mode:
                 # After enabling env_decoupled_mode, the data sending format is as follows:
                 # {
                 #     "batch_index": batch_index,
@@ -1113,7 +1113,7 @@ class Worker(metaclass=WorkerMeta):
         def _finalize(received_items: list[Any]):
             if not received_items:
                 return None
-            if self.env_decoupled_mode:
+            if env_decoupled_mode:
                 # get the tag from the received_items
                 _, _, tag = _split_channel_message(received_items[0]["batch_index"])
                 if tag in self.batch_index_map:

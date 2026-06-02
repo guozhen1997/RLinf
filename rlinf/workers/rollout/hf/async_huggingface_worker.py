@@ -14,9 +14,7 @@
 
 import asyncio
 import gc
-from typing import Any, Literal
 
-import numpy as np
 import torch
 from omegaconf.omegaconf import DictConfig
 
@@ -24,8 +22,6 @@ from rlinf.data.embodied_io_struct import (
     RolloutResult,
 )
 from rlinf.scheduler import Channel
-from rlinf.utils.comm_mapping import CommMapper
-from rlinf.utils.utils import _build_channel_message, _split_channel_message
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
@@ -193,174 +189,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         self._weight_sync_requested = True
         self._start_background_weight_sync_if_needed()
 
-    def _split_rollout_result_by_last_run(
-        self,
-        rollout_result: RolloutResult,
-        sizes: list[int],
-        is_last_run: list[bool],
-    ) -> list[RolloutResult]:
-        """This func according the is_last_run to get the return_result
-        if the is_last_run is True:
-            the return result:
-            RolloutResult(
-                actions,
-                prev_values,
-                bootstrap_values,
-            )
-        else the is_last_run is False:
-            the return result:
-            RolloutResult(
-                actions,
-                prev_logprobs,
-                prev_values,
-                bootstrap_values,
-                save_flags,
-                forward_inputs,
-                versions,
-            )
-        the return results is a list of RolloutResult
-        """
-        assert len(is_last_run) == len(sizes), (
-            f"is_last_run and sizes must have the same length, but got {len(is_last_run)} and {len(sizes)}."
-        )
-
-        def _split_optional_tensor(
-            tensor: torch.Tensor | None,
-        ) -> tuple[torch.Tensor | None, ...]:
-            if tensor is None:
-                return tuple(None for _ in sizes)
-            return tuple(torch.split(tensor, sizes, dim=0))
-
-        split_actions = _split_optional_tensor(rollout_result.actions)
-        split_prev_logprobs = _split_optional_tensor(rollout_result.prev_logprobs)
-        split_prev_values = _split_optional_tensor(rollout_result.prev_values)
-        split_bootstrap_values = _split_optional_tensor(rollout_result.bootstrap_values)
-        split_save_flags = _split_optional_tensor(rollout_result.save_flags)
-        split_versions = _split_optional_tensor(rollout_result.versions)
-        split_forward_inputs = (
-            [{} for _ in sizes]
-            if not rollout_result.forward_inputs
-            else [
-                {
-                    key: torch.split(value, sizes, dim=0)[idx]
-                    for key, value in rollout_result.forward_inputs.items()
-                }
-                for idx in range(len(sizes))
-            ]
-        )
-
-        return_results = []
-        for idx in range(len(sizes)):
-            if is_last_run[idx]:
-                return_results.append(
-                    RolloutResult(
-                        actions=split_actions[idx],
-                        prev_logprobs=None,
-                        prev_values=split_prev_values[idx],
-                        bootstrap_values=split_bootstrap_values[idx],
-                        save_flags=None,
-                        forward_inputs=None,
-                        versions=None,
-                    )
-                )
-            else:
-                return_results.append(
-                    RolloutResult(
-                        actions=split_actions[idx],
-                        prev_logprobs=split_prev_logprobs[idx],
-                        prev_values=split_prev_values[idx],
-                        bootstrap_values=split_bootstrap_values[idx],
-                        save_flags=split_save_flags[idx],
-                        forward_inputs=split_forward_inputs[idx],
-                        versions=split_versions[idx],
-                    )
-                )
-        return return_results
-
-    def send_rollout_result_to_channel(
-        self,
-        output_channel: Channel,
-        rollout_result: RolloutResult,
-        mode: Literal["train", "eval"] = "train",
-    ):
-        assert mode in ["train", "eval"], f"{mode=} is not supported"
-        assert mode == "train", "Now eval mode is not supported in env decoupled mode"
-        batch_size_map = self.batch_size_map[mode]
-        batch_index_map = self.batch_index_map[mode]
-        assert len(batch_index_map) == len(batch_size_map), (
-            f"batch_index_map and batch_size_map must have the same length, but got {len(batch_index_map)} and {len(batch_size_map)}."
-        )
-
-        is_last_run = []
-        for i in range(len(batch_size_map)):
-            batch_index = batch_index_map[i]
-            _, _, _, last_run = _split_channel_message(batch_index)
-            is_last_run.append(last_run)
-
-        split_rollout_results = self._split_rollout_result_by_last_run(
-            rollout_result, batch_size_map, is_last_run
-        )
-        for i, shard_result in enumerate(split_rollout_results):
-            batch_index = batch_index_map[i]
-            env_rank, batch_idx, _, last_run = _split_channel_message(batch_index)
-
-            item = {
-                "batch_index": _build_channel_message(
-                    env_rank, batch_idx, mode, last_run, "rollout_results"
-                ),
-                "batch": shard_result,
-            }
-
-            output_channel.put(
-                item=item,
-                key=CommMapper.build_channel_key(
-                    None, env_rank, extra=f"{mode}_rollout_results"
-                ),
-                async_op=True,
-            )
-        # delete the batch index map
-        self.batch_index_map[mode] = []
-        return
-
-    async def recv_env_output_from_channel(
-        self, input_channel: Channel, mode: Literal["train", "eval"] = "train"
-    ) -> dict[str, Any]:
-        """Receive env outputs from mapped env ranks and merge if needed.
-
-        Args:
-            input_channel: Channel carrying env->rollout outputs.
-            mode: Rollout mode, either ``"train"`` or ``"eval"``.
-
-        Returns:
-            A single env output dict. When multiple env ranks are mapped to this
-            rollout worker, outputs are merged on batch dimension.
-        """
-        assert mode in ["train", "eval"], f"{mode=} is not supported"
-        assert mode == "train", "Now eval mode is not supported in env decoupled mode"
-
-        batch_size_map = self.batch_size_map[mode]
-        batch_index_map = self.batch_index_map[mode]
-        assert len(batch_index_map) == 0, (
-            f"batch_index_map must be empty, but got batch_index_map {batch_index_map}."
-        )
-
-        obs_batches = []
-        for expected_size in batch_size_map:
-            obs_batch = await input_channel.get(
-                key=CommMapper.build_channel_key(None, None, extra=f"{mode}_obs"),
-                async_op=True,
-            ).async_wait()
-            batch_index = obs_batch["batch_index"]
-            batch_index_map.append(batch_index)
-            actual_size = self._infer_env_batch_size(obs_batch["batch"])
-
-            assert actual_size == expected_size, (
-                f"Expected env output batch size {expected_size} get the batch_index {batch_index}, "
-                f"got {actual_size}."
-            )
-            obs_batches.append(obs_batch["batch"])
-        return self._merge_obs_batches(obs_batches)
-
     async def decoupled_generate_one_epoch(
         self, input_channel: Channel, output_channel: Channel
     ):
@@ -419,51 +247,3 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 split_fn=self._split_rollout_result,
                 env_decoupled_mode=self.env_decoupled_mode,
             )
-
-    def send_chunk_actions_to_channel(
-        self,
-        output_channel: Channel,
-        chunk_actions: torch.Tensor | np.ndarray,
-        mode: Literal["train", "eval"] = "train",
-    ):
-        """Send action shards to one of the env ranks.
-
-        Args:
-            output_channel: Channel carrying rollout->env action chunks.
-            chunk_actions: Predicted action chunk batch (tensor or ndarray).
-            mode: Rollout mode, either ``"train"`` or ``"eval"``.
-        """
-        assert mode in ["train", "eval"], f"{mode=} is not supported"
-        batch_size_map = self.batch_size_map[mode]
-        batch_index_map = self.batch_index_map[mode]
-        assert len(batch_index_map) == len(batch_size_map), (
-            f"batch_index_map and batch_size_map must have the same length, but got {len(batch_index_map)} and {len(batch_size_map)}."
-        )
-        chunk_actions_split = self._split_actions(chunk_actions, batch_size_map)
-        for i, chunk_action_i in enumerate(chunk_actions_split):
-            if isinstance(chunk_action_i, torch.Tensor):
-                chunk_action_i = (
-                    chunk_action_i.detach().cpu().contiguous()
-                )  # for evaluation
-
-            batch_index = batch_index_map[i]
-            env_rank, batch_idx, _, _ = _split_channel_message(batch_index)
-
-            item = {
-                "batch_index": _build_channel_message(
-                    env_rank, batch_idx, mode, False, "actions"
-                ),
-                "batch": chunk_action_i,
-            }
-
-            output_channel.put(
-                item,
-                key=CommMapper.build_channel_key(
-                    None, env_rank, extra=f"{mode}_actions"
-                ),
-                async_op=True,
-            )
-
-        # delete the batch index map
-        self.batch_index_map[mode] = []
-        return
