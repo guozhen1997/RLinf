@@ -100,6 +100,9 @@ class MultiStepRolloutWorker(Worker):
             self.batch_index_map = {
                 "train_rollout_results": [],
             }
+        self.rollout_recv_queue_size = self.cfg.env.train.get(
+            "rollout_recv_queue_size", 0
+        )
 
     def init_worker(self):
         rollout_model_config = copy.deepcopy(self.cfg.actor.model)

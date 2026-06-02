@@ -210,6 +210,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 merge_fn=self._merge_obs_batches,
                 infer_batch_size_fn=self._infer_env_batch_size,
                 env_decoupled_mode=self.env_decoupled_mode,
+                recv_queue_size=self.rollout_recv_queue_size,
             ).async_wait()
             actions, result = self.predict(env_output["obs"])
             save_flags = None

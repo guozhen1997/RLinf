@@ -294,6 +294,7 @@ def env_decoupled_build_recv_plan(
     tag: str | None,
     route_key: Any = None,
     local_batch_size: int,
+    recv_queue_size: int = 0,
 ) -> RoutePlan:
     """Build the route plan for one receiver rank."""
     entries: list[DecoupledRouteEntry] = []
@@ -303,6 +304,7 @@ def env_decoupled_build_recv_plan(
         batch_size=stage_batch_size,
         src_world_size=src_world_size,
         dst_world_size=dst_world_size,
+        recv_queue_size=recv_queue_size,
     ):
         entries.append(
             DecoupledRouteEntry(

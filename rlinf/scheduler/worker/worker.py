@@ -1022,6 +1022,7 @@ class Worker(metaclass=WorkerMeta):
         enable_p2p: bool = False,
         options: Optional["CollectiveGroupOptions"] = None,
         env_decoupled_mode: bool = False,
+        recv_queue_size: int = 0,
     ):
         """Receive one routed payload or shard set from a worker group via channel or P2P recv.
 
@@ -1043,6 +1044,7 @@ class Worker(metaclass=WorkerMeta):
                 ``channel.get``.
             options: Optional collective options forwarded to ``recv``.
             env_decoupled_mode: If True, build an env-decoupled receive plan.
+            recv_queue_size: The length of the recv queue.
 
         Returns:
             The received payload, a merged payload, or AsyncRouteWork when
@@ -1108,6 +1110,7 @@ class Worker(metaclass=WorkerMeta):
                 tag=tag,
                 route_key=route_key,
                 local_batch_size=batch_size,
+                recv_queue_size=recv_queue_size,
             )
 
         def _finalize(received_items: list[Any]):
