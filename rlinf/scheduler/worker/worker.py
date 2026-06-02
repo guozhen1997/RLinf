@@ -856,6 +856,7 @@ class Worker(metaclass=WorkerMeta):
         enable_p2p: bool = False,
         options: Optional["CollectiveGroupOptions"] = None,
         env_decoupled_mode: bool = False,
+        send_queue_size: int = 0,
     ):
         """Route one payload to a worker group through a channel or direct P2P send.
 
@@ -882,6 +883,7 @@ class Worker(metaclass=WorkerMeta):
                 ``channel.put``.
             options: Optional collective options forwarded to ``send``.
             env_decoupled_mode: If True, build an env-decoupled route plan.
+            send_queue_size: The length of the send queue.
 
         Returns:
             AsyncRouteWork if ``async_op`` is True, otherwise None.
@@ -952,6 +954,7 @@ class Worker(metaclass=WorkerMeta):
                 route_key=route_key,
                 local_batch_size=local_batch_size,
                 batch_index_map=batch_index_map,
+                send_queue_size=send_queue_size,
             )
             if batch_index_map is not None:
                 # delete the used batch_index_map item to avoid duplicate sending
