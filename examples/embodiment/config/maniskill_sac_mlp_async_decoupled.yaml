@@ -104,7 +104,7 @@ env:
     # This is to handle situations where the env worker may become deadlocked.
     env_mode: "decoupled"
     # in decoupled mode, the rollout_queue_size = ceil(env_world_size // rollout_world_size)
-    rollout_queue_size: 1
+    rollout_recv_queue_size: 1
   
   eval:
     total_num_envs: 32
