@@ -20,6 +20,7 @@ import numpy as np
 import torch
 
 from rlinf.envs.isaaclab.isaaclab_env import IsaaclabBaseEnv
+from rlinf.utils.logging import get_logger
 
 
 class PolarisEnv(IsaaclabBaseEnv):
@@ -160,25 +161,40 @@ class PolarisEnv(IsaaclabBaseEnv):
                         actions = torch.as_tensor(actions, device=self.device)
                     else:
                         actions = actions.to(self.device)
-                    try:
-                        if self._open_loop_horizon is not None:
-                            needs_render = (
-                                self._chunk_step_counter == 0
-                                or self._chunk_step_counter >= self._open_loop_horizon
-                            )
-                            if needs_render:
-                                self._chunk_step_counter = 0
-                            result = self.env.step(actions, expensive=needs_render)
-                            self._chunk_step_counter += 1
-                            return result
-                        return self.env.step(actions, expensive=True)
-                    except RuntimeError as e:
-                        import logging
 
-                        logging.getLogger(__name__).warning(
-                            f"Expensive render failed, falling back: {e}"
+                    if self._open_loop_horizon is not None:
+                        needs_render = (
+                            self._chunk_step_counter == 0
+                            or self._chunk_step_counter >= self._open_loop_horizon
                         )
-                        return self.env.step(actions, expensive=False)
+                        if needs_render:
+                            self._chunk_step_counter = 0
+
+                        obs, rew, done, trunc, info = self.env.step(
+                            actions, expensive=False
+                        )
+
+                        if needs_render:
+                            try:
+                                obs["splat"] = self.env.custom_render(expensive=True)
+                            except RuntimeError as e:
+                                get_logger().warning(
+                                    f"Expensive render failed, using cheap render: {e}"
+                                )
+
+                        self._chunk_step_counter += 1
+                        return obs, rew, done, trunc, info
+
+                    obs, rew, done, trunc, info = self.env.step(
+                        actions, expensive=False
+                    )
+                    try:
+                        obs["splat"] = self.env.custom_render(expensive=True)
+                    except RuntimeError as e:
+                        get_logger().warning(
+                            f"Expensive render failed, using cheap render: {e}"
+                        )
+                    return obs, rew, done, trunc, info
 
                 def close(self):
                     self.env.close()

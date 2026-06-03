@@ -36,13 +36,31 @@ class DroidJointPosInputs(_transforms.DataTransformFn):
     model_type: _model.ModelType = _model.ModelType.PI0
 
     def __call__(self, data: dict) -> dict:
-        gripper_pos = np.asarray(data["observation/gripper_position"])
-        if gripper_pos.ndim == 0:
-            gripper_pos = gripper_pos[np.newaxis]
-        state = np.concatenate([data["observation/joint_position"], gripper_pos])
+        if "observation/state" in data:
+            state = np.asarray(data["observation/state"])
+        else:
+            gripper_pos = np.asarray(data["observation/gripper_position"])
+            if gripper_pos.ndim == 0:
+                gripper_pos = gripper_pos[np.newaxis]
+            state = np.concatenate([data["observation/joint_position"], gripper_pos])
 
-        base_image = _parse_image(data["observation/exterior_image_1_left"])
-        wrist_image = _parse_image(data["observation/wrist_image_left"])
+        base_key = (
+            "observation/image"
+            if "observation/image" in data
+            else "observation/exterior_image_1_left"
+        )
+        wrist_key = (
+            "observation/wrist_image"
+            if "observation/wrist_image" in data
+            else "observation/wrist_image_left"
+        )
+
+        base_image = _parse_image(data[base_key])
+        wrist_image = (
+            _parse_image(data[wrist_key])
+            if wrist_key in data
+            else np.zeros_like(base_image)
+        )
 
         match self.model_type:
             case _model.ModelType.PI0 | _model.ModelType.PI05:
