@@ -131,11 +131,11 @@ def build_send_plan(
     dst_world_size: int,
     tag: str | None,
     route_key: Any = None,
-    local_batch_size: int,
+    batch_size: int,
 ) -> RoutePlan:
     """Build the route plan for one sender rank."""
     entries: list[RouteEntry] = []
-    stage_batch_size = local_batch_size * src_world_size
+    stage_batch_size = batch_size
     for dst_rank, batch_size in CommMapper.get_dst_ranks(
         batch_size=stage_batch_size,
         src_world_size=src_world_size,
@@ -179,13 +179,13 @@ def env_decoupled_build_send_plan(
     dst_world_size: int,
     tag: str | None,
     route_key: Any = None,
-    local_batch_size: int,
+    batch_size: int,
     batch_index_map: list[str] | None = None,
     send_queue_size: int = 0,
 ) -> RoutePlan:
     """Build the route plan for one sender rank."""
     entries: list[DecoupledRouteEntry] = []
-    stage_batch_size = local_batch_size * src_world_size
+    stage_batch_size = batch_size
 
     for index, batch_size in enumerate(
         CommMapper.decoupled_get_batch_size(
@@ -247,11 +247,11 @@ def build_recv_plan(
     dst_world_size: int,
     tag: str | None,
     route_key: Any = None,
-    local_batch_size: int,
+    batch_size: int,
 ) -> RoutePlan:
     """Build the route plan for one receiver rank."""
     entries: list[RouteEntry] = []
-    stage_batch_size = local_batch_size * dst_world_size
+    stage_batch_size = batch_size
     for src_rank, batch_size in CommMapper.get_src_ranks(
         batch_size=stage_batch_size,
         src_world_size=src_world_size,
@@ -295,13 +295,12 @@ def env_decoupled_build_recv_plan(
     dst_world_size: int,
     tag: str | None,
     route_key: Any = None,
-    local_batch_size: int,
+    batch_size: int,
     recv_queue_size: int = 0,
 ) -> RoutePlan:
     """Build the route plan for one receiver rank."""
     entries: list[DecoupledRouteEntry] = []
-    stage_batch_size = local_batch_size * src_world_size
-
+    stage_batch_size = batch_size
     for batch_size in CommMapper.decoupled_get_batch_size(
         batch_size=stage_batch_size,
         src_world_size=src_world_size,

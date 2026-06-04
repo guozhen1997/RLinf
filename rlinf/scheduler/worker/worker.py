@@ -909,9 +909,8 @@ class Worker(metaclass=WorkerMeta):
             raise ValueError("send_to requires ``channel`` when enable_p2p is False.")
 
         world_size = get_group_world_size(self._manager_proxy, group_name)
-        local_batch_size = batch_size
-        if local_batch_size is None:
-            local_batch_size = infer_batch_size(data)
+        if batch_size is None:
+            batch_size = infer_batch_size(data) * self._world_size
 
         if not env_decoupled_mode:
             plan = build_send_plan(
@@ -922,7 +921,7 @@ class Worker(metaclass=WorkerMeta):
                 dst_world_size=world_size,
                 tag=tag,
                 route_key=route_key,
-                local_batch_size=local_batch_size,
+                batch_size=batch_size,
             )
         else:
             if tag in self.batch_index_map:
@@ -952,7 +951,7 @@ class Worker(metaclass=WorkerMeta):
                 dst_world_size=world_size,
                 tag=tag,
                 route_key=route_key,
-                local_batch_size=local_batch_size,
+                batch_size=batch_size,
                 batch_index_map=batch_index_map,
                 send_queue_size=send_queue_size,
             )
@@ -1084,7 +1083,7 @@ class Worker(metaclass=WorkerMeta):
                 dst_world_size=self._world_size,
                 tag=tag,
                 route_key=route_key,
-                local_batch_size=batch_size,
+                batch_size=batch_size,
             )
         else:
             if tag in self.batch_index_map:
@@ -1112,7 +1111,7 @@ class Worker(metaclass=WorkerMeta):
                 dst_world_size=world_size,
                 tag=tag,
                 route_key=route_key,
-                local_batch_size=batch_size,
+                batch_size=batch_size,
                 recv_queue_size=recv_queue_size,
             )
 

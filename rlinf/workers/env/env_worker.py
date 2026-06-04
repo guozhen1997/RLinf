@@ -93,10 +93,12 @@ class EnvWorker(Worker):
             self.train_num_envs_per_stage = (
                 self.cfg.env.train.total_num_envs // self._world_size // self.stage_num
             )
+            self.train_batch_size = self.cfg.env.train.total_num_envs // self.stage_num
         if self.enable_eval:
             self.eval_num_envs_per_stage = (
                 self.cfg.env.eval.total_num_envs // self._world_size // self.stage_num
             )
+            self.eval_batch_size = self.cfg.env.eval.total_num_envs // self.stage_num
         self.n_train_chunk_steps = 0
         if not self.only_eval:
             self.n_train_chunk_steps = (
@@ -598,7 +600,7 @@ class EnvWorker(Worker):
             group_name=self.cfg.reward.group_name,
             channel=recv_channel,
             tag="train_reward_obs",
-            batch_size=self.train_num_envs_per_stage,
+            batch_size=self.train_batch_size,
             env_decoupled_mode=self.env_decoupled_mode,
         )
         if self.reward_mode != "terminal" or reward_output is None:
@@ -796,7 +798,7 @@ class EnvWorker(Worker):
                         group_name=self.cfg.rollout.group_name,
                         channel=input_channel,
                         tag="train_rollout_results",
-                        batch_size=self.train_num_envs_per_stage,
+                        batch_size=self.train_batch_size,
                         merge_fn=RolloutResult.merge_rollout_results,
                         infer_batch_size_fn=self._infer_rollout_batch_size,
                         env_decoupled_mode=self.env_decoupled_mode,
@@ -881,7 +883,7 @@ class EnvWorker(Worker):
                     group_name=self.cfg.rollout.group_name,
                     channel=input_channel,
                     tag="train_rollout_results",
-                    batch_size=self.train_num_envs_per_stage,
+                    batch_size=self.train_batch_size,
                     merge_fn=RolloutResult.merge_rollout_results,
                     infer_batch_size_fn=self._infer_rollout_batch_size,
                     env_decoupled_mode=self.env_decoupled_mode,
@@ -972,7 +974,7 @@ class EnvWorker(Worker):
                         group_name=self.cfg.rollout.group_name,
                         channel=input_channel,
                         tag="eval_actions",
-                        batch_size=self.eval_num_envs_per_stage,
+                        batch_size=self.eval_batch_size,
                     )
                     if isinstance(raw_chunk_actions, torch.Tensor):
                         raw_chunk_actions = raw_chunk_actions.detach().cpu().numpy()

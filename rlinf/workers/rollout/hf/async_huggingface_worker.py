@@ -30,11 +30,6 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
         super().__init__(cfg)
         self._generate_task: asyncio.Task = None
         self.staleness_threshold = cfg.algorithm.get("staleness_threshold", None)
-        self.num_envs_per_stage = (
-            self.cfg.env.train.total_num_envs
-            // self._world_size
-            // self.num_pipeline_stages
-        )
         # set the decoupled rollout worker sync weight time
         self.sync_rollout_weight_time = (
             self.num_pipeline_stages * self.n_train_chunk_steps * self.rollout_epoch

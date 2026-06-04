@@ -215,13 +215,9 @@ class EmbodiedRewardWorker(Worker):
             self.total_num_eval_envs = cfg.env.eval.total_num_envs
             self.num_pipeline_stages = cfg.rollout.pipeline_stage_num
             self.train_batch_size = (
-                self.total_num_train_envs
-                // self._world_size
-                // self.num_pipeline_stages
+                self.total_num_train_envs // self.num_pipeline_stages
             )
-            self.eval_batch_size = (
-                self.total_num_eval_envs // self._world_size // self.num_pipeline_stages
-            )
+            self.eval_batch_size = self.total_num_eval_envs // self.num_pipeline_stages
         else:
             self.total_num_train_envs = 1
             self.total_num_eval_envs = 1

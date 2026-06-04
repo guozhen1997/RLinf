@@ -63,12 +63,8 @@ class MultiStepRolloutWorker(Worker):
         self.total_num_eval_envs = cfg.env.eval.total_num_envs
         self.num_pipeline_stages = cfg.rollout.pipeline_stage_num
 
-        self.train_batch_size = (
-            self.total_num_train_envs // self._world_size // self.num_pipeline_stages
-        )
-        self.eval_batch_size = (
-            self.total_num_eval_envs // self._world_size // self.num_pipeline_stages
-        )
+        self.train_batch_size = self.total_num_train_envs // self.num_pipeline_stages
+        self.eval_batch_size = self.total_num_eval_envs // self.num_pipeline_stages
         self.enable_cuda_graph = cfg.rollout.get("enable_cuda_graph", False)
         self.enable_eval = cfg.runner.val_check_interval > 0 or cfg.runner.only_eval
 
