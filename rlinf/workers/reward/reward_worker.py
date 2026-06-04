@@ -18,14 +18,14 @@ from typing import Optional
 
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader, DistributedSampler
 
-from rlinf.config import torch_dtype_from_precision
 from rlinf.data.datasets.reward_model import RewardBinaryDataset
 from rlinf.data.io_struct import RolloutResult
 from rlinf.data.tokenizers import hf_tokenizer
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
+from rlinf.models.embodiment.reward import get_reward_model_class
 from rlinf.scheduler import (
     Channel,
     Cluster,
@@ -50,7 +50,6 @@ class RewardWorker(Worker):
     def __init__(self, cfg: DictConfig):
         Worker.__init__(self)
         self.cfg = cfg
-
         self.placement = HybridComponentPlacement(cfg, Cluster())
 
     def init_worker(self):
@@ -243,22 +242,34 @@ class EmbodiedRewardWorker(Worker):
             }
 
     def model_provider_func(self):
-        from rlinf.models.embodiment.reward import get_reward_model_class
-
         reward_cls = get_reward_model_class(self.cfg.reward.model.model_type)
 
         model_cfg = self.cfg.reward.model
-        torch_dtype = torch_dtype_from_precision(model_cfg.precision)
-
+        with open_dict(model_cfg):
+            model_cfg.num_envs = self.local_num_train_envs
         model = reward_cls(model_cfg)
-
-        model.to(torch_dtype)
 
         return model
 
     def init_worker(self):
         """Initialize the reward worker for inference."""
-        # build model
+        if self._standalone_realworld:
+            self.local_num_train_envs = self.total_num_train_envs
+            self.dst_ranks = {"train": [(0, self.local_num_train_envs)]}
+            self.src_ranks = {"train": [(0, self.local_num_train_envs)]}
+        else:
+            self.dst_ranks = {
+                "train": self._setup_dst_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            self.src_ranks = {
+                "train": self._setup_src_ranks(
+                    self.total_num_train_envs // self.num_pipeline_stages
+                ),
+            }
+            self.local_num_train_envs = sum(size for _, size in self.src_ranks["train"])
+
         self.model = self.model_provider_func()
 
         # Move to device and set eval mode
@@ -268,11 +279,11 @@ class EmbodiedRewardWorker(Worker):
         if self._standalone_realworld:
             return
 
+    @Worker.timer("compute_rewards")
     async def compute_rewards(self, input_channel: Channel, output_channel: Channel):
         if self.enable_offload:
             self.model.to(self.device)
 
-        local_num_train_envs = self.train_batch_size
         total_last_run_count = 0
         while True:
             merged_data = await self.recv_from(
@@ -296,7 +307,7 @@ class EmbodiedRewardWorker(Worker):
                 async_op=True,
             )
             total_last_run_count += last_run_count
-            if total_last_run_count >= local_num_train_envs:
+            if total_last_run_count >= self.local_num_train_envs:
                 break
 
         if self.enable_offload:
@@ -328,7 +339,9 @@ class EmbodiedRewardWorker(Worker):
         self, images: torch.Tensor | np.ndarray
     ) -> torch.Tensor | np.ndarray:
         """Run one-shot reward inference and return CPU results."""
-        rewards = self._compute_image_rewards(images)
+        rewards = self.model.compute_reward({"main_images": images})
+        if rewards is not None and rewards.dim() == 1:
+            rewards = rewards.unsqueeze(-1)
         if isinstance(rewards, torch.Tensor):
             return rewards.detach().cpu()
         return rewards
@@ -402,16 +415,11 @@ class FSDPRewardWorker(FSDPModelManager, Worker):
         )
 
     def model_provider_func(self):
-        from rlinf.models.embodiment.reward import get_reward_model_class
-
         reward_cls = get_reward_model_class(self.cfg.actor.model.model_type)
 
         model_cfg = self.cfg.actor.model
-        torch_dtype = torch_dtype_from_precision(model_cfg.precision)
 
         model = reward_cls(model_cfg)
-
-        model.to(torch_dtype)
 
         return model
 

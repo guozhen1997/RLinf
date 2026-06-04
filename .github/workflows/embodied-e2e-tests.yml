@@ -216,6 +216,34 @@ jobs:
           rm -rf .venv
           uv cache prune
 
+  embodied-mlp-ppo-genesis-cubepick-test:
+    runs-on: embodied
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Genesis dependencies
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          bash requirements/install.sh embodied --env genesis
+
+      - name: Run Genesis CubePick PPO MLP e2e test
+        timeout-minutes: 20
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/embodied/run.sh genesis_cubepick_ppo_mlp
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+
   embodied-openvla-maniskill-libero-test:
     runs-on: embodied
     steps:
@@ -300,6 +328,63 @@ jobs:
           rm -rf .venv
           uv cache prune
 
+  embodied-openvlaoft-libero-rocm-test:
+    runs-on: rocm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create ROCm embodied environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          export LIBERO_PATH=/workspace/dataset/LIBERO
+          bash requirements/install.sh --platform amd embodied --model openvla-oft --env libero
+
+      - name: Libero-Goal GRPO test
+        timeout-minutes: 20
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/embodied/run.sh libero_goal_grpo_openvlaoft osmesa
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+
+  embodied-openvlaoft-libero-ascend-test:
+    runs-on: ascend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create Ascend embodied environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          export LIBERO_PATH=/workspace/dataset/LIBERO
+          bash requirements/install.sh --platform ascend embodied --model openvla-oft --env libero
+
+      - name: Libero-Goal GRPO test
+        timeout-minutes: 20
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/embodied/run.sh libero_goal_grpo_openvlaoft osmesa
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+
   embodied-openvlaoft-behavior-test:
     runs-on: embodied
     steps:
@@ -332,6 +417,43 @@ jobs:
           rm -rf .venv
           uv cache prune
           rm -rf /tmp/tmp*
+
+  embodied-reward-model-maniskill-test:
+    runs-on: embodied
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create embodied environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          export LIBERO_PATH=/workspace/dataset/LIBERO
+          bash requirements/install.sh embodied --env maniskill_libero --model qwen3_vl
+
+      - name: ManiSkill VLM Reward PPO test
+        timeout-minutes: 20
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/embodied/run.sh maniskill_ppo_mlp_qwentrend_reward
+
+      - name: ManiSkill ResNet Reward PPO test
+        timeout-minutes: 20
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          bash tests/e2e_tests/embodied/run.sh maniskill_ppo_mlp_resnet_reward
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
 
   embodied-openvlaoft-robotwin-test:
     runs-on: embodied
@@ -513,6 +635,14 @@ jobs:
           source .venv/bin/activate
           cp -r /workspace/dataset/maniskill_assets/assets ${REPO_PATH}/rlinf/envs/maniskill/
           bash tests/e2e_tests/embodied/run.sh maniskill_ppo_openpi05
+
+      - name: Maniskill PPO Pi05 training pipeline test
+        timeout-minutes: 20
+        run: |
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          cp -r /workspace/dataset/maniskill_assets/assets ${REPO_PATH}/rlinf/envs/maniskill/
+          bash tests/e2e_tests/embodied/run.sh maniskill_ppo_openpi05_pipeline
 
       - name: Libero-Spatial PPO test
         timeout-minutes: 20
@@ -1000,6 +1130,81 @@ jobs:
           rm -rf .venv
           uv cache prune
 
+  embodied-abot-m0-libero-test:
+    runs-on: embodied
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create embodied environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          export LIBERO_PATH=/workspace/dataset/LIBERO
+          bash requirements/install.sh embodied --model abot_m0 --env maniskill_libero
+
+      - name: Patch ABot-M0 VGGT path
+        run: |
+          source .venv/bin/activate
+          ABOT_PATH=$(python -c "import ABot; import os; print(os.path.dirname(ABot.__file__))")
+          sed -i "s|VGGT.from_pretrained('facebook/VGGT-1B')|VGGT.from_pretrained('/workspace/dataset/VGGT-1B')|" \
+            "${ABOT_PATH}/model/framework/ABot_M0.py"
+
+      - name: LIBERO ABot-M0 PPO test
+        timeout-minutes: 30
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          export LIBERO_TYPE=standard
+          bash tests/e2e_tests/embodied/run.sh libero_10_ppo_abot_m0
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+
+  embodied-abot-m0-liberoplus-test:
+    runs-on: embodied
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Create embodied environment
+        run: |
+          unset UV_DEFAULT_INDEX
+          export UV_PATH=/workspace/dataset/.uv
+          export UV_LINK_MODE=symlink
+          export UV_CACHE_DIR=/workspace/dataset/.uv_cache
+          export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
+          export LIBERO_PATH=/workspace/dataset/LIBERO
+          export LIBERO_PLUS_PATH=/workspace/dataset/LIBERO-PLUS
+          bash requirements/install.sh embodied --model abot_m0 --env liberoplus
+
+      - name: Patch ABot-M0 VGGT path
+        run: |
+          source .venv/bin/activate
+          ABOT_PATH=$(python -c "import ABot; import os; print(os.path.dirname(ABot.__file__))")
+          sed -i "s|VGGT.from_pretrained('facebook/VGGT-1B')|VGGT.from_pretrained('/workspace/dataset/VGGT-1B')|" \
+            "${ABOT_PATH}/model/framework/ABot_M0.py"
+
+      - name: LIBERO-Plus ABot-M0 PPO test
+        timeout-minutes: 30
+        run: |
+          unset PYTHONPATH
+          export REPO_PATH=$(pwd)
+          source .venv/bin/activate
+          export LIBERO_TYPE=plus
+          bash tests/e2e_tests/embodied/run.sh liberoplus_10_ppo_abot_m0
+
+      - name: Clean up
+        run: |
+          rm -rf .venv
+          uv cache prune
+
   embodied-embodichain-test:
     runs-on: embodied
     steps:
@@ -1021,6 +1226,7 @@ jobs:
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
+          export LD_LIBRARY_PATH="$(python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))'):${LD_LIBRARY_PATH:-}"
           export EMBODICHAIN_DATA_ROOT=/workspace/dataset/embodichain_data
           python -m embodichain.data download --name CartPole
           python -m embodichain.data download --name SimResources

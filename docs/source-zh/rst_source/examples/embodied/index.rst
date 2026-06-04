@@ -30,6 +30,28 @@
        </p>
      </div>
 
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/libero_numbers.jpeg"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="libero_amd.html" style="text-decoration: underline; color: blue;">
+           <b>AMD ROCm 平台上的 LIBERO 强化学习</b>
+         </a><br>
+         LIBERO 强化学习的 ROCm 依赖安装与 OSMesa 渲染配置
+       </p>
+     </div>
+
+     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+       <img src="https://github.com/RLinf/misc/raw/main/pic/libero_numbers.jpeg"
+            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+         <a href="libero_ascend.html" style="text-decoration: underline; color: blue;">
+           <b>Ascend CANN 平台上的 LIBERO 强化学习</b>
+         </a><br>
+         LIBERO 强化学习的 CANN 依赖安装与驱动挂载配置
+       </p>
+     </div>
+
    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
        <img src="https://raw.githubusercontent.com/RLinf/misc/378920588652fff0a2a0b163b392c94694993345/pic/libero-plus.jpg"
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
@@ -356,16 +378,17 @@
        </p>
       </div>
 
-     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <img src="https://github.com/RLinf/misc/raw/main/pic/robotiq_zed.jpeg"
-            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
-       <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-         <a href="franka_zed_robotiq.html" style="text-decoration: underline; color: blue;">
-           <b>Franka 真机使用 ZED 相机与 Robotiq 夹爪</b>
-         </a><br>
-         Franka 真机中 ZED 相机、Robotiq 夹爪安装与数据采集配置
-       </p>
-     </div>
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <img src="https://github.com/RLinf/misc/raw/main/pic/robotiq_zed.jpeg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="franka_zed_robotiq.html" style="text-decoration: underline; color: blue;">
+          <b>Franka 真机使用 ZED 相机与 Robotiq 夹爪</b>
+        </a><br>
+        Franka 真机中 ZED 相机、Robotiq 夹爪安装与数据采集配置
+      </p>
+    </div>
+
     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
       <img src="https://github.com/RLinf/misc/raw/main/pic/gello.jpeg"
            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
@@ -374,6 +397,17 @@
           <b>Franka 真机使用 GELLO 遥操作设备</b>
         </a><br>
         Franka 真机中 GELLO 遥操作设备安装、配置与验证流程
+      </p>
+    </div>
+
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <img src="https://github.com/RLinf/misc/raw/main/pic/dexhand.jpg"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="franka_dexhand.html" style="text-decoration: underline; color: blue;">
+          <b>Franka 机械臂与灵巧手真机强化学习</b>
+        </a><br>
+        Franka 机械臂 + 睿研五指灵巧手真机强化学习
       </p>
     </div>
 
@@ -424,6 +458,17 @@
     </div>
 
     <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
+      <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/ABot-M0.png"
+           style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
+      <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
+        <a href="abot_m0.html" style="text-decoration: underline; color: blue;">
+          <b>ABot-M0 模型强化学习训练</b>
+        </a><br>
+        ABot-M0 原生集成与 LIBERO-plus PPO 训练
+      </p>
+    </div>
+
+    <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
       <!-- TODO(thumbnail): replace placeholder cover image URL for dosw1 -->
       <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/dos-w1.png"
            style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" />
@@ -454,6 +499,8 @@
 
    maniskill
    libero
+   libero_amd
+   libero_ascend
    liberoplus_pro
    behavior
    metaworld
@@ -471,6 +518,7 @@
    pi0
    gr00t
    lingbotvla
+   abot_m0
    dexbotic
    starvla
    mlp
@@ -479,6 +527,8 @@
    sft_dreamzero
    sft_vlm
    dsrl
+   genesis
+
    dagger
    recap
    co_training
@@ -486,6 +536,7 @@
    franka_reward_model
    franka_zed_robotiq
    franka_gello
+   franka_dexhand
    franka_pi0_sft_deploy
    hg-dagger
    gim_arm
