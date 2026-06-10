@@ -305,7 +305,7 @@ For LIBERO-90 and LIBERO-130, we evaluate 4,500 (90 tasks × 50 trials) and 6,50
 
 We evaluate each model according to its training configuration.
 For the SFT-trained (LoRA-base) models, we set `do_sample = False`.
-For the RL-trained models, we set `do_sample = True`, `temperature = 1.6`, and enable `rollout_epoch=2` to elicit the best performance of the RL-tuned policy.
+For the RL-trained models, we set ``do_sample = True`` and ``temperature_train = 1.6`` in ``rollout.sampling_params``, and enable ``env.train.rollout_epoch=2`` to elicit the best performance of the RL-tuned policy.
 
 .. note::
 

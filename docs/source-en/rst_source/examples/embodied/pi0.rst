@@ -350,11 +350,11 @@ Compared to the standard task configuration, we have made the following modifica
 
 .. code:: yaml
 
-   rollout_epoch: 8 -> 2
-   total_num_envs: 64 -> 32
-   micro_batch_size: 128 -> 64
-   global_batch_size: 2048 -> 256
-   lr: 5e-6 -> 1e-6
+   env.train.rollout_epoch: 8 -> 2
+   env.train.total_num_envs: 64 -> 32
+   actor.micro_batch_size: 128 -> 64
+   actor.global_batch_size: 2048 -> 256
+   actor.optim.lr: 5e-6 -> 1e-6
    actor.enable_offload: False -> True
    rollout.enable_offload: False -> True
 
@@ -370,7 +370,7 @@ If you still encounter OOM issues under the minimum parameter configuration, we 
 **If OOM occurs during the rollout stage:**
 
 - Try replacing the rendering engine from ``egl`` to ``osmesa``
-- Further reduce ``total_num_envs`` from 32 to 16, but increase ``rollout_epoch`` from 2 to 4 to ensure the total number of environments per rollout round remains consistent
+- Further reduce ``env.train.total_num_envs`` from 32 to 16, but increase ``env.train.rollout_epoch`` from 2 to 4 to ensure the total number of environments per rollout round remains consistent
 - Check if actor's ``enable_offload`` is enabled, and set it to ``True`` if it is ``False``
 
 **If OOM occurs during the actor stage:**
@@ -392,7 +392,7 @@ For models after SFT or RL training, we provide two evaluation methods:
 
    ``Metaworld`` currently do not support the evaluation mode with ``env.eval.auto_reset=True``. It is recommended to use individual script files for model evaluation.
 
-- Use individual script files for model evaluation, refer to the example `README.md <https://github.com/RLinf/RLinf/blob/main/toolkits/eval_scripts_openpi/README.md>`__. This method's evaluation scripts are consistent with the official evaluation scripts provided by ``openpi``, supporting output of success rates for each subtask, but it is slower.
+- Use individual script files for model evaluation, refer to the example `README.md <https://github.com/RLinf/RLinf/blob/main/toolkits/standalone_eval_scripts/openpi/README.md>`__. This method's evaluation scripts are consistent with the official evaluation scripts provided by ``openpi``, supporting output of success rates for each subtask, but it is slower.
 
 **3. Configuration Files**
 

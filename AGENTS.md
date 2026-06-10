@@ -57,7 +57,7 @@ You launch one entry script (e.g. `train_embodied_agent.py`, `train_async.py`). 
 
 - **Metrics:** Runners use `MetricLogger`; set `runner.logger.logger_backends` (e.g. tensorboard, wandb, swanlab). Namespaces include `train/`, `eval/`, `env/`, `rollout/`, `time/`. See [logger tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/configuration/logger.html).
 - **Checkpoints:** Saved every `runner.save_interval` under `.../checkpoints/global_step_<N>/`. To resume, set `runner.resume_dir` to that path and relaunch; some runners support `resume_dir: auto`. See [checkpoint resume tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/configuration/resume.html).
-- **Evaluation:** During training, `runner.val_check_interval` triggers validation. Standalone embodied: `bash examples/embodiment/eval_embodiment.sh <config_name>` with an eval config; see [VLA evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla-eval.html). Reasoning/LLM: see [LLM evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/llm-eval.html).
+- **Evaluation:** During training, `runner.val_check_interval` triggers validation. Standalone embodied: `bash evaluations/run_eval.sh <benchmark> <config_name>` (configs under `evaluations/<benchmark>/`); see [VLA evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla-eval.html). Reasoning/LLM: see [LLM evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/llm-eval.html).
 
 ---
 
