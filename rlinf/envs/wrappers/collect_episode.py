@@ -365,7 +365,6 @@ class CollectEpisode(gym.Wrapper):
                 if "intervene_action" in env_info:
                     action_dim = self._slice_data(action, env_idx).shape[-1]
                     if env_info["intervene_action"].numel() > action_dim:
-                        # realworld, last step in a chunk, hold all intervene actions and reshaped into one
                         chunk_size = (
                             env_info["intervene_action"]
                             .reshape(-1, action_dim)

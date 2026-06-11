@@ -450,10 +450,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         obs_dict["actions"] = batch["actions"].reshape(
             bsz, self.config.action_chunk, -1
         )
-        # raise ValueError(f"!!!{obs_dict.keys()}")
         obs_dict["prompt"] = batch["task"]
-        # for key in obs_dict.keys():
-        #     print(f"prepare chk, {key}: {obs_dict[key].shape if hasattr(obs_dict[key], "shape") else obs_dict[key]}")
         processed_obs = self.input_transform(obs_dict, transpose=False)
         processed_obs = self.precision_processor(processed_obs)
         observation = _model.Observation.from_dict(processed_obs)

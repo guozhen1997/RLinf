@@ -158,7 +158,6 @@ class MLPPolicy(nn.Module, BasePolicy):
             raise NotImplementedError
 
     def sft_forward(self, data, **kwargs):
-        # breakpoint()
         states = data["states"]
         target_actions = data["action"]
 
