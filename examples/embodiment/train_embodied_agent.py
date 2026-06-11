@@ -41,6 +41,7 @@ def main(cfg) -> None:
     )
     component_placement = HybridComponentPlacement(cfg, cluster)
 
+    # Create actor worker group
     actor_placement = component_placement.get_strategy("actor")
     use_training_pipeline = bool(cfg.runner.get("use_training_pipeline", False))
 
@@ -85,11 +86,13 @@ def main(cfg) -> None:
         cluster, name=cfg.actor.group_name, placement_strategy=actor_placement
     )
 
+    # Create rollout worker group
     rollout_placement = component_placement.get_strategy("rollout")
     rollout_group = MultiStepRolloutWorker.create_group(cfg).launch(
         cluster, name=cfg.rollout.group_name, placement_strategy=rollout_placement
     )
 
+    # Create env worker group
     env_placement = component_placement.get_strategy("env")
     env_group = EnvWorker.create_group(cfg).launch(
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
@@ -99,6 +102,7 @@ def main(cfg) -> None:
     if cfg.get("reward", {}).get("use_reward_model", False) and not cfg.get(
         "reward", {}
     ).get("standalone_realworld", False):
+        # Create reward worker group
         reward_placement = component_placement.get_strategy("reward")
         reward_group = EmbodiedRewardWorker.create_group(cfg).launch(
             cluster, name=cfg.reward.group_name, placement_strategy=reward_placement
