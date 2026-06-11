@@ -324,10 +324,6 @@ class EmbodiedRewardWorker(Worker):
         with torch.no_grad():
             outputs = self.model(images)
             probs = outputs["probabilities"]
-            if self._use_reward_prob:
-                self.log_info(
-                    f"[reward_model/probs] shape={probs.shape} values={probs.cpu().tolist()}"
-                )
             rewards = (probs > self.reward_threshold).to(probs.dtype)
 
         if rewards.dim() == 1:

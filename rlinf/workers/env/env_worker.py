@@ -770,7 +770,8 @@ class EnvWorker(Worker):
                     "obs": env_batch["obs"],
                     "final_obs": env_batch["final_obs"],
                 },
-                tag="train_rollout_results",
+                tag="rollout_results",
+                mode="train",
                 env_decoupled_mode=self.env_decoupled_mode,
             )
 
@@ -881,7 +882,7 @@ class EnvWorker(Worker):
                     rollout_result = self.recv_from(
                         group_name=self.cfg.rollout.group_name,
                         channel=input_channel,
-                        tag="train_rollout_results",
+                        tag="rollout_results",
                         batch_size=self.train_batch_size,
                         merge_fn=RolloutResult.merge_rollout_results,
                         infer_batch_size_fn=self._infer_rollout_batch_size,
@@ -932,7 +933,8 @@ class EnvWorker(Worker):
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
                         },
-                        tag="train_rollout_results",
+                        tag="rollout_results",
+                        mode="train",
                         env_decoupled_mode=self.env_decoupled_mode,
                     )
                     if self.collect_transitions:
@@ -973,7 +975,7 @@ class EnvWorker(Worker):
                 rollout_result = self.recv_from(
                     group_name=self.cfg.rollout.group_name,
                     channel=input_channel,
-                    tag="train_rollout_results",
+                    tag="rollout_results",
                     batch_size=self.train_batch_size,
                     merge_fn=RolloutResult.merge_rollout_results,
                     infer_batch_size_fn=self._infer_rollout_batch_size,
@@ -1077,7 +1079,9 @@ class EnvWorker(Worker):
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
                         },
-                        tag="eval_obs",
+                        tag="rollout_results",
+                        mode="eval",
+                        env_decoupled_mode=self.env_decoupled_mode,
                     )
 
             for eval_step in range(self.n_eval_chunk_steps):
@@ -1085,8 +1089,9 @@ class EnvWorker(Worker):
                     raw_chunk_actions = self.recv_from(
                         group_name=self.cfg.rollout.group_name,
                         channel=input_channel,
-                        tag="eval_actions",
+                        tag="eval_rollout_results",
                         batch_size=self.eval_batch_size,
+                        env_decoupled_mode=self.env_decoupled_mode,
                     )
                     if isinstance(raw_chunk_actions, torch.Tensor):
                         raw_chunk_actions = raw_chunk_actions.detach().cpu().numpy()
@@ -1117,7 +1122,9 @@ class EnvWorker(Worker):
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
                         },
-                        tag="eval_obs",
+                        tag="rollout_results",
+                        eval="eval",
+                        env_decoupled_mode=self.env_decoupled_mode,
                     )
 
             self.finish_rollout(mode="eval")

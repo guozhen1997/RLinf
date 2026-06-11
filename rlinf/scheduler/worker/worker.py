@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
+
 import ctypes
 import functools
 import inspect
@@ -855,6 +857,7 @@ class Worker(metaclass=WorkerMeta):
         split_fn: Optional[Callable[[Any, list[int]], list[Any]]] = None,
         enable_p2p: bool = False,
         options: Optional["CollectiveGroupOptions"] = None,
+        mode: str = None,
         env_decoupled_mode: bool = False,
         send_queue_size: int = 0,
     ):
@@ -954,6 +957,7 @@ class Worker(metaclass=WorkerMeta):
                 batch_size=batch_size,
                 batch_index_map=batch_index_map,
                 send_queue_size=send_queue_size,
+                mode=mode,
             )
             if batch_index_map is not None:
                 # delete the used batch_index_map item to avoid duplicate sending
@@ -976,7 +980,7 @@ class Worker(metaclass=WorkerMeta):
                 # }
                 # The batch_index is the index of the batch in the data.
                 # The batch is the data to send.
-                # batch_index: {send_rank}_{batch_idx}_{tag}
+                # batch_index: {send_rank}_{batch_idx}_{mode}_{tag}
                 # The send_rank is the rank of the worker that originally sent the data.
                 # The batch_idx is the index of the batch in the data.
                 # The tag is the tag of the data.
@@ -1009,6 +1013,91 @@ class Worker(metaclass=WorkerMeta):
         if async_op:
             return AsyncRouteWork(works, lambda _: None)
         return None
+
+    def batch_send_to(
+        self,
+        group_name: str,
+        channel: Any | None,
+        data: Any,
+        *,
+        tag: str | None = None,
+        split_fn: Optional[Callable[[Any, list[int]], list[Any]]] = None,
+        split_sizes: list[int],
+    ):
+        """Route one payload to a worker group through a channel or direct P2P send.
+
+        When ``enable_p2p`` is True, the same routing plan as the channel path is used, but
+        each shard is sent with :meth:`send` to the destination rank instead of ``channel.put``.
+        In that case ``channel`` may be omitted (pass ``None``).
+
+        When ``env_decoupled_mode`` is True, this function will change the plan.entries to send the data to one of the rollout workers.
+        The rollout worker will receive the data and handle it to this env worker.
+
+        Args:
+            group_name: Destination worker group name.
+            channel: Channel used for routed transfer. May be ``None`` when
+                ``enable_p2p`` is True.
+            data: Payload to send.
+            route_key: Optional key that separates independent routed streams.
+            tag: Optional routing tag used to build channel keys.
+            async_op: If True, return an async work handle.
+            batch_size: Optional local batch size. If omitted, it is inferred
+                from ``data``.
+            split_fn: Optional custom function for splitting ``data`` by shard
+                sizes.
+            enable_p2p: If True, use collective ``send`` instead of
+                ``channel.put``.
+            options: Optional collective options forwarded to ``send``.
+            env_decoupled_mode: If True, build an env-decoupled route plan.
+            send_queue_size: The length of the send queue.
+
+        Returns:
+            AsyncRouteWork if ``async_op`` is True, otherwise None.
+        """
+
+        from ..collective import AsyncRouteWork
+        from .routing import split_batch
+
+        assert len(self.batch_index_map[tag]) > 0, f"batch_index_map[tag] {self.batch_index_map[tag]}[{tag}] is empty"
+        assert len(self.batch_index_map[tag]) == len(split_sizes), f"batch_index_map[{tag}] {self.batch_index_map[tag]} length should equal split_sizes {split_sizes}"
+
+        payloads = (
+            split_fn(data, split_sizes)
+            if split_fn is not None
+            else split_batch(data, split_sizes)
+        )
+
+        works = []
+        for i, payload in enumerate(payloads):
+            batch_index = self.batch_index_map[tag][i]
+            _, _, mode, _ = _split_channel_message(batch_index)
+            # After enabling env_decoupled_mode, the data sending format is as follows:
+            # {
+            #     "batch_index": batch_index,
+            #     "batch": batch,
+            # }
+            # The batch_index is the index of the batch in the data.
+            # The batch is the data to send.
+            # batch_index: {send_rank}_{batch_idx}_{mode}_{tag}
+            # The send_rank is the rank of the worker that originally sent the data.
+            # The batch_idx is the index of the batch in the data.
+            # The tag is the tag of the data.
+            senditem = {
+                "batch_index": batch_index,
+                "batch": payload,
+            }
+            if mode is not None:
+                key = f"{mode}_{tag}"
+            else:
+                key = tag
+            work = channel.put(
+                item=senditem,
+                key=key,
+                async_op=True,
+            )
+            works.append(work)
+
+        return AsyncRouteWork(works, lambda _: None)
 
     def recv_from(
         self,
@@ -1120,7 +1209,7 @@ class Worker(metaclass=WorkerMeta):
                 return None
             if env_decoupled_mode:
                 # get the tag from the received_items
-                _, _, tag = _split_channel_message(received_items[0]["batch_index"])
+                _, _, _, tag = _split_channel_message(received_items[0]["batch_index"])
                 if tag in self.batch_index_map:
                     # If the batch_index_map is provided,
                     # Save the batch_index to the batch_index_map.
@@ -1140,8 +1229,8 @@ class Worker(metaclass=WorkerMeta):
                         batch_index = item["batch_index"]
                         received_item = item["batch"]
                         # divide the batch_index into send_rank, batch_idx and tag
-                        # batch_index: {send_rank}_{batch_idx}_{tag}
-                        _, batch_idx, _ = _split_channel_message(batch_index)
+                        # batch_index: {send_rank}_{batch_idx}_{mode}_{tag}
+                        _, batch_idx, _, _ = _split_channel_message(batch_index)
                         sorted_received_items.append((batch_idx, received_item))
                     sorted_received_items.sort(key=lambda x: x[0])
                     received_items = [x[1] for x in sorted_received_items]
@@ -1187,6 +1276,152 @@ class Worker(metaclass=WorkerMeta):
             ]
         else:
             received_items = [channel.get(key=entry.key) for entry in plan.entries]
+        return _finalize(received_items)
+
+    async def timeout_recv_from(
+        self,
+        group_name: str,
+        channel: Any | None,
+        *,
+        route_key: Any = None,
+        tag: str | None = None,
+        batch_size: int | None = None,
+        merge_fn: Optional[Callable[[list[Any]], Any]] = None,
+        infer_batch_size_fn: Optional[Callable[[Any], int]] = None,
+        timeout_time: float = 0.2,
+        recv_queue_size: int = 0,
+    ):
+        """Receive one routed payload or shard set from a worker group via channel or P2P recv.
+
+        When ``enable_p2p`` is True, each shard is received with :meth:`recv` from the source
+        rank instead of ``channel.get``. ``channel`` may be ``None``.
+
+        Args:
+            group_name: Source worker group name.
+            channel: Channel used for routed transfer. May be ``None`` when
+                ``enable_p2p`` is True.
+            route_key: Optional key that separates independent routed streams.
+            tag: Optional routing tag used to build channel keys.
+            batch_size: Optional expected local batch size after routing.
+            merge_fn: Optional custom function for merging received shards.
+            infer_batch_size_fn: Optional custom function for inferring shard
+                batch size during validation.
+            recv_queue_size: The length of the recv queue.
+
+        Returns:
+            The received payload, a merged payload, or AsyncRouteWork when
+            ``async_op`` is True.
+        """
+       
+        from .routing import (
+            env_decoupled_build_recv_plan,
+            get_group_world_size,
+            merge_batches,
+            validate_batch_size,
+        )
+
+        world_size = get_group_world_size(self._manager_proxy, group_name)
+
+        if tag in self.batch_index_map:
+            # if the batch_index_map has this tag
+            # The sending and receiving logic of batch_index_map is as follows:
+            # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
+            # Use the batch_index_map[tag] to get the batch_index to create the send plan ->
+            # Send data to the worker that originally sent it.
+            # The recv_rank don't need to be provided
+            # The current worker will directly and arbitrarily fetch any data from the channel.
+            recv_rank = None
+        else:
+            # if the batch_index_map does not have this tag
+            # The sending and receiving logic is as follows:
+            # Save the send_rank in batch_index -> send the data and batch_index to channel ->
+            # Any workers can recv the data and save the batch_index -> handle the data in the worker ->
+            # Send the data to the worker that originally sent it by the batch_index.
+            # In this recv_from, the processed data will be received, so recv_rank needs to be set to the current worker rank
+            recv_rank = self._rank
+        plan = env_decoupled_build_recv_plan(
+            src_group_name=group_name,
+            dst_group_name=self.worker_address.root_group_name,
+            recv_rank=recv_rank,
+            src_world_size=self._world_size,
+            dst_world_size=world_size,
+            tag=tag,
+            route_key=route_key,
+            batch_size=batch_size,
+            recv_queue_size=recv_queue_size,
+        )
+
+        def _finalize(received_items: list[Any]):
+            if not received_items:
+                return None
+            # get the tag from the received_items
+            _, _, _, tag = _split_channel_message(received_items[0]["batch_index"])
+            if tag in self.batch_index_map:
+                # If the batch_index_map is provided,
+                # Save the batch_index to the batch_index_map.
+                list_received_items = []
+                for item in received_items:
+                    batch_index = item["batch_index"]
+                    received_item = item["batch"]
+                    list_received_items.append(received_item)
+                    # Save the batch_index to the batch_index_map.
+                    self.batch_index_map[tag].append(batch_index)
+                received_items = list_received_items
+            else:
+                # Otherwise, the worker get the batch_index from the channel.
+                # Sort the works by the batch_index.
+                sorted_received_items = []
+                for item in received_items:
+                    batch_index = item["batch_index"]
+                    received_item = item["batch"]
+                    # divide the batch_index into send_rank, batch_idx and tag
+                    # batch_index: {send_rank}_{batch_idx}_{mode}_{tag}
+                    _, batch_idx, _, _ = _split_channel_message(batch_index)
+                    sorted_received_items.append((batch_idx, received_item))
+                sorted_received_items.sort(key=lambda x: x[0])
+                received_items = [x[1] for x in sorted_received_items]
+
+            split_sises = [entry.batch_size for entry in plan.entries]
+            for item, entry in zip(received_items, plan.entries):
+                validate_batch_size(
+                    data=item,
+                    expected_batch_size=entry.batch_size,
+                    infer_batch_size_fn=infer_batch_size_fn,
+                )
+            if merge_fn is not None:
+                return merge_fn(received_items)
+            if len(received_items) == 1:
+                return received_items[0]
+            return merge_batches(received_items), split_sises
+
+        timeout_time = timeout_time + time.time()
+        get_items = None
+        max_item_num = len(plan.entries)
+        get_item_num = 0
+        received_items = []
+        while get_item_num < max_item_num:
+            # get the items
+            if get_items is None:
+                get_items = channel.get(key=plan.entries[get_item_num].key, async_op=True)
+            else:
+                # Now, the worker is getting a item, sleep to wait
+                await asyncio.sleep(0.001)
+            
+            # handle the get_items finish
+            if get_items.done():
+                # save the data and init the get_items to get next data
+                received_items.append(await get_items.async_wait())
+                get_items = None
+                get_item_num = get_item_num + 1
+
+            # handle the timeout case
+            if time.time() >= timeout_time:
+                max_item_num = get_item_num
+                if get_items is None:
+                    received_items.append(await get_items.async_wait())
+                    get_items = None
+                    get_item_num = get_item_num + 1
+
         return _finalize(received_items)
 
     def get_name(self) -> str:

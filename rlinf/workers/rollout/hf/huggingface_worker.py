@@ -443,35 +443,58 @@ class MultiStepRolloutWorker(Worker):
     async def evaluate(self, input_channel: Channel, output_channel: Channel):
         if self.enable_offload:
             self.reload_model()
-        for _ in tqdm(
-            range(self.cfg.algorithm.eval_rollout_epoch),
-            desc="Evaluating Rollout Epochs",
-            disable=(self._rank != 0),
-        ):
-            for _ in range(self.n_eval_chunk_steps):
-                for _ in range(self.num_pipeline_stages):
-                    env_output = await self.recv_from(
-                        group_name=self.cfg.env.group_name,
-                        channel=input_channel,
-                        tag="eval_obs",
-                        async_op=True,
-                        batch_size=self.eval_batch_size,
-                        merge_fn=self._merge_obs_batches,
-                        infer_batch_size_fn=self._infer_env_batch_size,
-                    ).async_wait()
-                    actions, _ = self.predict(env_output["obs"], mode="eval")
-                    if isinstance(actions, torch.Tensor):
-                        actions = actions.detach().cpu().contiguous()
-                    self.send_to(
-                        group_name=self.cfg.env.group_name,
-                        channel=output_channel,
-                        data=actions,
-                        tag="eval_actions",
-                        async_op=True,
-                    )
+        if self.env_decoupled_mode:
+            while True:
+                env_output, split_sizes = await self.timeout_recv_from(
+                    group_name=self.cfg.env.group_name,
+                    channel=input_channel,
+                    tag="rollout_results",
+                    batch_size=self.eval_batch_size,
+                    merge_fn=self._merge_obs_batches,
+                    infer_batch_size_fn=self._infer_env_batch_size,
+                    timeout_time=0.2,
+                    recv_queue_size=self.rollout_queue_size,
+                ).async_wait()
+                actions, _ = self.predict(env_output["obs"], mode="eval")
+                if isinstance(actions, torch.Tensor):
+                    actions = actions.detach().cpu().contiguous()
+                self.batch_send_to(
+                    group_name=self.cfg.env.group_name,
+                    channel=output_channel,
+                    data=actions,
+                    tag="rollout_results",
+                    split_sizes=split_sizes,
+                )
+        else:
+            for _ in tqdm(
+                range(self.cfg.algorithm.eval_rollout_epoch),
+                desc="Evaluating Rollout Epochs",
+                disable=(self._rank != 0),
+            ):
+                for _ in range(self.n_eval_chunk_steps):
+                    for _ in range(self.num_pipeline_stages):
+                        env_output = await self.recv_from(
+                            group_name=self.cfg.env.group_name,
+                            channel=input_channel,
+                            tag="eval_obs",
+                            async_op=True,
+                            batch_size=self.eval_batch_size,
+                            merge_fn=self._merge_obs_batches,
+                            infer_batch_size_fn=self._infer_env_batch_size,
+                        ).async_wait()
+                        actions, _ = self.predict(env_output["obs"], mode="eval")
+                        if isinstance(actions, torch.Tensor):
+                            actions = actions.detach().cpu().contiguous()
+                        self.send_to(
+                            group_name=self.cfg.env.group_name,
+                            channel=output_channel,
+                            data=actions,
+                            tag="eval_actions",
+                            async_op=True,
+                        )
 
-        if self.enable_offload:
-            self.offload_model()
+            if self.enable_offload:
+                self.offload_model()
 
     def offload_model(self):
         if self.enable_cuda_graph:

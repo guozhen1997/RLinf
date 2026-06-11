@@ -180,6 +180,7 @@ def env_decoupled_build_send_plan(
     tag: str | None,
     route_key: Any = None,
     batch_size: int,
+    mode: str = None,
     batch_index_map: list[str] | None = None,
     send_queue_size: int = 0,
 ) -> RoutePlan:
@@ -199,12 +200,13 @@ def env_decoupled_build_send_plan(
             # if the batch_index_map is provided, use the batch_index_map to get the batch_index
             batch_index = batch_index_map[index]
             # get the send_rank from the batch_index
-            send_rank, _, _ = _split_channel_message(batch_index)
+            send_rank, _, _, tag = _split_channel_message(batch_index)
         else:
             # Otherwise, use src_rank, index and tag to construct batch_index.
             batch_index = _build_channel_message(
                 send_rank=src_rank,
                 batch_idx=index,
+                mode=mode,
                 tag=tag,
             )
             # set the send_rank to None

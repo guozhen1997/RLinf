@@ -165,16 +165,15 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 if self._background_weight_sync_active:
                     await self._poll_background_weight_sync()
                 await self.wait_if_stale()
-                decoupled_generate_time = decoupled_generate_time + 1
-            env_output = await self.recv_from(
+            decoupled_generate_time = decoupled_generate_time + 1
+            env_output, split_sizes = await self.timeout_recv_from(
                 group_name=self.cfg.env.group_name,
                 channel=input_channel,
-                tag="train_rollout_results",
-                async_op=True,
+                tag="rollout_results",
                 batch_size=self.train_batch_size,
                 merge_fn=self._merge_obs_batches,
                 infer_batch_size_fn=self._infer_env_batch_size,
-                env_decoupled_mode=self.env_decoupled_mode,
+                timeout_time=0.2,
                 recv_queue_size=self.rollout_queue_size,
             ).async_wait()
             actions, result = self.predict(env_output["obs"])
@@ -203,14 +202,11 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     dtype=torch.float32,
                 ),
             )
-            self.send_to(
+            self.batch_send_to(
                 group_name=self.cfg.env.group_name,
                 channel=output_channel,
                 data=rollout_result,
-                tag="train_rollout_results",
-                async_op=True,
-                batch_size=self.train_batch_size,
+                tag="rollout_results",
                 split_fn=self._split_rollout_result,
-                env_decoupled_mode=self.env_decoupled_mode,
-                send_queue_size=self.rollout_queue_size,
+                split_sizes=split_sizes,
             )
