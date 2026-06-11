@@ -37,7 +37,7 @@ runner:
 
   resume_dir: null
   ckpt_path: null
-  expert_ckpt_path: /mnt/public2/hongzhi/per-frame-buffer/RLinf/logs/20260503-16:17:37/test_openpi/checkpoints/global_step_10000/actor/model_state_dict/full_weights.pt
+  expert_ckpt_path: "/path/to/ckpt" # fill expert ckpt path here
 
 algorithm:
   # dagger specific args
@@ -114,11 +114,11 @@ rollout:
   collect_prev_infos: False
 
   model:
-    model_path: /mnt/public2/hongzhi/models/RLinf-Pi0-LIBERO-Spatial-Object-Goal-SFT
+    model_path: ""
     precision: ${actor.model.precision}
 
   expert_model: # define expert model_path here
-    model_path: /mnt/public2/hongzhi/models/RLinf-Pi0-LIBERO-Spatial-Object-Goal-SFT
+    model_path: ""
     precision: ${actor.model.precision}
 
 actor:
@@ -146,7 +146,7 @@ actor:
 
   model:
     precision: null
-    model_path: /mnt/public2/hongzhi/models/RLinf-Pi0-LIBERO-Spatial-Object-Goal-SFT
+    model_path: ""
     num_action_chunks: 10
     add_value_head: False
     openpi:
