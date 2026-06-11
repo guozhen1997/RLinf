@@ -35,6 +35,7 @@ from rlinf.envs.action_utils import prepare_actions
 from rlinf.envs.wrappers import RecordVideo
 from rlinf.scheduler import Channel, Cluster, Worker
 from rlinf.utils.comm_mapping import CommMapper
+from rlinf.utils.data_iter_utils import split_list
 from rlinf.utils.metric_utils import compute_split_num
 from rlinf.utils.nested_dict_process import (
     clone_nested_to_cpu,
@@ -299,6 +300,7 @@ class EnvWorker(Worker):
                     finalize_interval=getattr(
                         env_cfg.data_collection, "finalize_interval", 100
                     ),
+                    defer_write=getattr(env_cfg.data_collection, "defer_write", False),
                 )
             env_list.append(env)
         return env_list
@@ -427,8 +429,10 @@ class EnvWorker(Worker):
         """
         This function is used to interact with the environment.
         """
-        chunk_actions = prepare_actions(
-            raw_chunk_actions=chunk_actions,
+        exec_actions = prepare_actions(
+            raw_chunk_actions=chunk_actions["raw_actions"]
+            if isinstance(chunk_actions, dict)
+            else chunk_actions,
             env_type=self.cfg.env.train.env_type,
             model_type=self.cfg.actor.model.model_type,
             num_action_chunks=self.cfg.actor.model.num_action_chunks,
@@ -436,6 +440,10 @@ class EnvWorker(Worker):
             policy=self.cfg.actor.model.get("policy_setup", None),
             wm_env_type=self.cfg.env.train.get("wm_env_type", None),
         )
+        if isinstance(chunk_actions, dict):
+            chunk_actions["actions"] = exec_actions
+        else:
+            chunk_actions = exec_actions
         env_info = {}
 
         obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = (
@@ -1012,12 +1020,19 @@ class EnvWorker(Worker):
         )
 
     def record_env_metrics(
-        self,
-        env_metrics: dict[str, list],
-        env_info: dict[str, Any],
+        self, env_metrics: dict[str, list], env_info: dict[str, Any], epoch: int
     ):
         for key, value in env_info.items():
-            env_metrics.setdefault(key, []).append(value)
+            if (
+                not self.cfg.env.train.auto_reset
+                and not self.cfg.env.train.ignore_terminations
+            ):
+                if key in env_metrics and len(env_metrics[key]) > epoch:
+                    env_metrics[key][epoch] = value
+                else:
+                    env_metrics[key].append(value)
+            else:
+                env_metrics[key].append(value)
 
     def store_last_obs_and_intervened_info(self, env_output_list: list[EnvOutput]):
         self.last_obs_list = [env_output.obs for env_output in env_output_list]
@@ -1038,6 +1053,21 @@ class EnvWorker(Worker):
             channel.put(trajectory, async_op=True)
         del trajectories
         gc.collect()
+
+    @Worker.timer("env/send_lerobot_episodes")
+    async def send_lerobot_episodes(
+        self, episodes: list[list[dict]], channel: Channel
+    ) -> None:
+        if self.actor_split_num <= 1:
+            chunks = [episodes]
+        else:
+            chunks = split_list(
+                episodes,
+                self.actor_split_num,
+                enforce_divisible_batch=False,
+            )
+        for chunk in chunks:
+            channel.put(chunk, async_op=True)
 
     @Worker.timer("run_interact_once")
     async def _run_interact_once(
@@ -1115,21 +1145,32 @@ class EnvWorker(Worker):
                         terminations=env_output.terminations,
                         rewards=rewards,
                     )
-                    self.rollout_results[stage_id].append_step_result(chunk_step_result)
-                    if (
-                        self.reward_mode == "history_buffer"
-                        and self.history_reward_assign
-                        and reward_model_output is not None
-                    ):
-                        self.assign_history_reward(stage_id, reward_model_output)
-                    if rollout_result.save_flags is not None:
-                        self.rollout_results[stage_id].mark_last_step_with_flags(
-                            rollout_result.save_flags
-                        )
 
-                    env_output, env_info = self.env_interact_step(
-                        rollout_result.actions, stage_id
-                    )
+                    if self.cfg.actor.get("data_source", "buffer") == "buffer":
+                        self.rollout_results[stage_id].append_step_result(
+                            chunk_step_result
+                        )
+                        if rollout_result.save_flags is not None:
+                            self.rollout_results[stage_id].mark_last_step_with_flags(
+                                rollout_result.save_flags
+                            )
+
+                    if self.cfg.env.train.get("data_collection", None) and getattr(
+                        self.cfg.env.train.data_collection, "enabled", False
+                    ):
+                        actions = {
+                            "raw_actions": rollout_result.actions,
+                            "save_flags": rollout_result.save_flags,
+                        }
+                        if rollout_result.save_flags is not None:
+                            expert_actions = rollout_result.forward_inputs.get(
+                                "action", None
+                            )
+                            if expert_actions is not None:
+                                actions["expert_actions"] = expert_actions
+                    else:
+                        actions = rollout_result.actions
+                    env_output, env_info = self.env_interact_step(actions, stage_id)
                     env_batch = env_output.to_dict()
                     self.send_env_batch(
                         rollout_channel,
@@ -1149,20 +1190,16 @@ class EnvWorker(Worker):
                         )
 
                     env_outputs[stage_id] = env_output
-                    should_record = (
-                        self.cfg.env.train.auto_reset
-                        or self.cfg.env.train.ignore_terminations
-                        or chunk_step_idx == self.n_train_chunk_steps - 1
-                    )
-                    if should_record:
-                        self.record_env_metrics(env_metrics, env_info)
+                    self.record_env_metrics(env_metrics, env_info, epoch)
+
             for stage_id in range(self.stage_num):
                 env_output = env_outputs[stage_id]
                 if env_output.intervene_actions is not None:
-                    self.rollout_results[stage_id].update_last_actions(
-                        env_output.intervene_actions,
-                        env_output.intervene_flags,
-                    )
+                    if self.cfg.actor.get("data_source", "buffer") == "buffer":
+                        self.rollout_results[stage_id].update_last_actions(
+                            env_output.intervene_actions,
+                            env_output.intervene_flags,
+                        )
 
                 reward_model_output = None
                 if reward_channel is not None:
@@ -1191,7 +1228,8 @@ class EnvWorker(Worker):
                     terminations=env_output.terminations,
                     rewards=rewards,
                 )
-                self.rollout_results[stage_id].append_step_result(chunk_step_result)
+                if self.cfg.actor.get("data_source", "buffer") == "buffer":
+                    self.rollout_results[stage_id].append_step_result(chunk_step_result)
                 if (
                     self.reward_mode == "history_buffer"
                     and self.history_reward_assign
@@ -1215,13 +1253,23 @@ class EnvWorker(Worker):
             self.finish_rollout()
 
         if not self.use_training_pipeline and actor_channel is not None:
-            for stage_id in range(self.stage_num):
-                await self.send_rollout_trajectories(
-                    self.rollout_results[stage_id], actor_channel
-                )
-            # reduce memory peak
-            self.rollout_results = []
-            gc.collect()
+            data_source = self.cfg.actor.get("data_source", "buffer")
+            if data_source == "buffer":
+                for stage_id in range(self.stage_num):
+                    await self.send_rollout_trajectories(
+                        self.rollout_results[stage_id], actor_channel
+                    )
+            elif data_source == "lerobot":
+                for stage_id in range(self.stage_num):
+                    collect_wrapper = self._find_collect_wrapper(
+                        self.env_list[stage_id]
+                    )
+                    episodes: list[list[dict]] = (
+                        collect_wrapper.drain_pending_episodes()
+                        if collect_wrapper is not None
+                        else []
+                    )
+                    await self.send_lerobot_episodes(episodes, actor_channel)
 
         for key, value in env_metrics.items():
             env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
@@ -1326,6 +1374,17 @@ class EnvWorker(Worker):
         recv_num = self._component_placement.get_world_size("actor")
         split_num = compute_split_num(recv_num, send_num)
         return split_num
+
+    @staticmethod
+    def _find_collect_wrapper(env):
+        """Traverse env wrappers to find a CollectEpisode instance, or None."""
+        from rlinf.envs.wrappers.collect_episode import CollectEpisode
+
+        while env is not None:
+            if isinstance(env, CollectEpisode):
+                return env
+            env = getattr(env, "env", None)
+        return None
 
     def compute_advantages_and_returns(
         self, rollout_batch: dict[str, torch.Tensor]
