@@ -1,0 +1,145 @@
+# STEAM value model SFT — RLinf FSDP runner.
+#
+# Usage:
+#   bash examples/steam/value/run_steam_sft.sh steam_value_model
+#
+# The model default lives in ``config/model/steam.yaml`` and the FSDP
+# training backend is loaded from the shared
+# ``examples/sft/config/training_backend/fsdp.yaml`` via the hydra
+# searchpath below.
+
+defaults:
+  - model/steam@actor.model
+  - training_backend/fsdp@actor.fsdp_config
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:REPO_PATH}/examples/sft/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor,env,rollout: all
+
+runner:
+  task_type: sft
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "steam_sft"
+    logger_backends: ["tensorboard"]
+
+  max_epochs: 8000
+  max_steps: -1
+  val_check_interval: 500
+  save_interval: 2000
+
+data:
+  # One or more LeRobot datasets of success demos. Each entry must have a
+  # dataset_path; extra fields like prompt / weight override per-dataset values.
+  train_data_paths:
+    - dataset_path: "/path/to/sft_dataset"
+      type: sft
+    - dataset_path: "/path/to/rollout_dataset"
+      type: rollout
+  eval_data_paths:
+    - dataset_path: "/path/to/eval_dataset"
+  # When mixing multiple train datasets, sample according to each entry's
+  # optional `weight` and optionally rebalance by dataset length.
+  balance_weights: true
+  seed: 42
+  dataset_type: sft
+
+  # Camera view names that the PairDataset loads from each LeRobot sample.
+  # Any missing views become zero-placeholders with mask=False in the
+  # processor output (masked out during camera mean-pool).
+  camera_keys:
+    - image
+    - wrist_image
+  state_key: state
+
+  # Pair sampling — same k for positive and negative. Negatives are
+  # positive pairs fed in reversed order.
+  k: 8
+  only_success: true
+
+  min_episode_length: null
+
+  # Loader knobs (mirrors the recap value-sft surface).
+  train_num_workers: 8
+  eval_num_workers: 4
+  prefetch_factor: 4
+  persistent_workers: false
+  pin_memory: false
+  do_augment: true
+
+algorithm:
+  adv_type: gae   # unused here — retained for config shape parity
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 4
+  global_batch_size: 32
+  seed: 0
+
+  # `actor.model` defaults come from ``model/steam``.
+  # Per-experiment overrides go here.
+  model:
+    # Load backbone weights as fp32 master copy. FSDP keeps the fp32 master
+    # and casts to bf16 only for forward compute (param_dtype below). Loading
+    # in bf16 makes the master copy bf16 too, which collapses Adam updates
+    # and produced non-finite hidden_states by step 3 of training.
+    precision: bf16
+    fusion_hidden_dim: 512
+    dropout: 0.1
+    label_smoothing: 0.05
+    num_frames_per_pair: 2
+    vision_repo_id: "/path/to/siglip"
+    language_repo_id: "/path/to/gemma3"
+    tokenizer_path: "/path/to/gemma/tokenizer"
+    freeze_vision_encoder: false
+    freeze_language_model: false
+    include_state_in_prompt: false
+    max_state_dim: 32
+    state_discretization_bins: 256
+    max_token_len: 200
+    ensemble_size: 4
+    inference_mode: "wco"
+    uwo_lambda: 1.0
+    ensemble_head_seed_base: 0
+    use_gradient_checkpointing: true
+
+  optim:
+    lr: 5.0e-5
+    value_lr: 5.0e-5
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-8
+    weight_decay: 1.0e-5
+    clip_grad: 10.0
+    lr_scheduler: "cosine"
+    lr_warmup_steps: 500
+    total_training_steps: 8000
+    min_lr: 1.0e-6
+
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "full_shard"
+    use_orig_params: true
+    gradient_checkpointing: False
+    mixed_precision:
+      param_dtype: bf16
+      reduce_dtype: fp32
+      buffer_dtype: fp32
+
+reward:
+  use_reward_model: False
+
+critic:
+  use_critic_model: False

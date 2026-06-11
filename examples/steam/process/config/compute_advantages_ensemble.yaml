@@ -1,0 +1,75 @@
+# Advantage computation using the STEAM ensemble value model.
+#
+# The label written per frame is ``True`` iff the ensemble-aggregated
+# p(progress) of the pair (frame_t, frame_{t+k}) exceeds
+# ``advantage.positive_threshold``. ``dataset_type=="sft"`` entries are
+# always labelled True (they are success demos by construction).
+#
+# Usage:
+#   cd examples/steam/process
+#   python compute_advantages_ensemble.py \
+#       --config-name compute_advantages_ensemble
+#   # Multi-GPU
+#   torchrun --nproc_per_node=4 compute_advantages_ensemble.py \
+#       --config-name compute_advantages_ensemble
+
+advantage:
+  value_checkpoint: /path/to/steam_checkpoint/actor
+  device: "cuda"
+  # Ensemble does K forward passes per sample on a 2-frame pair, so batch
+  # size sits well below the value-regression default of 1024.
+  batch_size: 256
+  num_dataloader_workers_per_gpu: 12
+  prefetch_factor: 2
+
+  # Required. "threshold" uses positive_threshold below; "quantile" pools
+  # advantage_continuous across all rollout datasets and labels the top
+  # positive_quantile fraction of rollout frames as True.
+  label_mode: threshold
+
+  # advantage_continuous > positive_threshold ⇒ advantage = True (rollout
+  # only). Used only when label_mode == threshold.
+  positive_threshold: 0.8
+  # Fraction of top rollout frames to label True when label_mode == quantile.
+  # positive_quantile: 0.3
+
+  tag: steam_k8_ensemble4_wco
+
+  model:
+    inference_mode: "wco"
+    precision: "bf16"
+
+data:
+  model_type: "pi05"
+  robot_type: "libero"
+
+  # Pair stride — must match the training-time data.k for the loaded
+  # checkpoint. Mismatching k changes the temporal scale the model was
+  # trained on and silently degrades p(progress).
+  k: 8
+
+  # Camera views must match the training config; the processor's
+  # image_keys were saved with these view names in the checkpoint.
+  camera_keys:
+    - image
+    - wrist_image
+  state_key: state
+
+  # Must match training-time include_state_in_prompt.
+  include_state_in_prompt: false
+  max_state_dim: 32
+
+  prompt: "perform the task"
+
+  # Same dataset list as the training config so the corpus the ensemble
+  # was trained on is scored. Override per run as needed.
+  train_data_paths:
+    - dataset_path: /path/to/sft_dataset
+      type: sft
+    - dataset_path: /path/to/rollout_dataset
+      type: rollout
+
+distributed:
+  enabled: true
+  backend: "nccl"
+  timeout: 3600

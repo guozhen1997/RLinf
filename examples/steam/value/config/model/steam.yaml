@@ -1,0 +1,65 @@
+model_type: "steam"
+
+# Backbone load dtype = FSDP master parameter dtype. Keep this fp32 even
+# when ``fsdp_config.mixed_precision.param_dtype: bf16`` is set — that
+# combination is the standard "fp32 master, bf16 forward" recipe. Loading
+# in bf16 makes the master copy bf16 too, which collapses Adam's second
+# moment after a couple of steps and produces non-finite hidden_states.
+precision: fp32
+is_lora: false
+
+# Backbones (local paths or HF repo ids). SteamProcessor uses
+# tokenizer_path; the backbone loads vision/language encoders via
+# vision_repo_id / language_repo_id.
+vision_repo_id: /path/to/siglip-so400m-patch14-384
+language_repo_id: /path/to/gemma-3-270m
+tokenizer_path: /path/to/gemma-3-270m
+
+# Architecture
+fusion_hidden_dim: 512
+dropout: 0.1
+
+# Binary classification head
+label_smoothing: 0.05
+num_frames_per_pair: 2   # (frame_t, frame_{t+k}) — keep at 2 for the standard recipe
+target_mode: rewind       # rewind | positive_only
+stride_k: null            # filled from data.k by the STEAM SFT worker
+ensemble_size: 1
+inference_mode: "wco"     # mo | wco | uwo
+uwo_lambda: 1.0
+ensemble_head_seed_base: null
+
+# Runtime
+freeze_vision_encoder: false
+freeze_language_model: false
+use_gradient_checkpointing: false
+
+# Prompt + state-in-prompt. When true, the processor
+# builds "Task: {task}, State: {b0 b1 ... bN}\nValue: " from the
+# dataset-provided state. Requires that state reaches the processor already
+# normalised into [-1, 1] (dataset's responsibility; the PairDataset does
+# not normalise).
+max_token_len: 200
+include_state_in_prompt: false
+max_state_dim: 32
+state_discretization_bins: 256
+
+# Optional normalized state-image compatibility branch. This is separate from
+# state-in-prompt: state is embedded by an MLP and compared against image/task
+# embeddings. Keep disabled for legacy runs/checkpoints.
+use_state_compatibility: false
+compatibility_loss_weight: 0.2
+compatibility_negative_mode: same_episode_distance_weighted_plus_perturb
+compatibility_distance_scale: null
+compatibility_same_episode_negative_max_distance: null
+compatibility_negative_min_weight: 0.1
+compatibility_num_same_episode_negatives: 1
+compatibility_num_perturb_negatives: 1
+compatibility_perturb_std: 0.03
+compatibility_perturb_max: 0.12
+compatibility_gate_value: true
+compatibility_gate_frame: tk
+compatibility_gate_floor: 0.0
+
+# Optional: previously trained SteamCriticModel checkpoint to resume.
+# model_path: "/path/to/checkpoint"

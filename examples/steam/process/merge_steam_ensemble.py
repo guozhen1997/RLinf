@@ -1,0 +1,387 @@
+# Copyright 2026 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Merge ARM+ReWiND binary-value checkpoints into an ensemble checkpoint.
+
+The script accepts any mix of:
+
+* Single-model checkpoints with keys like ``model.*``.
+* Ensemble checkpoints, using ``PATH:member_idx`` to extract one member.
+
+Inputs can point at an ``actor`` directory, a ``model_state_dict`` directory,
+or a direct ``full_weights.pt`` file. The output is an inference checkpoint
+containing ``actor/config.json``, tokenizer/processor assets, a merged
+``actor/model_state_dict/full_weights.pt``, and ``actor/merge_manifest.json``.
+Optimizer / FSDP DCP state is intentionally not copied.
+
+Examples:
+    python examples/steam/process/merge_steam_ensemble.py \\
+        --member /path/to/single_seed1/checkpoints/global_step_5000/actor \\
+        --member /path/to/single_seed2/checkpoints/global_step_5000/actor \\
+        --member /path/to/original_ensemble/checkpoints/global_step_6000/actor:2 \\
+        --output /path/to/merged_run/actor
+
+    python examples/steam/process/merge_steam_ensemble.py \\
+        --member /path/to/single/checkpoints/global_step_3000/actor \\
+        --member /path/to/original_ensemble/checkpoints/global_step_3000/actor:1 \\
+        --member /path/to/original_ensemble/checkpoints/global_step_3000/actor:2 \\
+        --output /path/to/merged_numbins16/actor
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import torch
+
+ASSET_NAMES = (
+    "added_tokens.json",
+    "preprocessor_config.json",
+    "processor_config.json",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer.model",
+    "tokenizer_config.json",
+)
+
+CONFIG_COMPAT_KEYS = (
+    "model_type",
+    "num_bins",
+    "stride_k",
+    "fusion_hidden_dim",
+    "num_frames_per_pair",
+    "include_state_in_prompt",
+    "max_state_dim",
+    "vision_repo_id",
+    "language_repo_id",
+    "precision",
+)
+
+
+@dataclass(frozen=True)
+class MemberSpec:
+    """One requested output member."""
+
+    raw: str
+    checkpoint: Path
+    source_member_idx: int | None
+
+
+@dataclass(frozen=True)
+class ResolvedCheckpoint:
+    """Resolved checkpoint paths."""
+
+    actor_dir: Path
+    weights_path: Path
+    config_path: Path
+
+
+def _parse_member_spec(raw: str) -> MemberSpec:
+    """Parse ``PATH`` or ``PATH:member_idx``.
+
+    A plain path is treated as a single-model checkpoint. ``PATH:2`` extracts
+    ``members.2`` from an ensemble checkpoint. Paths with ordinary colons are
+    uncommon on Linux; use absolute POSIX paths for this tool.
+    """
+    if ":" not in raw:
+        return MemberSpec(raw=raw, checkpoint=Path(raw), source_member_idx=None)
+
+    maybe_path, maybe_idx = raw.rsplit(":", 1)
+    if maybe_idx.isdigit():
+        return MemberSpec(
+            raw=raw,
+            checkpoint=Path(maybe_path),
+            source_member_idx=int(maybe_idx),
+        )
+    return MemberSpec(raw=raw, checkpoint=Path(raw), source_member_idx=None)
+
+
+def _resolve_checkpoint(path: Path) -> ResolvedCheckpoint:
+    """Resolve actor/model_state_dict/full_weights paths to canonical files."""
+    path = path.expanduser().resolve()
+
+    if path.is_file():
+        weights_path = path
+        model_state_dir = weights_path.parent
+        actor_dir = model_state_dir.parent if model_state_dir.name == "model_state_dict" else path.parent
+    elif (path / "full_weights.pt").is_file():
+        weights_path = path / "full_weights.pt"
+        actor_dir = path.parent if path.name == "model_state_dict" else path
+    elif (path / "model_state_dict" / "full_weights.pt").is_file():
+        weights_path = path / "model_state_dict" / "full_weights.pt"
+        actor_dir = path
+    else:
+        raise FileNotFoundError(
+            f"Could not find full_weights.pt under {path}. Expected an actor dir, "
+            "model_state_dict dir, or direct full_weights.pt file."
+        )
+
+    config_candidates = [
+        actor_dir / "config.json",
+        actor_dir.parent / "config.json",
+        weights_path.parent / "config.json",
+    ]
+    for config_path in config_candidates:
+        if config_path.is_file():
+            return ResolvedCheckpoint(
+                actor_dir=actor_dir,
+                weights_path=weights_path,
+                config_path=config_path,
+            )
+
+    raise FileNotFoundError(
+        f"Could not find config.json for checkpoint {path}. Tried: "
+        f"{[str(p) for p in config_candidates]}"
+    )
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    with path.open() as f:
+        return json.load(f)
+
+
+def _assert_config_compatible(
+    reference: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    candidate_name: str,
+) -> None:
+    """Fail when a member architecture differs from the reference."""
+    mismatches = []
+    missing_candidate_keys = []
+    for key in CONFIG_COMPAT_KEYS:
+        reference_value = reference.get(key)
+        candidate_value = candidate.get(key)
+        if reference_value == candidate_value:
+            continue
+        if reference_value is not None and candidate_value is None:
+            missing_candidate_keys.append((key, reference_value))
+            continue
+        mismatches.append((key, reference_value, candidate_value))
+    if missing_candidate_keys:
+        detail = "; ".join(
+            f"{key}: using reference={value!r}" for key, value in missing_candidate_keys
+        )
+        print(
+            f"[merge] Warning: {candidate_name} is missing compatible config "
+            f"metadata ({detail}). Tensor keys and shapes will still be checked."
+        )
+    if mismatches:
+        detail = "; ".join(
+            f"{key}: reference={ref!r}, {candidate_name}={val!r}"
+            for key, ref, val in mismatches
+        )
+        raise ValueError(f"Incompatible checkpoint config for {candidate_name}: {detail}")
+
+
+def _member_state_dict(
+    state_dict: dict[str, torch.Tensor],
+    spec: MemberSpec,
+) -> dict[str, torch.Tensor]:
+    """Return a single-member state dict with keys normalized to ``model.*``."""
+    if spec.source_member_idx is None:
+        if not all(key.startswith("model.") for key in state_dict):
+            member_like = any(key.startswith("members.") for key in state_dict)
+            hint = (
+                " Input looks like an ensemble checkpoint; append ':member_idx' "
+                "to --member, e.g. /path/to/actor:2."
+                if member_like
+                else ""
+            )
+            raise ValueError(
+                f"Member {spec.raw} was provided as a single model, but its keys "
+                f"do not all start with 'model.'.{hint}"
+            )
+        return state_dict
+
+    prefix = f"members.{spec.source_member_idx}."
+    extracted = {
+        key.removeprefix(prefix): value
+        for key, value in state_dict.items()
+        if key.startswith(prefix)
+    }
+    if not extracted:
+        raise ValueError(
+            f"Member {spec.raw} requested {prefix!r}, but no matching keys exist."
+        )
+    if not all(key.startswith("model.") for key in extracted):
+        bad = [key for key in sorted(extracted) if not key.startswith("model.")][:10]
+        raise ValueError(
+            f"Extracted keys from {spec.raw} are not normalized model keys; bad={bad}"
+        )
+    return extracted
+
+
+def _copy_assets(reference_actor_dir: Path, output_actor_dir: Path) -> None:
+    for name in ASSET_NAMES:
+        src = reference_actor_dir / name
+        if src.exists():
+            shutil.copy2(src, output_actor_dir / name)
+
+
+def _write_config(
+    reference_config: dict[str, Any],
+    output_actor_dir: Path,
+    *,
+    ensemble_size: int,
+    inference_mode: str | None,
+) -> None:
+    config = dict(reference_config)
+    config["ensemble_size"] = int(ensemble_size)
+    if inference_mode is not None:
+        config["inference_mode"] = inference_mode
+
+    with (output_actor_dir / "config.json").open("w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--member",
+        action="append",
+        required=True,
+        help=(
+            "Output member source. Use PATH for a single-model checkpoint, or "
+            "PATH:idx to extract members.idx from an ensemble checkpoint. Repeat "
+            "once per output ensemble member, in output order."
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        required=True,
+        help=(
+            "Output actor directory. The script will create "
+            "OUTPUT/model_state_dict/full_weights.pt."
+        ),
+    )
+    parser.add_argument(
+        "--inference-mode",
+        default=None,
+        help="Optional inference_mode to write into config.json, e.g. wco/mo/uwo.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing output directory.",
+    )
+    return parser
+
+
+def main() -> None:
+    args = _build_arg_parser().parse_args()
+    specs = [_parse_member_spec(raw) for raw in args.member]
+    if not specs:
+        raise ValueError("At least one --member is required.")
+
+    output_actor_dir = Path(args.output).expanduser().resolve()
+    if output_actor_dir.exists():
+        if not args.overwrite:
+            raise FileExistsError(
+                f"Output directory already exists: {output_actor_dir}. "
+                "Pass --overwrite to replace it."
+            )
+        shutil.rmtree(output_actor_dir)
+    output_model_dir = output_actor_dir / "model_state_dict"
+    output_model_dir.mkdir(parents=True)
+
+    resolved = [_resolve_checkpoint(spec.checkpoint) for spec in specs]
+    configs = [_load_json(item.config_path) for item in resolved]
+    reference_config = configs[0]
+    for idx, config in enumerate(configs[1:], start=1):
+        _assert_config_compatible(
+            reference_config,
+            config,
+            candidate_name=f"--member #{idx} ({specs[idx].raw})",
+        )
+
+    _copy_assets(resolved[0].actor_dir, output_actor_dir)
+    _write_config(
+        reference_config,
+        output_actor_dir,
+        ensemble_size=len(specs),
+        inference_mode=args.inference_mode or reference_config.get("inference_mode"),
+    )
+
+    merged: dict[str, torch.Tensor] = {}
+    reference_keys: set[str] | None = None
+    manifest: dict[str, Any] = {
+        "members": {},
+        "output": str(output_actor_dir),
+        "note": (
+            "Merged for inference/visualization. No optimizer or FSDP "
+            "dcp_checkpoint state is included."
+        ),
+    }
+
+    for output_idx, (spec, item) in enumerate(zip(specs, resolved)):
+        print(f"[merge] Loading member {output_idx}: {spec.raw}")
+        state_dict = torch.load(
+            item.weights_path,
+            map_location="cpu",
+            mmap=True,
+            weights_only=True,
+        )
+        member_sd = _member_state_dict(state_dict, spec)
+        member_keys = set(member_sd)
+        if reference_keys is None:
+            reference_keys = member_keys
+        elif member_keys != reference_keys:
+            only_ref = sorted(reference_keys - member_keys)[:10]
+            only_cur = sorted(member_keys - reference_keys)[:10]
+            raise ValueError(
+                f"Member {output_idx} keys differ from member 0: "
+                f"only_member0={only_ref}, only_member{output_idx}={only_cur}"
+            )
+
+        for key, value in member_sd.items():
+            merged[f"members.{output_idx}.{key}"] = value
+
+        manifest["members"][str(output_idx)] = {
+            "raw": spec.raw,
+            "actor_dir": str(item.actor_dir),
+            "weights_path": str(item.weights_path),
+            "source_member_idx": spec.source_member_idx,
+            "num_tensors": len(member_sd),
+        }
+
+        probe = "model.value_head.3.weight"
+        if probe in member_sd:
+            tensor = member_sd[probe]
+            print(
+                f"[merge]   {probe}: shape={tuple(tensor.shape)} "
+                f"dtype={tensor.dtype} norm={float(tensor.float().norm()):.6f}"
+            )
+
+    out_weights = output_model_dir / "full_weights.pt"
+    print(f"[merge] Saving {len(merged)} tensors to {out_weights}")
+    torch.save(merged, out_weights)
+
+    with (output_actor_dir / "merge_manifest.json").open("w") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
+
+    print("[merge] Done")
+    print(f"[merge] Actor checkpoint: {output_actor_dir}")
+    print(f"[merge] Model state dict: {output_model_dir}")
+
+
+if __name__ == "__main__":
+    main()
