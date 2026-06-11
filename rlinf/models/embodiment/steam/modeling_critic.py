@@ -495,7 +495,7 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         arange = torch.arange(num_bins, device=probs.device, dtype=probs.dtype)
         signed_bin = torch.where(
             arange < half,
-            arange - float(half),        # [0, half) -> [-half, -1]
+            arange - float(half),  # [0, half) -> [-half, -1]
             arange - float(half) + 1.0,  # [half, num_bins) -> [1, half]
         )
         return (probs * signed_bin).sum(dim=-1) / float(half)
@@ -591,13 +591,19 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         ):
             if state_neg.ndim == 4:
                 bsize, num_neg, num_frames, state_dim = state_neg.shape
-                state_neg_flat = state_neg.reshape(bsize * num_neg, num_frames, state_dim)
-                per_frame_flat = per_frame_image_features.unsqueeze(1).expand(
-                    -1, num_neg, -1, -1
-                ).reshape(bsize * num_neg, num_frames, -1)
-                language_flat = language_feature.unsqueeze(1).expand(
-                    -1, num_neg, -1
-                ).reshape(bsize * num_neg, -1)
+                state_neg_flat = state_neg.reshape(
+                    bsize * num_neg, num_frames, state_dim
+                )
+                per_frame_flat = (
+                    per_frame_image_features.unsqueeze(1)
+                    .expand(-1, num_neg, -1, -1)
+                    .reshape(bsize * num_neg, num_frames, -1)
+                )
+                language_flat = (
+                    language_feature.unsqueeze(1)
+                    .expand(-1, num_neg, -1)
+                    .reshape(bsize * num_neg, -1)
+                )
             else:
                 state_neg_flat = state_neg
                 per_frame_flat = per_frame_image_features
@@ -629,7 +635,9 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
                         getattr(cfg, "compatibility_negative_min_weight", 0.1)
                     ),
                 ).to(device=raw_neg_loss.device, dtype=raw_neg_loss.dtype)
-            losses.append((raw_neg_loss * weights).sum() / weights.sum().clamp_min(1e-6))
+            losses.append(
+                (raw_neg_loss * weights).sum() / weights.sum().clamp_min(1e-6)
+            )
 
         num_perturb = int(getattr(cfg, "compatibility_num_perturb_negatives", 1))
         perturb_std = float(getattr(cfg, "compatibility_perturb_std", 0.03))

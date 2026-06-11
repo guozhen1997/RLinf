@@ -177,7 +177,9 @@ def _to_float32_array(value: Any) -> np.ndarray:
     return np.asarray(value, dtype=np.float32)
 
 
-def _load_openpi_norm_stats(checkpoint_dir: Path, asset_id: str) -> dict[str, dict[str, np.ndarray | None]]:
+def _load_openpi_norm_stats(
+    checkpoint_dir: Path, asset_id: str
+) -> dict[str, dict[str, np.ndarray | None]]:
     """Load OpenPI norm stats as plain numpy arrays."""
     possible_paths = [
         checkpoint_dir / "norm_stats" / asset_id / "norm_stats.json",
@@ -246,12 +248,11 @@ class _OpenPIStateOnlyTransform:
                     std[..., : state_arr.shape[-1]] + 1e-6
                 )
             else:
-                state_arr = (
-                    (state_arr - q01[..., : state_arr.shape[-1]])
-                    / (q99[..., : state_arr.shape[-1]] - q01[..., : state_arr.shape[-1]] + 1e-6)
-                    * 2.0
-                    - 1.0
-                )
+                state_arr = (state_arr - q01[..., : state_arr.shape[-1]]) / (
+                    q99[..., : state_arr.shape[-1]]
+                    - q01[..., : state_arr.shape[-1]]
+                    + 1e-6
+                ) * 2.0 - 1.0
         return _pad_to_dim(state_arr, self.action_dim, axis=-1).astype(
             np.float32,
             copy=False,
@@ -274,6 +275,33 @@ def _pad_to_dim(
     return np.pad(x, pad_width, constant_values=value)
 
 
+# X2Robot camera-view repack mapping shared by every ``*_sm2sm``-style
+# robot name (the views are fixed by the X2Robot platform, not the task).
+_X2ROBOT_REPACK_KEYS = {
+    "images": {
+        "left_wrist_view": "left_wrist_view",
+        "face_view": "face_view",
+        "right_wrist_view": "right_wrist_view",
+    },
+    "state": "state",
+    "actions": "actions",
+    "prompt": "task",
+}
+
+_X2ROBOT_MODES = ("s2s", "s2m", "sm2m", "sm2sm")
+
+
+def _get_x2robot_mode(robot_type: str) -> Optional[str]:
+    """Return the X2Robot mode encoded in a robot/config name, if present."""
+    robot = robot_type.lower()
+    if robot in ("x2robot", "arx"):
+        return "sm2sm"
+    for mode in _X2ROBOT_MODES:
+        if robot == mode or robot.endswith(f"_{mode}"):
+            return mode
+    return None
+
+
 def build_openpi_state_transform(
     *,
     robot_type: str,
@@ -284,10 +312,7 @@ def build_openpi_state_transform(
     asset_id: Optional[str],
 ):
     """Build a state-only OpenPI transform for compatibility supervision."""
-    from rlinf.data.datasets.cfg.value_dataset import (
-        _REPACK_KEYS,
-        _get_x2robot_mode,
-    )
+    from rlinf.data.datasets.recap.value_model import _REPACK_KEYS
 
     del default_prompt, model_type
     robot = robot_type.lower()
@@ -295,7 +320,7 @@ def build_openpi_state_transform(
 
     repack_keys = _REPACK_KEYS.get(robot)
     if repack_keys is None and x2robot_mode is not None:
-        repack_keys = _REPACK_KEYS["fold_towel_sm2sm"]
+        repack_keys = _X2ROBOT_REPACK_KEYS
     if repack_keys is None:
         raise ValueError(
             f"Unknown robot type: {robot_type}. Available: {list(_REPACK_KEYS.keys())}"
@@ -763,9 +788,9 @@ class _LeRobotSource(TrajectorySource):
         ]
         ep_idx = int(_scalar_item(raw_t.get("episode_index", episode)))
         for camera_key in requested_video_keys:
-            frames = self.base._query_videos(
-                {camera_key: timestamps}, ep_idx
-            )[camera_key]
+            frames = self.base._query_videos({camera_key: timestamps}, ep_idx)[
+                camera_key
+            ]
             if frames.ndim == 3:
                 frames = frames.unsqueeze(0)
             frame_t_tensor = frames[0]
@@ -1150,9 +1175,7 @@ class PairDataset(Dataset):
             if not candidates:
                 return None
             rng = self._rng_for_worker()
-            return int(
-                candidates[int(rng.integers(low=0, high=len(candidates)))]
-            )
+            return int(candidates[int(rng.integers(low=0, high=len(candidates)))])
         # Sample from [0, T-2], then shift around the positive frame so the
         # negative is guaranteed to be from a different timestamp.
         draw = int(self._rng_for_worker().integers(low=0, high=episode_length - 1))

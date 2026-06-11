@@ -45,7 +45,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from .configuration import SteamConfig
-from .modeling_critic import SteamCriticModel, CriticOutput
+from .modeling_critic import CriticOutput, SteamCriticModel
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +94,13 @@ def clone_ensemble_members(
 
 def _reinitialize_module_parameters(module: nn.Module, seed: int) -> None:
     """Reset all resettable submodules under ``module`` with a fixed seed."""
-    cuda_devices = sorted({
-        int(parameter.device.index)
-        for parameter in module.parameters()
-        if parameter.is_cuda and parameter.device.index is not None
-    })
+    cuda_devices = sorted(
+        {
+            int(parameter.device.index)
+            for parameter in module.parameters()
+            if parameter.is_cuda and parameter.device.index is not None
+        }
+    )
     with torch.random.fork_rng(devices=cuda_devices):
         torch.manual_seed(int(seed))
         for submodule in module.modules():
@@ -181,9 +183,7 @@ class EnsembleSteamCriticModel(nn.Module):
     ) -> None:
         super().__init__()
         if not members:
-            raise ValueError(
-                "EnsembleSteamCriticModel requires at least one member"
-            )
+            raise ValueError("EnsembleSteamCriticModel requires at least one member")
 
         self.config = config
         self.members = nn.ModuleList(members)

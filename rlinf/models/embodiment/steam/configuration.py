@@ -47,8 +47,7 @@ def normalize_steam_inference_mode(mode: str) -> str:
     mode_norm = str(mode).strip().lower()
     if mode_norm not in VALID_STEAM_INFERENCE_MODES:
         raise ValueError(
-            f"inference_mode must be one of {VALID_STEAM_INFERENCE_MODES}, "
-            f"got {mode!r}"
+            f"inference_mode must be one of {VALID_STEAM_INFERENCE_MODES}, got {mode!r}"
         )
     return mode_norm
 
@@ -60,8 +59,7 @@ def normalize_steam_target_mode(mode: str) -> str:
         mode_norm = "positive_only"
     if mode_norm not in VALID_STEAM_TARGET_MODES:
         raise ValueError(
-            f"target_mode must be one of {VALID_STEAM_TARGET_MODES}, "
-            f"got {mode!r}"
+            f"target_mode must be one of {VALID_STEAM_TARGET_MODES}, got {mode!r}"
         )
     return mode_norm
 
@@ -223,13 +221,11 @@ class SteamConfig(PretrainedConfig):
     def _validate(self) -> None:
         if not self.vision_repo_id:
             raise ValueError(
-                "SteamConfig.vision_repo_id must be a non-empty path or "
-                "HF repo id"
+                "SteamConfig.vision_repo_id must be a non-empty path or HF repo id"
             )
         if not self.language_repo_id:
             raise ValueError(
-                "SteamConfig.language_repo_id must be a non-empty path or "
-                "HF repo id"
+                "SteamConfig.language_repo_id must be a non-empty path or HF repo id"
             )
         if self.fusion_hidden_dim <= 0:
             raise ValueError("fusion_hidden_dim must be > 0")

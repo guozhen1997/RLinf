@@ -74,7 +74,7 @@ model:
 
 data:
   train_data_paths:
-    - dataset_path: /mnt/public2/liuzhihao/data_to_use/libero_10_3shot
+    - dataset_path: /path/to/rollout_dataset
       type: rollout
       only_success: true
   camera_keys:

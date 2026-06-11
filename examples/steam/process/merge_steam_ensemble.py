@@ -119,7 +119,11 @@ def _resolve_checkpoint(path: Path) -> ResolvedCheckpoint:
     if path.is_file():
         weights_path = path
         model_state_dir = weights_path.parent
-        actor_dir = model_state_dir.parent if model_state_dir.name == "model_state_dict" else path.parent
+        actor_dir = (
+            model_state_dir.parent
+            if model_state_dir.name == "model_state_dict"
+            else path.parent
+        )
     elif (path / "full_weights.pt").is_file():
         weights_path = path / "full_weights.pt"
         actor_dir = path.parent if path.name == "model_state_dict" else path
@@ -187,7 +191,9 @@ def _assert_config_compatible(
             f"{key}: reference={ref!r}, {candidate_name}={val!r}"
             for key, ref, val in mismatches
         )
-        raise ValueError(f"Incompatible checkpoint config for {candidate_name}: {detail}")
+        raise ValueError(
+            f"Incompatible checkpoint config for {candidate_name}: {detail}"
+        )
 
 
 def _member_state_dict(

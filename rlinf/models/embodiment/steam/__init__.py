@@ -31,12 +31,12 @@ from omegaconf import DictConfig
 
 from .configuration import SteamConfig
 from .ensemble_modeling_critic import (
-    EnsembleSteamCriticModel,
     EnsembleCriticOutput,
+    EnsembleSteamCriticModel,
     clone_ensemble_members,
     reinitialize_member_value_heads,
 )
-from .modeling_critic import SteamCriticModel, CriticOutput
+from .modeling_critic import CriticOutput, SteamCriticModel
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,7 @@ _STEAM_CONFIG_DEFAULTS: dict[str, Any] = {
 }
 
 assert all(
-    not isinstance(v, (dict, DictConfig))
-    for v in _STEAM_CONFIG_DEFAULTS.values()
+    not isinstance(v, (dict, DictConfig)) for v in _STEAM_CONFIG_DEFAULTS.values()
 ), (
     "_STEAM_CONFIG_DEFAULTS must stay flat: build_steam_config "
     "merges only top-level fields and does not recurse."
@@ -265,9 +264,7 @@ def save_steam_checkpoint_assets(
 ) -> None:
     """Persist config/tokenizer/image-processor assets next to checkpoint weights."""
     os.makedirs(save_path, exist_ok=True)
-    model_config = (
-        cfg if isinstance(cfg, SteamConfig) else build_steam_config(cfg)
-    )
+    model_config = cfg if isinstance(cfg, SteamConfig) else build_steam_config(cfg)
     model_config.to_json_file(os.path.join(save_path, "config.json"), use_diff=False)
 
     if processor is not None and hasattr(processor, "save_pretrained"):
@@ -340,9 +337,7 @@ def get_model(
     """
     del torch_dtype
 
-    checkpoint_config = load_steam_checkpoint_config(
-        getattr(cfg, "model_path", None)
-    )
+    checkpoint_config = load_steam_checkpoint_config(getattr(cfg, "model_path", None))
     config = build_steam_config(cfg, checkpoint_config=checkpoint_config)
     model_path = _resolve_model_path(getattr(cfg, "model_path", None))
     state_dict = {}

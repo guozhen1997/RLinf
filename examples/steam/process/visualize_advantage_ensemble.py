@@ -114,12 +114,12 @@ def _silence_libav_logs() -> None:
 
 _silence_libav_logs()
 
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 # Make the rlinf package importable regardless of cwd, and let us pull in
 # the per-episode rendering helpers from the existing binary-value
@@ -137,10 +137,11 @@ sys.path.insert(0, str(_SCRIPT_DIR.parent.parent.parent))
 def load_advantages_parquet(dataset_path: Path, tag: str) -> tuple[pd.DataFrame, Path]:
     parquet_path = dataset_path / "meta" / f"advantages_{tag}.parquet"
     if not parquet_path.exists():
-        available = sorted(p.name for p in (dataset_path / "meta").glob("advantages*.parquet"))
+        available = sorted(
+            p.name for p in (dataset_path / "meta").glob("advantages*.parquet")
+        )
         raise FileNotFoundError(
-            f"Advantage parquet not found: {parquet_path}\n"
-            f"Available: {available}"
+            f"Advantage parquet not found: {parquet_path}\nAvailable: {available}"
         )
     df = pd.read_parquet(parquet_path)
     required_cols = {
@@ -211,8 +212,13 @@ def _data_driven_xrange(values: np.ndarray, pad: float = 0.05) -> tuple[float, f
 
 
 def plot_distribution(
-    df: pd.DataFrame, out_path: Path, threshold: float | None, dataset_name: str, tag: str,
-    *, tag_meta: dict | None = None,
+    df: pd.DataFrame,
+    out_path: Path,
+    threshold: float | None,
+    dataset_name: str,
+    tag: str,
+    *,
+    tag_meta: dict | None = None,
 ) -> None:
     tag_meta = tag_meta or {}
 
@@ -255,7 +261,9 @@ def plot_distribution(
     plt.close(fig)
 
 
-def plot_member_distributions(df: pd.DataFrame, out_path: Path, dataset_name: str, tag: str) -> None:
+def plot_member_distributions(
+    df: pd.DataFrame, out_path: Path, dataset_name: str, tag: str
+) -> None:
     members = _stack_member_values(df)  # [K, N]
     K = members.shape[0]
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -285,7 +293,11 @@ def plot_member_distributions(df: pd.DataFrame, out_path: Path, dataset_name: st
 
 
 def plot_uncertainty_scatter(
-    df: pd.DataFrame, out_path: Path, threshold: float | None, dataset_name: str, tag: str
+    df: pd.DataFrame,
+    out_path: Path,
+    threshold: float | None,
+    dataset_name: str,
+    tag: str,
 ) -> None:
     mean = df["p_progress_mean"].to_numpy()
     var = df["p_progress_variance"].to_numpy()
@@ -300,7 +312,12 @@ def plot_uncertainty_scatter(
     ax_right = fig.add_subplot(gs[1, 1], sharey=ax_main)
 
     ax_main.scatter(
-        mean[~pos], var[~pos], s=4, alpha=0.5, color="tab:red", label="advantage = False"
+        mean[~pos],
+        var[~pos],
+        s=4,
+        alpha=0.5,
+        color="tab:red",
+        label="advantage = False",
     )
     ax_main.scatter(
         mean[pos], var[pos], s=4, alpha=0.5, color="tab:green", label="advantage = True"
@@ -320,9 +337,7 @@ def plot_uncertainty_scatter(
     ax_top.tick_params(axis="x", labelbottom=False)
     ax_top.grid(True, alpha=0.3)
 
-    ax_right.hist(
-        var, bins=60, orientation="horizontal", color="indianred", alpha=0.75
-    )
+    ax_right.hist(var, bins=60, orientation="horizontal", color="indianred", alpha=0.75)
     ax_right.set_xlabel("count")
     ax_right.tick_params(axis="y", labelleft=False)
     ax_right.grid(True, alpha=0.3)
@@ -336,7 +351,11 @@ def plot_uncertainty_scatter(
 
 
 def plot_positive_rate_per_episode(
-    df: pd.DataFrame, out_path: Path, threshold: float | None, dataset_name: str, tag: str
+    df: pd.DataFrame,
+    out_path: Path,
+    threshold: float | None,
+    dataset_name: str,
+    tag: str,
 ) -> None:
     pos_per_ep = df.groupby("episode_index")["advantage"].mean().sort_index()
     counts_per_ep = df.groupby("episode_index").size()
@@ -382,9 +401,7 @@ def _pick_representative_episodes(df: pd.DataFrame, n: int) -> list[int]:
     Sorts episodes by mean variance and takes evenly-spaced quantile picks so
     the grid shows both confident and uncertain trajectories.
     """
-    var_per_ep = (
-        df.groupby("episode_index")["p_progress_variance"].mean().sort_values()
-    )
+    var_per_ep = df.groupby("episode_index")["p_progress_variance"].mean().sort_values()
     if len(var_per_ep) <= n:
         return [int(ep) for ep in var_per_ep.index.tolist()]
     quantile_idx = np.linspace(0, len(var_per_ep) - 1, n).round().astype(int)
@@ -402,7 +419,9 @@ def plot_episode_timelines(
     selected = _pick_representative_episodes(df, n_episodes)
     cols = 3
     rows = int(np.ceil(len(selected) / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.5, rows * 3.0), squeeze=False)
+    fig, axes = plt.subplots(
+        rows, cols, figsize=(cols * 4.5, rows * 3.0), squeeze=False
+    )
     for ax in axes.flat:
         ax.axis("off")
     for ax_idx, ep in enumerate(selected):
@@ -419,7 +438,12 @@ def plot_episode_timelines(
         mean = sub["p_progress_mean"].to_numpy()
         agg = sub["advantage_continuous"].to_numpy()
         ax.fill_between(
-            x, member_min, member_max, color="steelblue", alpha=0.18, label="member min/max"
+            x,
+            member_min,
+            member_max,
+            color="steelblue",
+            alpha=0.18,
+            label="member min/max",
         )
         ax.plot(x, mean, color="steelblue", linewidth=1.2, label="member mean")
         ax.plot(
@@ -496,7 +520,9 @@ def write_summary(
             "mean": float(df["p_progress_variance"].mean()),
             "max": float(df["p_progress_variance"].max()),
         },
-        "per_member_mean_p_progress": [float(members[k].mean()) for k in range(members.shape[0])],
+        "per_member_mean_p_progress": [
+            float(members[k].mean()) for k in range(members.shape[0])
+        ],
     }
     if "ensemble_signed_score" in df.columns:
         summary["ensemble_signed_score"] = {
@@ -537,7 +563,9 @@ def _build_progress_by_frame_from_df(df_for_episode: pd.DataFrame) -> dict:
             "value": float(row.advantage_continuous),
             "raw_score": float(
                 getattr(row, "ensemble_signed_score", row.advantage_continuous)
-            ) if has_ess else float(row.advantage_continuous),
+            )
+            if has_ess
+            else float(row.advantage_continuous),
             "value_mean": float(row.p_progress_mean),
             "value_min": float(row.p_progress_min),
             "value_variance": float(row.p_progress_variance),
@@ -615,6 +643,7 @@ def _open_lerobot_dataset(dataset_path: Path):
         )
         from lerobot.common.datasets.utils import hf_transform_to_torch  # type: ignore
     import io
+
     from PIL import Image as PILImage
 
     ds = LeRobotDataset(dataset_path.name, root=dataset_path, download_videos=False)
@@ -884,9 +913,7 @@ def main() -> None:
         args.tag,
         tag_meta=tag_meta,
     )
-    plot_member_distributions(
-        df, args.output / "members.png", dataset_name, args.tag
-    )
+    plot_member_distributions(df, args.output / "members.png", dataset_name, args.tag)
     plot_uncertainty_scatter(
         df, args.output / "uncertainty.png", threshold, dataset_name, args.tag
     )
@@ -906,7 +933,12 @@ def main() -> None:
         n_episodes=args.episodes,
     )
     write_summary(
-        df, parquet_path, threshold, dataset_name, args.tag, args.output / "summary.json"
+        df,
+        parquet_path,
+        threshold,
+        dataset_name,
+        args.tag,
+        args.output / "summary.json",
     )
 
     explicit_eps = None

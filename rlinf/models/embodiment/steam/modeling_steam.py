@@ -596,14 +596,18 @@ class SteamBackbone(nn.Module):
         state_features = self.state_projector(states.to(dtype=state_dtype))
         compat_dtype = state_features.dtype
         per_frame = per_frame_image_features.to(dtype=compat_dtype)
-        language_expanded = language_feature.to(dtype=compat_dtype).unsqueeze(1).expand(
-            -1, states.shape[1], -1
+        language_expanded = (
+            language_feature.to(dtype=compat_dtype)
+            .unsqueeze(1)
+            .expand(-1, states.shape[1], -1)
         )
         compat_input = torch.cat(
             [per_frame, language_expanded, state_features],
             dim=-1,
         )
-        head_dtype = _module_parameter_dtype(self.compatibility_head, compat_input.dtype)
+        head_dtype = _module_parameter_dtype(
+            self.compatibility_head, compat_input.dtype
+        )
         return self.compatibility_head(compat_input.to(dtype=head_dtype)).squeeze(-1)
 
     def _check_shapes(

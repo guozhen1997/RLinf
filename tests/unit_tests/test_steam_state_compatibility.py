@@ -207,7 +207,7 @@ def test_openpi_state_only_transform_matches_arx_state_path_without_images():
     openpi_transforms = pytest.importorskip("openpi.transforms")
     openpi_model = pytest.importorskip("openpi.models.model")
 
-    from rlinf.data.datasets.cfg.value_dataset import _REPACK_KEYS
+    from rlinf.data.datasets.steam.pair_dataset import _X2ROBOT_REPACK_KEYS
     from rlinf.models.embodiment.openpi.policies import arx_policy
 
     state = np.linspace(-0.5, 0.5, 14, dtype=np.float32)
@@ -222,7 +222,7 @@ def test_openpi_state_only_transform_matches_arx_state_path_without_images():
     }
     full_transform = openpi_transforms.compose(
         [
-            openpi_transforms.RepackTransform(_REPACK_KEYS["fold_towel_sm2sm"]),
+            openpi_transforms.RepackTransform(_X2ROBOT_REPACK_KEYS),
             arx_policy.ArxInputs(
                 mode="sm2sm",
                 action_dim=28,
@@ -235,7 +235,7 @@ def test_openpi_state_only_transform_matches_arx_state_path_without_images():
     expected = full_transform(sample)["state"]
 
     state_only_transform = build_openpi_state_transform(
-        robot_type="fold_towel_sm2sm",
+        robot_type="x2robot_sm2sm",
         model_type="pi0",
         action_dim=28,
         default_prompt=None,

@@ -385,9 +385,11 @@ class FSDPVlaSftWorker(FSDPSftWorker):
             observation, actions = batch[:2]
             register_pytree_dataclasses(observation)
             observation = _pytree.tree_map(
-                lambda x: torch.as_tensor(x, device=self.device).contiguous().clone()
-                if x is not None
-                else x,
+                lambda x: (
+                    torch.as_tensor(x, device=self.device).contiguous().clone()
+                    if x is not None
+                    else x
+                ),
                 observation,
             )
             actions = actions.to(torch.float32).to(self.device)

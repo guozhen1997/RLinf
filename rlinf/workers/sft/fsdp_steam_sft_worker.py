@@ -156,7 +156,7 @@ def _normalize_target_mode(mode: Any) -> str:
 
 def _default_action_dim_for_robot(robot_type: str) -> int:
     robot = str(robot_type).lower()
-    return 28 if robot == "fold_towel_sm2sm" or robot.endswith("_sm2sm") else 32
+    return 28 if robot == "x2robot" or robot.endswith("_sm2sm") else 32
 
 
 def _collect_non_finite_tensor_paths(value: Any, prefix: str) -> list[str]:
@@ -252,18 +252,18 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         except (ImportError, AttributeError):
             pass
 
-        from rlinf.data.datasets.steam.mixture import PairMixtureDataset
         from rlinf.data.datasets.steam import (
             BinaryPairDataCollator,
             PairDataset,
         )
-        from rlinf.models.embodiment.value_model.checkpoint_utils import (
-            has_tokenizer_files,
-        )
+        from rlinf.data.datasets.steam.mixture import PairMixtureDataset
         from rlinf.models.embodiment.steam.processing import (
             SteamImageProcessor,
             SteamProcessor,
             resolve_vision_image_size,
+        )
+        from rlinf.models.embodiment.value_model.checkpoint_utils import (
+            has_tokenizer_files,
         )
 
         data_cfg = self.cfg.get("data", {})
@@ -362,9 +362,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 f"multiple of model.num_bins; got data.k={k}, "
                 f"model.num_bins={num_bins} (2*k={2 * k})."
             )
-        if target_mode == "positive_only" and (
-            num_bins > k or k % num_bins != 0
-        ):
+        if target_mode == "positive_only" and (num_bins > k or k % num_bins != 0):
             raise ValueError(
                 "Binary value positive-only mode requires "
                 "1 <= model.num_bins <= data.k and data.k % model.num_bins == 0; "
@@ -496,7 +494,10 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 ),
                 default_prompt=entry.get(
                     "default_prompt",
-                    entry.get("prompt", data_cfg.get("default_prompt", data_cfg.get("prompt", None))),
+                    entry.get(
+                        "prompt",
+                        data_cfg.get("default_prompt", data_cfg.get("prompt", None)),
+                    ),
                 ),
                 norm_stats_dir=entry.get(
                     "norm_stats_dir",
@@ -796,9 +797,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             round(float(logits.detach().float().std(unbiased=False).item()), 6)
             if isinstance(logits, torch.Tensor)
             else None,
-            round(
-                float(hidden_states.detach().float().std(unbiased=False).item()), 6
-            )
+            round(float(hidden_states.detach().float().std(unbiased=False).item()), 6)
             if isinstance(hidden_states, torch.Tensor)
             else None,
         )

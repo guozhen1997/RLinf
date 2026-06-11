@@ -75,7 +75,7 @@ from visualize_advantage_dataset import (  # noqa: E402
     detect_image_keys,
 )
 
-from rlinf.data.datasets.cfg.return_loaders import (  # noqa: E402
+from rlinf.data.datasets.recap.utils import (  # noqa: E402
     load_return_stats_from_dataset,
 )
 
@@ -172,8 +172,7 @@ def _compute_value_for_indices(
     missing = [i for i in indices if i not in out]
     if missing:
         raise RuntimeError(
-            f"Value inference missing {len(missing)} indices "
-            f"(e.g. {missing[:5]})."
+            f"Value inference missing {len(missing)} indices (e.g. {missing[:5]})."
         )
     return out
 
@@ -195,9 +194,7 @@ def _compute_advantages_for_episodes(
             return -0.5
         return (x - global_return_min) / ret_range - 1.0
 
-    gamma_powers = np.array(
-        [gamma**i for i in range(action_horizon)], dtype=np.float64
-    )
+    gamma_powers = np.array([gamma**i for i in range(action_horizon)], dtype=np.float64)
 
     rows = []
     for ep_idx, (ep_start, ep_end) in episode_ranges.items():
@@ -327,9 +324,7 @@ def _resolve_threshold(
             tc = mix_cfg["tags"][tag]
             if "unified_threshold" in tc:
                 t = float(tc["unified_threshold"])
-                logger.info(
-                    f"Using threshold from {mixture_path}[tags.{tag}]: {t:.4f}"
-                )
+                logger.info(f"Using threshold from {mixture_path}[tags.{tag}]: {t:.4f}")
                 return t
         if "unified_threshold" in mix_cfg:
             t = float(mix_cfg["unified_threshold"])
@@ -486,9 +481,7 @@ def main(cfg: DictConfig) -> None:
         logger.info(f"  Wrote {summary_path.name}")
         if not no_video:
             video_path = output_dir / f"episode_{ep:04d}.mp4"
-            create_episode_video(
-                ep_data, video_path, threshold=threshold, fps=fps
-            )
+            create_episode_video(ep_data, video_path, threshold=threshold, fps=fps)
             logger.info(f"  Wrote {video_path.name}")
 
     slim_parquet = output_dir / "advantages_selected.parquet"

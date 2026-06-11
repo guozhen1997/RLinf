@@ -317,8 +317,7 @@ def _score_episode_pairs(
         frame_idx_t = batch["frame_idx_t"].cpu().numpy().tolist()
         if len(signed_progress) != len(frame_idx_t):
             raise RuntimeError(
-                f"Predicted {len(signed_progress)} values for "
-                f"{len(frame_idx_t)} pairs"
+                f"Predicted {len(signed_progress)} values for {len(frame_idx_t)} pairs"
             )
 
         # Multi-bin: derive bin-level quantities from the distributions.
@@ -357,16 +356,20 @@ def _score_episode_pairs(
                 "value_variance": float(value_variance[batch_idx]),
             }
             if is_multi_bin:
-                bundle.update({
-                    "aggregated_probs": agg_probs[batch_idx].tolist(),
-                    "member_probs": mem_probs[:, batch_idx, :].tolist(),
-                    "expected_stride_normalized": float(agg_es_normalized[batch_idx]),
-                    "member_expected_stride_normalized": mem_es_normalized[
-                        :, batch_idx
-                    ].tolist(),
-                    "entropy_aggregated": float(entropy_agg[batch_idx]),
-                    "entropy_member_mean": float(entropy_member_mean[batch_idx]),
-                })
+                bundle.update(
+                    {
+                        "aggregated_probs": agg_probs[batch_idx].tolist(),
+                        "member_probs": mem_probs[:, batch_idx, :].tolist(),
+                        "expected_stride_normalized": float(
+                            agg_es_normalized[batch_idx]
+                        ),
+                        "member_expected_stride_normalized": mem_es_normalized[
+                            :, batch_idx
+                        ].tolist(),
+                        "entropy_aggregated": float(entropy_agg[batch_idx]),
+                        "entropy_member_mean": float(entropy_member_mean[batch_idx]),
+                    }
+                )
             out[int(ft)] = bundle
 
     return out
@@ -588,9 +591,9 @@ def _collect_episode_frames(
             )
             if is_multi_bin:
                 data["aggregated_probs"].append(list(score_bundle["aggregated_probs"]))
-                data["member_probs"].append([
-                    list(m) for m in score_bundle["member_probs"]
-                ])
+                data["member_probs"].append(
+                    [list(m) for m in score_bundle["member_probs"]]
+                )
                 data["expected_stride_normalized"].append(
                     float(score_bundle["expected_stride_normalized"])
                 )
@@ -615,9 +618,9 @@ def _collect_episode_frames(
             )
             if is_multi_bin:
                 data["aggregated_probs"].append(data["aggregated_probs"][-1].copy())
-                data["member_probs"].append([
-                    m.copy() for m in data["member_probs"][-1]
-                ])
+                data["member_probs"].append(
+                    [m.copy() for m in data["member_probs"][-1]]
+                )
                 data["expected_stride_normalized"].append(
                     data["expected_stride_normalized"][-1]
                 )
@@ -684,11 +687,13 @@ def _create_episode_summary_plot(
     if n_cameras == 0:
         return
 
-    sample_indices = sorted({
-        i
-        for i in [0, n_frames // 4, n_frames // 2, 3 * n_frames // 4, n_frames - 1]
-        if i < n_frames
-    })
+    sample_indices = sorted(
+        {
+            i
+            for i in [0, n_frames // 4, n_frames // 2, 3 * n_frames // 4, n_frames - 1]
+            if i < n_frames
+        }
+    )
 
     member_signed_progress = np.asarray(
         ep_data["member_signed_progress"], dtype=np.float64
@@ -729,14 +734,10 @@ def _create_episode_summary_plot(
 
     signed_progress = ep_data["signed_progress"]
     p_arr = np.asarray(signed_progress, dtype=np.float64)
-    value_variance = np.asarray(
-        ep_data["signed_progress_variance"], dtype=np.float64
-    )
+    value_variance = np.asarray(ep_data["signed_progress_variance"], dtype=np.float64)
     cum_signed_progress = _cumulative_signed_progress(signed_progress)
     num_members = (
-        int(member_signed_progress.shape[1])
-        if member_signed_progress.ndim == 2
-        else 1
+        int(member_signed_progress.shape[1]) if member_signed_progress.ndim == 2 else 1
     )
     member_cum_signed_progress = (
         _cumulative_signed_progress(member_signed_progress) if has_ensemble else None
@@ -880,9 +881,7 @@ def _create_episode_summary_plot(
         cum_signed_progress,
         color="tab:purple",
         linewidth=2.0,
-        label=f"Aggregated ({inference_mode.upper()}) Σ V"
-        if has_ensemble
-        else "Σ V",
+        label=f"Aggregated ({inference_mode.upper()}) Σ V" if has_ensemble else "Σ V",
     )
     ax_c.axhline(y=0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
     # Ideal "always forward" line for reference (slope = +1).
@@ -1025,9 +1024,7 @@ def _create_episode_summary_plot(
         ax_h.grid(True, alpha=0.3)
 
     task_text = ep_data.get("task", "")[:80]
-    final_cum = (
-        float(cum_signed_progress[-1]) if len(cum_signed_progress) else 0.0
-    )
+    final_cum = float(cum_signed_progress[-1]) if len(cum_signed_progress) else 0.0
     suptitle_bits = [
         f"Episode {ep_data['episode_index']} (k={stride_k}, mode={inference_mode.upper()}",
     ]
@@ -1120,14 +1117,10 @@ def _create_episode_video(
         camera_axes.append(ax)
 
     signed_progress = ep_data["signed_progress"]
-    value_variance = np.asarray(
-        ep_data["signed_progress_variance"], dtype=np.float64
-    )
+    value_variance = np.asarray(ep_data["signed_progress_variance"], dtype=np.float64)
     cum_signed_progress = _cumulative_signed_progress(signed_progress)
     num_members = (
-        int(member_signed_progress.shape[1])
-        if member_signed_progress.ndim == 2
-        else 1
+        int(member_signed_progress.shape[1]) if member_signed_progress.ndim == 2 else 1
     )
     member_colors = _member_colors(num_members) if has_ensemble else []
     value_ymin, value_ymax = _compute_value_axis_limits(
@@ -1201,9 +1194,7 @@ def _create_episode_video(
 
     ax_c = fig.add_subplot(gs[cumulative_row, :], sharex=ax_p)
     if has_ensemble:
-        member_cum_signed_progress = _cumulative_signed_progress(
-            member_signed_progress
-        )
+        member_cum_signed_progress = _cumulative_signed_progress(member_signed_progress)
         for member_idx in range(num_members):
             ax_c.plot(
                 frames,
@@ -1218,9 +1209,7 @@ def _create_episode_video(
         cum_signed_progress,
         color="tab:purple",
         linewidth=1.4,
-        label=f"Aggregated ({inference_mode.upper()}) Σ V"
-        if has_ensemble
-        else "Σ V",
+        label=f"Aggregated ({inference_mode.upper()}) Σ V" if has_ensemble else "Σ V",
     )
     ideal = np.arange(len(frames), dtype=np.float64)
     ax_c.plot(
@@ -1458,9 +1447,7 @@ def _create_episode_video(
         marker_p.set_data([frames[frame_num]], [signed_progress[frame_num]])
         if marker_v is not None:
             marker_v.set_data([frames[frame_num]], [value_variance[frame_num]])
-        marker_c.set_data(
-            [frames[frame_num]], [cum_signed_progress[frame_num]]
-        )
+        marker_c.set_data([frames[frame_num]], [cum_signed_progress[frame_num]])
         # Multi-bin cursors.
         if hm_cursor is not None:
             hm_cursor.set_data(

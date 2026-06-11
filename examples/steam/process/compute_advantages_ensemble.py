@@ -348,9 +348,7 @@ class BinaryPairInferenceDataset(Dataset):
         self.dataset_type = dataset_type
         self.source_name = str(dataset_path)
         self.state_transform_enabled = bool(state_transform_enabled)
-        self.allow_raw_state_for_compatibility = bool(
-            allow_raw_state_for_compatibility
-        )
+        self.allow_raw_state_for_compatibility = bool(allow_raw_state_for_compatibility)
         self._state_transform = None
         if self.state_transform_enabled:
             if norm_stats_dir is None and not self.allow_raw_state_for_compatibility:
@@ -577,7 +575,11 @@ class BinaryPairInferenceDataset(Dataset):
         out: list[Optional[dict[str, Any]]] = [None] * len(indices)
         for episode, episode_entries in by_episode.items():
             frame_indices = sorted(
-                {frame for _out_idx, t, t_plus_k in episode_entries for frame in (t, t_plus_k)}
+                {
+                    frame
+                    for _out_idx, t, t_plus_k in episode_entries
+                    for frame in (t, t_plus_k)
+                }
             )
             metadata_by_frame = {
                 frame: self._source._metadata_sample(episode, frame)
@@ -594,7 +596,7 @@ class BinaryPairInferenceDataset(Dataset):
             )
 
             frames_by_camera = self._source.base._query_videos(
-                {cam: timestamps for cam in self.camera_keys},
+                dict.fromkeys(self.camera_keys, timestamps),
                 ep_idx,
             )
             frame_lookup: dict[tuple[str, int], Any] = {}
@@ -627,7 +629,9 @@ class BinaryPairInferenceDataset(Dataset):
 
         if any(sample is None for sample in out):
             missing = [i for i, sample in enumerate(out) if sample is None]
-            raise RuntimeError(f"Batched video loader missed sample positions: {missing}")
+            raise RuntimeError(
+                f"Batched video loader missed sample positions: {missing}"
+            )
         return [sample for sample in out if sample is not None]
 
     def __getitems__(self, indices: list[int]) -> list[dict[str, Any]]:
@@ -689,7 +693,7 @@ def _first_non_none(*values):
 
 def _default_action_dim_for_robot(robot_type: str) -> int:
     robot = str(robot_type).lower()
-    return 28 if robot == "fold_towel_sm2sm" or robot.endswith("_sm2sm") else 32
+    return 28 if robot == "x2robot" or robot.endswith("_sm2sm") else 32
 
 
 def _resolve_state_transform_kwargs(
@@ -953,29 +957,31 @@ def _records_from_predict(
     rows: list[dict[str, Any]] = []
     bsize = aggregated.shape[0]
     for i in range(bsize):
-        rows.append({
-            "episode_index": int(episodes[i]),
-            "frame_index": int(frame_t[i]),
-            # ``ensemble_signed_score`` = ``out.predicted_values`` — a
-            # signed bin-weighted expectation in ``[-1, 1]`` (NOT a
-            # probability). Renamed from the historical
-            # ``p_progress_aggregated``, which was misleading because it is
-            # not ``P(progress)`` for num_bins > 2; for num_bins == 2 it
-            # degenerates to ``2 · P(progress) - 1``.
-            "ensemble_signed_score": float(aggregated[i].item()),
-            "p_progress_mean": float(mean[i].item()),
-            "p_progress_min": float(minv[i].item()),
-            "p_progress_variance": float(var[i].item()),
-            "member_values": [float(x) for x in members[:, i].tolist()],
-            # Multi-bin additive columns. Binary (num_bins=2) still
-            # gets these: expected_stride_normalized degenerates to a
-            # monotone function of ensemble_signed_score, entropy is
-            # Bernoulli.
-            "expected_stride_normalized": float(es[i]),
-            "entropy_aggregated": float(entropy_agg[i]),
-            "entropy_member_mean": float(entropy_member_mean[i]),
-            "entropy_member_variance": float(entropy_member_variance[i]),
-        })
+        rows.append(
+            {
+                "episode_index": int(episodes[i]),
+                "frame_index": int(frame_t[i]),
+                # ``ensemble_signed_score`` = ``out.predicted_values`` — a
+                # signed bin-weighted expectation in ``[-1, 1]`` (NOT a
+                # probability). Renamed from the historical
+                # ``p_progress_aggregated``, which was misleading because it is
+                # not ``P(progress)`` for num_bins > 2; for num_bins == 2 it
+                # degenerates to ``2 · P(progress) - 1``.
+                "ensemble_signed_score": float(aggregated[i].item()),
+                "p_progress_mean": float(mean[i].item()),
+                "p_progress_min": float(minv[i].item()),
+                "p_progress_variance": float(var[i].item()),
+                "member_values": [float(x) for x in members[:, i].tolist()],
+                # Multi-bin additive columns. Binary (num_bins=2) still
+                # gets these: expected_stride_normalized degenerates to a
+                # monotone function of ensemble_signed_score, entropy is
+                # Bernoulli.
+                "expected_stride_normalized": float(es[i]),
+                "entropy_aggregated": float(entropy_agg[i]),
+                "entropy_member_mean": float(entropy_member_mean[i]),
+                "entropy_member_variance": float(entropy_member_variance[i]),
+            }
+        )
     return rows
 
 
@@ -990,22 +996,24 @@ def _build_terminal_frame_rows(
     for episode_index, episode_length in enumerate(episode_lengths):
         if int(episode_length) < 1:
             continue
-        rows.append({
-            "episode_index": int(episode_index),
-            "frame_index": int(episode_length) - 1,
-            "ensemble_signed_score": 0.0,
-            "p_progress_mean": 0.0,
-            "p_progress_min": 0.0,
-            "p_progress_variance": 0.0,
-            "member_values": list(zero_members),
-            # Terminal default: assume neutral signed stride (E[s]/K = 0)
-            # and zero entropy — matches the "default neutral" intent of
-            # the 0.0 ensemble_signed_score fill.
-            "expected_stride_normalized": 0.0,
-            "entropy_aggregated": 0.0,
-            "entropy_member_mean": 0.0,
-            "entropy_member_variance": 0.0,
-        })
+        rows.append(
+            {
+                "episode_index": int(episode_index),
+                "frame_index": int(episode_length) - 1,
+                "ensemble_signed_score": 0.0,
+                "p_progress_mean": 0.0,
+                "p_progress_min": 0.0,
+                "p_progress_variance": 0.0,
+                "member_values": list(zero_members),
+                # Terminal default: assume neutral signed stride (E[s]/K = 0)
+                # and zero entropy — matches the "default neutral" intent of
+                # the 0.0 ensemble_signed_score fill.
+                "expected_stride_normalized": 0.0,
+                "entropy_aggregated": 0.0,
+                "entropy_member_mean": 0.0,
+                "entropy_member_variance": 0.0,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -1026,10 +1034,12 @@ def _append_missing_terminal_rows(
         return df, 0
 
     if len(df) == 0:
-        combined = terminal_rows.sort_values([
-            "episode_index",
-            "frame_index",
-        ]).reset_index(drop=True)
+        combined = terminal_rows.sort_values(
+            [
+                "episode_index",
+                "frame_index",
+            ]
+        ).reset_index(drop=True)
         return combined, len(combined)
 
     existing_keys = set(
@@ -1072,7 +1082,9 @@ def _run_inference_for_dataset(
         k=int(cfg.data.k),
         prompt=cfg.data.get("prompt", None),
         include_state=bool(state_kwargs.pop("include_state")),
-        state_max_dim=int(getattr(model.config, "max_state_dim", cfg.data.get("max_state_dim", 32))),
+        state_max_dim=int(
+            getattr(model.config, "max_state_dim", cfg.data.get("max_state_dim", 32))
+        ),
         state_key=str(cfg.data.get("state_key", "state")),
         dataset_type=dataset_entry.type,
         **state_kwargs,
@@ -1484,9 +1496,7 @@ def main(cfg: DictConfig) -> None:
                     dataset_type=str(entry.type),
                     positive_threshold=unified_threshold,
                 )
-                out_path = _save_advantages_parquet(
-                    final_df, entry.dataset_path, tag
-                )
+                out_path = _save_advantages_parquet(final_df, entry.dataset_path, tag)
                 num_positive = int(final_df["advantage"].sum())
                 total_samples = int(len(final_df))
                 mix_path = _update_mixture_config(

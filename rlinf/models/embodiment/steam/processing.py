@@ -427,9 +427,7 @@ class SteamProcessor(ProcessorMixin):
     ):
         if image_processor is None:
             image_processor = (
-                SteamImageProcessor(
-                    image_keys=image_keys, do_augment=do_augment
-                )
+                SteamImageProcessor(image_keys=image_keys, do_augment=do_augment)
                 if image_keys
                 else SteamImageProcessor(do_augment=do_augment)
             )

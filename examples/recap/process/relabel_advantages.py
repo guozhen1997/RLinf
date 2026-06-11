@@ -161,8 +161,7 @@ def _resolve_dataset_type(
         t = str(cli_type).lower()
         if t not in ("sft", "rollout"):
             raise ValueError(
-                f"--dataset_types entry must be 'sft' or 'rollout', got "
-                f"{cli_type!r}"
+                f"--dataset_types entry must be 'sft' or 'rollout', got {cli_type!r}"
             )
         return t
     mix = _read_mixture_config(dataset_path)
@@ -325,9 +324,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                 f"threshold); got {args.positive_threshold}"
             )
         if args.positive_quantile is not None:
-            parser.error(
-                "--positive_quantile is only valid with --mode=quantile"
-            )
+            parser.error("--positive_quantile is only valid with --mode=quantile")
     else:  # quantile
         if args.positive_quantile is None:
             parser.error("--positive_quantile is required when --mode=quantile")
@@ -337,9 +334,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                 f"rollout frames; got {args.positive_quantile}"
             )
         if args.positive_threshold is not None:
-            parser.error(
-                "--positive_threshold is only valid with --mode=threshold"
-            )
+            parser.error("--positive_threshold is only valid with --mode=threshold")
     if args.dataset_types is not None and len(args.dataset_types) != len(
         args.dataset_paths
     ):
@@ -371,8 +366,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         source_meta = tags.get(args.source_tag) if isinstance(tags, dict) else {}
         if not isinstance(source_meta, dict):
             raise RuntimeError(
-                f"mixture_config tag {args.source_tag!r} at {ds_path} is not "
-                "a mapping"
+                f"mixture_config tag {args.source_tag!r} at {ds_path} is not a mapping"
             )
         df, src_path = _load_source_parquet(ds_path, args.source_tag)
         loaded.append((ds_path, df, src_path, dataset_type, source_meta))
@@ -393,9 +387,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     # receive the resulting unified_threshold in their tag metadata.
     if args.mode == "threshold":
         unified_threshold = float(args.positive_threshold)
-        logger.info(
-            "Mode: threshold; unified_threshold=%.4f", unified_threshold
-        )
+        logger.info("Mode: threshold; unified_threshold=%.4f", unified_threshold)
     else:
         rollout_scores = [
             df["advantage_continuous"].values
@@ -427,9 +419,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     # ---- Phase 3: relabel + write each dataset ----
     for ds_path, df, src_path, dataset_type, source_meta in loaded:
-        new_df = _relabel(
-            df, dataset_type=dataset_type, threshold=unified_threshold
-        )
+        new_df = _relabel(df, dataset_type=dataset_type, threshold=unified_threshold)
         out_path = ds_path / "meta" / f"advantages_{args.new_tag}.parquet"
         if out_path.exists():
             logger.warning("Overwriting existing %s", out_path)
