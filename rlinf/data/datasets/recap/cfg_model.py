@@ -130,6 +130,58 @@ class AdvantagePreservingDataset:
         return sample
 
 
+class PositiveAdvantageOnlySubset(AdvantagePreservingDataset):
+    """Subset wrapper that keeps only ``advantage=True`` samples."""
+
+    def __init__(
+        self,
+        base_dataset: Any,
+        transformed_dataset: Any,
+        advantages_lookup: dict[tuple[int, int], bool] | None = None,
+    ):
+        super().__init__(
+            base_dataset=base_dataset,
+            transformed_dataset=transformed_dataset,
+            advantages_lookup=advantages_lookup,
+        )
+        self._positive_indices = [
+            idx
+            for idx in range(len(self._transformed_dataset))
+            if self._get_advantage(idx)
+        ]
+
+    def _get_advantage(self, idx: int) -> bool:
+        if self._advantage_by_index is not None:
+            if idx not in self._advantage_by_index:
+                raise KeyError(
+                    f"[PositiveAdvantageOnlySubset] Index {idx} not found in "
+                    f"advantage index (size {len(self._advantage_by_index)})."
+                )
+            return self._advantage_by_index[idx]
+
+        base_sample = self._base_dataset[idx]
+        if "advantage" not in base_sample:
+            raise KeyError(
+                "[PositiveAdvantageOnlySubset] 'advantage' key not found in "
+                f"base_sample at index {idx}. Run compute_advantages.py first."
+            )
+        advantage = base_sample["advantage"]
+        if isinstance(advantage, torch.Tensor):
+            advantage = bool(advantage.item())
+        return bool(advantage)
+
+    @property
+    def kept_ratio(self) -> float:
+        total = len(self._transformed_dataset)
+        return len(self._positive_indices) / total if total > 0 else 0.0
+
+    def __len__(self) -> int:
+        return len(self._positive_indices)
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        return self._transformed_dataset[self._positive_indices[idx]]
+
+
 class CFGDataLoaderImpl(BaseDataLoaderImpl):
     """DataLoader wrapper that yields CFG training tuples."""
 

@@ -25,7 +25,11 @@ import torch.nn.functional as F
 from openpi import transforms as _transforms
 from openpi.models import model as _model
 from openpi.models.pi0_config import Pi0Config
-from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
+from openpi.models_pytorch.pi0_pytorch import (
+    PI0Pytorch,
+    create_sinusoidal_pos_embedding,
+    make_att_2d_masks,
+)
 from torch.utils._pytree import tree_map
 
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
@@ -250,6 +254,99 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
 
     def set_global_step(self, global_step):
         self.global_step = global_step
+
+    def embed_suffix(self, state, noisy_actions, timestep):
+        """Embed state/action suffix tokens, including state sequences.
+
+        Extends the upstream OpenPI ``embed_suffix`` to accept state of
+        shape ``[B, S, D]`` (a window of proprio states, e.g. history +
+        future from ``state_history_size`` / ``state_future_size``) in
+        addition to the standard ``[B, D]``. For ``[B, D]`` input the
+        behavior is identical to the parent implementation.
+        """
+        embs = []
+        pad_masks = []
+        att_masks = []
+
+        if not self.pi05:
+            if self.state_proj.weight.dtype == torch.float32:
+                state = state.to(torch.float32)
+
+            def state_proj_func(state):
+                return self.state_proj(state)
+
+            state_emb = self._apply_checkpoint(state_proj_func, state)
+            if state_emb.ndim == 2:
+                state_emb = state_emb[:, None, :]
+            elif state_emb.ndim != 3:
+                raise ValueError(
+                    "OpenPI expects state with shape [B, D] or [B, S, D], "
+                    f"got {tuple(state.shape)}."
+                )
+
+            embs.append(state_emb)
+            bsize, state_tokens = state_emb.shape[:2]
+            device = state_emb.device
+
+            state_mask = torch.ones(
+                bsize, state_tokens, dtype=torch.bool, device=device
+            )
+            pad_masks.append(state_mask)
+            att_masks += [1] + ([0] * (state_tokens - 1))
+
+        time_emb = create_sinusoidal_pos_embedding(
+            timestep,
+            self.action_in_proj.out_features,
+            min_period=4e-3,
+            max_period=4.0,
+            device=timestep.device,
+        )
+        time_emb = time_emb.type(dtype=timestep.dtype)
+
+        def action_proj_func(noisy_actions):
+            return self.action_in_proj(noisy_actions)
+
+        action_emb = self._apply_checkpoint(action_proj_func, noisy_actions)
+
+        if not self.pi05:
+            time_emb = time_emb[:, None, :].expand_as(action_emb)
+            action_time_emb = torch.cat([action_emb, time_emb], dim=2)
+
+            def mlp_func(action_time_emb):
+                x = self.action_time_mlp_in(action_time_emb)
+                x = F.silu(x)
+                return self.action_time_mlp_out(x)
+
+            action_time_emb = self._apply_checkpoint(mlp_func, action_time_emb)
+            adarms_cond = None
+        else:
+
+            def time_mlp_func(time_emb):
+                x = self.time_mlp_in(time_emb)
+                x = F.silu(x)
+                x = self.time_mlp_out(x)
+                return F.silu(x)
+
+            time_emb = self._apply_checkpoint(time_mlp_func, time_emb)
+            action_time_emb = action_emb
+            adarms_cond = time_emb
+
+        embs.append(action_time_emb)
+
+        bsize, action_time_dim = action_time_emb.shape[:2]
+        action_time_mask = torch.ones(
+            bsize, action_time_dim, dtype=torch.bool, device=timestep.device
+        )
+        pad_masks.append(action_time_mask)
+
+        att_masks += [1] + ([0] * (self.config.action_horizon - 1))
+
+        embs = torch.cat(embs, dim=1)
+        pad_masks = torch.cat(pad_masks, dim=1)
+        att_masks = torch.tensor(att_masks, dtype=embs.dtype, device=embs.device)
+        att_masks = att_masks[None, :].expand(bsize, len(att_masks))
+
+        return embs, pad_masks, att_masks, adarms_cond
 
     def setup_wrappers(
         self,

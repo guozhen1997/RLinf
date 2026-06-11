@@ -362,11 +362,31 @@ class FSDPStrategy(FSDPStrategyBase):
 
         all_no_shard = all(not handle.uses_sharded_strategy for handle in all_handles)
         if all_no_shard:
-            return (
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, norm_type)
-                .cpu()
-                .item()
+            # Avoid PyTorch's generic clip_grad_norm_ fast path here. On CUDA it
+            # may dispatch foreach kernels over the replicated NO_SHARD
+            # parameter list, and we have seen illegal-memory-access failures in
+            # large nested-FSDP models during that path. Reuse the same explicit
+            # FP32 norm computation that we already use for sharded handles.
+            no_shard_params = [
+                param for param in model.parameters() if param.grad is not None
+            ]
+            total_norm = get_grad_norm_for_mixed_precision(
+                no_shard_params,
+                norm_type,
+                torch.tensor(0.0, device=device, dtype=torch.float32),
+                device,
             )
+            grad_norm = float(total_norm.item())
+            if grad_norm == 0.0 or grad_norm <= max_norm:
+                return grad_norm
+
+            clip_coef = max_norm / (total_norm + 1e-6)
+            clip_coef = torch.clamp(clip_coef, max=1.0)
+            for param in no_shard_params:
+                param.grad.mul_(
+                    clip_coef.to(device=param.grad.device, dtype=param.grad.dtype)
+                )
+            return grad_norm
         sharded_params_set, nonsharded_params_set = set(), set()
         sharded_params, nonsharded_params = [], []
         grads = []
