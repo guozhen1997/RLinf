@@ -28,7 +28,6 @@ import torch.nn.functional as F
 from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 
-from rlinf.scheduler import Worker
 from rlinf.utils.metric_utils import compute_loss_mask
 
 
@@ -87,6 +86,8 @@ def normalize_dtype(dtype: torch.dtype | str) -> torch.dtype:
 def normalize_device(device: torch.device | str | None) -> torch.device:
     """Convert a device string into torch.device, defaulting to the worker device."""
     if device is None:
+        from rlinf.scheduler.worker.worker import Worker
+
         device = Worker.torch_device_type
     return device if isinstance(device, torch.device) else torch.device(device)
 
@@ -124,6 +125,8 @@ def synchronize_pending_accel_copies(copy_devices: set[torch.device]) -> None:
 
     events: list[torch.Event] = []
     for device in copy_devices:
+        from rlinf.scheduler.worker.worker import Worker
+
         event = Worker.torch_platform.Event()
         event.record(Worker.torch_platform.current_stream(device))
         events.append(event)

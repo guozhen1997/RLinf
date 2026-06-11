@@ -175,7 +175,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 infer_batch_size_fn=self._infer_env_batch_size,
                 timeout_time=0.2,
                 recv_queue_size=self.rollout_queue_size,
-            ).async_wait()
+            )
             actions, result = self.predict(env_output["obs"])
             save_flags = None
             if result.get("expert_label_flag", False):

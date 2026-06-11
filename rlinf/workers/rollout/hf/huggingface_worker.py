@@ -91,7 +91,7 @@ class MultiStepRolloutWorker(Worker):
         if self.env_decoupled_mode:
             # save the run-time imformation in communicate channel for decoupled mode
             self.batch_index_map = {
-                "train_rollout_results": [],
+                "rollout_results": [],
             }
         self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
 

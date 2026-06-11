@@ -169,6 +169,23 @@ def build_send_plan(
         entries=entries,
     )
 
+def build_send_key(
+    *,
+    src_group_name: str,
+    dst_group_name: str,
+    src_rank: int,
+    dst_rank: int,
+    tag: str | None,
+    route_key: Any = None,
+) -> str:
+    return build_route_channel_key(
+        src_group_name=src_group_name,
+        dst_group_name=dst_group_name,
+        src_rank=src_rank,
+        dst_rank=dst_rank,
+        tag=tag,
+        route_key=route_key,
+    )
 
 def env_decoupled_build_send_plan(
     *,

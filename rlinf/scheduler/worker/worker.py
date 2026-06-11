@@ -1020,6 +1020,7 @@ class Worker(metaclass=WorkerMeta):
         channel: Any | None,
         data: Any,
         *,
+        route_key: Any = None,
         tag: str | None = None,
         split_fn: Optional[Callable[[Any, list[int]], list[Any]]] = None,
         split_sizes: list[int],
@@ -1056,10 +1057,15 @@ class Worker(metaclass=WorkerMeta):
         """
 
         from ..collective import AsyncRouteWork
-        from .routing import split_batch
+        from .routing import (
+            split_batch,
+            build_send_key,
+        )
 
-        assert len(self.batch_index_map[tag]) > 0, f"batch_index_map[tag] {self.batch_index_map[tag]}[{tag}] is empty"
-        assert len(self.batch_index_map[tag]) == len(split_sizes), f"batch_index_map[{tag}] {self.batch_index_map[tag]} length should equal split_sizes {split_sizes}"
+        assert tag in self.batch_index_map, f"{tag=} need to be already in the batch_index_map"
+
+        assert len(self.batch_index_map[tag]) > 0, f"{self.batch_index_map[tag]=} is empty"
+        assert len(self.batch_index_map[tag]) == len(split_sizes), f"{self.batch_index_map[tag]=} length should equal {split_sizes=} length"
 
         payloads = (
             split_fn(data, split_sizes)
@@ -1070,7 +1076,7 @@ class Worker(metaclass=WorkerMeta):
         works = []
         for i, payload in enumerate(payloads):
             batch_index = self.batch_index_map[tag][i]
-            _, _, mode, _ = _split_channel_message(batch_index)
+            send_rank, _, mode, _ = _split_channel_message(batch_index)
             # After enabling env_decoupled_mode, the data sending format is as follows:
             # {
             #     "batch_index": batch_index,
@@ -1086,10 +1092,14 @@ class Worker(metaclass=WorkerMeta):
                 "batch_index": batch_index,
                 "batch": payload,
             }
-            if mode is not None:
-                key = f"{mode}_{tag}"
-            else:
-                key = tag
+            key=build_send_key(
+                src_group_name=self.worker_address.root_group_name,
+                dst_group_name=group_name,
+                src_rank=None,
+                dst_rank=send_rank,
+                tag=tag if mode is None else f"{mode}_{tag}",
+                route_key=route_key,
+            )
             work = channel.put(
                 item=senditem,
                 key=key,
@@ -1097,6 +1107,8 @@ class Worker(metaclass=WorkerMeta):
             )
             works.append(work)
 
+        # clear the batch_index_map for the next send
+        self.batch_index_map[tag] = []
         return AsyncRouteWork(works, lambda _: None)
 
     def recv_from(
@@ -1321,28 +1333,10 @@ class Worker(metaclass=WorkerMeta):
         )
 
         world_size = get_group_world_size(self._manager_proxy, group_name)
-
-        if tag in self.batch_index_map:
-            # if the batch_index_map has this tag
-            # The sending and receiving logic of batch_index_map is as follows:
-            # recv_from the worker -> Save the data's batch_index to batch_index_map[tag] ->
-            # Use the batch_index_map[tag] to get the batch_index to create the send plan ->
-            # Send data to the worker that originally sent it.
-            # The recv_rank don't need to be provided
-            # The current worker will directly and arbitrarily fetch any data from the channel.
-            recv_rank = None
-        else:
-            # if the batch_index_map does not have this tag
-            # The sending and receiving logic is as follows:
-            # Save the send_rank in batch_index -> send the data and batch_index to channel ->
-            # Any workers can recv the data and save the batch_index -> handle the data in the worker ->
-            # Send the data to the worker that originally sent it by the batch_index.
-            # In this recv_from, the processed data will be received, so recv_rank needs to be set to the current worker rank
-            recv_rank = self._rank
         plan = env_decoupled_build_recv_plan(
             src_group_name=group_name,
             dst_group_name=self.worker_address.root_group_name,
-            recv_rank=recv_rank,
+            recv_rank=None,
             src_world_size=self._world_size,
             dst_world_size=world_size,
             tag=tag,
@@ -1353,46 +1347,34 @@ class Worker(metaclass=WorkerMeta):
 
         def _finalize(received_items: list[Any]):
             if not received_items:
-                return None
+                assert False, "received_items is empty"
+
             # get the tag from the received_items
             _, _, _, tag = _split_channel_message(received_items[0]["batch_index"])
-            if tag in self.batch_index_map:
-                # If the batch_index_map is provided,
-                # Save the batch_index to the batch_index_map.
-                list_received_items = []
-                for item in received_items:
-                    batch_index = item["batch_index"]
-                    received_item = item["batch"]
-                    list_received_items.append(received_item)
-                    # Save the batch_index to the batch_index_map.
-                    self.batch_index_map[tag].append(batch_index)
-                received_items = list_received_items
-            else:
-                # Otherwise, the worker get the batch_index from the channel.
-                # Sort the works by the batch_index.
-                sorted_received_items = []
-                for item in received_items:
-                    batch_index = item["batch_index"]
-                    received_item = item["batch"]
-                    # divide the batch_index into send_rank, batch_idx and tag
-                    # batch_index: {send_rank}_{batch_idx}_{mode}_{tag}
-                    _, batch_idx, _, _ = _split_channel_message(batch_index)
-                    sorted_received_items.append((batch_idx, received_item))
-                sorted_received_items.sort(key=lambda x: x[0])
-                received_items = [x[1] for x in sorted_received_items]
 
-            split_sises = [entry.batch_size for entry in plan.entries]
-            for item, entry in zip(received_items, plan.entries):
+            assert tag in self.batch_index_map, f"{tag=} need to be already in the batch_index_map"
+            # Save the batch_index to the batch_index_map.
+            list_received_items = []
+            for item in received_items:
+                batch_index = item["batch_index"]
+                received_item = item["batch"]
+                list_received_items.append(received_item)
+                # Save the batch_index to the batch_index_map.
+                self.batch_index_map[tag].append(batch_index)
+            received_items = list_received_items
+
+            split_sizes = [plan.entries[0].batch_size for _ in received_items]
+            for item, item_batch_size in zip(received_items, split_sizes):
                 validate_batch_size(
                     data=item,
-                    expected_batch_size=entry.batch_size,
+                    expected_batch_size=item_batch_size,
                     infer_batch_size_fn=infer_batch_size_fn,
                 )
             if merge_fn is not None:
-                return merge_fn(received_items)
+                return merge_fn(received_items), split_sizes
             if len(received_items) == 1:
                 return received_items[0]
-            return merge_batches(received_items), split_sises
+            return merge_batches(received_items), split_sizes
 
         timeout_time = timeout_time + time.time()
         get_items = None
@@ -1417,7 +1399,7 @@ class Worker(metaclass=WorkerMeta):
             # handle the timeout case
             if time.time() >= timeout_time:
                 max_item_num = get_item_num
-                if get_items is None:
+                if get_items is not None:
                     received_items.append(await get_items.async_wait())
                     get_items = None
                     get_item_num = get_item_num + 1
