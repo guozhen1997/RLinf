@@ -1205,10 +1205,10 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         means via ``<metric>`` keys (no prefix) alongside the
         ``<dataset>/<metric>`` breakdown.
         """
-        if not self.eval_data_loaders:
-            return {}
-
         with self.worker_timer():
+            if not self.eval_data_loaders:
+                return {}
+
             if self.cfg.actor.get("enable_offload", False):
                 with self.device_lock:
                     self.load_param_and_grad(self.device)
