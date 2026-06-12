@@ -1255,23 +1255,19 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                     self.offload_param_and_grad()
             return final
 
-    def set_global_step(self, step: int):
-        """Update the current epoch so the sampler reshuffles on rollover.
+    def get_max_steps_per_epoch(self) -> int:
+        """Global training steps per epoch (SFTRunner contract).
 
         A global training step consumes ``grad_accum × ensemble_size``
         loader batches (see :meth:`build_dataloader`'s per-member note):
         the single-model path consumes ``grad_accum`` batches while the
         ensemble path runs the same grad-accum loop once per member.
-        Both factors are folded into ``batches_per_step`` so epoch
-        rollover — and the resulting ``DistributedSampler.set_epoch``
-        reshuffle — fires at the correct global step in either mode.
-        Single model (``ensemble_size=1``) reduces to the original
+        Single model (``ensemble_size=1``) reduces to the usual
         ``loader_len // grad_accum`` calculation.
         """
-        self.global_step = step
         loader_len = len(self.data_loader)
         if loader_len == 0:
-            return
+            return 0
         grad_accum = (
             self.cfg.actor.global_batch_size
             // self.cfg.actor.micro_batch_size
@@ -1279,7 +1275,19 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         )
         ensemble_size = max(1, int(getattr(self.cfg.actor.model, "ensemble_size", 1)))
         batches_per_step = grad_accum * ensemble_size
-        steps_per_epoch = max(1, loader_len // batches_per_step)
+        return max(1, loader_len // batches_per_step)
+
+    def set_global_step(self, step: int):
+        """Update the current epoch so the sampler reshuffles on rollover.
+
+        Epoch rollover — and the resulting ``DistributedSampler.set_epoch``
+        reshuffle — fires when ``step`` crosses a multiple of
+        :meth:`get_max_steps_per_epoch`.
+        """
+        self.global_step = step
+        steps_per_epoch = self.get_max_steps_per_epoch()
+        if steps_per_epoch == 0:
+            return
         new_epoch = step // steps_per_epoch
         current = getattr(self, "_current_epoch", -1)
         if current != new_epoch:
