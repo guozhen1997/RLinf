@@ -26,6 +26,7 @@ def compute_split_num(num, split_num):
 
 def _current_device():
     from rlinf.scheduler.worker.worker import Worker
+
     return Worker.torch_platform.current_device()
 
 

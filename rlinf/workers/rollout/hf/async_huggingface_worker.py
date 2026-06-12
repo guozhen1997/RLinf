@@ -166,7 +166,10 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     await self._poll_background_weight_sync()
                 await self.wait_if_stale()
             decoupled_generate_time = decoupled_generate_time + 1
-            env_output, split_sizes = await self.timeout_recv_from(
+            (
+                env_output,
+                split_sizes,
+            ) = await self.recv_from_and_record_batch_routes_with_timeout(
                 group_name=self.cfg.env.group_name,
                 channel=input_channel,
                 tag="rollout_results",
@@ -202,7 +205,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                     dtype=torch.float32,
                 ),
             )
-            self.batch_send_to(
+            self.send_to_recorded_batch_routes(
                 group_name=self.cfg.env.group_name,
                 channel=output_channel,
                 data=rollout_result,

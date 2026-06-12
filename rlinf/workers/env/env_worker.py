@@ -152,8 +152,8 @@ class EnvWorker(Worker):
         self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
 
         if self.env_decoupled_mode:
-            # Init the batch_index_map for env decoupled mode
-            self.batch_index_map = {}
+            # Init the batch_router for env decoupled mode
+            self.batch_router = {}
 
         self.update_env_cfg()
 
@@ -1091,7 +1091,9 @@ class EnvWorker(Worker):
                         channel=input_channel,
                         tag="eval_rollout_results",
                         batch_size=self.eval_batch_size,
-                        infer_batch_size_fn=self._infer_rollout_batch_size if self.env_decoupled_mode else None,
+                        infer_batch_size_fn=self._infer_rollout_batch_size
+                        if self.env_decoupled_mode
+                        else None,
                         env_decoupled_mode=self.env_decoupled_mode,
                     )
                     raw_chunk_actions = (

@@ -237,7 +237,7 @@ class EmbodiedRewardWorker(Worker):
 
         if self.env_decoupled_mode:
             # save the run-time imformation in communicate channel for decoupled mode
-            self.batch_index_map = {
+            self.batch_router = {
                 "train_reward_obs": [],
             }
 

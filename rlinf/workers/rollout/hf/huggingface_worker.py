@@ -90,7 +90,7 @@ class MultiStepRolloutWorker(Worker):
 
         if self.env_decoupled_mode:
             # save the run-time imformation in communicate channel for decoupled mode
-            self.batch_index_map = {
+            self.batch_router = {
                 "rollout_results": [],
             }
         self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
@@ -445,7 +445,10 @@ class MultiStepRolloutWorker(Worker):
             self.reload_model()
         if self.env_decoupled_mode:
             while True:
-                env_output, split_sizes = await self.timeout_recv_from(
+                (
+                    env_output,
+                    split_sizes,
+                ) = await self.recv_from_and_record_batch_routes_with_timeout(
                     group_name=self.cfg.env.group_name,
                     channel=input_channel,
                     tag="rollout_results",
@@ -458,7 +461,7 @@ class MultiStepRolloutWorker(Worker):
                 actions, _ = self.predict(env_output["obs"], mode="eval")
                 if isinstance(actions, torch.Tensor):
                     actions = actions.detach().cpu().contiguous()
-                self.batch_send_to(
+                self.send_to_recorded_batch_routes(
                     group_name=self.cfg.env.group_name,
                     channel=output_channel,
                     data=actions,

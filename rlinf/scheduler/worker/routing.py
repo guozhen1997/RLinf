@@ -169,6 +169,7 @@ def build_send_plan(
         entries=entries,
     )
 
+
 def build_send_key(
     *,
     src_group_name: str,
@@ -178,6 +179,23 @@ def build_send_key(
     tag: str | None,
     route_key: Any = None,
 ) -> str:
+    """Build the channel key used to send a routed payload shard.
+
+    The key identifies one logical route from a source worker group/rank to a
+    destination worker group/rank. ``tag`` and ``route_key`` can be used to separate
+    different message streams that share the same source and destination ranks.
+
+    Args:
+        src_group_name: Name of the source worker group.
+        dst_group_name: Name of the destination worker group.
+        src_rank: Rank of the source worker within its group.
+        dst_rank: Rank of the destination worker within its group.
+        tag: Optional routing tag used to distinguish message types.
+        route_key: Optional extra key used to separate independent streams.
+
+    Returns:
+        The channel key string for sending the routed payload.
+    """
     return build_route_channel_key(
         src_group_name=src_group_name,
         dst_group_name=dst_group_name,
@@ -186,6 +204,7 @@ def build_send_key(
         tag=tag,
         route_key=route_key,
     )
+
 
 def env_decoupled_build_send_plan(
     *,
@@ -197,8 +216,8 @@ def env_decoupled_build_send_plan(
     tag: str | None,
     route_key: Any = None,
     batch_size: int,
-    mode: str = None,
-    batch_index_map: list[str] | None = None,
+    mode: str | None = None,
+    batch_router: list[str] | None = None,
     send_queue_size: int = 0,
 ) -> RoutePlan:
     """Build the route plan for one sender rank."""
@@ -213,9 +232,9 @@ def env_decoupled_build_send_plan(
             queue_size=send_queue_size,
         )
     ):
-        if batch_index_map is not None:
-            # if the batch_index_map is provided, use the batch_index_map to get the batch_index
-            batch_index = batch_index_map[index]
+        if batch_router is not None:
+            # if the batch_router is provided, use the batch_router to get the batch_index
+            batch_index = batch_router[index]
             # get the send_rank from the batch_index
             send_rank, _, _, tag = _split_channel_message(batch_index)
         else:
