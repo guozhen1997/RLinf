@@ -154,6 +154,11 @@ class EnvWorker(Worker):
         if self.env_decoupled_mode:
             # Init the batch_router for env decoupled mode
             self.batch_router = {}
+            assert self._component_placement.get_world_size(
+                "env"
+            ) >= self._component_placement.get_world_size("rollout"), (
+                "the world size of env must be greater than the world size of rollout in env_decoupled_mode"
+            )
 
         self.update_env_cfg()
 

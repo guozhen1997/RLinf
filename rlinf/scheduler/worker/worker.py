@@ -1279,9 +1279,9 @@ class Worker(metaclass=WorkerMeta):
         """
         from .routing import (
             env_decoupled_build_recv_plan,
+            get_batch_size,
             get_group_world_size,
             merge_batches,
-            validate_batch_size,
         )
 
         world_size = get_group_world_size(self._manager_proxy, group_name)
@@ -1316,14 +1316,10 @@ class Worker(metaclass=WorkerMeta):
                 # Save the batch_index to the batch_router.
                 self.batch_router[tag].append(batch_index)
             received_items = list_received_items
+            split_sizes = [
+                get_batch_size(item, infer_batch_size_fn) for item in received_items
+            ]
 
-            split_sizes = [plan.entries[0].batch_size for _ in received_items]
-            for item, item_batch_size in zip(received_items, split_sizes):
-                validate_batch_size(
-                    data=item,
-                    expected_batch_size=item_batch_size,
-                    infer_batch_size_fn=infer_batch_size_fn,
-                )
             if merge_fn is not None:
                 return merge_fn(received_items), split_sizes
             if len(received_items) == 1:

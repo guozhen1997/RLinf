@@ -483,3 +483,13 @@ def validate_batch_size(
         raise ValueError(
             f"Expected batch size {expected_batch_size}, but received {actual_batch_size}."
         )
+
+
+def get_batch_size(
+    data: Any,
+    infer_batch_size_fn: Callable[[Any], int] | None = None,
+) -> int:
+    """Get the batch size of a data."""
+    if infer_batch_size_fn is None:
+        return infer_batch_size(data)
+    return infer_batch_size_fn(data)

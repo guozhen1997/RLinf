@@ -550,3 +550,4 @@ as well as reinforcement learning training examples on real robots.
    gim_arm
    xsquare_turtle2
    dosw1
+   env_decoupled_mode
