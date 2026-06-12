@@ -43,7 +43,12 @@ echo "Using Python at $(which python)"
 LOG_DIR="${REPO_PATH}/logs/steam_sft/${CONFIG_NAME}-$(date +'%Y%m%d-%H:%M:%S')"
 LOG_FILE="${LOG_DIR}/run_steam_sft.log"
 mkdir -p "${LOG_DIR}"
-HYDRA_ARGS=("runner.logger.log_path=${LOG_DIR}")
+# Resolve shared config groups (training_backend/...) from examples/sft/config
+# regardless of what searchpath an individual config file declares.
+HYDRA_ARGS=(
+    "runner.logger.log_path=${LOG_DIR}"
+    "hydra.searchpath=[file://${SCRIPT_DIR}/config/,file://${REPO_PATH}/examples/sft/config/]"
+)
 CMD_BASE="python ${SRC_FILE} --config-path ${SCRIPT_DIR}/config/ --config-name ${CONFIG_NAME}"
 echo "${CMD_BASE} ${HYDRA_ARGS[*]} ${EXTRA_ARGS}" > "${LOG_FILE}"
 ${CMD_BASE} "${HYDRA_ARGS[@]}" ${EXTRA_ARGS} 2>&1 | grep -v "libdav1d" | tee -a "${LOG_FILE}"
