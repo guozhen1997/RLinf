@@ -775,8 +775,8 @@ class EnvWorker(Worker):
                     "obs": env_batch["obs"],
                     "final_obs": env_batch["final_obs"],
                 },
-                tag="rollout_results",
                 mode="train",
+                tag="rollout_results",
                 env_decoupled_mode=self.env_decoupled_mode,
             )
 
@@ -938,8 +938,8 @@ class EnvWorker(Worker):
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
                         },
-                        tag="rollout_results",
                         mode="train",
+                        tag="rollout_results",
                         env_decoupled_mode=self.env_decoupled_mode,
                     )
                     if self.collect_transitions:
@@ -1084,8 +1084,8 @@ class EnvWorker(Worker):
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
                         },
-                        tag="rollout_results",
                         mode="eval",
+                        tag="rollout_results",
                         env_decoupled_mode=self.env_decoupled_mode,
                     )
 
@@ -1135,8 +1135,8 @@ class EnvWorker(Worker):
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
                         },
-                        tag="rollout_results",
                         mode="eval",
+                        tag="rollout_results",
                         env_decoupled_mode=self.env_decoupled_mode,
                     )
 

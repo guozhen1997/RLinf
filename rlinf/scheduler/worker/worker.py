@@ -850,13 +850,13 @@ class Worker(metaclass=WorkerMeta):
         data: Any,
         *,
         route_key: Any = None,
+        mode: str | None = None,
         tag: str | None = None,
         async_op: bool = False,
         batch_size: int | None = None,
         split_fn: Optional[Callable[[Any, list[int]], list[Any]]] = None,
         enable_p2p: bool = False,
         options: Optional["CollectiveGroupOptions"] = None,
-        mode: str | None = None,
         env_decoupled_mode: bool = False,
         send_queue_size: int = 0,
     ):
@@ -887,6 +887,11 @@ class Worker(metaclass=WorkerMeta):
                 is True.
             data: Payload to split and send.
             route_key: Optional key used to separate independent routed streams.
+            mode: Optional phase name used only in env-decoupled routing. It is encoded in
+            ``batch_index`` so the response path can distinguish streams that share the
+            same base ``tag``. For example, ``mode="train"`` and
+            ``tag="rollout_results"`` make the return message use
+            ``"train_rollout_results"``.
             tag: Optional routing tag used to build channel keys and env-decoupled
                 batch indices.
             async_op: If True, return an ``AsyncRouteWork`` wrapping async send/put
@@ -898,7 +903,6 @@ class Worker(metaclass=WorkerMeta):
             enable_p2p: If True, send shards with collective ``send`` instead of
                 ``channel.put``. Not supported with ``env_decoupled_mode``.
             options: Optional collective options forwarded to ``send``.
-            mode: Optional env-decoupled mode value encoded in ``batch_index``.
             env_decoupled_mode: If True, use env-decoupled routing and wrap each shard
                 with ``batch_index`` metadata.
             send_queue_size: Number of send queue entries used when building the
@@ -938,7 +942,7 @@ class Worker(metaclass=WorkerMeta):
                 src_rank=self._rank,
                 src_world_size=self._world_size,
                 dst_world_size=world_size,
-                tag=tag,
+                tag=tag if mode is None else f"{mode}_{tag}",
                 route_key=route_key,
                 batch_size=batch_size,
             )

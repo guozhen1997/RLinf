@@ -69,7 +69,7 @@ class EmbodiedEvalRunner:
             output_channel=self.env_channel,
         )
         env_results = env_handle.wait()
-        if getattr(self.env, "env_decoupled_mode", False):
+        if not getattr(self.env, "env_decoupled_mode", False):
             rollout_handle.wait()
         eval_metrics_list = [results for results in env_results if results is not None]
         eval_metrics = compute_evaluate_metrics(eval_metrics_list)
