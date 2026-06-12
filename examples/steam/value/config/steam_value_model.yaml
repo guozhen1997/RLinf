@@ -34,8 +34,11 @@ runner:
     experiment_name: "steam_sft"
     logger_backends: ["tensorboard"]
 
-  max_epochs: 8000
-  max_steps: -1
+  # Total training length is step-driven: max_steps bounds the run (keep it
+  # in sync with actor.optim.total_training_steps); max_epochs: -1 = no
+  # epoch-based limit.
+  max_epochs: -1
+  max_steps: 8000
   val_check_interval: 500
   save_interval: 2000
 
