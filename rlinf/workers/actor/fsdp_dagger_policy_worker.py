@@ -411,6 +411,9 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
     def _prepare_sft_batch(self, batch):
         """Prepare model-specific DAgger training inputs."""
         if self.data_source == "buffer":
+            # Replay-buffer samples store model inputs under forward_inputs.
+            if "forward_inputs" in batch:
+                batch = batch["forward_inputs"]
             return self.model.prepare_dagger_sft_batch(batch)
         elif self.data_source == "lerobot":
             return self.model.prepare_lerobot_sft_batch(batch)
@@ -468,7 +471,7 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
                 is_last_micro_batch=(mb_idx + 1) == self.gradient_accumulation,
             )
             with self.amp_context:
-                actor_loss = self.forward_actor(batch)
+                actor_loss = self.forward_actor(batch["forward_inputs"])
             actor_loss = actor_loss / self.gradient_accumulation
             with backward_ctx:
                 self.grad_scaler.scale(actor_loss).backward()
