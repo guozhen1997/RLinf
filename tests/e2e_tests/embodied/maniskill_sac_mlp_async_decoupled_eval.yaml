@@ -18,12 +18,12 @@ cluster:
   component_placement:
     actor: 0
     rollout: 0:0-1
-    env: 0:0-4, 1:5-9
+    env: 0:0-1, 1:2-4
 
 runner:
   task_type: embodied
   logger:
-    log_path: /workspace/results/maniskill_sac_mlp_async_decoupled
+    log_path: /workspace/results/maniskill_sac_mlp_async_decoupled_eval
     project_name: rlinf
     experiment_name: "ci-test"
     logger_backends: ["tensorboard"] # wandb, swanlab
@@ -31,7 +31,7 @@ runner:
   max_epochs: 5
   max_steps: -1
 
-  only_eval: False
+  only_eval: True
   val_check_interval: 1
   save_interval: -1
 
@@ -102,7 +102,6 @@ env:
     # The rollout and env workers are fully decoupled, removing the static mapping.
     # This is to handle situations where the env worker may become deadlocked.
     env_mode: "decoupled"
-    rollout_queue_size: 5
   
   eval:
     total_num_envs: 80

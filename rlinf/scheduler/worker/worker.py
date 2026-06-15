@@ -1243,7 +1243,7 @@ class Worker(metaclass=WorkerMeta):
         batch_size: int | None = None,
         merge_fn: Optional[Callable[[list[Any]], Any]] = None,
         infer_batch_size_fn: Optional[Callable[[Any], int]] = None,
-        timeout_time: float = 0.2,
+        timeout_time: float = 0.02,
         recv_queue_size: int = 0,
     ):
         """Receive routed batch shards and record their return routes.
@@ -1343,7 +1343,7 @@ class Worker(metaclass=WorkerMeta):
                 )
             else:
                 # Now, the worker is getting a item, sleep to wait
-                await asyncio.sleep(0.001)
+                await asyncio.sleep(0.0001)
 
             # handle the get_items finish
             if get_items.done():

@@ -176,7 +176,7 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
                 batch_size=self.train_batch_size,
                 merge_fn=self._merge_obs_batches,
                 infer_batch_size_fn=self._infer_env_batch_size,
-                timeout_time=0.2,
+                timeout_time=0.02,
                 recv_queue_size=self.rollout_queue_size,
             )
             actions, result = self.predict(env_output["obs"])

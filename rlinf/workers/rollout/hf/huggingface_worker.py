@@ -457,9 +457,9 @@ class MultiStepRolloutWorker(Worker):
                     batch_size=self.eval_batch_size,
                     merge_fn=self._merge_obs_batches,
                     infer_batch_size_fn=self._infer_env_batch_size,
-                    timeout_time=0.2,
+                    timeout_time=0.02,
                     recv_queue_size=self.rollout_queue_size,
-                ).async_wait()
+                )
                 actions, _ = self.predict(env_output["obs"], mode="eval")
                 if isinstance(actions, torch.Tensor):
                     actions = actions.detach().cpu().contiguous()
