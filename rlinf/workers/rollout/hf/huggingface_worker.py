@@ -180,6 +180,41 @@ class MultiStepRolloutWorker(Worker):
                 ),
             }
 
+    def send_rollout_result(
+        self,
+        output_channel: Channel,
+        rollout_result: RolloutResult,
+        *,
+        tag: str,
+        batch_size: int,
+    ):
+        self.send_to(
+            group_name=self.cfg.env.group_name,
+            channel=output_channel,
+            data=rollout_result,
+            tag=tag,
+            async_op=True,
+            batch_size=batch_size,
+            split_fn=self._split_rollout_result,
+        )
+
+    async def recv_env_output(
+        self,
+        input_channel: Channel,
+        *,
+        tag: str,
+        batch_size: int,
+    ):
+        return await self.recv_from(
+            group_name=self.cfg.env.group_name,
+            channel=input_channel,
+            tag=tag,
+            async_op=True,
+            batch_size=batch_size,
+            merge_fn=self._merge_obs_batches,
+            infer_batch_size_fn=self._infer_env_batch_size,
+        ).async_wait()
+
     def update_dagger_beta(self):
         if self.expert_model is None:
             return
@@ -347,15 +382,11 @@ class MultiStepRolloutWorker(Worker):
         self.update_dagger_beta()
         for _ in range(self.n_train_chunk_steps):
             for _ in range(self.num_pipeline_stages):
-                env_output = await self.recv_from(
-                    group_name=self.cfg.env.group_name,
-                    channel=input_channel,
+                env_output = await self.recv_env_output(
+                    input_channel=input_channel,
                     tag="train_rollout_results",
-                    async_op=True,
                     batch_size=self.train_batch_size,
-                    merge_fn=self._merge_obs_batches,
-                    infer_batch_size_fn=self._infer_env_batch_size,
-                ).async_wait()
+                )
                 actions, result = self.predict(env_output["obs"])
 
                 save_flags = None
@@ -385,25 +416,18 @@ class MultiStepRolloutWorker(Worker):
                         dtype=torch.float32,
                     ),
                 )
-                self.send_to(
-                    group_name=self.cfg.env.group_name,
-                    channel=output_channel,
-                    data=rollout_result,
+                self.send_rollout_result(
+                    output_channel=output_channel,
+                    rollout_result=rollout_result,
                     tag="train_rollout_results",
-                    async_op=True,
                     batch_size=self.train_batch_size,
-                    split_fn=self._split_rollout_result,
                 )
         for _ in range(self.num_pipeline_stages):
-            env_output = await self.recv_from(
-                group_name=self.cfg.env.group_name,
-                channel=input_channel,
+            env_output = self.recv_env_output(
+                input_channel=input_channel,
                 tag="train_rollout_results",
-                async_op=True,
                 batch_size=self.train_batch_size,
-                merge_fn=self._merge_obs_batches,
-                infer_batch_size_fn=self._infer_env_batch_size,
-            ).async_wait()
+            )
             actions, result = self.predict(env_output["obs"])
 
             rollout_result = RolloutResult(
@@ -413,14 +437,11 @@ class MultiStepRolloutWorker(Worker):
                     env_output.get("final_obs", None)
                 ),
             )
-            self.send_to(
-                group_name=self.cfg.env.group_name,
-                channel=output_channel,
-                data=rollout_result,
+            self.send_rollout_result(
+                output_channel=output_channel,
+                rollout_result=rollout_result,
                 tag="train_rollout_results",
-                async_op=True,
                 batch_size=self.train_batch_size,
-                split_fn=self._split_rollout_result,
             )
 
     @Worker.timer("rollout/generate")
@@ -478,24 +499,19 @@ class MultiStepRolloutWorker(Worker):
             ):
                 for _ in range(self.n_eval_chunk_steps):
                     for _ in range(self.num_pipeline_stages):
-                        env_output = await self.recv_from(
-                            group_name=self.cfg.env.group_name,
-                            channel=input_channel,
+                        env_output = self.recv_env_output(
+                            input_channel=input_channel,
                             tag="eval_rollout_results",
-                            async_op=True,
                             batch_size=self.eval_batch_size,
-                            merge_fn=self._merge_obs_batches,
-                            infer_batch_size_fn=self._infer_env_batch_size,
-                        ).async_wait()
+                        )
                         actions, _ = self.predict(env_output["obs"], mode="eval")
                         if isinstance(actions, torch.Tensor):
                             actions = actions.detach().cpu().contiguous()
-                        self.send_to(
-                            group_name=self.cfg.env.group_name,
-                            channel=output_channel,
-                            data=actions,
+                        self.send_rollout_result(
+                            output_channel=output_channel,
+                            rollout_result=actions,
                             tag="eval_rollout_results",
-                            async_op=True,
+                            batch_size=self.eval_batch_size,
                         )
 
             if self.enable_offload:

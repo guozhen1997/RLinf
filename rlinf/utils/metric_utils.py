@@ -25,12 +25,6 @@ def compute_split_num(num, split_num):
     return math.lcm(num, split_num) // split_num
 
 
-def _current_device():
-    from rlinf.scheduler.worker.worker import Worker
-
-    return Worker.torch_platform.current_device()
-
-
 def _normalize_metric_shard(shard: object) -> torch.Tensor:
     """One rank's metric -> 1D float tensor on CPU."""
     if shard is None:
@@ -124,7 +118,10 @@ def compute_rollout_metrics(data_buffer: dict) -> dict:
     loss_mask = data_buffer.get("loss_mask", None)
 
     def reduce_metrics(values: torch.Tensor) -> tuple[float, float, float]:
-        device = _current_device()
+        from rlinf.scheduler.worker.worker import Worker
+
+        device = Worker.torch_platform.current_device()
+
         if values.numel() == 0:
             count = torch.tensor(0.0, device=device, dtype=torch.float32)
             values_sum = torch.tensor(0.0, device=device, dtype=torch.float32)
