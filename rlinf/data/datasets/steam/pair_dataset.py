@@ -400,6 +400,44 @@ def _positive_stride_to_bin(stride: int, K: int, num_bins: int) -> int:
     return int(((stride - 1) * num_bins) // K)
 
 
+def _scaled_signed_stride_to_bin(scaled_stride: float, K: int, num_bins: int) -> int:
+    """Bin a length-scaled signed stride over ``[-K, K]`` (bin width ``2K/num_bins``).
+
+    The scaled stride ``signed_stride * L_max / L_ep`` is rounded to the nearest
+    integer-equivalent stride, clamped to ``[-K, K] \\ {0}`` with the sign
+    preserved, then mapped through :func:`_signed_stride_to_bin` — the *same*
+    layout (and resolution) as the unscaled path. Consequences:
+
+    * An episode of length ``L_max`` (``scale == 1``) reproduces the unscaled
+      bins exactly.
+    * Shorter episodes (``scale > 1``) push a fixed frame stride into a higher
+      progress bin and saturate at ``±K`` earlier — a stride covering fraction
+      ``K / L_max`` of its episode already hits the extreme bin.
+    * Longer episodes (``scale < 1``) under-reach: their max stride lands below
+      the extreme bin.
+
+    Only the position on the ``±K`` axis is length-dependent; the regress/
+    progress split at ``half`` is preserved, so the model loss and the
+    bin-index decoders (``_predicted_signed_value``) stay unchanged.
+    """
+    s = int(round(float(scaled_stride)))
+    if s == 0:  # a non-zero stride must keep a direction, never "no progress"
+        s = 1 if scaled_stride > 0 else -1
+    s = max(-int(K), min(int(K), s))
+    return _signed_stride_to_bin(s, int(K), num_bins)
+
+
+def _scaled_positive_stride_to_bin(scaled_stride: float, K: int, num_bins: int) -> int:
+    """Positive-only analogue of :func:`_scaled_signed_stride_to_bin`.
+
+    Rounds ``|scaled_stride|`` to the nearest integer stride, clamps to
+    ``[1, K]``, then maps via :func:`_positive_stride_to_bin`.
+    """
+    s = int(round(abs(float(scaled_stride))))
+    s = max(1, min(int(K), s))
+    return _positive_stride_to_bin(s, int(K), num_bins)
+
+
 def bin_centers(K: int, num_bins: int) -> np.ndarray:
     """Return the ``[num_bins]`` signed-stride centers for the bin layout.
 
@@ -888,6 +926,27 @@ class PairDataset(Dataset):
             ``num_bins`` bins.
         min_episode_length: Optional override for the minimum-length
             floor (default ``k + 1``).
+        length_scale_enabled: If ``True`` (multi-bin modes only), the signed
+            stride is length-normalized before binning:
+            ``scaled = signed_stride * L_max / L_ep``, where ``L_ep`` is the
+            current episode length and ``L_max`` is the reference length. Binning
+            stays on the ``±K`` axis (bin width ``2K/num_bins``, same resolution
+            as the unscaled path); ``L_max`` only sets the scale factor, and
+            ``|scaled| > K`` saturates into the extreme bin. An episode of length
+            ``L_max`` reproduces the unscaled layout (``scale == 1``); shorter
+            episodes push a fixed frame stride into a higher bin (and saturate
+            earlier), longer episodes under-reach. No-op in binary mode
+            (``num_bins == 2``), where positive scaling preserves the stride sign.
+        length_scale_percentile: Percentile of eligible-episode lengths used as
+            the reference length ``L_max`` when no explicit
+            ``length_scale_reference`` is supplied (default ``90``; ``100`` ⇒
+            true max). Acts as the pivot length: episodes near ``L_max`` use the
+            full bin range, shorter ones saturate, longer ones under-reach — so
+            a lower percentile (e.g. the median) saturates fewer episodes.
+        length_scale_reference: Explicit ``L_max``. When ``None`` and
+            ``length_scale_enabled``, it is computed per-dataset from
+            ``length_scale_percentile``; callers wanting one global ``L_max``
+            across a mixture inject it via :meth:`set_length_scale_reference`.
     """
 
     def __init__(
@@ -908,6 +967,9 @@ class PairDataset(Dataset):
         open_rewind: bool = True,
         min_episode_length: Optional[int] = None,
         num_bins: int = 2,
+        length_scale_enabled: bool = False,
+        length_scale_percentile: float = 90.0,
+        length_scale_reference: Optional[float] = None,
         state_transform_enabled: bool = False,
         robot_type: str = "libero",
         model_type: str = "pi05",
@@ -950,6 +1012,26 @@ class PairDataset(Dataset):
                 f"Positive-only mode requires 1 <= num_bins <= k and "
                 f"k % num_bins == 0; got k={self.k}, num_bins={self.num_bins}."
             )
+        self.length_scale_enabled = bool(length_scale_enabled)
+        self.length_scale_percentile = float(length_scale_percentile)
+        # Resolved per-dataset below once eligible episodes are known; a global
+        # mixture-wide L_max can override it via set_length_scale_reference.
+        self._length_scale_reference: Optional[float] = (
+            None if length_scale_reference is None else float(length_scale_reference)
+        )
+        if self.length_scale_enabled:
+            if not (0.0 < self.length_scale_percentile <= 100.0):
+                raise ValueError(
+                    "length_scale_percentile must be in (0, 100], got "
+                    f"{self.length_scale_percentile}"
+                )
+            if self.open_rewind and self.num_bins == 2:
+                logger.warning(
+                    "PairDataset length_scale_enabled has no effect in binary "
+                    "mode (num_bins == 2): scaling by L_max / L_ep preserves the "
+                    "stride sign, so labels are unchanged. Set num_bins > 2 for "
+                    "length-scaled multi-bin labels."
+                )
         self.include_state = bool(include_state)
         self.state_max_dim = state_max_dim
         self.state_key = state_key
@@ -1052,6 +1134,12 @@ class PairDataset(Dataset):
         # anchor into its positive and negative training samples.
         self._num_pair_positions = int(self._pair_position_ends[-1])
 
+        # Resolve the per-dataset length-scale reference (L_max) as the
+        # configured percentile of eligible-episode lengths, unless an explicit
+        # (e.g. global mixture-wide) reference was supplied to the constructor.
+        if self.length_scale_enabled and self._length_scale_reference is None:
+            self._length_scale_reference = self._compute_length_scale_reference()
+
         logger.info(
             "PairDataset: dataset_path=%s, episodes=%d eligible=%d, k=%d, "
             "num_bins=%d (%s mode), total_positions=%d, include_state=%s, "
@@ -1087,6 +1175,60 @@ class PairDataset(Dataset):
     def num_pair_positions(self) -> int:
         """Number of distinct ``(episode, t)`` anchors before label duplication."""
         return self._num_pair_positions
+
+    @property
+    def length_scale_reference(self) -> Optional[float]:
+        """The resolved ``L_max`` used to length-scale strides (``None`` if off)."""
+        return self._length_scale_reference
+
+    def eligible_episode_lengths(self) -> list[int]:
+        """Return the length of every eligible (trained-on) episode."""
+        return [int(self._source.episode_length(ep)) for ep in self._eligible]
+
+    def _compute_length_scale_reference(self) -> float:
+        """Percentile of eligible-episode lengths, floored at 1."""
+        lengths = self.eligible_episode_lengths()
+        ref = float(
+            np.percentile(
+                np.asarray(lengths, dtype=np.float64),
+                self.length_scale_percentile,
+            )
+        )
+        return max(1.0, ref)
+
+    def set_length_scale_reference(self, reference: float) -> None:
+        """Override ``L_max`` (e.g. a global mixture-wide value).
+
+        No-op when length scaling is disabled, so callers can apply it
+        unconditionally across a heterogeneous mixture.
+        """
+        if not self.length_scale_enabled:
+            return
+        if reference <= 0:
+            raise ValueError(f"length_scale_reference must be > 0, got {reference}")
+        self._length_scale_reference = float(reference)
+
+    @staticmethod
+    def compute_global_length_scale_reference(
+        datasets: Sequence["PairDataset"],
+        percentile: float,
+    ) -> float:
+        """Pool eligible-episode lengths across datasets and return the percentile.
+
+        Used to derive a single mixture-wide ``L_max`` so a fixed frame stride
+        maps to the same bin regardless of which dataset the episode came from.
+        """
+        lengths: list[int] = []
+        for ds in datasets:
+            lengths.extend(ds.eligible_episode_lengths())
+        if not lengths:
+            raise ValueError(
+                "compute_global_length_scale_reference got no episodes to pool."
+            )
+        ref = float(
+            np.percentile(np.asarray(lengths, dtype=np.float64), float(percentile))
+        )
+        return max(1.0, ref)
 
     def __len__(self) -> int:
         if not self.open_rewind:
@@ -1321,7 +1463,24 @@ class PairDataset(Dataset):
             else:
                 frame_idx_t, frame_idx_tk = t + i, t
                 signed_stride = -i
-            if self.open_rewind:
+            if self.length_scale_enabled and self._length_scale_reference is not None:
+                # Length-normalize the stride so a fixed frame jump maps to a
+                # higher progress bin in shorter episodes:
+                #   scaled = signed_stride * L_max / L_ep
+                # L_max only sets the scale factor; binning stays on the ±K axis
+                # (bin width 2K/num_bins, same resolution as the unscaled path),
+                # with |scaled| > K saturating into the extreme bin. An episode
+                # of length L_max reproduces the unscaled layout (scale == 1).
+                scale = self._length_scale_reference / float(episode_length)
+                if self.open_rewind:
+                    label = _scaled_signed_stride_to_bin(
+                        signed_stride * scale, self.k, self.num_bins
+                    )
+                else:
+                    label = _scaled_positive_stride_to_bin(
+                        i * scale, self.k, self.num_bins
+                    )
+            elif self.open_rewind:
                 label = _signed_stride_to_bin(signed_stride, self.k, self.num_bins)
             else:
                 label = _positive_stride_to_bin(i, self.k, self.num_bins)

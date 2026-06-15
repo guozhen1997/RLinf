@@ -25,25 +25,35 @@ CriticOutput.predicted_values`). For binary (``num_bins=2``) it degenerates to
 The final per-frame scalar written as ``advantage_continuous`` is the
 ``ensemble_signed_score``.
 
-The boolean ``advantage`` label is ``True`` for every frame in ``sft``
-datasets (they are success demos by construction) and, for ``rollout``
-datasets, is derived from ``advantage_continuous`` under one of two
-mutually-exclusive modes selected via ``advantage.label_mode``:
+The boolean ``advantage`` label is derived from ``advantage_continuous``
+under one of two mutually-exclusive modes selected via
+``advantage.label_mode``:
 
     * ``label_mode: threshold`` — ``advantage = advantage_continuous >
       advantage.positive_threshold``, where ``positive_threshold`` is a
-      signed-score threshold in ``[-1, 1]`` (NOT a probability).
-    * ``label_mode: quantile`` — pool ``advantage_continuous`` across every
-      rollout dataset and compute the ``(1 - advantage.positive_quantile)``-th
-      percentile; any rollout frame strictly above that cross-dataset
-      threshold is labelled True. ``advantage.positive_quantile`` must be in
-      ``(0, 1)``; e.g. ``0.3`` ⇒ top 30% rollout frames by
-      ``advantage_continuous``.
+      signed-score threshold in ``[-1, 1]`` (NOT a probability). ``sft``
+      frames are always labelled True (success demos by construction).
+    * ``label_mode: quantile`` — separate top-fraction quantiles per data
+      type, scored over independent pools:
 
-``advantage.label_mode`` is **required** — there is no default. The resulting
-``unified_threshold`` (equal to ``positive_threshold`` in threshold mode, or
-the computed percentile in quantile mode) is recorded in each dataset's
-``tags[tag].positive_threshold`` for downstream consumers.
+        - ``advantage.rollout_quantile`` (required; ``positive_quantile`` is
+          accepted as a deprecated alias) pools ``advantage_continuous``
+          across every ``rollout`` dataset and labels the top
+          ``rollout_quantile`` fraction True. e.g. ``0.3`` ⇒ top 30% rollout
+          frames by ``advantage_continuous``.
+        - ``advantage.expert_quantile`` (optional) pools
+          ``advantage_continuous`` across every ``sft`` dataset and labels the
+          top ``expert_quantile`` fraction True. When omitted, every ``sft``
+          frame is labelled True (the historical behaviour).
+
+      Both quantiles must be in ``(0, 1)``. The expert pool never sees rollout
+      frames and vice-versa.
+
+``advantage.label_mode`` is **required** — there is no default. Each dataset
+records the threshold applied to it in ``tags[tag].positive_threshold``: the
+rollout-pool percentile for ``rollout`` datasets, the expert-pool percentile
+for ``sft`` datasets when ``expert_quantile`` is set (otherwise the
+rollout-pool percentile, for provenance, while the frames stay all-True).
 
 Output: ``meta/advantages_{tag}.parquet`` per dataset, with columns
 ``[episode_index, frame_index, advantage, advantage_continuous,
@@ -53,7 +63,7 @@ Output: ``meta/advantages_{tag}.parquet`` per dataset, with columns
 backfilled with zero
 ``ensemble_signed_score``. ``mixture_config.yaml`` under ``meta/`` is updated
 with a per-tag entry that now also records ``label_mode`` (and
-``positive_quantile`` in quantile mode).
+``rollout_quantile`` / ``expert_quantile`` in quantile mode).
 
 Usage:
     python compute_advantages_ensemble.py \\
@@ -63,10 +73,11 @@ Usage:
     torchrun --nproc_per_node=4 compute_advantages_ensemble.py \\
         --config-name compute_advantages_ensemble
 
-    # Override at the CLI: quantile mode, top 30% rollout frames positive
+    # Override at the CLI: quantile mode, top 30% rollout + top 90% expert
     torchrun --nproc_per_node=4 compute_advantages_ensemble.py \\
         --config-name compute_advantages_ensemble \\
-        advantage.label_mode=quantile advantage.positive_quantile=0.3
+        advantage.label_mode=quantile \\
+        advantage.rollout_quantile=0.3 advantage.expert_quantile=0.9
 """
 
 import gc
@@ -761,6 +772,34 @@ def _resolve_state_transform_kwargs(
     }
 
 
+def _resolve_quantiles(
+    advantage_cfg: DictConfig,
+) -> tuple[Optional[float], Optional[float]]:
+    """Resolve ``(rollout_quantile, expert_quantile)`` for quantile label_mode.
+
+    ``rollout_quantile`` is the fraction of top rollout frames labelled True;
+    ``advantage.positive_quantile`` is accepted as a deprecated alias for it.
+    ``expert_quantile`` is the fraction of top ``sft`` (expert) frames labelled
+    True — ``None`` when unset, which keeps the historical "every sft frame is
+    positive" behaviour. Range validation lives in :func:`_validate_cfg`; this
+    only resolves the alias and coerces to ``float``.
+    """
+    rollout = advantage_cfg.get("rollout_quantile")
+    positive = advantage_cfg.get("positive_quantile")
+    if rollout is not None and positive is not None:
+        raise ValueError(
+            "Set only one of advantage.rollout_quantile and "
+            "advantage.positive_quantile (the latter is a deprecated alias for "
+            "the former)."
+        )
+    rollout_quantile = rollout if rollout is not None else positive
+    expert = advantage_cfg.get("expert_quantile")
+    return (
+        None if rollout_quantile is None else float(rollout_quantile),
+        None if expert is None else float(expert),
+    )
+
+
 def _validate_cfg(cfg: DictConfig) -> None:
     """Hard-fail on configuration mistakes — no silent fallbacks."""
     if "advantage" not in cfg:
@@ -777,9 +816,9 @@ def _validate_cfg(cfg: DictConfig) -> None:
         raise ValueError(
             "advantage.label_mode is required; must be 'threshold' or 'quantile'. "
             "'threshold' labels advantage=True when advantage_continuous > "
-            "advantage.positive_threshold; 'quantile' pools advantage_continuous "
-            "across all rollout datasets and labels the top advantage.positive_quantile "
-            "fraction as True."
+            "advantage.positive_threshold; 'quantile' labels the top "
+            "advantage.rollout_quantile fraction of rollout frames as True (and "
+            "the top advantage.expert_quantile fraction of sft frames when set)."
         )
     label_mode = str(label_mode).lower()
     if label_mode not in ("threshold", "quantile"):
@@ -805,18 +844,24 @@ def _validate_cfg(cfg: DictConfig) -> None:
                 f"threshold matching ensemble_signed_score's range); got {threshold}"
             )
     else:  # label_mode == "quantile"
-        quantile = cfg.advantage.get("positive_quantile")
-        if quantile is None:
+        rollout_quantile, expert_quantile = _resolve_quantiles(cfg.advantage)
+        if rollout_quantile is None:
             raise ValueError(
-                "advantage.positive_quantile is required when "
+                "advantage.rollout_quantile is required when "
                 "advantage.label_mode='quantile' (e.g. 0.3 ⇒ top 30% of rollout "
-                "samples by advantage_continuous are labelled True)"
+                "samples by advantage_continuous are labelled True). "
+                "advantage.positive_quantile is accepted as a deprecated alias."
             )
-        quantile = float(quantile)
-        if not (0.0 < quantile < 1.0):
+        if not (0.0 < rollout_quantile < 1.0):
             raise ValueError(
-                "positive_quantile must be a fraction in (0, 1) — fraction of "
-                f"top rollout samples labelled True; got {quantile}"
+                "rollout_quantile must be a fraction in (0, 1) — fraction of "
+                f"top rollout samples labelled True; got {rollout_quantile}"
+            )
+        # expert_quantile is optional: unset ⇒ every sft frame is labelled True.
+        if expert_quantile is not None and not (0.0 < expert_quantile < 1.0):
+            raise ValueError(
+                "expert_quantile must be a fraction in (0, 1) — fraction of top "
+                f"sft (expert) samples labelled True; got {expert_quantile}"
             )
 
     tag = cfg.advantage.get("tag")
@@ -1216,16 +1261,17 @@ def _compute_advantage_continuous(df: pd.DataFrame) -> pd.DataFrame:
 def _apply_boolean_label(
     df: pd.DataFrame,
     *,
-    dataset_type: str,
-    positive_threshold: float,
+    positive_threshold: Optional[float],
 ) -> pd.DataFrame:
     """Add the boolean ``advantage`` column and select canonical columns.
 
-    ``dataset_type == "sft"`` forces ``advantage=True``; ``"rollout"`` uses
-    ``advantage_continuous > positive_threshold``. ``positive_threshold`` is
-    the effective threshold — in quantile label_mode this is the
-    cross-dataset percentile; in threshold label_mode it is the user-set
-    ``advantage.positive_threshold``.
+    ``positive_threshold`` is the effective signed-score threshold for THIS
+    dataset: ``advantage = advantage_continuous > positive_threshold``. Pass
+    ``None`` to force ``advantage=True`` for every frame — used for ``sft``
+    datasets when no expert quantile/threshold is configured (expert demos are
+    positive by construction). The caller owns the per-dataset policy (which
+    threshold, or ``None``) so quantile mode can apply distinct expert/rollout
+    thresholds to the two data types.
     """
     if "advantage_continuous" not in df.columns:
         raise ValueError(
@@ -1233,7 +1279,7 @@ def _apply_boolean_label(
             "_compute_advantage_continuous first."
         )
     out = df.copy()
-    if dataset_type.lower() == "sft":
+    if positive_threshold is None:
         out["advantage"] = True
     else:
         out["advantage"] = out["advantage_continuous"] > float(positive_threshold)
@@ -1250,8 +1296,10 @@ def _finalise_dataframe(
     """Compute ``advantage_continuous`` and the boolean ``advantage`` label.
 
     Thin wrapper that composes :func:`_compute_advantage_continuous` and
-    :func:`_apply_boolean_label` — kept as a single-call entry point for
-    backward-compat with unit tests that depend on the combined signature.
+    :func:`_apply_boolean_label`, applying the simple per-type policy: ``sft``
+    frames are all positive, ``rollout`` frames threshold on
+    ``positive_threshold``. Quantile mode's expert/rollout split is handled in
+    :func:`main` rather than here.
 
     Args:
         df: per-frame DataFrame carrying ``ensemble_signed_score``.
@@ -1264,10 +1312,12 @@ def _finalise_dataframe(
         DataFrame with the canonical column order.
     """
     df_cont = _compute_advantage_continuous(df)
+    effective_threshold = (
+        None if str(dataset_type).lower() == "sft" else positive_threshold
+    )
     return _apply_boolean_label(
         df_cont,
-        dataset_type=dataset_type,
-        positive_threshold=positive_threshold,
+        positive_threshold=effective_threshold,
     )
 
 
@@ -1292,7 +1342,8 @@ def _update_mixture_config(
     num_positive: int,
     dataset_type: str,
     label_mode: str,
-    positive_quantile: Optional[float] = None,
+    rollout_quantile: Optional[float] = None,
+    expert_quantile: Optional[float] = None,
 ) -> Path:
     """Merge a per-tag entry into ``<dataset>/meta/mixture_config.yaml``.
 
@@ -1301,10 +1352,12 @@ def _update_mixture_config(
     treated as read-only.
 
     ``label_mode`` records which rule produced the bool label:
-    ``"threshold"`` (fixed ``positive_threshold``) or ``"quantile"``
-    (cross-rollout top-``positive_quantile`` percentile, with the resulting
-    unified threshold written to ``positive_threshold`` so downstream
-    consumers see a single value).
+    ``"threshold"`` (fixed ``positive_threshold``) or ``"quantile"``. In
+    quantile mode ``rollout_quantile`` (required) and ``expert_quantile``
+    (optional) record the per-pool top-fractions, while ``positive_threshold``
+    holds the threshold actually applied to THIS dataset (the rollout-pool
+    percentile for ``rollout`` datasets, the expert-pool percentile for
+    ``sft`` datasets that were filtered by ``expert_quantile``).
 
     ``dataset_type`` is recorded so downstream recompute / viz tooling can
     read it without re-parsing the parquet schema.
@@ -1313,8 +1366,8 @@ def _update_mixture_config(
         raise ValueError(
             f"label_mode must be 'threshold' or 'quantile', got {label_mode!r}"
         )
-    if label_mode == "quantile" and positive_quantile is None:
-        raise ValueError("label_mode='quantile' requires positive_quantile")
+    if label_mode == "quantile" and rollout_quantile is None:
+        raise ValueError("label_mode='quantile' requires rollout_quantile")
 
     meta_dir = Path(dataset_path) / "meta"
     cfg_path = meta_dir / "mixture_config.yaml"
@@ -1344,7 +1397,9 @@ def _update_mixture_config(
         "dataset_type": str(dataset_type),
     }
     if label_mode == "quantile":
-        entry["positive_quantile"] = float(positive_quantile)
+        entry["rollout_quantile"] = float(rollout_quantile)
+        if expert_quantile is not None:
+            entry["expert_quantile"] = float(expert_quantile)
     tags[str(tag)] = entry
     existing["tags"] = tags
     with open(cfg_path, "w") as f:
@@ -1380,15 +1435,24 @@ def main(cfg: DictConfig) -> None:
     inference_mode = str(cfg.advantage.model.get("inference_mode", "wco"))
     precision = cfg.advantage.model.get("precision", None)
     label_mode = str(cfg.advantage.label_mode).lower()
-    # Only one of the two knobs below is read below, but we still coerce
-    # the requested one eagerly so any late YAML typo (e.g. "positive_treshold")
-    # trips here rather than deep inside Phase 2.
+    # Coerce the knobs the selected mode reads eagerly so any late YAML typo
+    # (e.g. "positive_treshold") trips here rather than deep inside Phase 2.
     positive_threshold_cfg: Optional[float] = (
         float(cfg.advantage.positive_threshold) if label_mode == "threshold" else None
     )
-    positive_quantile_cfg: Optional[float] = (
-        float(cfg.advantage.positive_quantile) if label_mode == "quantile" else None
-    )
+    rollout_quantile_cfg: Optional[float] = None
+    expert_quantile_cfg: Optional[float] = None
+    if label_mode == "quantile":
+        rollout_quantile_cfg, expert_quantile_cfg = _resolve_quantiles(cfg.advantage)
+        if (
+            rank == 0
+            and cfg.advantage.get("positive_quantile") is not None
+            and cfg.advantage.get("rollout_quantile") is None
+        ):
+            logger.warning(
+                "advantage.positive_quantile is a deprecated alias for "
+                "advantage.rollout_quantile; please rename it in your config."
+            )
     tag = str(cfg.advantage.tag)
 
     if rank == 0:
@@ -1447,14 +1511,16 @@ def main(cfg: DictConfig) -> None:
             if world_size > 1:
                 dist.barrier()
 
-        # ---- Phase 2: pick unified threshold + write parquet + update meta ----
-        # Runs only on rank 0. In quantile mode the threshold is the
-        # ``(1 - positive_quantile)``-th percentile of advantage_continuous
-        # pooled across every rollout dataset — sft datasets are ignored when
-        # picking the threshold (they are always labelled True by convention)
-        # but still receive the same unified_threshold in their tag metadata
-        # for provenance.
+        # ---- Phase 2: pick thresholds + write parquet + update meta ----
+        # Runs only on rank 0. ``rollout_threshold`` is applied to rollout
+        # datasets; ``expert_threshold`` (quantile mode + advantage.expert_quantile)
+        # is applied to sft datasets. In quantile mode each threshold is the
+        # ``(1 - quantile)``-th percentile of advantage_continuous over its OWN
+        # pool (rollout frames vs sft frames). When expert_quantile is unset,
+        # sft frames stay all-True (the historical convention) but still record
+        # the rollout threshold in their tag metadata for provenance.
         if rank == 0:
+            expert_threshold: Optional[float] = None
             if label_mode == "quantile":
                 rollout_scores: list[np.ndarray] = [
                     d["advantage_continuous"].values
@@ -1464,37 +1530,88 @@ def main(cfg: DictConfig) -> None:
                 if not rollout_scores:
                     raise ValueError(
                         "advantage.label_mode='quantile' requires at least one "
-                        "rollout dataset to derive the unified threshold; none "
+                        "rollout dataset to derive the rollout threshold; none "
                         "of the configured train_data_paths has type='rollout'."
                     )
-                combined = np.concatenate(rollout_scores)
-                unified_threshold = float(
+                combined_rollout = np.concatenate(rollout_scores)
+                rollout_threshold = float(
                     np.percentile(
-                        combined, (1.0 - float(positive_quantile_cfg)) * 100.0
+                        combined_rollout,
+                        (1.0 - float(rollout_quantile_cfg)) * 100.0,
                     )
                 )
                 logger.info(
-                    "label_mode='quantile' (top %.1f%% of %d rollout samples) → "
-                    "unified_threshold=%.4f (advantage_continuous range "
-                    "[%.4f, %.4f])",
-                    float(positive_quantile_cfg) * 100.0,
-                    len(combined),
-                    unified_threshold,
-                    float(combined.min()),
-                    float(combined.max()),
+                    "label_mode='quantile' rollout_quantile=%.3f (top %.1f%% of "
+                    "%d rollout samples) → rollout_threshold=%.4f "
+                    "(advantage_continuous range [%.4f, %.4f])",
+                    float(rollout_quantile_cfg),
+                    float(rollout_quantile_cfg) * 100.0,
+                    len(combined_rollout),
+                    rollout_threshold,
+                    float(combined_rollout.min()),
+                    float(combined_rollout.max()),
                 )
+                if expert_quantile_cfg is not None:
+                    sft_scores: list[np.ndarray] = [
+                        d["advantage_continuous"].values
+                        for e, d in collected
+                        if str(e.type).lower() == "sft"
+                    ]
+                    if sft_scores:
+                        combined_sft = np.concatenate(sft_scores)
+                        expert_threshold = float(
+                            np.percentile(
+                                combined_sft,
+                                (1.0 - float(expert_quantile_cfg)) * 100.0,
+                            )
+                        )
+                        logger.info(
+                            "expert_quantile=%.3f (top %.1f%% of %d sft samples) "
+                            "→ expert_threshold=%.4f (advantage_continuous range "
+                            "[%.4f, %.4f])",
+                            float(expert_quantile_cfg),
+                            float(expert_quantile_cfg) * 100.0,
+                            len(combined_sft),
+                            expert_threshold,
+                            float(combined_sft.min()),
+                            float(combined_sft.max()),
+                        )
+                    else:
+                        logger.warning(
+                            "advantage.expert_quantile=%.3f set but no sft "
+                            "datasets in train_data_paths; expert quantile is "
+                            "ignored.",
+                            float(expert_quantile_cfg),
+                        )
+                else:
+                    logger.info(
+                        "advantage.expert_quantile not set → every sft frame is "
+                        "labelled positive (historical behaviour)."
+                    )
             else:
-                unified_threshold = float(positive_threshold_cfg)
+                rollout_threshold = float(positive_threshold_cfg)
                 logger.info(
-                    "label_mode='threshold'; unified_threshold=%.4f",
-                    unified_threshold,
+                    "label_mode='threshold'; rollout_threshold=%.4f; sft frames "
+                    "labelled all-True.",
+                    rollout_threshold,
                 )
 
             for entry, df_cont in collected:
+                is_sft = str(entry.type).lower() == "sft"
+                # Threshold actually applied to the bool label. ``None`` ⇒
+                # force every frame True (sft with no expert quantile).
+                label_threshold = expert_threshold if is_sft else rollout_threshold
                 final_df = _apply_boolean_label(
                     df_cont,
-                    dataset_type=str(entry.type),
-                    positive_threshold=unified_threshold,
+                    positive_threshold=label_threshold,
+                )
+                # Threshold recorded in the tag metadata: for all-True sft fall
+                # back to the rollout threshold so the entry still carries a
+                # numeric value (matches the previous single-threshold layout).
+                recorded_threshold = (
+                    label_threshold
+                    if label_threshold is not None
+                    else rollout_threshold
                 )
                 out_path = _save_advantages_parquet(final_df, entry.dataset_path, tag)
                 num_positive = int(final_df["advantage"].sum())
@@ -1502,7 +1619,7 @@ def main(cfg: DictConfig) -> None:
                 mix_path = _update_mixture_config(
                     dataset_path=entry.dataset_path,
                     tag=tag,
-                    positive_threshold=unified_threshold,
+                    positive_threshold=recorded_threshold,
                     inference_mode=str(model.config.inference_mode),
                     ensemble_size=int(model.config.ensemble_size),
                     num_bins=int(getattr(model.config, "num_bins", 2)),
@@ -1510,16 +1627,25 @@ def main(cfg: DictConfig) -> None:
                     num_positive=num_positive,
                     dataset_type=str(entry.type),
                     label_mode=label_mode,
-                    positive_quantile=(
-                        float(positive_quantile_cfg)
+                    rollout_quantile=(
+                        float(rollout_quantile_cfg)
                         if label_mode == "quantile"
+                        else None
+                    ),
+                    expert_quantile=(
+                        float(expert_quantile_cfg)
+                        if (
+                            label_mode == "quantile"
+                            and expert_quantile_cfg is not None
+                        )
                         else None
                     ),
                 )
                 logger.info(
-                    "Wrote %s (rows=%d, positive=%d/%d, raw_score_avg=%.4f, "
-                    "label_mode=%s). Updated %s",
+                    "Wrote %s (type=%s, rows=%d, positive=%d/%d, "
+                    "raw_score_avg=%.4f, label_mode=%s). Updated %s",
                     out_path,
+                    str(entry.type),
                     total_samples,
                     num_positive,
                     total_samples,
