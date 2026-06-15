@@ -21,10 +21,7 @@ from torch.utils import _pytree
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from rlinf.config import SupportedModel
-from rlinf.data.datasets.recap.cfg_model import (
-    CfgMixtureDataset,
-    PositiveAdvantageOnlySubset,
-)
+from rlinf.data.datasets.recap.cfg_model import CfgMixtureDataset
 from rlinf.data.datasets.recap.common import BaseDataLoaderImpl
 from rlinf.data.datasets.recap.utils import cast_image_features
 from rlinf.data.lerobot_paths import resolve_lerobot_repo_id
@@ -131,38 +128,6 @@ class FSDPVlaSftWorker(FSDPSftWorker):
         return data_kwargs
 
     @staticmethod
-    def _load_advantages_lookup(
-        data_path: str,
-        advantage_tag: str | None = None,
-    ) -> dict[tuple[int, int], bool]:
-        """Load ``(episode_index, frame_index) -> advantage`` from dataset meta."""
-        import pandas as pd
-
-        if advantage_tag:
-            meta_path = Path(data_path) / "meta" / f"advantages_{advantage_tag}.parquet"
-        else:
-            meta_path = Path(data_path) / "meta" / "advantages.parquet"
-
-        if not meta_path.exists():
-            raise FileNotFoundError(
-                f"Advantage file not found: {meta_path}. "
-                "Run compute_advantages.py first."
-            )
-
-        adv_df = pd.read_parquet(meta_path)
-        if "advantage" not in adv_df.columns:
-            raise ValueError(f"Advantage file {meta_path} missing 'advantage' column")
-        return dict(
-            zip(
-                zip(
-                    adv_df["episode_index"].values.astype(int).tolist(),
-                    adv_df["frame_index"].values.astype(int).tolist(),
-                ),
-                adv_df["advantage"].values.astype(bool).tolist(),
-            )
-        )
-
-    @staticmethod
     def _fix_episode_data_index(dataset: Any, episodes: list[int]) -> None:
         """Fix LeRobotDataset episode indices after dataset-level filtering."""
         ep_idx_mapping = {ep: i for i, ep in enumerate(sorted(episodes))}
@@ -219,9 +184,7 @@ class FSDPVlaSftWorker(FSDPSftWorker):
         """Build OpenPI SFT dataloader from one or more LeRobot dataset entries.
 
         Each entry carries ``dataset_path`` plus optional ``episodes`` /
-        ``weight``. Set ``data.advantage_filter: positive_only`` (with
-        ``data.advantage_tag``) to train only on frames labelled
-        ``advantage=True`` by the offline advantage pipeline.
+        ``weight``.
         """
         import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
         import openpi.shared.download as download
@@ -233,14 +196,6 @@ class FSDPVlaSftWorker(FSDPSftWorker):
 
         data_cfg = self.cfg.get("data", {})
         openpi_cfg = self.cfg.actor.model.openpi
-        advantage_tag = data_cfg.get("advantage_tag", None)
-        advantage_filter = str(data_cfg.get("advantage_filter", "") or "").lower()
-        if advantage_filter not in ("", "all", "positive_only"):
-            raise ValueError(
-                "data.advantage_filter must be unset, 'all', or 'positive_only'; "
-                f"got {advantage_filter!r}."
-            )
-        positive_only = advantage_filter == "positive_only"
 
         first_path = datasets_config[0]["dataset_path"]
         config = get_openpi_config(
@@ -330,27 +285,7 @@ class FSDPVlaSftWorker(FSDPSftWorker):
             )
 
             final_dataset = transformed_dataset
-            if positive_only:
-                advantages_lookup = self._load_advantages_lookup(
-                    data_path, advantage_tag
-                )
-                final_dataset = PositiveAdvantageOnlySubset(
-                    base_dataset=base_dataset,
-                    transformed_dataset=transformed_dataset,
-                    advantages_lookup=advantages_lookup,
-                )
-                if self._rank == 0:
-                    adv_filename = (
-                        f"advantages_{advantage_tag}.parquet"
-                        if advantage_tag
-                        else "advantages.parquet"
-                    )
-                    self.log_info(
-                        f"Loaded positive-only dataset: {data_path} "
-                        f"({len(final_dataset)}/{len(transformed_dataset)} samples, "
-                        f"weight={weight}, meta/{adv_filename})"
-                    )
-            elif self._rank == 0:
+            if self._rank == 0:
                 self.log_info(
                     f"Loaded dataset: {data_path} "
                     f"({len(final_dataset)} samples, weight={weight})"

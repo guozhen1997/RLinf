@@ -90,81 +90,15 @@ from typing import Any, Optional
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
-def _silence_libav_logs() -> None:
-    """Suppress the ``[libdav1d @ 0x..] libdav1d 0.9.2`` chatter that
-    torchcodec (LeRobot's default video backend) emits every frame.
+# Make the rlinf package importable regardless of the cwd the user launched from.
+_SCRIPT_DIR = Path(__file__).parent
+sys.path.insert(0, str(_SCRIPT_DIR.parent.parent.parent))
 
-    The messages are written by libav* **directly to file-descriptor 2**
-    — pyav's log level does not intercept them because torchcodec
-    bypasses pyav. We splice our own ``fd=2`` through a long-lived
-    ``grep -v '\\[libdav1d'`` subprocess so every write to stderr is
-    filtered line-by-line; all other stderr output (our own logs,
-    tracebacks, etc.) still reaches the terminal.
-    """
-    import atexit
-    import shutil
-    import subprocess
-    import sys
+# Install the libav/libdav1d stderr filter before the heavy torch / torchcodec
+# imports so the fd=2 redirect is in place before libav loads.
+from rlinf.utils.logging import silence_libav_logs  # noqa: E402
 
-    # pyav's log level still helps when pyav IS the backend (older lerobot
-    # fallback); cheap to do alongside the fd-level filter.
-    try:
-        import av
-
-        av.logging.set_level(av.logging.PANIC)
-    except Exception:
-        pass
-
-    if not shutil.which("grep"):
-        return
-    # Save the original fd=2 BEFORE we redirect — we need it back at exit
-    # so grep can see EOF on its stdin (otherwise grep blocks forever and
-    # ``atexit`` deadlocks because our fd=2 is still a write-end of the pipe).
-    saved_stderr_fd = os.dup(2)
-    try:
-        # grep's stdout points at the ORIGINAL stderr so filtered lines
-        # keep showing. grep's stdin becomes our new fd=2.
-        grep = subprocess.Popen(
-            # Match any libdav1d / libav* chatter — both the `[libdav1d @
-            # 0x..] libdav1d 0.9.2` form AND any continuation line that
-            # contains just `libdav1d`. Cast a wider net so child workers
-            # whose output formatting differs don't slip through.
-            ["grep", "-v", "-E", "--line-buffered", r"libdav1d|libdav1d 0\.9"],
-            stdin=subprocess.PIPE,
-            stdout=saved_stderr_fd,
-        )
-    except Exception:
-        os.close(saved_stderr_fd)
-        return
-
-    sys.stderr.flush()
-    os.dup2(grep.stdin.fileno(), 2)
-
-    def _restore_and_drain() -> None:
-        # Restore fd=2 first so subsequent stderr writes (e.g. tracebacks)
-        # still reach the terminal — and crucially so grep sees EOF on its
-        # stdin instead of waiting on us forever.
-        try:
-            os.dup2(saved_stderr_fd, 2)
-        except OSError:
-            pass
-        try:
-            os.close(saved_stderr_fd)
-        except OSError:
-            pass
-        try:
-            grep.stdin.close()
-        except Exception:
-            pass
-        try:
-            grep.wait(timeout=3)
-        except Exception:
-            grep.kill()
-
-    atexit.register(_restore_and_drain)
-
-
-_silence_libav_logs()
+silence_libav_logs()
 
 import hydra  # noqa: E402
 import numpy as np  # noqa: E402
@@ -175,10 +109,6 @@ import yaml  # noqa: E402
 from omegaconf import DictConfig, OmegaConf  # noqa: E402
 from torch.utils.data import DataLoader, Dataset, Subset  # noqa: E402
 from tqdm import tqdm  # noqa: E402
-
-# Make the rlinf package importable regardless of the cwd the user launched from.
-_SCRIPT_DIR = Path(__file__).parent
-sys.path.insert(0, str(_SCRIPT_DIR.parent.parent.parent))
 
 from rlinf.data.datasets.steam.pair_dataset import (  # noqa: E402
     BinaryPairDataCollator,

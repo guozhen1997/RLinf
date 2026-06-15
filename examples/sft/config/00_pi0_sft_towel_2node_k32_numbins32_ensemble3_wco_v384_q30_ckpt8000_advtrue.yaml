@@ -1,0 +1,136 @@
+# PI0 SFT for fold_towel_sm2sm using only advantage=True samples.
+#
+# Usage:
+#   bash examples/sft/run_vla_sft.sh 00_pi0_towel_advtrue_sft
+# Smoke test:
+#   bash examples/sft/run_vla_sft.sh 00_pi0_towel_advtrue_sft runner.max_steps=1 runner.save_interval=-1
+
+defaults:
+  - model/pi0@actor.model
+  - training_backend/fsdp@actor.fsdp_config
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 2
+  component_placement:
+    actor,env,rollout: all
+
+runner:
+  task_type: sft
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "pi0_towel_advtrue_sft"
+    logger_backends: ["tensorboard"]
+
+  max_epochs: 30000
+  max_steps: -1
+  val_check_interval: -1
+  save_interval: 10000
+
+data:
+  num_workers: 8
+  advantage_tag: towel_multibin_k32_numbins32_ensemble3_wco_v384_sft251_rollout177_step8000
+  balance_dataset_weights: true
+  seed: 42
+
+  train_data_paths:
+    # 103 eps
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260317_pm_tele
+      type: sft
+    # 47 eps
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260318_pm_tele
+      type: sft
+    # 101 eps
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260420_pm_tele
+      type: sft
+    # 30 eps, 23.3%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260325_pm_rollout
+      type: rollout
+    # 20 eps, 45%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260330_pm_rollout
+      type: rollout
+    # 20 eps, 10%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260407_pm_rollout
+      type: rollout
+    # 20 eps, 35%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260420_pm_rollout
+      type: rollout
+    # 10 eps, 70%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260421_pm_rollout
+      type: rollout
+    # 22 eps, 81.82%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260422_pm_rollout
+      type: rollout
+    # 20 eps, 90%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260423_pm_rollout
+      type: rollout
+    # 35 eps, dagger, 100%
+    - dataset_path: /mnt/public2/liuzhihao/data_to_use/beijing_guqiuyi_20260331_pm_dagger_filter_static
+      type: rollout
+
+algorithm:
+  adv_type: gae
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 16
+  global_batch_size: 256
+  seed: 0
+
+  model:
+    precision: null
+    model_path: /mnt/models/pi0_base_pytorch
+    model_type: openpi
+    num_action_chunks: 20
+    action_dim: 28
+    num_steps: 10
+    add_value_head: False
+    openpi:
+      config_name: fold_towel_sm2sm
+      asset_id: fold_towel_tele_0317_0318_0420
+      action_chunk: 20
+      action_env_dim: 28
+      num_steps: 10
+      train_expert_only: False
+    openpi_data:
+      state_history_size: 3
+      state_future_size: 2
+      state_step: 1
+
+  optim:
+    lr: 5.0e-5
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-8
+    weight_decay: 1.0e-10
+    clip_grad: 1.0
+    lr_scheduler: "constant"
+    lr_warmup_steps: 10000
+    total_training_steps: 30000
+    min_lr: 0.0
+
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "no_shard"
+    use_orig_params: False
+    gradient_checkpointing: True
+    mixed_precision:
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}
+
+reward:
+  use_reward_model: False
+
+critic:
+  use_critic_model: False
