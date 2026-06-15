@@ -124,7 +124,7 @@ def compute_rollout_metrics(data_buffer: dict) -> dict:
     loss_mask = data_buffer.get("loss_mask", None)
 
     def reduce_metrics(values: torch.Tensor) -> tuple[float, float, float]:
-        device = Worker.torch_platform.current_device()
+        device = _current_device()
         if values.numel() == 0:
             count = torch.tensor(0.0, device=device, dtype=torch.float32)
             values_sum = torch.tensor(0.0, device=device, dtype=torch.float32)
