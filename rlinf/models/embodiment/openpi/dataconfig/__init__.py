@@ -68,55 +68,8 @@ from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.X2robot_dataconfig import (
-    LeRobotX2robotDataConfig,
-)
 
 _CONFIGS = [
-    TrainConfig(
-        name="pi0_x2robot",
-        model=pi0_config.Pi0Config(action_horizon=20),
-        data=LeRobotX2robotDataConfig(
-            repo_id="<x2robot_lerobot_repo_id>",
-            mode="sm2sm",
-            state_history_size=3,
-            state_future_size=2,
-            action_dim=28,
-            random_drop_master=0.10,
-            random_drop_history=0.50,
-            random_drop_future=0.50,
-            random_pos_offset=0.020,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
-        ),
-        pytorch_weight_path="checkpoints/torch/pi0_base",
-        batch_size=128,
-    ),
-    TrainConfig(
-        name="pi05_x2robot",
-        model=pi0_config.Pi0Config(
-            pi05=True,
-            action_horizon=20,
-            discrete_state_input=False,
-        ),
-        data=LeRobotX2robotDataConfig(
-            repo_id="<x2robot_lerobot_repo_id>",
-            mode="sm2sm",
-            state_history_size=3,
-            state_future_size=2,
-            action_dim=28,
-            random_drop_master=0.10,
-            random_drop_history=0.50,
-            random_drop_future=0.50,
-            random_pos_offset=0.020,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base/params"
-        ),
-        pytorch_weight_path="checkpoints/torch/pi05_base",
-        batch_size=128,
-    ),
     TrainConfig(
         name="pi0_libero",
         model=pi0_config.Pi0Config(),
@@ -529,20 +482,11 @@ def _override_with_data_kwargs(config: TrainConfig, data_kwargs: dict) -> TrainC
     return dataclasses.replace(config, **replace_kwargs)
 
 
-def _override_with_asset_id(config: TrainConfig, asset_id: str) -> TrainConfig:
-    """Return a copy of the config with an explicit assets asset_id."""
-    data_config = config.data
-    new_assets = dataclasses.replace(data_config.assets, asset_id=asset_id)
-    new_data = dataclasses.replace(data_config, assets=new_assets)
-    return dataclasses.replace(config, data=new_data)
-
-
 def get_openpi_config(
     config_name: str,
     model_path: Optional[str] = None,
     batch_size: Optional[int] = None,
     repo_id: Optional[str] = None,
-    asset_id: Optional[str] = None,
     data_kwargs: Optional[dict] = None,
 ) -> TrainConfig:
     """Get a config by name.
@@ -554,7 +498,6 @@ def get_openpi_config(
         repo_id: Optional LeRobot repo_id or local data path to override.
             When using a local path, the original asset_id is preserved so
             that norm_stats can still be loaded from the model checkpoint.
-        asset_id: Optional explicit asset id for norm_stats lookup.
     """
     if config_name not in _CONFIGS_DICT:
         closest = difflib.get_close_matches(
@@ -573,12 +516,8 @@ def get_openpi_config(
 
     if repo_id is not None:
         original_repo_id = config.data.repo_id
-        new_assets = dataclasses.replace(
-            config.data.assets, asset_id=asset_id or original_repo_id
-        )
+        new_assets = dataclasses.replace(config.data.assets, asset_id=original_repo_id)
         new_data = dataclasses.replace(config.data, repo_id=repo_id, assets=new_assets)
         config = dataclasses.replace(config, data=new_data)
-    elif asset_id is not None:
-        config = _override_with_asset_id(config, asset_id)
 
     return config
