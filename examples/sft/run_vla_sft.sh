@@ -7,11 +7,6 @@ export SRC_FILE="${EMBODIED_PATH}/train_vla_sft.py"
 export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
 
-# Suppress libdav1d / ffmpeg verbose logging.
-export AV_LOG_FORCE_NOCOLOR=1
-export LIBAV_LOG_LEVEL=quiet
-export FFREPORT=""
-
 export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:$PYTHONPATH
 
 export DREAMZERO_PATH=${DREAMZERO_PATH:-"/path/to/DreamZero"}
@@ -22,14 +17,11 @@ if [ -z "$1" ]; then
 else
     CONFIG_NAME=$1
 fi
-shift 1 2>/dev/null || true
-EXTRA_ARGS=("$@")
 
 echo "Using Python at $(which python)"
-LOG_DIR="${REPO_PATH}/logs/sft/${CONFIG_NAME}-$(date +'%Y%m%d-%H:%M:%S')"
+LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}"
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
 mkdir -p "${LOG_DIR}"
-HYDRA_ARGS=("runner.logger.log_path=${LOG_DIR}")
-CMD_BASE=(python "${SRC_FILE}" --config-path "${EMBODIED_PATH}/config/" --config-name "${CONFIG_NAME}")
-echo "${CMD_BASE[*]} ${HYDRA_ARGS[*]} ${EXTRA_ARGS[*]}" > ${MEGA_LOG_FILE}
-"${CMD_BASE[@]}" "${HYDRA_ARGS[@]}" "${EXTRA_ARGS[@]}" 2>&1 | grep -v "libdav1d" | tee -a ${MEGA_LOG_FILE}
+CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
+echo ${CMD} > ${MEGA_LOG_FILE}
+${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
