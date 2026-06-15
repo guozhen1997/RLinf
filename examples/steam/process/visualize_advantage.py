@@ -15,118 +15,35 @@
 """Visualise the ensemble binary value model's per-frame advantage parquet.
 
 Reads ``meta/advantages_{tag}.parquet`` produced by
-``compute_advantages_ensemble.py`` and writes:
+``compute_advantages_ensemble.py`` and writes aggregate diagnostics:
 
-  Global plots (always written):
-    1. ``distribution.png``                — aggregated signed-progress histogram
-    2. ``members.png``                     — per-member signed-progress overlay
-    3. ``uncertainty.png``                 — mean vs variance scatter
-    4. ``positive_rate_per_episode.png``   — per-episode positive fraction
-    5. ``timeline_episodes.png``           — 3x3 episode timeline grid
+    1. ``distribution.png``              — aggregated signed-progress histogram
+    2. ``members.png``                   — per-member signed-progress overlay
+    3. ``uncertainty.png``               — ensemble mean vs variance scatter
+    4. ``positive_rate_per_episode.png`` — per-episode positive fraction
+    5. ``timeline_episodes.png``         — 3x3 episode timeline grid
+    6. ``summary.json``                  — aggregate statistics
 
-  Per-episode renders (when ``--num-episodes > 0``):
-    6. ``episodes/episode_<NNNN>_summary.png`` — sampled-frame summary
-       (5 thumbnails per camera + member curves + variance + cumulative
-       progress) — same layout as
-       ``logs/viz_binary/pnp_eval_ckpt8000_k8_ensemble4_10eps``.
-    7. ``episodes/episode_<NNNN>.mp4``      — animated playback of every
-       frame with a moving cursor on the score plot (omit with ``--no-video``).
-
-This script does NOT load the value model and does NOT recompute anything
-— all per-episode scores come from the parquet, frames come from the
-LeRobot dataset on disk.
+The script does NOT load the value model and does NOT recompute anything —
+every score comes from the parquet.
 
 Usage:
-    python visualize_advantage_ensemble.py \\
+    python visualize_advantage.py \\
         --dataset /path/to/lerobot_dataset \\
         --tag fail150_k8_ensemble4_wco \\
-        --output /path/to/visualization_dir \\
-        --num-episodes 10
+        --output /path/to/visualization_dir
 """
 
 import argparse
 import json
-import os
-import sys
 from pathlib import Path
 
-
-def _silence_libav_logs() -> None:
-    """Suppress the ``[libdav1d @ 0x..] libdav1d 0.9.2`` chatter that
-    torchcodec (LeRobot's default video backend) emits every frame.
-
-    The messages are written by libav* **directly to file-descriptor 2**
-    — pyav's log level does not intercept them. We splice our own
-    ``fd=2`` through a long-lived ``grep -v '\\[libdav1d'`` subprocess
-    so every write to stderr is filtered line-by-line; all other
-    stderr output (our own logs, tracebacks, etc.) still reaches the
-    terminal.
-    """
-    import atexit
-    import shutil
-    import subprocess
-
-    try:
-        import av
-
-        av.logging.set_level(av.logging.PANIC)
-    except Exception:
-        pass
-
-    if not shutil.which("grep"):
-        return
-    saved_stderr_fd = os.dup(2)
-    try:
-        grep = subprocess.Popen(
-            ["grep", "-v", "-E", "--line-buffered", r"libdav1d|libdav1d 0\.9"],
-            stdin=subprocess.PIPE,
-            stdout=saved_stderr_fd,
-        )
-    except Exception:
-        os.close(saved_stderr_fd)
-        return
-
-    sys.stderr.flush()
-    os.dup2(grep.stdin.fileno(), 2)
-
-    def _restore_and_drain() -> None:
-        # Restore fd=2 first so grep sees EOF on its stdin (otherwise the
-        # pipe stays open via our fd=2 and ``grep.wait()`` deadlocks).
-        try:
-            os.dup2(saved_stderr_fd, 2)
-        except OSError:
-            pass
-        try:
-            os.close(saved_stderr_fd)
-        except OSError:
-            pass
-        try:
-            grep.stdin.close()
-        except Exception:
-            pass
-        try:
-            grep.wait(timeout=3)
-        except Exception:
-            grep.kill()
-
-    atexit.register(_restore_and_drain)
-
-
-_silence_libav_logs()
-
-import matplotlib  # noqa: E402
+import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-
-# Make the rlinf package importable regardless of cwd, and let us pull in
-# the per-episode rendering helpers from the existing binary-value
-# visualization script (those helpers are pure plotting — no model load).
-_SCRIPT_DIR = Path(__file__).parent
-sys.path.insert(0, str(_SCRIPT_DIR))
-sys.path.insert(0, str(_SCRIPT_DIR.parent.parent.parent))
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +117,8 @@ def _stack_member_values(df: pd.DataFrame) -> np.ndarray:
 
 
 def _data_driven_xrange(values: np.ndarray, pad: float = 0.05) -> tuple[float, float]:
-    """Return ``(lo, hi)`` for histogram / axis bounds. Pads away from data
-    limits so the extreme bins remain visible, and never clips corrected
-    values that fall below ``-1``."""
+    """``(lo, hi)`` for histogram / axis bounds, padded so extreme bins stay
+    visible and corrected values below ``-1`` are never clipped."""
     if values.size == 0:
         return -1.05, 1.05
     lo = float(np.nanmin(values))
@@ -217,11 +133,7 @@ def plot_distribution(
     threshold: float | None,
     dataset_name: str,
     tag: str,
-    *,
-    tag_meta: dict | None = None,
 ) -> None:
-    tag_meta = tag_meta or {}
-
     fig, ax = plt.subplots(figsize=(8, 5))
     adv = df["advantage_continuous"].to_numpy()
     xlo, xhi = _data_driven_xrange(adv)
@@ -396,11 +308,8 @@ def plot_positive_rate_per_episode(
 
 
 def _pick_representative_episodes(df: pd.DataFrame, n: int) -> list[int]:
-    """Pick episodes that span the spectrum of average ensemble disagreement.
-
-    Sorts episodes by mean variance and takes evenly-spaced quantile picks so
-    the grid shows both confident and uncertain trajectories.
-    """
+    """Pick episodes spanning the spectrum of average ensemble disagreement,
+    via evenly-spaced quantile picks over mean variance."""
     var_per_ep = df.groupby("episode_index")["p_progress_variance"].mean().sort_values()
     if len(var_per_ep) <= n:
         return [int(ep) for ep in var_per_ep.index.tolist()]
@@ -462,12 +371,11 @@ def plot_episode_timelines(
         )
         ax.set_xlabel("frame_index")
         ax.set_ylabel("signed progress / advantage_continuous")
-        # Data-driven y-range so out-of-range values are not clipped.
+        # Data-driven y-range so out-of-range values are not clipped, but never
+        # shrink below the native [-1, 1] envelope.
         y_lo, y_hi = _data_driven_xrange(
             np.concatenate([member_min, member_max, agg]), pad=0.02
         )
-        # Never shrink below the native [-1, 1] envelope so uncorrected
-        # parquets keep their familiar view.
         ax.set_ylim(min(y_lo, -1.02), max(y_hi, 1.02))
         ax.grid(True, alpha=0.3)
         if ax_idx == 0:
@@ -536,268 +444,6 @@ def write_summary(
 
 
 # ---------------------------------------------------------------------------
-# Per-episode rendering (sampled frames + plots + optional video)
-# ---------------------------------------------------------------------------
-
-
-def _build_progress_by_frame_from_df(df_for_episode: pd.DataFrame) -> dict:
-    """Convert per-episode parquet rows into the score-bundle dict expected
-    by ``_collect_episode_frames``.
-
-    Field semantics:
-      * ``value`` — decision score used for threshold highlight in the shared
-        render path. Always equals ``advantage_continuous``.
-      * ``raw_score`` — raw ``ensemble_signed_score`` when available; falls
-        back to ``advantage_continuous`` for legacy parquets where the two
-        are equal.
-
-    Frames missing from the parquet (e.g. terminal frames that had no valid
-    ``t+k`` pair pre-terminal-fill) are handled by the collector via fallback
-    to the previous value.
-    """
-    has_ess = "ensemble_signed_score" in df_for_episode.columns
-
-    out: dict[int, dict[str, object]] = {}
-    for row in df_for_episode.itertuples(index=False):
-        entry: dict[str, object] = {
-            "value": float(row.advantage_continuous),
-            "raw_score": float(
-                getattr(row, "ensemble_signed_score", row.advantage_continuous)
-            )
-            if has_ess
-            else float(row.advantage_continuous),
-            "value_mean": float(row.p_progress_mean),
-            "value_min": float(row.p_progress_min),
-            "value_variance": float(row.p_progress_variance),
-            "member_values": [float(x) for x in row.member_values],
-        }
-        out[int(row.frame_index)] = entry
-    return out
-
-
-def _select_episode_indices(
-    df: pd.DataFrame, n: int, strategy: str, seed: int, eligible: set[int]
-) -> list[int]:
-    """Pick ``n`` episodes from those present in ``df`` and ``eligible``.
-
-    Strategies:
-      * ``random``  — random sample, fixed seed.
-      * ``variance`` — episodes with the highest mean ensemble variance
-                       (most uncertain trajectories).
-      * ``positive`` — episodes with the highest positive-rate.
-      * ``negative`` — episodes with the lowest positive-rate.
-    """
-    pool = sorted(set(df["episode_index"].unique().tolist()) & eligible)
-    if not pool:
-        raise RuntimeError(
-            "No episodes are both present in the parquet AND in the "
-            "LeRobot dataset's episode index."
-        )
-    if n <= 0 or n >= len(pool):
-        return pool
-
-    if strategy == "random":
-        rng = np.random.default_rng(seed)
-        return sorted(rng.choice(pool, n, replace=False).tolist())
-    if strategy == "variance":
-        var_per_ep = (
-            df[df["episode_index"].isin(pool)]
-            .groupby("episode_index")["p_progress_variance"]
-            .mean()
-            .sort_values(ascending=False)
-        )
-        return sorted(var_per_ep.head(n).index.astype(int).tolist())
-    if strategy == "positive":
-        pos_per_ep = (
-            df[df["episode_index"].isin(pool)]
-            .groupby("episode_index")["advantage"]
-            .mean()
-            .sort_values(ascending=False)
-        )
-        return sorted(pos_per_ep.head(n).index.astype(int).tolist())
-    if strategy == "negative":
-        pos_per_ep = (
-            df[df["episode_index"].isin(pool)]
-            .groupby("episode_index")["advantage"]
-            .mean()
-            .sort_values(ascending=True)
-        )
-        return sorted(pos_per_ep.head(n).index.astype(int).tolist())
-    raise ValueError(
-        f"Unknown --episode-strategy: {strategy!r}. "
-        "Expected random / variance / positive / negative."
-    )
-
-
-def _open_lerobot_dataset(dataset_path: Path):
-    """Open a LeRobot dataset, tolerant of both lerobot.common.datasets and
-    lerobot.common.datasets layouts. Mirrors _LeRobotSource."""
-    try:
-        from lerobot.common.datasets.lerobot_dataset import (  # type: ignore
-            LeRobotDataset,
-        )
-        from lerobot.common.datasets.utils import hf_transform_to_torch  # type: ignore
-    except ImportError:
-        from lerobot.common.datasets.lerobot_dataset import (  # type: ignore
-            LeRobotDataset,
-        )
-        from lerobot.common.datasets.utils import hf_transform_to_torch  # type: ignore
-    import io
-
-    from PIL import Image as PILImage
-
-    ds = LeRobotDataset(dataset_path.name, root=dataset_path, download_videos=False)
-    ep_data_index = ds.episode_data_index
-    ep_starts = [int(x) for x in ep_data_index["from"].tolist()]
-    ep_ends = [int(x) for x in ep_data_index["to"].tolist()]
-
-    def _decode(batch: dict) -> dict:
-        for key in list(batch.keys()):
-            vals = batch[key]
-            if vals and isinstance(vals[0], dict) and "bytes" in vals[0]:
-                batch[key] = [PILImage.open(io.BytesIO(v["bytes"])) for v in vals]
-        return hf_transform_to_torch(batch)
-
-    ds.hf_dataset.set_transform(_decode)
-
-    tasks: dict[int, str] = {}
-    tasks_path = dataset_path / "meta" / "tasks.jsonl"
-    if tasks_path.exists():
-        with open(tasks_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                d = json.loads(line)
-                tasks[int(d.get("task_index", len(tasks)))] = str(d.get("task", ""))
-    return ds, ep_starts, ep_ends, tasks
-
-
-def render_per_episode(
-    df: pd.DataFrame,
-    dataset_path: Path,
-    output_dir: Path,
-    threshold: float,
-    inference_mode: str,
-    stride_k: int,
-    num_episodes: int,
-    strategy: str,
-    seed: int,
-    write_video: bool,
-    fps: int,
-    explicit_episodes: list[int] | None = None,
-) -> list[Path]:
-    """Render per-episode summary PNGs (and optionally MP4s) into output_dir.
-
-    Reuses the rendering helpers from
-    ``visualize_episodes_with_steam.py`` so the output layout
-    matches ``logs/viz_binary/pnp_eval_ckpt8000_k8_ensemble4_10eps``.
-
-    If ``explicit_episodes`` is non-empty it bypasses the strategy-based
-    selection entirely — every listed episode present in both the parquet
-    and the LeRobot dataset is rendered (missing ones are warned and
-    skipped).
-    """
-    from visualize_episodes_with_steam import (
-        _collect_episode_frames,
-        _create_episode_summary_plot,
-        _create_episode_video,
-        detect_image_keys,
-    )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"Opening LeRobot dataset {dataset_path}")
-    lerobot_ds, ep_starts, ep_ends, tasks = _open_lerobot_dataset(dataset_path)
-    eligible = set(range(len(ep_starts)))
-    if explicit_episodes:
-        requested = [int(e) for e in explicit_episodes]
-        parquet_eps = set(df["episode_index"].astype(int).tolist())
-        selected = [e for e in requested if e in eligible and e in parquet_eps]
-        missing = sorted(set(requested) - set(selected))
-        if missing:
-            print(
-                f"  warning: {len(missing)} episodes in --explicit-episodes are "
-                f"not in both parquet and LeRobot dataset; skipping: {missing}"
-            )
-        if not selected:
-            raise RuntimeError(
-                "None of the explicit episodes are present in both parquet "
-                f"and dataset. requested={requested}"
-            )
-        print(f"Selected episodes (explicit): {selected}")
-    else:
-        selected = _select_episode_indices(df, num_episodes, strategy, seed, eligible)
-        print(f"Selected episodes ({strategy}): {selected}")
-
-    image_keys = detect_image_keys(lerobot_ds[int(ep_starts[selected[0]])])
-    print(f"Detected image keys: {image_keys}")
-    if not image_keys:
-        raise RuntimeError(
-            "No image-like keys detected in the LeRobot sample — cannot render."
-        )
-
-    written: list[Path] = []
-    from tqdm import tqdm as _tqdm
-
-    for ep in _tqdm(selected, desc="rendering episodes"):
-        ep_df = df[df["episode_index"] == int(ep)]
-        if ep_df.empty:
-            print(f"  ep {ep}: no parquet rows; skipping")
-            continue
-        progress_by_frame = _build_progress_by_frame_from_df(ep_df)
-        ep_data = _collect_episode_frames(
-            lerobot_ds=lerobot_ds,
-            episode_index=int(ep),
-            ep_starts=ep_starts,
-            ep_ends=ep_ends,
-            tasks=tasks,
-            image_keys=image_keys,
-            progress_by_frame=progress_by_frame,
-        )
-
-        summary_path = output_dir / f"episode_{int(ep):04d}_summary.png"
-        _create_episode_summary_plot(
-            ep_data,
-            summary_path,
-            decision_threshold=threshold,
-            stride_k=stride_k,
-            inference_mode=inference_mode,
-        )
-        written.append(summary_path)
-
-        if write_video:
-            video_path = output_dir / f"episode_{int(ep):04d}.mp4"
-            _create_episode_video(
-                ep_data,
-                video_path,
-                decision_threshold=threshold,
-                stride_k=stride_k,
-                inference_mode=inference_mode,
-                fps=fps,
-            )
-            written.append(video_path)
-
-    return written
-
-
-def _read_mixture_meta(dataset_path: Path, tag: str) -> dict:
-    """Pull tag-level metadata (inference_mode, ensemble_size, threshold)
-    from meta/mixture_config.yaml."""
-    cfg_path = dataset_path / "meta" / "mixture_config.yaml"
-    if not cfg_path.exists():
-        return {}
-    import yaml
-
-    with open(cfg_path) as f:
-        loaded = yaml.safe_load(f)
-    if not isinstance(loaded, dict):
-        return {}
-    tag_entry = (loaded.get("tags") or {}).get(tag)
-    return tag_entry if isinstance(tag_entry, dict) else {}
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -832,55 +478,6 @@ def main() -> None:
         default=9,
         help="Number of episodes in the timeline grid (default: 9, fits 3x3).",
     )
-    parser.add_argument(
-        "--num-episodes",
-        type=int,
-        default=10,
-        help=(
-            "Number of episodes to render with sampled-frame summaries + "
-            "videos (parallel to logs/viz_binary/...). Set 0 to skip."
-        ),
-    )
-    parser.add_argument(
-        "--episode-strategy",
-        choices=("random", "variance", "positive", "negative"),
-        default="random",
-        help=(
-            "How to pick the episodes to render. random (default) matches "
-            "the reference 10-eps directory; variance picks the most "
-            "uncertain trajectories."
-        ),
-    )
-    parser.add_argument(
-        "--episode-seed", type=int, default=42, help="RNG seed for random strategy."
-    )
-    parser.add_argument(
-        "--explicit-episodes",
-        type=str,
-        default=None,
-        help=(
-            "Comma-separated explicit episode ids (e.g. '7,22,29,66'). When "
-            "provided, --num-episodes / --episode-strategy / --episode-seed "
-            "are ignored and every listed episode present in both parquet "
-            "and dataset is rendered."
-        ),
-    )
-    parser.add_argument(
-        "--no-video",
-        action="store_true",
-        help="Skip MP4 generation (PNG summaries still produced).",
-    )
-    parser.add_argument("--fps", type=int, default=10, help="FPS for episode videos.")
-    parser.add_argument(
-        "--stride-k",
-        type=int,
-        default=8,
-        help=(
-            "Pair stride k used at compute time. Drives the title/legend on "
-            "per-episode plots — must match the value used by "
-            "compute_advantages_ensemble.py."
-        ),
-    )
     args = parser.parse_args()
 
     if not args.dataset.exists():
@@ -904,14 +501,8 @@ def main() -> None:
     print(f"Threshold = {threshold}")
     print(f"Output dir = {args.output}")
 
-    tag_meta = _read_mixture_meta(args.dataset, args.tag)
     plot_distribution(
-        df,
-        args.output / "distribution.png",
-        threshold,
-        dataset_name,
-        args.tag,
-        tag_meta=tag_meta,
+        df, args.output / "distribution.png", threshold, dataset_name, args.tag
     )
     plot_member_distributions(df, args.output / "members.png", dataset_name, args.tag)
     plot_uncertainty_scatter(
@@ -940,40 +531,6 @@ def main() -> None:
         args.tag,
         args.output / "summary.json",
     )
-
-    explicit_eps = None
-    if args.explicit_episodes:
-        try:
-            explicit_eps = [
-                int(x) for x in args.explicit_episodes.split(",") if x.strip()
-            ]
-        except ValueError as exc:
-            raise SystemExit(
-                f"--explicit-episodes must be comma-separated integers, "
-                f"got {args.explicit_episodes!r} ({exc})"
-            )
-        if not explicit_eps:
-            raise SystemExit("--explicit-episodes resolved to an empty list")
-
-    run_per_episode = args.num_episodes > 0 or bool(explicit_eps)
-    if run_per_episode:
-        meta = _read_mixture_meta(args.dataset, args.tag)
-        inference_mode = str(meta.get("inference_mode", "wco"))
-        episodes_dir = args.output / "episodes"
-        render_per_episode(
-            df=df,
-            dataset_path=args.dataset,
-            output_dir=episodes_dir,
-            threshold=threshold,
-            inference_mode=inference_mode,
-            stride_k=int(args.stride_k),
-            num_episodes=int(args.num_episodes),
-            strategy=str(args.episode_strategy),
-            seed=int(args.episode_seed),
-            write_video=not args.no_video,
-            fps=int(args.fps),
-            explicit_episodes=explicit_eps,
-        )
 
     print("Wrote:")
     for p in sorted(args.output.rglob("*")):

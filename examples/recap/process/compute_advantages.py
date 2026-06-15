@@ -59,117 +59,14 @@ from rlinf.data.datasets.recap.utils import (
     load_returns_sidecar,
 )
 from rlinf.models.embodiment.value_model.modeling_critic import ValueCriticModel
+from rlinf.utils.dist_inference import (
+    cleanup_distributed,
+    gather_all_advantages,
+    get_shard_indices,
+    setup_distributed,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def setup_distributed(cfg: DictConfig) -> tuple[int, int, str]:
-    """Initialize torch.distributed for torchrun-launched processes.
-
-    Args:
-        cfg: Configuration with distributed settings
-
-    Returns:
-        Tuple of (rank, world_size, device_string)
-    """
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
-        rank = int(os.environ["RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-
-        dist_cfg = cfg.get("distributed", {})
-        backend = dist_cfg.get("backend", "nccl")
-        timeout_seconds = dist_cfg.get("timeout", 1800)
-
-        if not dist.is_initialized():
-            from datetime import timedelta
-
-            dist.init_process_group(
-                backend=backend,
-                timeout=timedelta(seconds=timeout_seconds),
-            )
-
-        torch.cuda.set_device(local_rank)
-        device = f"cuda:{local_rank}"
-
-        if rank == 0:
-            logger.info(f"Distributed mode enabled: {world_size} GPUs")
-            logger.info(f"  Backend: {backend}, Timeout: {timeout_seconds}s")
-
-        return rank, world_size, device
-
-    # Single GPU fallback
-    return 0, 1, "cuda"
-
-
-def cleanup_distributed():
-    """Clean up distributed process group if initialized."""
-    if dist.is_initialized():
-        dist.destroy_process_group()
-
-
-def get_shard_indices(
-    total_samples: int, rank: int, world_size: int
-) -> tuple[int, int]:
-    """Calculate start/end indices for this rank's shard.
-
-    Distributes samples as evenly as possible, with earlier ranks
-    getting one extra sample if there's a remainder.
-
-    Args:
-        total_samples: Total number of samples
-        rank: Current process rank
-        world_size: Total number of processes
-
-    Returns:
-        Tuple of (start_index, end_index) where end is exclusive
-    """
-    base_count = total_samples // world_size
-    remainder = total_samples % world_size
-
-    if rank < remainder:
-        start = rank * (base_count + 1)
-        end = start + base_count + 1
-    else:
-        start = remainder * (base_count + 1) + (rank - remainder) * base_count
-        end = start + base_count
-
-    return start, end
-
-
-def gather_all_advantages(
-    local_df: pd.DataFrame,
-    rank: int,
-    world_size: int,
-) -> pd.DataFrame:
-    """Gather advantages from all ranks using all_gather_object.
-
-    Args:
-        local_df: Local DataFrame with advantages for this rank's shard
-        rank: Current process rank
-        world_size: Total number of processes
-
-    Returns:
-        Merged DataFrame with all advantages, sorted by (episode_index, frame_index)
-    """
-    if world_size == 1:
-        return local_df
-
-    all_dfs = [None] * world_size
-    dist.all_gather_object(all_dfs, local_df.to_dict("records"))
-
-    all_records = []
-    for df_records in all_dfs:
-        if df_records:
-            all_records.extend(df_records)
-
-    merged_df = pd.DataFrame(all_records)
-    if len(merged_df) > 0:
-        merged_df = merged_df.sort_values(["episode_index", "frame_index"]).reset_index(
-            drop=True
-        )
-
-    return merged_df
 
 
 # Maps LeRobot dataset keys to value model observation format

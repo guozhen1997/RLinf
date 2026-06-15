@@ -45,6 +45,7 @@ import io
 import json
 import logging
 import os
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
@@ -1809,8 +1810,378 @@ ValueDataCollator`. Runs the :class:`SteamProcessor` **twice**
         }
 
 
+class BinaryPairInferenceDataset(Dataset):
+    """Yields one ``(frame_t, frame_{t+k})`` pair per anchor for inference.
+
+    Differences vs :class:`PairDataset`:
+        * No success-only filter — every episode contributes pairs (matches
+          ``compute_advantages.py`` which scores every frame).
+        * Forward direction only: ``image_t = frame_t``, ``image_tk = frame_{t+k}``,
+          ``label = 0`` (placeholder so the existing collator works).
+        * Boundary clamp identical to PairDataset: when ``t + k > T - 1`` the
+          second slot is clamped to ``T - 1``.
+    """
+
+    def __init__(
+        self,
+        *,
+        dataset_path: str,
+        camera_keys: list[str],
+        k: int,
+        prompt: Optional[str],
+        include_state: bool,
+        state_max_dim: Optional[int],
+        state_key: str,
+        dataset_type: str,
+        min_episode_length: Optional[int] = None,
+        state_transform_enabled: bool = False,
+        robot_type: str = "libero",
+        model_type: str = "pi05",
+        action_dim: int = 32,
+        default_prompt: Optional[str] = None,
+        norm_stats_dir: Optional[str] = None,
+        asset_id: Optional[str] = None,
+        allow_raw_state_for_compatibility: bool = False,
+    ) -> None:
+        if dataset_type not in ("sft", "rollout"):
+            raise ValueError(
+                "BinaryPairInferenceDataset.dataset_type must be 'sft' or 'rollout', "
+                f"got {dataset_type!r}"
+            )
+        if int(k) < 1:
+            raise ValueError(f"k must be >= 1, got {k}")
+        if not camera_keys:
+            raise ValueError("camera_keys must be non-empty")
+
+        self.k = int(k)
+        self.camera_keys = tuple(camera_keys)
+        self.prompt = prompt
+        self.include_state = bool(include_state)
+        self.state_max_dim = state_max_dim
+        self.state_key = str(state_key)
+        self.dataset_type = dataset_type
+        self.source_name = str(dataset_path)
+        self.state_transform_enabled = bool(state_transform_enabled)
+        self.allow_raw_state_for_compatibility = bool(allow_raw_state_for_compatibility)
+        self._state_transform = None
+        if self.state_transform_enabled:
+            if norm_stats_dir is None and not self.allow_raw_state_for_compatibility:
+                raise ValueError(
+                    "BinaryPairInferenceDataset state compatibility requires "
+                    "data.norm_stats_dir or per-dataset norm_stats_dir unless "
+                    "data.allow_raw_state_for_compatibility=true."
+                )
+            self._state_transform = build_openpi_state_transform(
+                robot_type=str(robot_type),
+                model_type=str(model_type),
+                action_dim=int(action_dim),
+                default_prompt=default_prompt,
+                norm_stats_dir=norm_stats_dir,
+                asset_id=asset_id,
+            )
+
+        # Iterate every episode regardless of is_success; _LeRobotSource with
+        # only_success=False skips the success scan and treats all episodes
+        # as eligible.
+        self._source = _LeRobotSource(
+            dataset_path,
+            only_success=False,
+            dataset_type=dataset_type,
+        )
+
+        if min_episode_length is None:
+            min_episode_length = 2
+        self._min_episode_length = int(min_episode_length)
+
+        total_eps = self._source.num_episodes()
+        self._eligible: list[int] = [
+            ep
+            for ep in range(total_eps)
+            if self._source.episode_length(ep) >= self._min_episode_length
+        ]
+        if not self._eligible:
+            raise ValueError(
+                f"No eligible episodes in {dataset_path!r} with length >= "
+                f"{self._min_episode_length} (dataset has {total_eps} episodes)."
+            )
+
+        # One anchor per t in [0, T - 2]; total = sum(T_ep - 1).
+        pair_positions_per_episode = np.array(
+            [self._source.episode_length(ep) - 1 for ep in self._eligible],
+            dtype=np.int64,
+        )
+        self._pair_position_ends = np.cumsum(pair_positions_per_episode)
+        self._num_pair_positions = int(self._pair_position_ends[-1])
+
+        logger.info(
+            "BinaryPairInferenceDataset: source=%s, episodes=%d, k=%d, "
+            "total_anchors=%d, include_state=%s, dataset_type=%s, "
+            "camera_keys=%s",
+            self.source_name,
+            len(self._eligible),
+            self.k,
+            self._num_pair_positions,
+            self.include_state,
+            self.dataset_type,
+            self.camera_keys,
+        )
+
+    def __len__(self) -> int:
+        return self._num_pair_positions
+
+    def _resolve_pair_position(self, idx: int) -> tuple[int, int, int]:
+        if idx < 0 or idx >= self._num_pair_positions:
+            raise IndexError(idx)
+        episode_slot = int(np.searchsorted(self._pair_position_ends, idx, side="right"))
+        prev_episode_end = (
+            int(self._pair_position_ends[episode_slot - 1]) if episode_slot > 0 else 0
+        )
+        episode = int(self._eligible[episode_slot])
+        t = int(idx - prev_episode_end)
+        t_plus_k = min(t + self.k, self._source.episode_length(episode) - 1)
+        return episode, t, t_plus_k
+
+    def _resolve_prompt(self, episode: int, frame_idx: int) -> str:
+        prompt = self._source.get_prompt(episode, frame_idx)
+        if prompt:
+            return prompt
+        if self.prompt is None:
+            raise RuntimeError(
+                f"No per-episode task instruction for episode={episode} in "
+                f"{self.source_name!r} and no fallback prompt was provided."
+            )
+        return self.prompt
+
+    def _resolve_prompt_from_sample(
+        self,
+        sample: dict,
+        episode: int,
+        frame_idx: int,
+    ) -> str:
+        if hasattr(self._source, "get_prompt_from_sample"):
+            prompt = self._source.get_prompt_from_sample(sample, episode, frame_idx)
+        else:
+            prompt = self._source.get_prompt(episode, frame_idx)
+        if prompt:
+            return prompt
+        if self.prompt is None:
+            raise RuntimeError(
+                f"No per-episode task instruction for episode={episode} in "
+                f"{self.source_name!r} and no fallback prompt was provided."
+            )
+        return self.prompt
+
+    def _load_views(
+        self,
+        episode: int,
+        frame_idx: int,
+        *,
+        sample: Optional[dict] = None,
+    ) -> tuple[dict[str, np.ndarray], dict[str, bool]]:
+        views: dict[str, np.ndarray] = {}
+        masks: dict[str, bool] = {}
+        for cam in self.camera_keys:
+            view = (
+                self._source.get_view_from_sample(sample, cam)
+                if sample is not None and hasattr(self._source, "get_view_from_sample")
+                else self._source.get_view(episode, frame_idx, cam)
+            )
+            if view is None:
+                masks[cam] = False
+            else:
+                views[cam] = view
+                masks[cam] = True
+        return views, masks
+
+    def _load_state(
+        self,
+        episode: int,
+        frame_idx: int,
+        *,
+        sample: Optional[dict] = None,
+    ) -> np.ndarray:
+        if sample is not None and hasattr(self._source, "get_state_from_sample"):
+            state = self._source.get_state_from_sample(sample, self.state_key)
+            if self._state_transform is not None:
+                state = self._state_transform(state)
+            return _to_float32_1d(state, max_dim=self.state_max_dim)
+
+        if self._state_transform is None:
+            state = self._source.get_state(episode, frame_idx, self.state_key)
+        else:
+            sample = dict(self._source.get_raw_sample(episode, frame_idx))
+            raw_state = self._source.get_state_from_sample(sample, self.state_key)
+            state = self._state_transform(raw_state)
+        return _to_float32_1d(state, max_dim=self.state_max_dim)
+
+    def _build_sample_from_pair(
+        self,
+        *,
+        episode: int,
+        t: int,
+        t_plus_k: int,
+        raw_t: Optional[dict] = None,
+        raw_tk: Optional[dict] = None,
+    ) -> dict[str, Any]:
+        prompt = (
+            self._resolve_prompt_from_sample(raw_t, episode, t)
+            if raw_t is not None
+            else self._resolve_prompt(episode, t)
+        )
+        views_t, mask_t = self._load_views(episode, t, sample=raw_t)
+        views_tk, mask_tk = self._load_views(
+            episode,
+            t_plus_k,
+            sample=raw_tk,
+        )
+        sample: dict[str, Any] = {
+            "image_t": views_t,
+            "image_tk": views_tk,
+            "image_mask_t": mask_t,
+            "image_mask_tk": mask_tk,
+            "prompt": prompt,
+            "label": 0,  # placeholder; collator emits but inference ignores
+            "episode": int(episode),
+            "frame_idx_t": int(t),
+            "frame_idx_tk": int(t_plus_k),
+            "source_name": self.source_name,
+        }
+
+        if self.include_state:
+            state_t = self._load_state(episode, t, sample=raw_t)
+            state_tk = self._load_state(episode, t_plus_k, sample=raw_tk)
+            sample["state"] = state_t
+            sample["state_tk"] = state_tk
+
+        return sample
+
+    def _supports_batched_video_query(self) -> bool:
+        if not hasattr(self._source, "base") or not hasattr(
+            self._source.base,
+            "_query_videos",
+        ):
+            return False
+        if not hasattr(self._source, "_metadata_sample"):
+            return False
+        video_keys = set(getattr(self._source.meta, "video_keys", []))
+        return bool(video_keys) and all(cam in video_keys for cam in self.camera_keys)
+
+    @staticmethod
+    def _scalar_item(value: Any) -> Any:
+        if isinstance(value, torch.Tensor):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return value.reshape(-1)[0].item()
+        if isinstance(value, (list, tuple)):
+            if len(value) != 1:
+                raise ValueError(f"Expected scalar-like list/tuple, got {value!r}")
+            return BinaryPairInferenceDataset._scalar_item(value[0])
+        return value
+
+    def _getitems_batched_video(self, indices: list[int]) -> list[dict[str, Any]]:
+        resolved: list[tuple[int, int, int, int]] = []
+        by_episode: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
+        for out_idx, idx in enumerate(indices):
+            episode, t, t_plus_k = self._resolve_pair_position(int(idx))
+            resolved.append((out_idx, episode, t, t_plus_k))
+            by_episode[episode].append((out_idx, t, t_plus_k))
+
+        out: list[Optional[dict[str, Any]]] = [None] * len(indices)
+        for episode, episode_entries in by_episode.items():
+            frame_indices = sorted(
+                {
+                    frame
+                    for _out_idx, t, t_plus_k in episode_entries
+                    for frame in (t, t_plus_k)
+                }
+            )
+            metadata_by_frame = {
+                frame: self._source._metadata_sample(episode, frame)
+                for frame in frame_indices
+            }
+            timestamps = [
+                float(self._scalar_item(metadata_by_frame[frame]["timestamp"]))
+                for frame in frame_indices
+            ]
+            ep_idx = int(
+                self._scalar_item(
+                    metadata_by_frame[frame_indices[0]].get("episode_index", episode)
+                )
+            )
+
+            frames_by_camera = self._source.base._query_videos(
+                dict.fromkeys(self.camera_keys, timestamps),
+                ep_idx,
+            )
+            frame_lookup: dict[tuple[str, int], Any] = {}
+            for cam in self.camera_keys:
+                frames = frames_by_camera[cam]
+                if frames.ndim == 3:
+                    frames = frames.unsqueeze(0)
+                if int(frames.shape[0]) != len(frame_indices):
+                    raise RuntimeError(
+                        "_query_videos returned an unexpected number of frames for "
+                        f"camera={cam!r}: got {int(frames.shape[0])}, expected "
+                        f"{len(frame_indices)}"
+                    )
+                for pos, frame_idx in enumerate(frame_indices):
+                    frame_lookup[(cam, frame_idx)] = frames[pos]
+
+            for out_idx, t, t_plus_k in episode_entries:
+                raw_t = dict(metadata_by_frame[t])
+                raw_tk = dict(metadata_by_frame[t_plus_k])
+                for cam in self.camera_keys:
+                    raw_t[cam] = frame_lookup[(cam, t)]
+                    raw_tk[cam] = frame_lookup[(cam, t_plus_k)]
+                out[out_idx] = self._build_sample_from_pair(
+                    episode=episode,
+                    t=t,
+                    t_plus_k=t_plus_k,
+                    raw_t=raw_t,
+                    raw_tk=raw_tk,
+                )
+
+        if any(sample is None for sample in out):
+            missing = [i for i, sample in enumerate(out) if sample is None]
+            raise RuntimeError(
+                f"Batched video loader missed sample positions: {missing}"
+            )
+        return [sample for sample in out if sample is not None]
+
+    def __getitems__(self, indices: list[int]) -> list[dict[str, Any]]:
+        if not indices:
+            return []
+        if self._supports_batched_video_query():
+            return self._getitems_batched_video([int(idx) for idx in indices])
+        return [self[int(idx)] for idx in indices]
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        episode, t, t_plus_k = self._resolve_pair_position(idx)
+
+        if hasattr(self._source, "get_raw_pair"):
+            raw_t, raw_tk = self._source.get_raw_pair(
+                episode,
+                t,
+                t_plus_k,
+                camera_keys=self.camera_keys,
+            )
+            return self._build_sample_from_pair(
+                episode=episode,
+                t=t,
+                t_plus_k=t_plus_k,
+                raw_t=raw_t,
+                raw_tk=raw_tk,
+            )
+        return self._build_sample_from_pair(
+            episode=episode,
+            t=t,
+            t_plus_k=t_plus_k,
+        )
+
+
 __all__ = [
     "BinaryPairDataCollator",
+    "BinaryPairInferenceDataset",
     "PairDataset",
     "TrajectorySource",
     "build_openpi_state_transform",

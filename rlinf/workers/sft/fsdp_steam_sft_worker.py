@@ -454,6 +454,18 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             robot_type = str(
                 entry.get("robot_type", data_cfg.get("robot_type", "libero"))
             )
+            length_scale_enabled = bool(
+                entry.get(
+                    "length_scale_enabled",
+                    data_cfg.get("length_scale_enabled", False),
+                )
+            )
+            length_scale_percentile = float(
+                entry.get(
+                    "length_scale_percentile",
+                    data_cfg.get("length_scale_percentile", 90.0),
+                )
+            )
             return PairDataset(
                 dataset_path=ds_path,
                 camera_keys=tuple(
@@ -522,6 +534,8 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                     "compatibility_same_episode_negative_max_distance",
                     None,
                 ),
+                length_scale_enabled=length_scale_enabled,
+                length_scale_percentile=length_scale_percentile,
             )
 
         balance_dataset_weights = bool(
@@ -559,6 +573,31 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             )
 
         _validate_train_dataset_shapes(named_train_datasets)
+
+        # Length-scale reference (L_max): pool eligible-episode lengths across
+        # every train dataset so one global L_max governs the whole mixture —
+        # a fixed frame stride then maps to the same bin regardless of which
+        # dataset the episode came from. Applied to eval datasets too below.
+        # np.percentile is deterministic, so every rank derives the same value
+        # without a collective.
+        global_length_scale_reference: float | None = None
+        if any(ds.length_scale_enabled for ds, _ in datasets_with_weights):
+            percentile = float(data_cfg.get("length_scale_percentile", 90.0))
+            global_length_scale_reference = (
+                PairDataset.compute_global_length_scale_reference(
+                    [ds for ds, _ in datasets_with_weights],
+                    percentile,
+                )
+            )
+            for ds, _ in datasets_with_weights:
+                ds.set_length_scale_reference(global_length_scale_reference)
+            logger.info(
+                "[SteamSFT] Global length-scale L_max (p%.1f) = %.2f, applied to "
+                "%d train dataset(s).",
+                percentile,
+                global_length_scale_reference,
+                len(datasets_with_weights),
+            )
 
         if len(datasets_with_weights) == 1:
             train_dataset: torch.utils.data.Dataset = datasets_with_weights[0][0]
@@ -622,6 +661,8 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             if not entry.get("dataset_path"):
                 continue
             ds = _build_pair_dataset(entry)
+            if global_length_scale_reference is not None:
+                ds.set_length_scale_reference(global_length_scale_reference)
             name = entry.get("name", Path(_resolve(entry["dataset_path"])).stem)
             eval_sampler = None
             if torch.distributed.is_initialized():
