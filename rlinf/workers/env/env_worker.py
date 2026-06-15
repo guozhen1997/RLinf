@@ -1159,7 +1159,7 @@ class EnvWorker(Worker):
 
             for eval_step in range(self.n_eval_chunk_steps):
                 for stage_id in range(self.stage_num):
-                    raw_chunk_actions = self.recv_from(
+                    rollout_results = self.recv_from(
                         group_name=self.cfg.rollout.group_name,
                         channel=input_channel,
                         tag="eval_rollout_results",
@@ -1168,6 +1168,11 @@ class EnvWorker(Worker):
                         if self.env_decoupled_mode
                         else None,
                         env_decoupled_mode=self.env_decoupled_mode,
+                    )
+                    raw_chunk_actions = (
+                        rollout_results.actions
+                        if hasattr(rollout_results, "actions")
+                        else rollout_results
                     )
                     if isinstance(raw_chunk_actions, torch.Tensor):
                         raw_chunk_actions = raw_chunk_actions.detach().cpu().numpy()
