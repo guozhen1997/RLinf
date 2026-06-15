@@ -41,9 +41,11 @@
 Benchmark 专属环境变量
 ----------------------
 
-评测前请按目标 benchmark 设置以下环境变量：
+按目标 benchmark 需要配置以下变量（LIBERO 由 ``install.sh`` 自动处理，见下文）：
 
 **LIBERO**
+
+使用 ``--env libero`` 时，``install.sh`` 默认将 LIBERO clone 到 ``.venv/libero``，并在 activate 脚本中将其加入 ``PYTHONPATH``。若需使用已有目录，请在安装前设置 ``LIBERO_PATH``：
 
 .. code-block:: bash
 

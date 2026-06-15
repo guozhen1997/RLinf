@@ -13,34 +13,35 @@ Step 1：安装环境
    bash requirements/install.sh embodied --model openpi --env libero
    source .venv/bin/activate
 
-Step 2：设置环境变量
---------------------
+使用 ``--env libero`` 时，安装脚本会将 LIBERO clone 到 ``.venv/libero``（若已设置 ``LIBERO_PATH`` 则复用已有目录），并在 ``.venv/bin/activate`` 中将其加入 ``PYTHONPATH``，无需再单独配置 ``LIBERO_PATH``。
+
+Step 2：准备模型
+----------------
+
+从 Hugging Face 下载 SFT 模型（``RLinf/RLinf-Pi05-LIBERO-SFT``）到本地：
 
 .. code-block:: bash
 
-   export LIBERO_PATH=/path/to/LIBERO
+   huggingface-cli download RLinf/RLinf-Pi05-LIBERO-SFT --local-dir ./RLinf-Pi05-LIBERO-SFT
 
-Step 3：准备模型
-----------------
+模型地址：`RLinf/RLinf-Pi05-LIBERO-SFT <https://huggingface.co/RLinf/RLinf-Pi05-LIBERO-SFT>`__。也可在启动时通过命令行覆盖 ``rollout.model.model_path``。
 
-将预训练或 SFT 后的模型下载到本地，记下目录路径。也可在启动时通过命令行覆盖 ``rollout.model.model_path``。
-
-Step 4：启动评测
+Step 3：启动评测
 ----------------
 
 .. code-block:: bash
 
    bash evaluations/run_eval.sh libero libero_spatial_openpi_pi05_eval \
-     rollout.model.model_path=/path/to/model
+     rollout.model.model_path=./RLinf-Pi05-LIBERO-SFT
 
 若配置名以 ``libero_`` 开头，可省略 benchmark 参数：
 
 .. code-block:: bash
 
    bash evaluations/run_eval.sh libero_spatial_openpi_pi05_eval \
-     rollout.model.model_path=/path/to/model
+     rollout.model.model_path=./RLinf-Pi05-LIBERO-SFT
 
-Step 5：查看结果
+Step 4：查看结果
 ----------------
 
 - 终端会输出 ``eval/success_once``、``eval/return`` 等指标
