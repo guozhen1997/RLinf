@@ -397,7 +397,7 @@ SFT 完成后，可在数据集对应具身环境中评测策略。下文以 **L
    * - ``env.eval.rollout_epoch``
      - 评测轮数；每轮在相同种子下跑完测试集，最终指标为多轮平均。
    * - ``env.eval.total_num_envs`` / ``auto_reset`` / ``max_steps_per_rollout_epoch``
-     - 并行环境数与是否通过 ``auto_reset`` 覆盖更大测试集；详见 :doc:`评估教程 <../../start/vla-eval>`。
+     - 并行环境数与是否通过 ``auto_reset`` 覆盖更大测试集；详见 :doc:`评测配置参考 <../../evaluations/reference/configuration>`。
    * - ``env.eval.video_cfg.save_video``
      - 设为 ``True`` 可在 ``{log_path}/video/eval`` 下保存评测视频。
 
@@ -434,7 +434,7 @@ SFT 完成后，可在数据集对应具身环境中评测策略。下文以 **L
 
    bash evaluations/run_eval.sh libero_spatial_eval_dreamzero
 
-脚本会调用 ``eval_embodied_agent.py``，将日志写入 ``logs/<时间戳>-libero_spatial_eval_dreamzero/eval_embodiment.log``，并在终端输出 ``eval/success_once``、 ``eval/return`` 等指标。更多通用评测参数说明见 :doc:`评估教程 <../../start/vla-eval>`。
+脚本会调用 ``eval_embodied_agent.py``，将日志写入 ``logs/<时间戳>-libero_spatial_eval_dreamzero/eval_embodiment.log``，并在终端输出 ``eval/success_once``、 ``eval/return`` 等指标。更多通用评测参数说明见 :doc:`评测配置参考 <../../evaluations/reference/configuration>`；LIBERO 完整流程见 :doc:`LIBERO 评测指南 <../../evaluations/guides/libero>`。
 
 Franka 真机部署评测
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

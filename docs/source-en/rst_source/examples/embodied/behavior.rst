@@ -504,6 +504,8 @@ Run evaluation with:
    export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
    bash evaluations/run_eval.sh behavior_ppo_openpi_pi05_eval
 
+For the full evaluation workflow, see :doc:`BEHAVIOR-1K evaluation guide <../../evaluations/guides/behavior>`.
+
 
 Visualization and Results
 -------------------------

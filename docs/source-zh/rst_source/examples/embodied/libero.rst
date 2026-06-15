@@ -547,14 +547,14 @@ LIBERO-Pro 和 LIBERO-Plus 复用了标准 LIBERO 配置族，并通过额外的
 
 **评测 (Evaluation)**
 
-要评测训练好的模型，请使用 ``eval_embodiment.sh`` 脚本：
+要评测训练好的模型，请使用 ``evaluations/run_eval.sh``。详见 :doc:`LIBERO 评测指南 <../../evaluations/guides/libero>`。
 
 .. code-block:: bash
 
     # 评测 LIBERO-Pro
     export LIBERO_TYPE=pro
-    bash examples/embodiment/eval_embodiment.sh libero_10_grpo_openvlaoft
+    bash evaluations/run_eval.sh libero libero_10_openvlaoft_eval
 
     # 评测 LIBERO-Plus
     export LIBERO_TYPE=plus
-    bash examples/embodiment/eval_embodiment.sh libero_10_grpo_openvlaoft
+    bash evaluations/run_eval.sh libero libero_10_openvlaoft_eval

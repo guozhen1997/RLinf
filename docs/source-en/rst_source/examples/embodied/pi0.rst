@@ -386,7 +386,7 @@ If you still encounter OOM issues under the minimum parameter configuration, we 
 
 For models after SFT or RL training, we provide two evaluation methods:
 
-- Use RLinf's unified evaluation script, refer to the `VLA Evaluation Documentation <https://rlinf.readthedocs.io/en/latest/rst_source/start/vla-eval.html>`__ for evaluation. This method supports parallel environment evaluation, which is fast, but only supports outputting the success rate of the entire task.
+- Use RLinf's unified evaluation script; see :doc:`evaluation <../../evaluations/index>` for evaluation. This method supports parallel environment evaluation, which is fast, but only supports outputting the success rate of the entire task.
 
 .. note::
 

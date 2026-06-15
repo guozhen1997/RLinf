@@ -210,7 +210,7 @@ DM0 模型
 
    bash examples/embodiment/run_embodiment.sh libero_spatial_ppo_dexbotic_dm0
 
-评估
+评测
 ----------
 
 π\ :sub:`0`\ 模型
@@ -239,8 +239,8 @@ DM0 模型
       --action_chunk 10 \
       --num_steps 10
 
-亦可使用 RLinf 统一的 VLA 评估流程，详见
-:doc:`VLA 评估文档 <../../start/vla-eval>`。
+亦可使用 RLinf 统一的 VLA 评测流程，详见
+:doc:`评测 <../../evaluations/index>`。
 
 .. note::
 

@@ -1,0 +1,57 @@
+Quick Tour
+==========
+
+This tutorial walks through your first embodied evaluation in about 5 minutes using **LIBERO Spatial + OpenPI π₀.₅**. The example config is ``evaluations/libero/libero_spatial_openpi_pi05_eval.yaml``.
+
+Step 1: Install the Environment
+-------------------------------
+
+From the repository root:
+
+.. code-block:: bash
+
+   bash requirements/install.sh embodied --model openpi --env libero
+   source .venv/bin/activate
+
+Step 2: Set Environment Variables
+---------------------------------
+
+.. code-block:: bash
+
+   export LIBERO_PATH=/path/to/LIBERO
+
+Step 3: Prepare the Model
+-------------------------
+
+Download a pretrained or SFT model to a local directory. You can also override ``rollout.model.model_path`` on the command line at launch time.
+
+Step 4: Launch Evaluation
+-------------------------
+
+.. code-block:: bash
+
+   bash evaluations/run_eval.sh libero libero_spatial_openpi_pi05_eval \
+     rollout.model.model_path=/path/to/model
+
+When the config name starts with ``libero_``, you can omit the benchmark argument:
+
+.. code-block:: bash
+
+   bash evaluations/run_eval.sh libero_spatial_openpi_pi05_eval \
+     rollout.model.model_path=/path/to/model
+
+Step 5: Check Results
+---------------------
+
+- The terminal prints metrics such as ``eval/success_once`` and ``eval/return``
+- Log directory: ``logs/<timestamp>-libero_spatial_openpi_pi05_eval/eval_embodiment.log``
+- When ``env.eval.video_cfg.save_video: True``, videos are saved under ``<log_path>/video/eval/``
+
+See :doc:`../reference/results` for more details.
+
+Next Steps
+----------
+
+- YAML configuration: :doc:`../reference/configuration`
+- Other benchmarks: :doc:`../guides/libero`
+- More CLI options: :doc:`../reference/cli`

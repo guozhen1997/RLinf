@@ -400,7 +400,7 @@ Copy or edit ``evaluations/libero/libero_spatial_dreamzero_eval.yaml`` and updat
    * - ``env.eval.rollout_epoch``
      - Number of eval passes; metrics are averaged over passes with the same seeds.
    * - ``env.eval.total_num_envs`` / ``auto_reset`` / ``max_steps_per_rollout_epoch``
-     - Parallel env count and coverage of the test set; see :doc:`VLA evaluation guide <../../start/vla-eval>`.
+     - Parallel env count and coverage of the test set; see :doc:`configuration reference <../../evaluations/reference/configuration>`.
    * - ``env.eval.video_cfg.save_video``
      - Set ``True`` to save videos under ``{log_path}/video/eval``.
 
@@ -437,7 +437,7 @@ From the repo root, with the DreamZero venv active and ``DREAMZERO_PATH`` set:
 
    bash evaluations/run_eval.sh libero_spatial_eval_dreamzero
 
-Logs go to ``logs/<timestamp>-libero_spatial_eval_dreamzero/eval_embodiment.log``; the terminal prints metrics such as ``eval/success_once`` and ``eval/return``. For general eval YAML fields, see :doc:`VLA evaluation guide <../../start/vla-eval>`.
+Logs go to ``logs/<timestamp>-libero_spatial_eval_dreamzero/eval_embodiment.log``; the terminal prints metrics such as ``eval/success_once`` and ``eval/return``. For general eval YAML fields, see :doc:`configuration reference <../../evaluations/reference/configuration>`. For the full LIBERO workflow, see :doc:`LIBERO evaluation guide <../../evaluations/guides/libero>`.
 
 Franka real-world deployment and evaluation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

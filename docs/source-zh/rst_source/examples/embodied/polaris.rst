@@ -322,6 +322,8 @@ PolaRiS 目前支持以下训练配置：
    # π₀ + MoveLatteCup
    bash evaluations/run_eval.sh polaris polaris_movelattecup_openpi_eval
 
+完整评测流程（环境变量、配置字段、结果查看）见 :doc:`PolaRiS 评测指南 <../../evaluations/guides/polaris>`。
+
 可视化与结果
 -----------------
 

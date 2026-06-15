@@ -311,6 +311,8 @@ The training configuration file references them via Hydra defaults (e.g. ``defau
    # π₀ + MoveLatteCup
    bash evaluations/run_eval.sh polaris polaris_movelattecup_openpi_eval
 
+For the full evaluation workflow (environment variables, config fields, and results), see :doc:`PolaRiS evaluation guide <../../evaluations/guides/polaris>`.
+
 Visualization and Results
 -------------------------
 

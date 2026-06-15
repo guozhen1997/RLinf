@@ -243,7 +243,7 @@ Lingbot-VLA provides an end-to-end evaluation script for various tasks in the Ro
     export ROBOT_PLATFORM="ALOHA"
     bash evaluations/run_eval.sh robotwin_click_bell_grpo_lingbotvla_eval
 
-For RLinf's unified VLA evaluation flow, please refer to the :doc:`VLA Evaluation Documentation <../../start/vla-eval>`.
+For RLinf's unified VLA evaluation flow, please refer to :doc:`evaluation <../../evaluations/index>`.
 
 Visualization and Results
 -------------------------

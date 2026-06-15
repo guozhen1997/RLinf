@@ -252,7 +252,7 @@ DM0 Model
       --num_steps 10
 
 You can also use RLinf's unified VLA evaluation flow; refer to the
-:doc:`VLA Evaluation Documentation <../../start/vla-eval>` for details.
+:doc:`evaluation <../../evaluations/index>` for details.
 
 .. note::
 

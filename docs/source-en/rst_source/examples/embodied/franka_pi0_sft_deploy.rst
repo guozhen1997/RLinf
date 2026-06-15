@@ -352,3 +352,5 @@ Then launch:
 .. code:: bash
 
    bash evaluations/run_eval.sh realworld_eval
+
+For the full real-robot evaluation workflow, see :doc:`real-world evaluation guide <../../evaluations/guides/realworld>`.
