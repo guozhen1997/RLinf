@@ -12,6 +12,7 @@ You will learn how to:
 - Follow a complete :doc:`reward model workflow <../embodied/reward_model>` (simulation and real-world)
 - Use :doc:`Megatron-Bridge <mbridge>` to integrate Megatron-LM training with HuggingFace checkpoints
 - Optimize weight transfer with :doc:`Weight Synchronization <weight_syncer>` (``patch`` and ``bucket`` modes)
+- Use :doc:`Env Decoupled Mode <env_decoupled_mode>` to decouple the static mapping between Env and Rollout, improving resource utilization.
 
 RLinf supports multiple backends for model training, each with its own initialization logic and execution flow.  
 This guide provides step-by-step instructions on how to:
@@ -65,3 +66,4 @@ this section gives you the tools to plug directly into RLinf’s modular design.
    new_model_sft
    mbridge
    weight_syncer
+   env_decoupled_mode
