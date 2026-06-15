@@ -898,10 +898,6 @@ def validate_embodied_cfg(cfg):
                 )
 
     if not only_eval and cfg.runner.get("use_training_pipeline", False):
-        assert not cfg.algorithm.get("normalize_advantages", True), (
-            "algorithm.normalize_advantages must be False when "
-            "runner.use_training_pipeline is True."
-        )
         assert cfg.algorithm.adv_type == "gae", (
             "algorithm.adv_type only supports 'gae' now"
             "when runner.use_training_pipeline is True."
@@ -1109,12 +1105,6 @@ def validate_offline_cfg(cfg: DictConfig) -> DictConfig:
 
     with open_dict(cfg):
         cfg.runner.only_eval = bool(runner_only_eval)
-
-        # Offline RL only needs env.eval for evaluation interaction.
-        if cfg.env.get("train", None) is None:
-            cfg.env.train = OmegaConf.create(
-                OmegaConf.to_container(cfg.env.eval, resolve=True)
-            )
 
     if cfg.runner.val_check_interval > 0 or cfg.runner.only_eval:
         component_placement = HybridComponentPlacement(cfg, Cluster())

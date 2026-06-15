@@ -19,7 +19,7 @@ cluster:
 
 runner:
   task_type: "offline"
-  only_eval: true
+  only_eval: false
   logger:
     log_path: "../results"
     project_name: rlinf

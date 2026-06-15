@@ -61,6 +61,7 @@ class MultiStepRolloutWorker(Worker):
         self._weight_sync_is_sender = self._rank == 0
         train_env_cfg = cfg.env.get("train", None)
         eval_env_cfg = cfg.env.get("eval", None)
+        self.enable_train = not self.only_eval and train_env_cfg is not None
         self.enable_eval = (
             cfg.runner.get("val_check_interval", -1) > 0 or self.only_eval
         )
@@ -72,7 +73,7 @@ class MultiStepRolloutWorker(Worker):
         self.expert_model = None
 
         self.total_num_train_envs = (
-            cfg.env.train.total_num_envs if train_env_cfg is not None else 0
+            cfg.env.train.total_num_envs if self.enable_train else 0
         )
         self.total_num_eval_envs = (
             cfg.env.eval.total_num_envs if self.enable_eval else 0
@@ -81,7 +82,7 @@ class MultiStepRolloutWorker(Worker):
 
         self.train_batch_size = (
             self.total_num_train_envs // self._world_size // self.num_pipeline_stages
-            if train_env_cfg is not None
+            if self.enable_train
             else 0
         )
         self.eval_batch_size = (
@@ -94,7 +95,7 @@ class MultiStepRolloutWorker(Worker):
         self.n_train_chunk_steps = (
             cfg.env.train.max_steps_per_rollout_epoch
             // self.model_cfg.num_action_chunks
-            if train_env_cfg is not None
+            if self.enable_train
             else 0
         )
         self.n_eval_chunk_steps = 0
@@ -159,7 +160,7 @@ class MultiStepRolloutWorker(Worker):
 
         self.dst_ranks = {}
         self.src_ranks = {}
-        if not self.only_eval:
+        if self.enable_train:
             self.dst_ranks = {
                 "train": self._setup_dst_ranks(
                     self.total_num_train_envs // self.num_pipeline_stages
