@@ -32,7 +32,7 @@ import ray.util.state
 import torch
 from omegaconf import OmegaConf
 
-from rlinf.utils.utils import _split_channel_message
+from ...utils.utils import _split_channel_message
 
 from ..cluster import (
     Cluster,
