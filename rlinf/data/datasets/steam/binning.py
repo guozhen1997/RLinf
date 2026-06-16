@@ -164,22 +164,6 @@ def bin_centers(K: int, num_bins: int) -> np.ndarray:
     return centers
 
 
-def positive_bin_centers(K: int, num_bins: int) -> np.ndarray:
-    """Return ``[num_bins]`` positive-stride centers for positive-only mode."""
-    if num_bins < 1 or num_bins > K or K % num_bins != 0:
-        raise ValueError(
-            f"positive_bin_centers requires 1 <= num_bins <= K and "
-            f"K % num_bins == 0; got K={K}, num_bins={num_bins}."
-        )
-    strides_per_bin = K // num_bins
-    centers = np.empty(num_bins, dtype=np.float32)
-    for b in range(num_bins):
-        low = 1 + b * strides_per_bin
-        high = low + strides_per_bin - 1
-        centers[b] = (low + high) / 2.0
-    return centers
-
-
 def expected_signed_stride(probs, K: int, num_bins: int):
     """Return ``E[s] = Σ_b probs[..., b] * bin_centers[b]``.
 
@@ -215,6 +199,5 @@ __all__ = [
     "_scaled_signed_stride_to_bin",
     "_scaled_positive_stride_to_bin",
     "bin_centers",
-    "positive_bin_centers",
     "expected_signed_stride",
 ]

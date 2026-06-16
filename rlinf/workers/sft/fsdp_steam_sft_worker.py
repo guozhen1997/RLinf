@@ -675,19 +675,38 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         positive_mask = labels >= (num_bins // 2)
         return float(positive_mask.to(dtype=torch.float32).mean().item())
 
-    # def _label_bin_fracs(self, labels: torch.Tensor) -> dict[str, float]:
-    #     """Per-bin label fractions for diagnosing ensemble data skew."""
-    #     num_bins = int(getattr(self.cfg.actor.model, "num_bins", 2))
-    #     labels_1d = labels.detach().to(dtype=torch.long).reshape(-1)
-    #     if labels_1d.numel() == 0:
-    #         return {f"label_bin_{idx:02d}_frac": 0.0 for idx in range(num_bins)}
+    @staticmethod
+    def _critic_output_metrics(result, *, include_std: bool) -> dict[str, float]:
+        """Flatten a CriticOutput into a scalar metric dict.
 
-    #     hist = torch.bincount(labels_1d, minlength=num_bins)[:num_bins]
-    #     fracs = hist.to(dtype=torch.float32) / float(labels_1d.numel())
-    #     return {
-    #         f"label_bin_{idx:02d}_frac": float(frac.item())
-    #         for idx, frac in enumerate(fracs)
-    #     }
+        ``include_std`` adds ``signed_progress_std`` (eval only): on the
+        training path each ensemble member sees its own shuffled micro
+        batch, so within-batch std is shuffle noise, not ensemble
+        disagreement — eval covers the spread question on shared inputs.
+        """
+        metrics: dict[str, float] = {}
+        if result.loss is not None:
+            metrics["loss"] = float(result.loss.detach().item())
+        if result.cat_acc_best is not None:
+            metrics["accuracy"] = float(result.cat_acc_best.detach().item())
+        if result.cat_acc_neighbor is not None:
+            metrics["accuracy_neighbor"] = float(
+                result.cat_acc_neighbor.detach().item()
+            )
+        if result.predicted_values is not None:
+            signed_progress = result.predicted_values.detach().float()
+            metrics["signed_progress_mean"] = float(signed_progress.mean().item())
+            if include_std:
+                metrics["signed_progress_std"] = (
+                    float(signed_progress.std(unbiased=False).item())
+                    if signed_progress.numel() >= 2
+                    else 0.0
+                )
+        if result.progress_values is not None:
+            metrics["progress_value_mean"] = float(
+                result.progress_values.detach().float().mean().item()
+            )
+        return metrics
 
     def _log_training_batch_diagnostics_once(
         self,
@@ -805,31 +824,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         )
         self._log_training_batch_diagnostics_once(observation, labels, result)
 
-        # signed_progress_std is intentionally not logged on the training path:
-        # in the ensemble flow each member trains on its own shuffled micro
-        # batch, so the within-batch std is shuffle noise, not ensemble
-        # disagreement. Eval covers the spread question on shared inputs
-        # instead.
-        metrics: dict[str, float] = {}
-        if result.loss is not None:
-            metrics["loss"] = float(result.loss.detach().item())
-        if result.cat_acc_best is not None:
-            metrics["accuracy"] = float(result.cat_acc_best.detach().item())
-        if result.cat_acc_neighbor is not None:
-            metrics["accuracy_neighbor"] = float(
-                result.cat_acc_neighbor.detach().item()
-            )
-        if result.predicted_values is not None:
-            metrics["signed_progress_mean"] = float(
-                result.predicted_values.detach().float().mean().item()
-            )
-        if result.progress_values is not None:
-            metrics["progress_value_mean"] = float(
-                result.progress_values.detach().float().mean().item()
-            )
-        # if labels is not None:
-        #     metrics["label_pos_frac"] = self._label_pos_frac(labels)
-        #     metrics.update(self._label_bin_fracs(labels))
+        metrics = self._critic_output_metrics(result, include_std=False)
 
         scaled_loss = loss / grad_accum
         with backward_ctx:
@@ -1016,32 +1011,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         with self.amp_context:
             result = self.model(observation=observation, labels=labels)
 
-        metrics: dict[str, float] = {}
-        if result.loss is not None:
-            metrics["loss"] = float(result.loss.detach().item())
-        if result.cat_acc_best is not None:
-            metrics["accuracy"] = float(result.cat_acc_best.detach().item())
-        if result.cat_acc_neighbor is not None:
-            metrics["accuracy_neighbor"] = float(
-                result.cat_acc_neighbor.detach().item()
-            )
-        if result.predicted_values is not None:
-            signed_progress = result.predicted_values.detach().float()
-            metrics["signed_progress_mean"] = float(signed_progress.mean().item())
-            if signed_progress.numel() >= 2:
-                metrics["signed_progress_std"] = float(
-                    signed_progress.std(unbiased=False).item()
-                )
-            else:
-                metrics["signed_progress_std"] = 0.0
-        if result.progress_values is not None:
-            metrics["progress_value_mean"] = float(
-                result.progress_values.detach().float().mean().item()
-            )
-        # if labels is not None:
-        #     metrics["label_pos_frac"] = self._label_pos_frac(labels)
-        #     metrics.update(self._label_bin_fracs(labels))
-        return metrics
+        return self._critic_output_metrics(result, include_std=True)
 
     def _eval_batch_ensemble(
         self,
@@ -1066,31 +1036,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                     member_idx=m_idx,
                 )
 
-            metrics: dict[str, float] = {}
-            if result.loss is not None:
-                metrics["loss"] = float(result.loss.detach().item())
-            if result.cat_acc_best is not None:
-                metrics["accuracy"] = float(result.cat_acc_best.detach().item())
-            if result.cat_acc_neighbor is not None:
-                metrics["accuracy_neighbor"] = float(
-                    result.cat_acc_neighbor.detach().item()
-                )
-            if result.predicted_values is not None:
-                signed_progress = result.predicted_values.detach().float()
-                metrics["signed_progress_mean"] = float(signed_progress.mean().item())
-                if signed_progress.numel() >= 2:
-                    metrics["signed_progress_std"] = float(
-                        signed_progress.std(unbiased=False).item()
-                    )
-                else:
-                    metrics["signed_progress_std"] = 0.0
-            if result.progress_values is not None:
-                metrics["progress_value_mean"] = float(
-                    result.progress_values.detach().float().mean().item()
-                )
-            # if labels is not None:
-            #     metrics["label_pos_frac"] = self._label_pos_frac(labels)
-            #     metrics.update(self._label_bin_fracs(labels))
+            metrics = self._critic_output_metrics(result, include_std=True)
             member_metrics.append(metrics)
         eval_metrics = self._mean_metrics(member_metrics)
         for member_idx, metrics in enumerate(member_metrics):

@@ -14,13 +14,6 @@
 
 """Data pipeline for STEAM binary value learning."""
 
-from .binning import (
-    _scaled_positive_stride_to_bin,
-    _scaled_signed_stride_to_bin,
-    _signed_stride_to_bin,
-    bin_centers,
-    expected_signed_stride,
-)
 from .mixture import PairMixtureDataset
 from .pair_dataset import (
     BinaryPairDataCollator,
@@ -33,9 +26,4 @@ __all__ = [
     "PairMixtureDataset",
     "PairDataset",
     "TrajectorySource",
-    "_scaled_positive_stride_to_bin",
-    "_scaled_signed_stride_to_bin",
-    "_signed_stride_to_bin",
-    "bin_centers",
-    "expected_signed_stride",
 ]

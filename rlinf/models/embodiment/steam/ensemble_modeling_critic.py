@@ -209,10 +209,9 @@ class EnsembleSteamCriticModel(nn.Module):
     def attach_runtime_assets(self, processor, device) -> None:
         """Attach inference-time runtime assets to self AND every member.
 
-        Overrides :meth:`SteamCriticModel.attach_runtime_assets`:
-        the per-member ``_prepare_observation*`` delegations in this class
-        call into ``members[0]``. Every member needs the same processor and
-        device target for collator-prepared pair observations.
+        Overrides :meth:`SteamCriticModel.attach_runtime_assets` to fan the
+        processor and device target out to every member, so each member can
+        run inference on collator-prepared pair observations.
         """
         self.processor = processor
         self._device = device
@@ -271,10 +270,8 @@ class EnsembleSteamCriticModel(nn.Module):
             # keep ``predicted_values`` in range. No logit/sigmoid
             # round-trip — the signed score already encodes direction
             # and strength, so penalizing disagreement on this scale is
-            # the native form. Note: ``uwo_lambda`` is now a coefficient
-            # on variance in ``[-1, 1]`` space rather than log-odds
-            # space, so its tuned magnitude will differ from the old
-            # logit-based formulation.
+            # the native form. ``uwo_lambda`` is a coefficient on variance
+            # in ``[-1, 1]`` space, so tune its magnitude on that scale.
             aggregated_margin = prediction_mean - (
                 self.config.uwo_lambda * prediction_variance
             )
@@ -397,41 +394,6 @@ class EnsembleSteamCriticModel(nn.Module):
     @torch.no_grad()
     def predict_value(self, observation) -> Tensor:
         return self.predict(observation).predicted_values
-
-    @staticmethod
-    def _prepare_observation_cpu(inputs: dict, processor) -> dict:
-        return SteamCriticModel._prepare_observation_cpu(inputs, processor)
-
-    def _prepare_observation(self, inputs: dict) -> dict:
-        return self.members[0]._prepare_observation(inputs)
-
-    def _prepare_observation_batch(self, inputs_list: list[dict]) -> dict:
-        return self.members[0]._prepare_observation_batch(inputs_list)
-
-    @torch.no_grad()
-    def infer(self, obs: dict) -> dict:
-        del obs
-        raise RuntimeError(
-            "EnsembleSteamCriticModel is a pair-classification model and does "
-            "not accept single-frame raw observations. Use BinaryPairDataCollator "
-            "to build a pair observation, then call predict(observation)."
-        )
-
-    @torch.no_grad()
-    def infer_batch(
-        self,
-        obs_list: list[dict],
-        *,
-        batch_size: int = 64,
-        pretransformed: bool = False,
-        already_cpu_prepared: bool = False,
-    ) -> list[dict]:
-        del obs_list, batch_size, pretransformed, already_cpu_prepared
-        raise RuntimeError(
-            "EnsembleSteamCriticModel is a pair-classification model and does "
-            "not accept raw observation batches. Use BinaryPairDataCollator "
-            "to build pair observations, then call predict(observation)."
-        )
 
     @classmethod
     def from_checkpoint(cls, *args, **kwargs):

@@ -35,11 +35,10 @@ Compared with a categorical value-regression critic:
 Public API (mirrors value_model.modeling_critic.ValueCriticModel):
     - forward(observation, labels=None) -> CriticOutput
     - predict(observation) -> CriticOutput
-    - predict_value(observation) -> Tensor   (sigmoid probability)
+    - predict_value(observation) -> Tensor   (signed value in [-1, 1])
     - from_checkpoint(checkpoint_dir, **kwargs) -> SteamCriticModel
     - gradient_checkpointing_enable() / .disable()
     - _no_split_modules / _no_split_names properties
-    - _prepare_observation_cpu(inputs, processor) staticmethod
 """
 
 import logging
@@ -358,16 +357,15 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
               (progressive).
 
         Dividing by ``half`` maps the raw expectation (range
-        ``[-half, half]``) onto ``[-1, 1]``. Unlike the older
-        ``probs[:, half:num_bins].sum(-1)`` reading, this uses the full
-        distribution — a bin at the extreme (strong progress / strong
-        regress) contributes with larger magnitude than a near-midpoint
-        bin, so the score carries both direction and strength.
+        ``[-half, half]``) onto ``[-1, 1]``. Using the full distribution
+        means a bin at the extreme (strong progress / strong regress)
+        contributes with larger magnitude than a near-midpoint bin, so the
+        score carries both direction and strength.
 
         Binary (``num_bins == 2``) degenerates to
         ``-p[:, 0] + p[:, 1] = 2 · P(progress) - 1``, matching the
         signed-confidence convention documented on
-        :func:`~rlinf.data.datasets.steam.pair_dataset.bin_centers`.
+        :func:`~rlinf.data.datasets.steam.binning.bin_centers`.
         """
         num_bins = int(self.config.num_bins)
         if getattr(self.config, "target_mode", "rewind") == "positive_only":
@@ -522,15 +520,15 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         max_token_len: Optional[int] = None,
         **kwargs,
     ) -> "SteamCriticModel | EnsembleSteamCriticModel":
-        """Build a binary value critic from a checkpoint, ready for inference.
+        """Build a STEAM value critic from a checkpoint, ready for inference.
 
         Dispatches through :func:`get_model`: returns a single-model
         :class:`SteamCriticModel` when ``ensemble_size == 1``, or an
         :class:`~rlinf.models.embodiment.steam.\
 ensemble_modeling_critic.EnsembleSteamCriticModel` wrapper when
         ``ensemble_size > 1``. Either return value exposes the same
-        ``predict`` / ``infer`` / ``infer_batch`` surface; callers that want
-        ensemble aggregate stats must call the ensemble-specific paths.
+        ``predict`` surface; callers that want ensemble aggregate stats
+        must call the ensemble-specific paths.
         Mirrors ``ValueCriticModel.from_checkpoint`` so the offline
         pipeline (compute_advantages, etc.) dispatches on ``model_type`` and
         loads either variant via the same call shape.
@@ -639,281 +637,6 @@ ensemble_modeling_critic.EnsembleSteamCriticModel` wrapper when
 
         logger.info("SteamCriticModel.from_checkpoint ready for inference")
         return model
-
-    @staticmethod
-    def _prepare_observation_cpu(inputs: dict, processor) -> dict:
-        """CPU-only observation preparation (safe for DataLoader workers).
-
-        Standalone copy of ValueCriticModel._prepare_observation_cpu adapted
-        to use SteamProcessor (which outputs [0, 1] BCHW images at
-        the value model's configured vision resolution).
-        """
-        import numpy as np
-
-        if "image" in inputs and isinstance(inputs["image"], dict):
-            images_dict = inputs["image"]
-        elif "images" in inputs and isinstance(inputs["images"], dict):
-            images_dict = inputs["images"]
-        else:
-            images_dict = {}
-            for key in inputs:
-                if "image" in key.lower() and isinstance(
-                    inputs[key], (np.ndarray, torch.Tensor)
-                ):
-                    img_key = key
-                    for prefix in [
-                        "observation/",
-                        "observation.",
-                        "images/",
-                        "images.",
-                    ]:
-                        img_key = img_key.replace(prefix, "")
-                    images_dict[img_key] = inputs[key]
-
-        prompt = inputs.get("prompt", "perform the task")
-        if isinstance(prompt, np.ndarray):
-            prompt = str(prompt.item()) if prompt.size == 1 else "perform the task"
-        elif not isinstance(prompt, str):
-            prompt = "perform the task"
-
-        images_bhwc = {}
-        for cam_name, img in images_dict.items():
-            if isinstance(img, np.ndarray):
-                img = torch.from_numpy(img)
-            if img.dim() == 3:
-                if img.shape[0] == 3:
-                    img = img.unsqueeze(0).permute(0, 2, 3, 1)  # CHW -> BHWC
-                else:
-                    img = img.unsqueeze(0)  # HWC -> BHWC
-            elif img.dim() == 4:
-                if img.shape[1] == 3:
-                    img = img.permute(0, 2, 3, 1)  # BCHW -> BHWC
-            images_bhwc[cam_name] = img
-
-        input_masks = inputs.get("image_mask", inputs.get("image_masks", {}))
-        image_masks_batch = {}
-        for cam_name in images_bhwc:
-            if cam_name in input_masks:
-                mask = input_masks[cam_name]
-                if isinstance(mask, (bool, np.bool_)):
-                    image_masks_batch[cam_name] = torch.tensor([mask], dtype=torch.bool)
-                elif isinstance(mask, torch.Tensor):
-                    image_masks_batch[cam_name] = (
-                        mask.unsqueeze(0) if mask.dim() == 0 else mask
-                    )
-                else:
-                    image_masks_batch[cam_name] = torch.tensor([True], dtype=torch.bool)
-            else:
-                image_masks_batch[cam_name] = torch.tensor([True], dtype=torch.bool)
-
-        processed_img = processor.image_processor(
-            images=images_bhwc,
-            image_masks=image_masks_batch if image_masks_batch else None,
-            return_tensors="pt",
-            train=False,
-        )
-
-        # Prompt + optional state → tokens. Delegating to
-        # ``processor._build_prefix_text`` keeps inference parity with the
-        # training-time ``_tokenize_single`` path.
-        state_val = inputs.get("state")
-        prefix_text = processor._build_prefix_text(prompt, state_val)
-        tokens = processor.tokenizer.encode(prefix_text, add_special_tokens=True)
-        seq_len = len(tokens)
-        max_length = processor.max_token_len
-        if seq_len < max_length:
-            padding_len = max_length - seq_len
-            tok_mask = [True] * seq_len + [False] * padding_len
-            tokens = tokens + [0] * padding_len
-        else:
-            tokens = tokens[:max_length]
-            tok_mask = [True] * max_length
-
-        return {
-            "images": processed_img["pixel_values"],
-            "image_masks": processed_img["image_masks"],
-            "tokenized_prompt": torch.tensor([tokens], dtype=torch.long),
-            "tokenized_prompt_mask": torch.tensor([tok_mask], dtype=torch.bool),
-        }
-
-    def _prepare_observation(self, inputs: dict) -> dict:
-        """Prepare observation dict on the model's device for direct forward.
-
-        Independent copy of ValueCriticModel._prepare_observation. Uses
-        ``self.processor`` and ``self._device`` (both set by from_checkpoint).
-        """
-        import numpy as np
-
-        processor = getattr(self, "processor", None)
-        if processor is None:
-            raise RuntimeError(
-                "Model processor not attached. Use from_checkpoint() or "
-                "attach manually."
-            )
-
-        device = getattr(self, "_device", "cuda")
-
-        if "image" in inputs and isinstance(inputs["image"], dict):
-            images_dict = inputs["image"]
-        elif "images" in inputs and isinstance(inputs["images"], dict):
-            images_dict = inputs["images"]
-        else:
-            images_dict = {}
-            for key in inputs:
-                if "image" in key.lower() and isinstance(
-                    inputs[key], (np.ndarray, torch.Tensor)
-                ):
-                    img_key = key
-                    for prefix in [
-                        "observation/",
-                        "observation.",
-                        "images/",
-                        "images.",
-                    ]:
-                        img_key = img_key.replace(prefix, "")
-                    images_dict[img_key] = inputs[key]
-
-        prompt = inputs.get("prompt", "perform the task")
-        if isinstance(prompt, np.ndarray):
-            prompt = str(prompt.item()) if prompt.size == 1 else "perform the task"
-        elif not isinstance(prompt, str):
-            prompt = "perform the task"
-
-        images_bhwc = {}
-        for cam_name, img in images_dict.items():
-            if isinstance(img, np.ndarray):
-                img = torch.from_numpy(img)
-            if img.dim() == 3:
-                if img.shape[0] == 3:
-                    img = img.unsqueeze(0).permute(0, 2, 3, 1)
-                else:
-                    img = img.unsqueeze(0)
-            elif img.dim() == 4:
-                if img.shape[1] == 3:
-                    img = img.permute(0, 2, 3, 1)
-            images_bhwc[cam_name] = img
-
-        input_masks = inputs.get("image_mask", inputs.get("image_masks", {}))
-        image_masks_batch = {}
-        for cam_name in images_bhwc:
-            if cam_name in input_masks:
-                mask = input_masks[cam_name]
-                if isinstance(mask, (bool, np.bool_)):
-                    image_masks_batch[cam_name] = torch.tensor([mask], dtype=torch.bool)
-                elif isinstance(mask, torch.Tensor):
-                    image_masks_batch[cam_name] = (
-                        mask.unsqueeze(0) if mask.dim() == 0 else mask
-                    )
-                else:
-                    image_masks_batch[cam_name] = torch.tensor([True], dtype=torch.bool)
-            else:
-                image_masks_batch[cam_name] = torch.tensor([True], dtype=torch.bool)
-
-        processed_img = processor.image_processor(
-            images=images_bhwc,
-            image_masks=image_masks_batch if image_masks_batch else None,
-            return_tensors="pt",
-            train=False,
-        )
-
-        # Prompt + optional state → tokens. Delegating to
-        # ``processor._build_prefix_text`` keeps inference parity with the
-        # training-time ``_tokenize_single`` path.
-        state_val = inputs.get("state")
-        prefix_text = processor._build_prefix_text(prompt, state_val)
-        tokens = processor.tokenizer.encode(prefix_text, add_special_tokens=True)
-        seq_len = len(tokens)
-        max_length = processor.max_token_len
-        if seq_len < max_length:
-            padding_len = max_length - seq_len
-            mask = [True] * seq_len + [False] * padding_len
-            tokens = tokens + [0] * padding_len
-        else:
-            tokens = tokens[:max_length]
-            mask = [True] * max_length
-
-        pixel_values = processed_img["pixel_values"]
-        image_masks = processed_img["image_masks"]
-
-        if isinstance(pixel_values, dict):
-            images_on_device = {k: v.to(device) for k, v in pixel_values.items()}
-        else:
-            images_on_device = pixel_values.to(device)
-
-        if isinstance(image_masks, dict):
-            masks_on_device = {k: v.to(device) for k, v in image_masks.items()}
-        else:
-            masks_on_device = image_masks.to(device)
-
-        return {
-            "images": images_on_device,
-            "image_masks": masks_on_device,
-            "tokenized_prompt": torch.tensor([tokens], dtype=torch.long, device=device),
-            "tokenized_prompt_mask": torch.tensor(
-                [mask], dtype=torch.bool, device=device
-            ),
-        }
-
-    def _prepare_observation_batch(self, inputs_list: list[dict]) -> dict:
-        """Prepare batched observation dict from a list of inputs."""
-        all_images = []
-        all_image_masks = []
-        all_tokens = []
-        all_masks = []
-
-        for inputs in inputs_list:
-            single_obs = self._prepare_observation(inputs)
-            all_images.append(single_obs["images"])
-            all_image_masks.append(single_obs["image_masks"])
-            all_tokens.append(single_obs["tokenized_prompt"])
-            all_masks.append(single_obs["tokenized_prompt_mask"])
-
-        if isinstance(all_images[0], dict):
-            batched_images = {
-                k: torch.cat([img[k] for img in all_images], dim=0)
-                for k in all_images[0]
-            }
-            batched_masks = {
-                k: torch.cat([m[k] for m in all_image_masks], dim=0)
-                for k in all_image_masks[0]
-            }
-        else:
-            batched_images = torch.cat(all_images, dim=0)
-            batched_masks = torch.cat(all_image_masks, dim=0)
-
-        return {
-            "images": batched_images,
-            "image_masks": batched_masks,
-            "tokenized_prompt": torch.cat(all_tokens, dim=0),
-            "tokenized_prompt_mask": torch.cat(all_masks, dim=0),
-        }
-
-    @torch.no_grad()
-    def infer(self, obs: dict) -> dict:
-        """Raw-observation inference is not supported for this pair model."""
-        del obs
-        raise RuntimeError(
-            "SteamCriticModel is a pair-classification model and does not accept "
-            "single-frame raw observations. Use BinaryPairDataCollator to build "
-            "a pair observation, then call predict(observation)."
-        )
-
-    @torch.no_grad()
-    def infer_batch(
-        self,
-        obs_list: list[dict],
-        *,
-        batch_size: int = 64,
-        pretransformed: bool = False,
-        already_cpu_prepared: bool = False,
-    ) -> list[dict]:
-        """Raw-observation batched inference is not supported for this pair model."""
-        del obs_list, batch_size, pretransformed, already_cpu_prepared
-        raise RuntimeError(
-            "SteamCriticModel is a pair-classification model and does not accept "
-            "raw observation batches. Use BinaryPairDataCollator to build pair "
-            "observations, then call predict(observation)."
-        )
 
 
 __all__ = [

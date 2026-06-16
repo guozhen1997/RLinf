@@ -34,9 +34,9 @@ scalar value regression:
 * There are no ``bin_centers``, ``v_min/v_max``, or scalar-return
   utilities — those are categorical-value concepts and do not apply here.
 
-``SteamBackbone.forward`` returns the raw logits ``[B, 2]``; the
-critic wrapper in :mod:`modeling_critic` owns the loss, metrics and
-CriticOutput packaging.
+:meth:`SteamBackbone._compute_projected_features` returns the fused
+multimodal feature; the critic wrapper in :mod:`modeling_critic` applies
+the classification head and owns the loss, metrics and CriticOutput packaging.
 """
 
 from __future__ import annotations
@@ -70,8 +70,6 @@ except ImportError:  # pragma: no cover
 
 
 NUM_CLASSES = 2
-CLASS_REGRESS = 0
-CLASS_PROGRESS = 1
 
 
 # ---------------------------------------------------------------------------
@@ -331,8 +329,8 @@ class SteamBackbone(nn.Module):
         The collator's processor has already resized to native resolution
         and converted to ``[0, 1]`` float, so this step only needs to
         subtract ``image_mean`` and divide by ``image_std``. A safety
-        rescale/resize handles degenerate inputs (e.g. uint8 tensors fed
-        directly through ``infer()``).
+        rescale/resize still handles degenerate inputs (e.g. raw uint8 or
+        out-of-range float tensors).
         """
         if flat_images.dtype == torch.uint8:
             flat_images = flat_images.to(dtype=torch.float32) / 255.0
@@ -426,7 +424,7 @@ class SteamBackbone(nn.Module):
         """End-to-end encoder + fusion plus per-frame features.
 
         Args:
-            input_ids: ``[B, T]`` token ids for the (state-aware) prompt.
+            input_ids: ``[B, T]`` token ids for the prompt.
             attention_mask: ``[B, T]`` prompt mask.
             images: ``[B, num_cameras, num_frames, C, H, W]`` — per-camera
                 per-frame pair images in ``[0, 1]`` BCHW, as emitted by
@@ -504,36 +502,6 @@ class SteamBackbone(nn.Module):
         lang = self.language_projector(lang_feat_raw.to(dtype=language_projector_dtype))
         return self._fuse(per_frame_features, lang), per_frame_features, lang
 
-    def _compute_features(
-        self,
-        input_ids: Tensor,
-        attention_mask: Tensor,
-        images: Tensor,
-        image_attention_mask: Tensor,
-    ) -> Tensor:
-        """End-to-end encoder + fusion.
-
-        Args:
-            input_ids: ``[B, T]`` token ids for the (state-aware) prompt.
-            attention_mask: ``[B, T]`` prompt mask.
-            images: ``[B, num_cameras, num_frames, C, H, W]`` — per-camera
-                per-frame pair images in ``[0, 1]`` BCHW, as emitted by
-                :class:`BinaryPairDataCollator`. Camera order is sorted by
-                key; frame order is ``(t, t+k)``.
-            image_attention_mask: ``[B, num_cameras, num_frames]`` bool —
-                zeros mask missing camera/frame slots.
-
-        Returns:
-            Fused feature of shape ``[B, fusion_hidden_dim * (num_frames + 1)]``.
-        """
-        fused, _per_frame, _lang = self._compute_projected_features(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            images=images,
-            image_attention_mask=image_attention_mask,
-        )
-        return fused
-
     def _check_shapes(
         self,
         input_ids: Tensor,
@@ -568,26 +536,8 @@ class SteamBackbone(nn.Module):
                 "frame slots"
             )
 
-    def forward(
-        self,
-        input_ids: Tensor,
-        attention_mask: Tensor,
-        images: Tensor,
-        image_attention_mask: Tensor,
-    ) -> Tensor:
-        """Return raw 2-class logits ``[B, 2]``."""
-        features = self._compute_features(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            images=images,
-            image_attention_mask=image_attention_mask,
-        )
-        return self.value_head(features)
-
 
 __all__ = [
-    "CLASS_PROGRESS",
-    "CLASS_REGRESS",
     "NUM_CLASSES",
     "SteamBackbone",
 ]

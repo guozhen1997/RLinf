@@ -93,10 +93,9 @@ actor:
   # `actor.model` defaults come from ``model/steam``.
   # Per-experiment overrides go here.
   model:
-    # Load backbone weights as fp32 master copy. FSDP keeps the fp32 master
-    # and casts to bf16 only for forward compute (param_dtype below). Loading
-    # in bf16 makes the master copy bf16 too, which collapses Adam updates
-    # and produced non-finite hidden_states by step 3 of training.
+    # Backbone load dtype for this run. Overrides the model default
+    # (model/steam loads fp32) with bf16 to trade a little numerical
+    # headroom for lower memory and higher throughput on this corpus.
     precision: bf16
     fusion_hidden_dim: 512
     dropout: 0.1

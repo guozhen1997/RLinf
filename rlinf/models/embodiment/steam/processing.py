@@ -32,33 +32,16 @@ and stacks the results along a new ``num_frames`` dimension.
 
 from typing import ClassVar, Optional
 
-import torch
-
 from ..common.image_text_processing import (
     IMAGE_KEYS,
     BaseMultiViewImageProcessor,
     BaseValueTextProcessor,
-    normalize_image_to_range,
     resize_with_pad,
-    resolve_image_size,
     resolve_vision_image_size,
 )
 
 # Default SigLIP vision-encoder resolution (siglip-so400m-patch14-384).
 IMAGE_RESOLUTION = (384, 384)
-
-
-def normalize_image_to_steam_format(
-    img: torch.Tensor,
-    device: torch.device = None,
-    dtype: torch.dtype = None,
-) -> torch.Tensor:
-    """Convert any image format to BCHW ``[0, 1]`` float (STEAM backbone format).
-
-    The backbone expects raw ``[0, 1]`` floats; the model itself applies SigLIP
-    mean/std normalisation internally.
-    """
-    return normalize_image_to_range(img, "unit", device=device, dtype=dtype)
 
 
 class SteamImageProcessor(BaseMultiViewImageProcessor):
@@ -79,8 +62,6 @@ class SteamProcessor(BaseValueTextProcessor):
 __all__ = [
     "SteamImageProcessor",
     "SteamProcessor",
-    "normalize_image_to_steam_format",
-    "resolve_image_size",
     "resolve_vision_image_size",
     "resize_with_pad",
     "IMAGE_KEYS",

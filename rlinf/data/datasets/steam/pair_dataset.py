@@ -39,8 +39,6 @@ per camera key.
 
 from __future__ import annotations
 
-import io
-import json
 import logging
 import os
 from collections import defaultdict
@@ -241,8 +239,11 @@ class _LeRobotSource(TrajectorySource):
             LeRobotDataset,
             LeRobotDatasetMetadata,
         )
-        from lerobot.common.datasets.utils import hf_transform_to_torch
-        from PIL import Image as PILImage
+
+        from rlinf.data.datasets.recap.utils import (
+            decode_image_struct_batch,
+            load_task_descriptions,
+        )
 
         local_path = Path(dataset_path).absolute()
         self._dataset_label = str(local_path)
@@ -263,40 +264,9 @@ class _LeRobotSource(TrajectorySource):
                 self._scan_episode_successes() if only_success else None
             )
 
-        def _decoding_transform(batch: dict) -> dict:
-            for key in list(batch.keys()):
-                vals = batch[key]
-                if vals and isinstance(vals[0], dict) and "bytes" in vals[0]:
-                    batch[key] = [PILImage.open(io.BytesIO(v["bytes"])) for v in vals]
-            return hf_transform_to_torch(batch)
+        self.base.hf_dataset.set_transform(decode_image_struct_batch)
 
-        self.base.hf_dataset.set_transform(_decoding_transform)
-
-        self._tasks: dict[int, str] = self._load_tasks(local_path)
-
-    @staticmethod
-    def _load_tasks(dataset_path: Path) -> dict[int, str]:
-        """Load task_index → instruction mapping from LeRobot meta."""
-        meta = dataset_path / "meta"
-        jsonl = meta / "tasks.jsonl"
-        if jsonl.exists():
-            tasks: dict[int, str] = {}
-            with open(jsonl, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    d = json.loads(line)
-                    tasks[int(d.get("task_index", len(tasks)))] = str(d.get("task", ""))
-            return tasks
-        parquet = meta / "tasks.parquet"
-        if parquet.exists():
-            import pandas as pd
-
-            df = pd.read_parquet(parquet)
-            if "task_index" in df.columns and "task" in df.columns:
-                return {int(r["task_index"]): str(r["task"]) for _, r in df.iterrows()}
-        return {}
+        self._tasks: dict[int, str] = load_task_descriptions(local_path)
 
     def num_episodes(self) -> int:
         return len(self._ep_starts)

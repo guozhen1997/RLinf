@@ -14,8 +14,7 @@
 #       --config-name compute_advantages_ensemble
 
 advantage:
-  value_checkpoint: /mnt/public2/liuzhihao/RLinf/logs/binary_value/00_cola_rewind_arm_k32_numbins32_ensemble3_bs512_onlyexp_2node_noaug_v384/checkpoints/global_step_16000/actor
-  device: "cuda"
+  value_checkpoint: /path/to/steam_value_ensemble/checkpoints/global_step_N/actor
   # Ensemble does K forward passes per sample on a 2-frame pair, so batch
   # size sits well below the value-regression default of 1024.
   batch_size: 256
@@ -68,12 +67,11 @@ data:
   # Same dataset list as the training config so the corpus the ensemble
   # was trained on is scored. Override per run as needed.
   train_data_paths:
-    - dataset_path: /mnt/public2/liuzhihao/data_to_use/restock_cola/beijing_guqiuyi_20260606_pm_tele
+    - dataset_path: /path/to/expert_dataset
       type: sft
-    - dataset_path: /mnt/public2/liuzhihao/data_to_use/restock_cola/beijing_guqiuyi_20260614_pm_rollout
+    - dataset_path: /path/to/rollout_dataset
       type: rollout
 
 distributed:
-  enabled: true
   backend: "nccl"
   timeout: 3600
