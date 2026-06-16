@@ -178,179 +178,6 @@ def _to_float32_array(value: Any) -> np.ndarray:
     return np.asarray(value, dtype=np.float32)
 
 
-def _load_openpi_norm_stats(
-    checkpoint_dir: Path, asset_id: str
-) -> dict[str, dict[str, np.ndarray | None]]:
-    """Load OpenPI norm stats as plain numpy arrays."""
-    possible_paths = [
-        checkpoint_dir / "norm_stats" / asset_id / "norm_stats.json",
-        checkpoint_dir / "stats" / asset_id / "norm_stats.json",
-        checkpoint_dir / "norm_stats.json",
-    ]
-
-    norm_stats_dir = checkpoint_dir / "norm_stats"
-    if norm_stats_dir.exists():
-        for subdir in norm_stats_dir.iterdir():
-            if subdir.is_dir():
-                candidate = subdir / "norm_stats.json"
-                if candidate.exists() and candidate not in possible_paths:
-                    possible_paths.append(candidate)
-
-    for path in possible_paths:
-        if not path.exists():
-            continue
-        logger.info("Loading norm stats from %s", path)
-        with open(path) as f:
-            data = json.load(f)
-        if "norm_stats" in data:
-            data = data["norm_stats"]
-
-        stats: dict[str, dict[str, np.ndarray | None]] = {}
-        for key, value in data.items():
-            stats[key] = {
-                "mean": np.asarray(value["mean"], dtype=np.float32),
-                "std": np.asarray(value["std"], dtype=np.float32),
-                "q01": (
-                    np.asarray(value["q01"], dtype=np.float32)
-                    if value.get("q01") is not None
-                    else None
-                ),
-                "q99": (
-                    np.asarray(value["q99"], dtype=np.float32)
-                    if value.get("q99") is not None
-                    else None
-                ),
-            }
-        return stats
-
-    raise FileNotFoundError(f"Could not find norm_stats.json in {checkpoint_dir}")
-
-
-@dataclass(frozen=True)
-class _OpenPIStateOnlyTransform:
-    """State-only subset of the OpenPI input transform stack."""
-
-    action_dim: int
-    pre_pad_state: bool
-    norm_stats: dict[str, dict[str, np.ndarray | None]] | None
-
-    def __call__(self, state: Any) -> np.ndarray:
-        state_arr = _to_float32_array(state)
-        if self.pre_pad_state:
-            state_arr = _pad_to_dim(state_arr, self.action_dim, axis=-1)
-        if self.norm_stats is not None and "state" in self.norm_stats:
-            stats = self.norm_stats["state"]
-            q01 = stats.get("q01")
-            q99 = stats.get("q99")
-            if q01 is None or q99 is None:
-                mean = stats["mean"]
-                std = stats["std"]
-                state_arr = (state_arr - mean[..., : state_arr.shape[-1]]) / (
-                    std[..., : state_arr.shape[-1]] + 1e-6
-                )
-            else:
-                state_arr = (state_arr - q01[..., : state_arr.shape[-1]]) / (
-                    q99[..., : state_arr.shape[-1]]
-                    - q01[..., : state_arr.shape[-1]]
-                    + 1e-6
-                ) * 2.0 - 1.0
-        return _pad_to_dim(state_arr, self.action_dim, axis=-1).astype(
-            np.float32,
-            copy=False,
-        )
-
-
-def _pad_to_dim(
-    x: np.ndarray,
-    target_dim: int,
-    *,
-    axis: int = -1,
-    value: float = 0.0,
-) -> np.ndarray:
-    """Pad an array to target_dim along axis using OpenPI-compatible semantics."""
-    current_dim = x.shape[axis]
-    if current_dim >= target_dim:
-        return x
-    pad_width = [(0, 0)] * len(x.shape)
-    pad_width[axis] = (0, target_dim - current_dim)
-    return np.pad(x, pad_width, constant_values=value)
-
-
-# X2Robot camera-view repack mapping shared by every ``*_sm2sm``-style
-# robot name (the views are fixed by the X2Robot platform, not the task).
-_X2ROBOT_REPACK_KEYS = {
-    "images": {
-        "left_wrist_view": "left_wrist_view",
-        "face_view": "face_view",
-        "right_wrist_view": "right_wrist_view",
-    },
-    "state": "state",
-    "actions": "actions",
-    "prompt": "task",
-}
-
-_X2ROBOT_MODES = ("s2s", "s2m", "sm2m", "sm2sm")
-
-
-def _get_x2robot_mode(robot_type: str) -> Optional[str]:
-    """Return the X2Robot mode encoded in a robot/config name, if present."""
-    robot = robot_type.lower()
-    if robot in ("x2robot", "arx"):
-        return "sm2sm"
-    for mode in _X2ROBOT_MODES:
-        if robot == mode or robot.endswith(f"_{mode}"):
-            return mode
-    return None
-
-
-def build_openpi_state_transform(
-    *,
-    robot_type: str,
-    model_type: str,
-    action_dim: int,
-    default_prompt: Optional[str],
-    norm_stats_dir: Optional[str],
-    asset_id: Optional[str],
-):
-    """Build a state-only OpenPI transform for compatibility supervision."""
-    from rlinf.data.datasets.recap.value_model import _REPACK_KEYS
-
-    del default_prompt, model_type
-    robot = robot_type.lower()
-    x2robot_mode = _get_x2robot_mode(robot)
-
-    repack_keys = _REPACK_KEYS.get(robot)
-    if repack_keys is None and x2robot_mode is not None:
-        repack_keys = _X2ROBOT_REPACK_KEYS
-    if repack_keys is None:
-        raise ValueError(
-            f"Unknown robot type: {robot_type}. Available: {list(_REPACK_KEYS.keys())}"
-        )
-
-    norm_stats = None
-    if norm_stats_dir is not None:
-        resolved_asset_id = asset_id or robot
-        try:
-            norm_stats = _load_openpi_norm_stats(
-                Path(norm_stats_dir), asset_id=resolved_asset_id
-            )
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                "PairDataset was given "
-                f"norm_stats_dir={norm_stats_dir!r} asset_id={resolved_asset_id!r} "
-                "but no norm_stats.json was found. State compatibility expects "
-                "normalized state; fix norm_stats_dir/asset_id or explicitly set "
-                "allow_raw_state_for_compatibility=true."
-            ) from exc
-    return _OpenPIStateOnlyTransform(
-        action_dim=int(action_dim),
-        pre_pad_state=(
-            robot in ("franka", "franka_co_train") or x2robot_mode is not None
-        ),
-        norm_stats=norm_stats,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Signed-stride → bin mapping (multi-bin mode)
 # ---------------------------------------------------------------------------
@@ -971,17 +798,6 @@ class PairDataset(Dataset):
         length_scale_enabled: bool = False,
         length_scale_percentile: float = 90.0,
         length_scale_reference: Optional[float] = None,
-        state_transform_enabled: bool = False,
-        robot_type: str = "libero",
-        model_type: str = "pi05",
-        action_dim: int = 32,
-        default_prompt: Optional[str] = None,
-        norm_stats_dir: Optional[str] = None,
-        asset_id: Optional[str] = None,
-        allow_raw_state_for_compatibility: bool = False,
-        compatibility_negative_enabled: bool = False,
-        compatibility_num_same_episode_negatives: int = 1,
-        compatibility_same_episode_negative_max_distance: Optional[int] = None,
     ) -> None:
         self.camera_keys: tuple[str, ...] = tuple(camera_keys)
         if not self.camera_keys:
@@ -1036,40 +852,7 @@ class PairDataset(Dataset):
         self.include_state = bool(include_state)
         self.state_max_dim = state_max_dim
         self.state_key = state_key
-        self.state_transform_enabled = bool(state_transform_enabled)
-        self.compatibility_negative_enabled = bool(compatibility_negative_enabled)
-        self.compatibility_num_same_episode_negatives = max(
-            0, int(compatibility_num_same_episode_negatives)
-        )
-        self.compatibility_same_episode_negative_max_distance = (
-            None
-            if compatibility_same_episode_negative_max_distance is None
-            else int(compatibility_same_episode_negative_max_distance)
-        )
-        if (
-            self.compatibility_same_episode_negative_max_distance is not None
-            and self.compatibility_same_episode_negative_max_distance <= 0
-        ):
-            raise ValueError(
-                "compatibility_same_episode_negative_max_distance must be null or > 0"
-            )
-        self.allow_raw_state_for_compatibility = bool(allow_raw_state_for_compatibility)
-        self._state_transform = None
         self._rng: np.random.Generator | None = None
-        if self.state_transform_enabled:
-            if norm_stats_dir is None and not self.allow_raw_state_for_compatibility:
-                raise ValueError(
-                    "PairDataset state compatibility requires data.norm_stats_dir "
-                    "unless allow_raw_state_for_compatibility=true."
-                )
-            self._state_transform = build_openpi_state_transform(
-                robot_type=str(robot_type),
-                model_type=str(model_type),
-                action_dim=int(action_dim),
-                default_prompt=default_prompt,
-                norm_stats_dir=norm_stats_dir,
-                asset_id=asset_id,
-            )
         self.source_name = str(dataset_path)
         if dataset_type is None:
             raise ValueError(
@@ -1287,44 +1070,18 @@ class PairDataset(Dataset):
         return self._rng
 
     def _load_state(self, episode: int, frame_idx: int) -> np.ndarray:
-        """Load raw or OpenPI-normalized state and pad/truncate to max_state_dim."""
+        """Load raw state and pad/truncate to max_state_dim."""
         state = self._source.get_state(episode, frame_idx, self.state_key)
         return self._normalize_loaded_state(state)
 
     def _load_state_from_sample(self, sample: dict) -> np.ndarray:
-        """Load raw or OpenPI-normalized state from an already-loaded sample."""
+        """Load raw state from an already-loaded sample."""
         state = self._source.get_state_from_sample(sample, self.state_key)
         return self._normalize_loaded_state(state)
 
     def _normalize_loaded_state(self, state: Any) -> np.ndarray:
-        """Normalize and pad/truncate a raw state payload."""
-        if self._state_transform is not None:
-            state = self._state_transform(state)
+        """Pad/truncate a raw state payload to ``state_max_dim``."""
         return _to_float32_1d(state, max_dim=self.state_max_dim)
-
-    def _sample_same_episode_negative_frame(
-        self,
-        episode: int,
-        frame_idx: int,
-    ) -> int | None:
-        episode_length = self._source.episode_length(episode)
-        if episode_length <= 1:
-            return None
-        max_distance = self.compatibility_same_episode_negative_max_distance
-        if max_distance is not None:
-            lo = max(0, int(frame_idx) - int(max_distance))
-            hi = min(episode_length - 1, int(frame_idx) + int(max_distance))
-            candidates = [idx for idx in range(lo, hi + 1) if idx != int(frame_idx)]
-            if not candidates:
-                return None
-            rng = self._rng_for_worker()
-            return int(candidates[int(rng.integers(low=0, high=len(candidates)))])
-        # Sample from [0, T-2], then shift around the positive frame so the
-        # negative is guaranteed to be from a different timestamp.
-        draw = int(self._rng_for_worker().integers(low=0, high=episode_length - 1))
-        if draw >= int(frame_idx):
-            draw += 1
-        return draw
 
     def _build_sample(
         self,
@@ -1367,40 +1124,7 @@ class PairDataset(Dataset):
                 if raw_t is not None
                 else self._load_state(episode, frame_idx_t)
             )
-            state_tk = (
-                self._load_state_from_sample(raw_tk)
-                if raw_tk is not None
-                else self._load_state(episode, frame_idx_tk)
-            )
             sample["state"] = state_t  # consumed by state-in-prompt branch
-            sample["state_tk"] = state_tk  # reserved for future extensions
-            if self.compatibility_negative_enabled:
-                neg_states_t: list[np.ndarray] = []
-                neg_states_tk: list[np.ndarray] = []
-                neg_dist_t: list[float] = []
-                neg_dist_tk: list[float] = []
-                for _ in range(self.compatibility_num_same_episode_negatives):
-                    neg_t = self._sample_same_episode_negative_frame(
-                        episode, frame_idx_t
-                    )
-                    neg_tk = self._sample_same_episode_negative_frame(
-                        episode, frame_idx_tk
-                    )
-                    if neg_t is None or neg_tk is None:
-                        continue
-                    neg_states_t.append(self._load_state(episode, neg_t))
-                    neg_states_tk.append(self._load_state(episode, neg_tk))
-                    neg_dist_t.append(float(abs(int(neg_t) - frame_idx_t)))
-                    neg_dist_tk.append(float(abs(int(neg_tk) - frame_idx_tk)))
-                if neg_states_t and neg_states_tk:
-                    sample["state_neg_t"] = np.stack(neg_states_t)
-                    sample["state_neg_tk"] = np.stack(neg_states_tk)
-                    sample["state_neg_distance_t"] = np.asarray(
-                        neg_dist_t, dtype=np.float32
-                    )
-                    sample["state_neg_distance_tk"] = np.asarray(
-                        neg_dist_tk, dtype=np.float32
-                    )
 
         return sample
 
@@ -1727,62 +1451,6 @@ ValueDataCollator`. Runs the :class:`SteamProcessor` **twice**
             "tokenized_prompt": processed_txt["input_ids"],
             "tokenized_prompt_mask": processed_txt["attention_mask"].bool(),
         }
-        if any_state:
-            state_tk_list = [ex.get("state_tk") for ex in examples]
-            if any(s is None for s in states_list) or any(
-                s is None for s in state_tk_list
-            ):
-                raise ValueError(
-                    "BinaryPairDataCollator received a mixed state batch. "
-                    "When any sample has state, every sample must provide both "
-                    "'state' and 'state_tk'."
-                )
-            observation["state_t"] = torch.tensor(state_batch, dtype=torch.float32)
-            observation["state_tk"] = torch.tensor(
-                np.stack(
-                    [np.asarray(s, dtype=np.float32).reshape(-1) for s in state_tk_list]
-                ),
-                dtype=torch.float32,
-            )
-
-            neg_t_list = [ex.get("state_neg_t") for ex in examples]
-            neg_tk_list = [ex.get("state_neg_tk") for ex in examples]
-            if all(s is not None for s in neg_t_list) and all(
-                s is not None for s in neg_tk_list
-            ):
-                observation["state_neg_t"] = torch.tensor(
-                    np.stack([np.asarray(s, dtype=np.float32) for s in neg_t_list]),
-                    dtype=torch.float32,
-                )
-                observation["state_neg_tk"] = torch.tensor(
-                    np.stack([np.asarray(s, dtype=np.float32) for s in neg_tk_list]),
-                    dtype=torch.float32,
-                )
-                observation["state_neg_distance_t"] = torch.tensor(
-                    np.stack(
-                        [
-                            np.asarray(
-                                ex.get("state_neg_distance_t", 0.0),
-                                dtype=np.float32,
-                            ).reshape(-1)
-                            for ex in examples
-                        ]
-                    ),
-                    dtype=torch.float32,
-                )
-                observation["state_neg_distance_tk"] = torch.tensor(
-                    np.stack(
-                        [
-                            np.asarray(
-                                ex.get("state_neg_distance_tk", 0.0),
-                                dtype=np.float32,
-                            ).reshape(-1)
-                            for ex in examples
-                        ]
-                    ),
-                    dtype=torch.float32,
-                )
-
         episode = torch.tensor(
             [int(ex["episode"]) for ex in examples], dtype=torch.long
         )
@@ -1834,14 +1502,6 @@ class BinaryPairInferenceDataset(Dataset):
         state_key: str,
         dataset_type: str,
         min_episode_length: Optional[int] = None,
-        state_transform_enabled: bool = False,
-        robot_type: str = "libero",
-        model_type: str = "pi05",
-        action_dim: int = 32,
-        default_prompt: Optional[str] = None,
-        norm_stats_dir: Optional[str] = None,
-        asset_id: Optional[str] = None,
-        allow_raw_state_for_compatibility: bool = False,
     ) -> None:
         if dataset_type not in ("sft", "rollout"):
             raise ValueError(
@@ -1861,24 +1521,6 @@ class BinaryPairInferenceDataset(Dataset):
         self.state_key = str(state_key)
         self.dataset_type = dataset_type
         self.source_name = str(dataset_path)
-        self.state_transform_enabled = bool(state_transform_enabled)
-        self.allow_raw_state_for_compatibility = bool(allow_raw_state_for_compatibility)
-        self._state_transform = None
-        if self.state_transform_enabled:
-            if norm_stats_dir is None and not self.allow_raw_state_for_compatibility:
-                raise ValueError(
-                    "BinaryPairInferenceDataset state compatibility requires "
-                    "data.norm_stats_dir or per-dataset norm_stats_dir unless "
-                    "data.allow_raw_state_for_compatibility=true."
-                )
-            self._state_transform = build_openpi_state_transform(
-                robot_type=str(robot_type),
-                model_type=str(model_type),
-                action_dim=int(action_dim),
-                default_prompt=default_prompt,
-                norm_stats_dir=norm_stats_dir,
-                asset_id=asset_id,
-            )
 
         # Iterate every episode regardless of is_success; _LeRobotSource with
         # only_success=False skips the success scan and treats all episodes
@@ -2002,16 +1644,9 @@ class BinaryPairInferenceDataset(Dataset):
     ) -> np.ndarray:
         if sample is not None and hasattr(self._source, "get_state_from_sample"):
             state = self._source.get_state_from_sample(sample, self.state_key)
-            if self._state_transform is not None:
-                state = self._state_transform(state)
             return _to_float32_1d(state, max_dim=self.state_max_dim)
 
-        if self._state_transform is None:
-            state = self._source.get_state(episode, frame_idx, self.state_key)
-        else:
-            sample = dict(self._source.get_raw_sample(episode, frame_idx))
-            raw_state = self._source.get_state_from_sample(sample, self.state_key)
-            state = self._state_transform(raw_state)
+        state = self._source.get_state(episode, frame_idx, self.state_key)
         return _to_float32_1d(state, max_dim=self.state_max_dim)
 
     def _build_sample_from_pair(
@@ -2184,6 +1819,5 @@ __all__ = [
     "BinaryPairInferenceDataset",
     "PairDataset",
     "TrajectorySource",
-    "build_openpi_state_transform",
     "positive_bin_centers",
 ]

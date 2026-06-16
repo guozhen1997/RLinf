@@ -139,10 +139,6 @@ ensemble_modeling_critic.EnsembleCriticOutput`, which is what the
     cat_acc_neighbor: Optional[torch.FloatTensor] = None
     mae: Optional[torch.FloatTensor] = None
     progress_values: Optional[torch.FloatTensor] = None
-    compatibility_logits: Optional[torch.FloatTensor] = None
-    compatibility_probs: Optional[torch.FloatTensor] = None
-    final_values: Optional[torch.FloatTensor] = None
-    compatibility_loss: Optional[torch.FloatTensor] = None
 
 
 class SteamCriticModel(nn.Module):
@@ -190,8 +186,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
             "image_projector",
             "language_projector",
             "value_head",
-            "state_projector",
-            "compatibility_head",
         ]
 
     def gradient_checkpointing_enable(self):
@@ -288,108 +282,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
             images_stacked,
             image_mask_stacked,
         )
-
-    @staticmethod
-    def _tensor_from_observation(
-        observation: dict,
-        key: str,
-        *,
-        device: torch.device,
-        dtype: torch.dtype = torch.float32,
-        required: bool = False,
-    ) -> Tensor | None:
-        value = observation.get(key)
-        if value is None:
-            if required:
-                raise ValueError(
-                    "State compatibility is enabled but observation is missing "
-                    f"{key!r}. Ensure PairDataset and BinaryPairDataCollator are "
-                    "built with include_state=true and normalized state enabled."
-                )
-            return None
-        if not isinstance(value, torch.Tensor):
-            value = torch.as_tensor(value)
-        return value.to(device=device, dtype=dtype)
-
-    def _stack_compatibility_states(
-        self,
-        observation: dict,
-        *,
-        device: torch.device,
-    ) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-        """Return positive states, same-episode negative states and distances."""
-        if not getattr(self.config, "use_state_compatibility", False):
-            return None, None, None
-
-        state_t = self._tensor_from_observation(
-            observation, "state_t", device=device, required=True
-        )
-        state_tk = self._tensor_from_observation(
-            observation, "state_tk", device=device, required=True
-        )
-        if state_t is None or state_tk is None:
-            raise RuntimeError("required=True should have raised for missing states")
-        if state_t.shape != state_tk.shape:
-            raise ValueError(
-                "state_t and state_tk must share shape, got "
-                f"{tuple(state_t.shape)} and {tuple(state_tk.shape)}"
-            )
-        expected_dim = int(getattr(self.config, "max_state_dim", state_t.shape[-1]))
-        if state_t.ndim != 2 or state_t.shape[-1] != expected_dim:
-            raise ValueError(
-                "state_t/state_tk must have shape [B, max_state_dim="
-                f"{expected_dim}], got {tuple(state_t.shape)}"
-            )
-
-        states = torch.stack([state_t, state_tk], dim=1)
-
-        state_neg_t = self._tensor_from_observation(
-            observation, "state_neg_t", device=device
-        )
-        state_neg_tk = self._tensor_from_observation(
-            observation, "state_neg_tk", device=device
-        )
-        if state_neg_t is None or state_neg_tk is None:
-            return states, None, None
-        if state_neg_t.ndim == 2:
-            state_neg_t = state_neg_t.unsqueeze(1)
-        if state_neg_tk.ndim == 2:
-            state_neg_tk = state_neg_tk.unsqueeze(1)
-        if (
-            state_neg_t.ndim != 3
-            or state_neg_tk.ndim != 3
-            or state_neg_t.shape[0] != state_t.shape[0]
-            or state_neg_tk.shape[0] != state_t.shape[0]
-            or state_neg_t.shape[2] != state_t.shape[1]
-            or state_neg_tk.shape[2] != state_t.shape[1]
-            or state_neg_t.shape[1] != state_neg_tk.shape[1]
-        ):
-            raise ValueError(
-                "state_neg_t/state_neg_tk must have shape [B, N, D] or [B, D]; got "
-                f"{tuple(state_neg_t.shape)} and {tuple(state_neg_tk.shape)} "
-                f"vs {tuple(state_t.shape)}"
-            )
-        state_neg = torch.stack([state_neg_t, state_neg_tk], dim=2)
-        # state_neg: [B, N, 2, D]
-
-        distance_t = self._tensor_from_observation(
-            observation, "state_neg_distance_t", device=device
-        )
-        distance_tk = self._tensor_from_observation(
-            observation, "state_neg_distance_tk", device=device
-        )
-        if distance_t is None or distance_tk is None:
-            return states, state_neg, None
-        if distance_t.ndim == 1:
-            distance_t = distance_t.unsqueeze(1)
-        if distance_tk.ndim == 1:
-            distance_tk = distance_tk.unsqueeze(1)
-        distances = torch.stack(
-            [distance_t.to(dtype=torch.float32), distance_tk.to(dtype=torch.float32)],
-            dim=2,
-        )
-        # distances: [B, N, 2]
-        return states, state_neg, distances
 
     # ------------------------------------------------------------------
     # Loss — ``num_bins``-way cross-entropy (covers binary and multi-bin)
@@ -500,169 +392,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         )
         return (probs * signed_bin).sum(dim=-1) / float(half)
 
-    @staticmethod
-    def _compatibility_negative_weights(
-        distances: Tensor,
-        *,
-        distance_scale: float,
-        min_weight: float,
-    ) -> Tensor:
-        """Distance-weight same-episode negative BCE terms."""
-        if distance_scale <= 0:
-            raise ValueError(f"distance_scale must be > 0, got {distance_scale}")
-        distances_f = distances.to(dtype=torch.float32).abs()
-        ratio = (distances_f / float(distance_scale)).clamp(min=0.0, max=1.0)
-        return float(min_weight) + (1.0 - float(min_weight)) * ratio
-
-    @staticmethod
-    def _apply_compatibility_gate(
-        progress_values: Tensor,
-        compatibility_probs: Tensor,
-        *,
-        gate_floor: float,
-    ) -> Tensor:
-        """Gate signed progress by compatibility probability."""
-        progress_01 = (progress_values + 1.0) * 0.5
-        gate = float(gate_floor) + (1.0 - float(gate_floor)) * compatibility_probs
-        final_01 = progress_01 * gate
-        return (2.0 * final_01) - 1.0
-
-    def _select_gate_probability(self, compatibility_probs: Tensor) -> Tensor:
-        frame = str(getattr(self.config, "compatibility_gate_frame", "tk")).lower()
-        if compatibility_probs.ndim != 2 or compatibility_probs.shape[1] < 1:
-            raise ValueError(
-                "compatibility_probs must have shape [B, num_frames], got "
-                f"{tuple(compatibility_probs.shape)}"
-            )
-        if frame == "t":
-            return compatibility_probs[:, 0]
-        if frame == "tk":
-            if compatibility_probs.shape[1] < 2:
-                raise ValueError("compatibility_gate_frame=tk requires >=2 frames")
-            return compatibility_probs[:, 1]
-        if frame == "mean":
-            return compatibility_probs.mean(dim=1)
-        if frame == "min":
-            return compatibility_probs.min(dim=1).values
-        raise ValueError(f"Unsupported compatibility_gate_frame: {frame!r}")
-
-    def _resolve_compatibility_distance_scale(
-        self,
-        distances: Tensor | None,
-    ) -> float:
-        configured = getattr(self.config, "compatibility_distance_scale", None)
-        if configured is not None:
-            return float(configured)
-        stride_k = getattr(self.config, "stride_k", None)
-        if stride_k is not None:
-            return float(max(1, int(stride_k)))
-        if distances is not None and distances.numel() > 0:
-            return float(max(1.0, distances.detach().float().max().item()))
-        return 1.0
-
-    def _compute_compatibility_loss(
-        self,
-        *,
-        compatibility_logits: Tensor,
-        per_frame_image_features: Tensor,
-        language_feature: Tensor,
-        states: Tensor,
-        state_neg: Tensor | None,
-        state_neg_distances: Tensor | None,
-    ) -> Tensor:
-        """BCE for real states, same-episode mismatches and perturbed states."""
-        cfg = self.config
-        losses: list[Tensor] = [
-            F.binary_cross_entropy_with_logits(
-                compatibility_logits,
-                torch.ones_like(compatibility_logits),
-                reduction="mean",
-            )
-        ]
-
-        mode = str(getattr(cfg, "compatibility_negative_mode", "none")).lower()
-        use_same_episode = "same_episode" in mode
-        use_perturb = "perturb" in mode
-
-        if (
-            use_same_episode
-            and int(getattr(cfg, "compatibility_num_same_episode_negatives", 1)) > 0
-            and state_neg is not None
-        ):
-            if state_neg.ndim == 4:
-                bsize, num_neg, num_frames, state_dim = state_neg.shape
-                state_neg_flat = state_neg.reshape(
-                    bsize * num_neg, num_frames, state_dim
-                )
-                per_frame_flat = (
-                    per_frame_image_features.unsqueeze(1)
-                    .expand(-1, num_neg, -1, -1)
-                    .reshape(bsize * num_neg, num_frames, -1)
-                )
-                language_flat = (
-                    language_feature.unsqueeze(1)
-                    .expand(-1, num_neg, -1)
-                    .reshape(bsize * num_neg, -1)
-                )
-            else:
-                state_neg_flat = state_neg
-                per_frame_flat = per_frame_image_features
-                language_flat = language_feature
-            neg_logits = self.model.compute_compatibility_logits(
-                per_frame_image_features=per_frame_flat,
-                language_feature=language_flat,
-                states=state_neg_flat,
-            )
-            raw_neg_loss = F.binary_cross_entropy_with_logits(
-                neg_logits,
-                torch.zeros_like(neg_logits),
-                reduction="none",
-            )
-            if state_neg.ndim == 4:
-                raw_neg_loss = raw_neg_loss.reshape(
-                    state_neg.shape[0], state_neg.shape[1], state_neg.shape[2]
-                )
-            if state_neg_distances is None:
-                weights = torch.ones_like(raw_neg_loss, dtype=torch.float32)
-            else:
-                distance_scale = self._resolve_compatibility_distance_scale(
-                    state_neg_distances
-                )
-                weights = self._compatibility_negative_weights(
-                    state_neg_distances,
-                    distance_scale=distance_scale,
-                    min_weight=float(
-                        getattr(cfg, "compatibility_negative_min_weight", 0.1)
-                    ),
-                ).to(device=raw_neg_loss.device, dtype=raw_neg_loss.dtype)
-            losses.append(
-                (raw_neg_loss * weights).sum() / weights.sum().clamp_min(1e-6)
-            )
-
-        num_perturb = int(getattr(cfg, "compatibility_num_perturb_negatives", 1))
-        perturb_std = float(getattr(cfg, "compatibility_perturb_std", 0.03))
-        perturb_max = float(getattr(cfg, "compatibility_perturb_max", 0.12))
-        if use_perturb and num_perturb > 0 and perturb_std > 0.0:
-            for _ in range(num_perturb):
-                noise = torch.randn_like(states) * perturb_std
-                if perturb_max > 0.0:
-                    noise = noise.clamp(min=-perturb_max, max=perturb_max)
-                perturbed = (states + noise).clamp(min=-1.0, max=1.0)
-                perturb_logits = self.model.compute_compatibility_logits(
-                    per_frame_image_features=per_frame_image_features,
-                    language_feature=language_feature,
-                    states=perturbed,
-                )
-                losses.append(
-                    F.binary_cross_entropy_with_logits(
-                        perturb_logits,
-                        torch.zeros_like(perturb_logits),
-                        reduction="mean",
-                    )
-                )
-
-        return torch.stack(losses).mean()
-
     # ------------------------------------------------------------------
     # Forward / predict
     # ------------------------------------------------------------------
@@ -679,19 +408,9 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         input_ids, attention_mask, images, image_mask = self._stack_observation(
             observation
         )
-        states, state_neg, state_neg_distances = self._stack_compatibility_states(
-            observation,
-            device=images.device,
-        )
-
         # SteamImageProcessor emits [0, 1] BCHW images; the
         # backbone applies SigLIP-style mean/std normalization internally.
-        # Splitting features and logits keeps `hidden_states` exposed.
-        (
-            hidden_states,
-            per_frame_image_features,
-            language_feature,
-        ) = self.model._compute_projected_features(
+        hidden_states, _per_frame, _language = self.model._compute_projected_features(
             input_ids=input_ids,
             attention_mask=attention_mask,
             images=images,
@@ -708,30 +427,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         probs = F.softmax(logits, dim=-1)  # [B, num_bins]
         progress_values = self._predicted_signed_value(probs)  # [B]
         predicted_values = progress_values
-        compatibility_logits = None
-        compatibility_probs = None
-        compatibility_loss = None
-        final_values = None
-
-        if getattr(self.config, "use_state_compatibility", False):
-            if states is None:
-                raise RuntimeError("State compatibility enabled without states")
-            compatibility_logits = self.model.compute_compatibility_logits(
-                per_frame_image_features=per_frame_image_features,
-                language_feature=language_feature,
-                states=states,
-            )
-            compatibility_probs = torch.sigmoid(compatibility_logits)
-            if getattr(self.config, "compatibility_gate_value", True):
-                gate_prob = self._select_gate_probability(compatibility_probs)
-                final_values = self._apply_compatibility_gate(
-                    progress_values,
-                    gate_prob,
-                    gate_floor=float(
-                        getattr(self.config, "compatibility_gate_floor", 0.0)
-                    ),
-                )
-                predicted_values = final_values
 
         expert_loss = None
         cat_metrics = None
@@ -740,28 +435,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
 
         expert_loss_mean = expert_loss.mean() if expert_loss is not None else None
         total_loss = expert_loss_mean
-        if (
-            getattr(self.config, "use_state_compatibility", False)
-            and labels is not None
-            and compatibility_logits is not None
-            and states is not None
-            and float(getattr(self.config, "compatibility_loss_weight", 0.2)) > 0.0
-        ):
-            compatibility_loss_weight = float(
-                getattr(self.config, "compatibility_loss_weight", 0.2)
-            )
-            compatibility_loss = self._compute_compatibility_loss(
-                compatibility_logits=compatibility_logits,
-                per_frame_image_features=per_frame_image_features,
-                language_feature=language_feature,
-                states=states,
-                state_neg=state_neg,
-                state_neg_distances=state_neg_distances,
-            )
-            if total_loss is None:
-                total_loss = compatibility_loss_weight * compatibility_loss
-            else:
-                total_loss = total_loss + compatibility_loss_weight * compatibility_loss
 
         return CriticOutput(
             loss=total_loss,
@@ -775,10 +448,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
             cat_acc_neighbor=cat_metrics["acc_neighbor"] if cat_metrics else None,
             mae=cat_metrics["mae"] if cat_metrics else None,
             progress_values=progress_values,
-            compatibility_logits=compatibility_logits,
-            compatibility_probs=compatibility_probs,
-            final_values=final_values,
-            compatibility_loss=compatibility_loss,
         )
 
     @torch.no_grad()
@@ -793,16 +462,7 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         input_ids, attention_mask, images, image_mask = self._stack_observation(
             observation
         )
-        states, _state_neg, _state_neg_distances = self._stack_compatibility_states(
-            observation,
-            device=images.device,
-        )
-
-        (
-            hidden_states,
-            per_frame_image_features,
-            language_feature,
-        ) = self.model._compute_projected_features(
+        hidden_states, _per_frame, _language = self.model._compute_projected_features(
             input_ids=input_ids,
             attention_mask=attention_mask,
             images=images,
@@ -819,27 +479,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
 
         progress_values = self._predicted_signed_value(probs)
         predicted_values = progress_values
-        compatibility_logits = None
-        compatibility_probs = None
-        final_values = None
-        if getattr(self.config, "use_state_compatibility", False):
-            if states is None:
-                raise RuntimeError("State compatibility enabled without states")
-            compatibility_logits = self.model.compute_compatibility_logits(
-                per_frame_image_features=per_frame_image_features,
-                language_feature=language_feature,
-                states=states,
-            )
-            compatibility_probs = torch.sigmoid(compatibility_logits)
-            if getattr(self.config, "compatibility_gate_value", True):
-                final_values = self._apply_compatibility_gate(
-                    progress_values,
-                    self._select_gate_probability(compatibility_probs),
-                    gate_floor=float(
-                        getattr(self.config, "compatibility_gate_floor", 0.0)
-                    ),
-                )
-                predicted_values = final_values
         return CriticOutput(
             predicted_values=predicted_values,
             logits=logits,
@@ -847,9 +486,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
             atoms=None,
             hidden_states=hidden_states,
             progress_values=progress_values,
-            compatibility_logits=compatibility_logits,
-            compatibility_probs=compatibility_probs,
-            final_values=final_values,
         )
 
     @torch.no_grad()
@@ -887,18 +523,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         max_state_dim: Optional[int] = None,
         state_discretization_bins: Optional[int] = None,
         max_token_len: Optional[int] = None,
-        use_state_compatibility: Optional[bool] = None,
-        compatibility_loss_weight: Optional[float] = None,
-        compatibility_negative_mode: Optional[str] = None,
-        compatibility_distance_scale: Optional[int] = None,
-        compatibility_negative_min_weight: Optional[float] = None,
-        compatibility_num_same_episode_negatives: Optional[int] = None,
-        compatibility_num_perturb_negatives: Optional[int] = None,
-        compatibility_perturb_std: Optional[float] = None,
-        compatibility_perturb_max: Optional[float] = None,
-        compatibility_gate_value: Optional[bool] = None,
-        compatibility_gate_frame: Optional[str] = None,
-        compatibility_gate_floor: Optional[float] = None,
         **kwargs,
     ) -> "SteamCriticModel | EnsembleSteamCriticModel":
         """Build a binary value critic from a checkpoint, ready for inference.
@@ -947,22 +571,6 @@ ensemble_modeling_critic.EnsembleSteamCriticModel` wrapper when
             "max_state_dim": max_state_dim,
             "state_discretization_bins": state_discretization_bins,
             "max_token_len": max_token_len,
-            "use_state_compatibility": use_state_compatibility,
-            "compatibility_loss_weight": compatibility_loss_weight,
-            "compatibility_negative_mode": compatibility_negative_mode,
-            "compatibility_distance_scale": compatibility_distance_scale,
-            "compatibility_negative_min_weight": compatibility_negative_min_weight,
-            "compatibility_num_same_episode_negatives": (
-                compatibility_num_same_episode_negatives
-            ),
-            "compatibility_num_perturb_negatives": (
-                compatibility_num_perturb_negatives
-            ),
-            "compatibility_perturb_std": compatibility_perturb_std,
-            "compatibility_perturb_max": compatibility_perturb_max,
-            "compatibility_gate_value": compatibility_gate_value,
-            "compatibility_gate_frame": compatibility_gate_frame,
-            "compatibility_gate_floor": compatibility_gate_floor,
         }
         for key, value in optional_overrides.items():
             if value is not None:

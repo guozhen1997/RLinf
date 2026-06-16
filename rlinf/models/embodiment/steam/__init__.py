@@ -64,19 +64,6 @@ _STEAM_CONFIG_DEFAULTS: dict[str, Any] = {
     "include_state_in_prompt": True,
     "max_state_dim": 32,
     "state_discretization_bins": 256,
-    "use_state_compatibility": False,
-    "compatibility_loss_weight": 0.2,
-    "compatibility_negative_mode": "same_episode_distance_weighted_plus_perturb",
-    "compatibility_distance_scale": None,
-    "compatibility_same_episode_negative_max_distance": None,
-    "compatibility_negative_min_weight": 0.1,
-    "compatibility_num_same_episode_negatives": 1,
-    "compatibility_num_perturb_negatives": 1,
-    "compatibility_perturb_std": 0.03,
-    "compatibility_perturb_max": 0.12,
-    "compatibility_gate_value": True,
-    "compatibility_gate_frame": "tk",
-    "compatibility_gate_floor": 0.0,
 }
 
 assert all(

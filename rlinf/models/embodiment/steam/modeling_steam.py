@@ -312,23 +312,6 @@ class SteamBackbone(nn.Module):
             nn.Dropout(cfg.dropout),
             nn.Linear(cfg.fusion_hidden_dim, head_out_dim),
         )
-        if getattr(cfg, "use_state_compatibility", False):
-            self.state_projector = nn.Sequential(
-                nn.LayerNorm(int(cfg.max_state_dim)),
-                nn.Linear(int(cfg.max_state_dim), cfg.fusion_hidden_dim),
-                nn.GELU(),
-                nn.Dropout(cfg.dropout),
-                nn.Linear(cfg.fusion_hidden_dim, cfg.fusion_hidden_dim),
-                nn.GELU(),
-            )
-            compat_dim = cfg.fusion_hidden_dim * 3
-            self.compatibility_head = nn.Sequential(
-                nn.LayerNorm(compat_dim),
-                nn.Linear(compat_dim, cfg.fusion_hidden_dim),
-                nn.GELU(),
-                nn.Dropout(cfg.dropout),
-                nn.Linear(cfg.fusion_hidden_dim, 1),
-            )
 
         if cfg.use_gradient_checkpointing:
             _maybe_enable_gradient_checkpointing(self.language_model)
@@ -550,65 +533,6 @@ class SteamBackbone(nn.Module):
             image_attention_mask=image_attention_mask,
         )
         return fused
-
-    def compute_compatibility_logits(
-        self,
-        per_frame_image_features: Tensor,
-        language_feature: Tensor,
-        states: Tensor,
-    ) -> Tensor:
-        """Score whether each normalized state matches its image/task frame.
-
-        Args:
-            per_frame_image_features: ``[B, num_frames, D]`` from
-                :meth:`_compute_projected_features`.
-            language_feature: ``[B, D]`` from :meth:`_compute_projected_features`.
-            states: ``[B, num_frames, max_state_dim]`` normalized states in
-                the same frame order as ``per_frame_image_features``.
-
-        Returns:
-            Raw BCE logits of shape ``[B, num_frames]``.
-        """
-        if not hasattr(self, "state_projector") or not hasattr(
-            self, "compatibility_head"
-        ):
-            raise RuntimeError(
-                "State compatibility head is not initialized. Set "
-                "use_state_compatibility=true in SteamConfig."
-            )
-        if states.ndim != 3:
-            raise ValueError(
-                f"states must have shape [B, num_frames, D], got {tuple(states.shape)}"
-            )
-        if states.shape[:2] != per_frame_image_features.shape[:2]:
-            raise ValueError(
-                "states and per_frame_image_features must share batch/frame dims: "
-                f"states={tuple(states.shape)}, "
-                f"features={tuple(per_frame_image_features.shape)}"
-            )
-        if language_feature.shape[0] != states.shape[0]:
-            raise ValueError(
-                "language_feature batch dim must match states; got "
-                f"{tuple(language_feature.shape)} vs {tuple(states.shape)}"
-            )
-
-        state_dtype = _module_parameter_dtype(self.state_projector, states.dtype)
-        state_features = self.state_projector(states.to(dtype=state_dtype))
-        compat_dtype = state_features.dtype
-        per_frame = per_frame_image_features.to(dtype=compat_dtype)
-        language_expanded = (
-            language_feature.to(dtype=compat_dtype)
-            .unsqueeze(1)
-            .expand(-1, states.shape[1], -1)
-        )
-        compat_input = torch.cat(
-            [per_frame, language_expanded, state_features],
-            dim=-1,
-        )
-        head_dtype = _module_parameter_dtype(
-            self.compatibility_head, compat_input.dtype
-        )
-        return self.compatibility_head(compat_input.to(dtype=head_dtype)).squeeze(-1)
 
     def _check_shapes(
         self,

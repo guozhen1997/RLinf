@@ -72,9 +72,6 @@ class EnsembleCriticOutput(CriticOutput):
     member_probs: Optional[torch.FloatTensor] = None
     member_logits: Optional[torch.FloatTensor] = None
     member_progress_values: Optional[torch.FloatTensor] = None
-    member_compatibility_logits: Optional[torch.FloatTensor] = None
-    member_compatibility_probs: Optional[torch.FloatTensor] = None
-    member_final_values: Optional[torch.FloatTensor] = None
     prediction_mean: Optional[torch.FloatTensor] = None
     prediction_min: Optional[torch.FloatTensor] = None
     prediction_variance: Optional[torch.FloatTensor] = None
@@ -121,12 +118,6 @@ def reinitialize_member_value_heads(
                 f"Ensemble member {member_idx} does not expose model.value_head"
             )
         _reinitialize_module_parameters(value_head, int(head_seed_base) + member_idx)
-        compatibility_head = getattr(backbone, "compatibility_head", None)
-        if compatibility_head is not None:
-            _reinitialize_module_parameters(
-                compatibility_head,
-                int(head_seed_base) + 10_000 + member_idx,
-            )
 
 
 def build_ensemble_members(
@@ -369,24 +360,6 @@ class EnsembleSteamCriticModel(nn.Module):
                 [output.progress_values for output in member_outputs],
                 dim=0,
             )
-        member_compatibility_logits = None
-        if all(output.compatibility_logits is not None for output in member_outputs):
-            member_compatibility_logits = torch.stack(
-                [output.compatibility_logits for output in member_outputs],
-                dim=0,
-            )
-        member_compatibility_probs = None
-        if all(output.compatibility_probs is not None for output in member_outputs):
-            member_compatibility_probs = torch.stack(
-                [output.compatibility_probs for output in member_outputs],
-                dim=0,
-            )
-        member_final_values = None
-        if all(output.final_values is not None for output in member_outputs):
-            member_final_values = torch.stack(
-                [output.final_values for output in member_outputs],
-                dim=0,
-            )
         (
             aggregated,
             aggregated_logits,
@@ -409,13 +382,6 @@ class EnsembleSteamCriticModel(nn.Module):
             progress_values=member_progress_values.mean(dim=0)
             if member_progress_values is not None
             else None,
-            compatibility_logits=member_compatibility_logits.mean(dim=0)
-            if member_compatibility_logits is not None
-            else None,
-            compatibility_probs=member_compatibility_probs.mean(dim=0)
-            if member_compatibility_probs is not None
-            else None,
-            final_values=aggregated if member_final_values is not None else None,
             member_predicted_values=member_predicted_values,
             # member_{logits,probs} let downstream tools (rich viz,
             # advantage parquet) compute per-member entropy / expected
@@ -423,9 +389,6 @@ class EnsembleSteamCriticModel(nn.Module):
             member_probs=member_probs,
             member_logits=member_logits,
             member_progress_values=member_progress_values,
-            member_compatibility_logits=member_compatibility_logits,
-            member_compatibility_probs=member_compatibility_probs,
-            member_final_values=member_final_values,
             prediction_mean=prediction_mean,
             prediction_min=prediction_min,
             prediction_variance=prediction_variance,

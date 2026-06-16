@@ -35,12 +35,9 @@ def get_model(cfg: DictConfig, torch_dtype=None):
 
     # config
     config_name = getattr(cfg.openpi, "config_name", None)
-    asset_id = getattr(cfg.openpi, "asset_id", None)
     data_kwargs = getattr(cfg, "openpi_data", None)
     actor_train_config = get_openpi_config(
-        config_name,
-        asset_id=asset_id,
-        data_kwargs=data_kwargs,
+        config_name, model_path=cfg.model_path, data_kwargs=data_kwargs
     )
 
     actor_model_config = actor_train_config.model
@@ -48,8 +45,6 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     override_model_config_kwargs = cfg.openpi
     if override_model_config_kwargs is not None:
         for key, val in override_model_config_kwargs.items():
-            if key == "asset_id":
-                continue
             actor_model_config.__dict__[key] = val
 
     # load model
@@ -98,10 +93,10 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     data_config = actor_train_config.data.create(
         actor_train_config.assets_dirs, actor_model_config
     )
-    norm_stats = data_config.norm_stats
+    norm_stats = None
     if norm_stats is None:
-        # Fall back to checkpoint assets for checkpoints that carry their own
-        # normalization stats.
+        # We are loading the norm stats from the checkpoint instead of the config assets dir to make sure
+        # that the policy is using the same normalization stats as the original training process.
         if data_config.asset_id is None:
             raise ValueError("Asset id is required to load norm stats.")
         norm_stats = _checkpoints.load_norm_stats(checkpoint_dir, data_config.asset_id)

@@ -33,13 +33,6 @@ from transformers import PretrainedConfig
 
 VALID_STEAM_INFERENCE_MODES = ("mo", "wco", "uwo")
 VALID_STEAM_TARGET_MODES = ("rewind", "positive_only")
-VALID_COMPATIBILITY_NEGATIVE_MODES = (
-    "none",
-    "same_episode_distance_weighted",
-    "perturb",
-    "same_episode_distance_weighted_plus_perturb",
-)
-VALID_COMPATIBILITY_GATE_FRAMES = ("t", "tk", "mean", "min")
 
 
 def normalize_steam_inference_mode(mode: str) -> str:
@@ -140,22 +133,6 @@ class SteamConfig(PretrainedConfig):
         include_state_in_prompt: bool = True,
         max_state_dim: int = 32,
         state_discretization_bins: int = 256,
-        # Optional normalized state-image compatibility branch. Disabled by
-        # default so legacy configs/checkpoints preserve the original
-        # pair-classification behavior.
-        use_state_compatibility: bool = False,
-        compatibility_loss_weight: float = 0.2,
-        compatibility_negative_mode: str = "same_episode_distance_weighted_plus_perturb",
-        compatibility_distance_scale: Optional[int] = None,
-        compatibility_same_episode_negative_max_distance: Optional[int] = None,
-        compatibility_negative_min_weight: float = 0.1,
-        compatibility_num_same_episode_negatives: int = 1,
-        compatibility_num_perturb_negatives: int = 1,
-        compatibility_perturb_std: float = 0.03,
-        compatibility_perturb_max: float = 0.12,
-        compatibility_gate_value: bool = True,
-        compatibility_gate_frame: str = "tk",
-        compatibility_gate_floor: float = 0.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -188,33 +165,6 @@ class SteamConfig(PretrainedConfig):
         self.include_state_in_prompt = include_state_in_prompt
         self.max_state_dim = max_state_dim
         self.state_discretization_bins = state_discretization_bins
-        self.use_state_compatibility = bool(use_state_compatibility)
-        self.compatibility_loss_weight = float(compatibility_loss_weight)
-        self.compatibility_negative_mode = str(compatibility_negative_mode).lower()
-        self.compatibility_distance_scale = (
-            None
-            if compatibility_distance_scale is None
-            else int(compatibility_distance_scale)
-        )
-        self.compatibility_same_episode_negative_max_distance = (
-            None
-            if compatibility_same_episode_negative_max_distance is None
-            else int(compatibility_same_episode_negative_max_distance)
-        )
-        self.compatibility_negative_min_weight = float(
-            compatibility_negative_min_weight
-        )
-        self.compatibility_num_same_episode_negatives = int(
-            compatibility_num_same_episode_negatives
-        )
-        self.compatibility_num_perturb_negatives = int(
-            compatibility_num_perturb_negatives
-        )
-        self.compatibility_perturb_std = float(compatibility_perturb_std)
-        self.compatibility_perturb_max = float(compatibility_perturb_max)
-        self.compatibility_gate_value = bool(compatibility_gate_value)
-        self.compatibility_gate_frame = str(compatibility_gate_frame).lower()
-        self.compatibility_gate_floor = float(compatibility_gate_floor)
 
         self._validate()
 
@@ -271,44 +221,6 @@ class SteamConfig(PretrainedConfig):
             raise ValueError("max_state_dim must be > 0")
         if self.state_discretization_bins < 2:
             raise ValueError("state_discretization_bins must be >= 2")
-        if self.compatibility_loss_weight < 0.0:
-            raise ValueError("compatibility_loss_weight must be >= 0")
-        if self.compatibility_negative_mode not in VALID_COMPATIBILITY_NEGATIVE_MODES:
-            raise ValueError(
-                "compatibility_negative_mode must be one of "
-                f"{VALID_COMPATIBILITY_NEGATIVE_MODES}, got "
-                f"{self.compatibility_negative_mode!r}"
-            )
-        if (
-            self.compatibility_distance_scale is not None
-            and self.compatibility_distance_scale <= 0
-        ):
-            raise ValueError("compatibility_distance_scale must be null or > 0")
-        if (
-            self.compatibility_same_episode_negative_max_distance is not None
-            and self.compatibility_same_episode_negative_max_distance <= 0
-        ):
-            raise ValueError(
-                "compatibility_same_episode_negative_max_distance must be null or > 0"
-            )
-        if not 0.0 <= self.compatibility_negative_min_weight <= 1.0:
-            raise ValueError("compatibility_negative_min_weight must be in [0, 1]")
-        if self.compatibility_num_same_episode_negatives < 0:
-            raise ValueError("compatibility_num_same_episode_negatives must be >= 0")
-        if self.compatibility_num_perturb_negatives < 0:
-            raise ValueError("compatibility_num_perturb_negatives must be >= 0")
-        if self.compatibility_perturb_std < 0.0:
-            raise ValueError("compatibility_perturb_std must be >= 0")
-        if self.compatibility_perturb_max < 0.0:
-            raise ValueError("compatibility_perturb_max must be >= 0")
-        if self.compatibility_gate_frame not in VALID_COMPATIBILITY_GATE_FRAMES:
-            raise ValueError(
-                "compatibility_gate_frame must be one of "
-                f"{VALID_COMPATIBILITY_GATE_FRAMES}, got "
-                f"{self.compatibility_gate_frame!r}"
-            )
-        if not 0.0 <= self.compatibility_gate_floor <= 1.0:
-            raise ValueError("compatibility_gate_floor must be in [0, 1]")
 
     def to_diff_dict(self) -> dict:
         """Return a full config dict without instantiating an empty default config.

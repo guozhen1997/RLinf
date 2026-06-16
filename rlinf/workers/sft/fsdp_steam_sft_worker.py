@@ -154,11 +154,6 @@ def _normalize_target_mode(mode: Any) -> str:
     return mode_norm
 
 
-def _default_action_dim_for_robot(robot_type: str) -> int:
-    robot = str(robot_type).lower()
-    return 28 if robot == "x2robot" or robot.endswith("_sm2sm") else 32
-
-
 def _collect_non_finite_tensor_paths(value: Any, prefix: str) -> list[str]:
     """Return dotted tensor paths whose values contain NaN/Inf."""
     if isinstance(value, torch.Tensor):
@@ -268,30 +263,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
 
         data_cfg = self.cfg.get("data", {})
         model_cfg = self.cfg.actor.model
-        use_state_compatibility = bool(
-            getattr(model_cfg, "use_state_compatibility", False)
-        )
-        allow_raw_state_for_compatibility = bool(
-            data_cfg.get("allow_raw_state_for_compatibility", False)
-        )
-        if (
-            use_state_compatibility
-            and data_cfg.get("norm_stats_dir", None) is None
-            and not allow_raw_state_for_compatibility
-        ):
-            has_entry_norm_stats = any(
-                e.get("norm_stats_dir") is not None
-                for e in data_cfg.get("train_data_paths", [])
-            ) or any(
-                e.get("norm_stats_dir") is not None
-                for e in data_cfg.get("eval_data_paths", []) or []
-            )
-            if not has_entry_norm_stats:
-                raise ValueError(
-                    "actor.model.use_state_compatibility=true requires "
-                    "data.norm_stats_dir or per-dataset norm_stats_dir unless "
-                    "data.allow_raw_state_for_compatibility=true."
-                )
 
         # --- Tokenizer resolution ---
         tokenizer_path = getattr(model_cfg, "tokenizer_path", None) or getattr(
@@ -451,9 +422,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                     "Set actor.model.target_mode=positive_only and reduce "
                     "actor.model.num_bins to the positive-bin count."
                 )
-            robot_type = str(
-                entry.get("robot_type", data_cfg.get("robot_type", "libero"))
-            )
             length_scale_enabled = bool(
                 entry.get(
                     "length_scale_enabled",
@@ -481,7 +449,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 k=k,
                 include_state=bool(
                     getattr(model_cfg, "include_state_in_prompt", False)
-                    or use_state_compatibility
                 ),
                 state_max_dim=int(getattr(model_cfg, "max_state_dim", 32)),
                 state_key=str(data_cfg.get("state_key", "state")),
@@ -490,50 +457,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 open_rewind=open_rewind,
                 min_episode_length=data_cfg.get("min_episode_length", None),
                 num_bins=num_bins,
-                state_transform_enabled=use_state_compatibility,
-                robot_type=robot_type,
-                model_type=str(
-                    entry.get("model_type", data_cfg.get("model_type", "pi05"))
-                ),
-                action_dim=int(
-                    entry.get(
-                        "action_dim",
-                        data_cfg.get(
-                            "action_dim",
-                            _default_action_dim_for_robot(robot_type),
-                        ),
-                    )
-                ),
-                default_prompt=entry.get(
-                    "default_prompt",
-                    entry.get(
-                        "prompt",
-                        data_cfg.get("default_prompt", data_cfg.get("prompt", None)),
-                    ),
-                ),
-                norm_stats_dir=entry.get(
-                    "norm_stats_dir",
-                    data_cfg.get("norm_stats_dir", None),
-                ),
-                asset_id=entry.get("asset_id", data_cfg.get("asset_id", None)),
-                allow_raw_state_for_compatibility=allow_raw_state_for_compatibility,
-                compatibility_negative_enabled=use_state_compatibility
-                and "same_episode"
-                in str(
-                    getattr(
-                        model_cfg,
-                        "compatibility_negative_mode",
-                        "same_episode_distance_weighted_plus_perturb",
-                    )
-                ).lower(),
-                compatibility_num_same_episode_negatives=int(
-                    getattr(model_cfg, "compatibility_num_same_episode_negatives", 1)
-                ),
-                compatibility_same_episode_negative_max_distance=getattr(
-                    model_cfg,
-                    "compatibility_same_episode_negative_max_distance",
-                    None,
-                ),
                 length_scale_enabled=length_scale_enabled,
                 length_scale_percentile=length_scale_percentile,
             )
@@ -726,10 +649,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             "loss",
             "predicted_values",
             "progress_values",
-            "compatibility_logits",
-            "compatibility_probs",
-            "final_values",
-            "compatibility_loss",
             "logits",
             "probs",
             "hidden_states",
@@ -919,18 +838,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         if result.progress_values is not None:
             metrics["progress_value_mean"] = float(
                 result.progress_values.detach().float().mean().item()
-            )
-        if result.final_values is not None:
-            metrics["gated_value_mean"] = float(
-                result.final_values.detach().float().mean().item()
-            )
-        if result.compatibility_loss is not None:
-            metrics["compatibility_loss"] = float(
-                result.compatibility_loss.detach().item()
-            )
-        if result.compatibility_probs is not None:
-            metrics["compatibility_prob_mean"] = float(
-                result.compatibility_probs.detach().float().mean().item()
             )
         # if labels is not None:
         #     metrics["label_pos_frac"] = self._label_pos_frac(labels)
@@ -1143,23 +1050,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             metrics["progress_value_mean"] = float(
                 result.progress_values.detach().float().mean().item()
             )
-        if result.final_values is not None:
-            gated_value = result.final_values.detach().float()
-            metrics["gated_value_mean"] = float(gated_value.mean().item())
-            if gated_value.numel() >= 2:
-                metrics["gated_value_std"] = float(
-                    gated_value.std(unbiased=False).item()
-                )
-            else:
-                metrics["gated_value_std"] = 0.0
-        if result.compatibility_loss is not None:
-            metrics["compatibility_loss"] = float(
-                result.compatibility_loss.detach().item()
-            )
-        if result.compatibility_probs is not None:
-            metrics["compatibility_prob_mean"] = float(
-                result.compatibility_probs.detach().float().mean().item()
-            )
         # if labels is not None:
         #     metrics["label_pos_frac"] = self._label_pos_frac(labels)
         #     metrics.update(self._label_bin_fracs(labels))
@@ -1209,23 +1099,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             if result.progress_values is not None:
                 metrics["progress_value_mean"] = float(
                     result.progress_values.detach().float().mean().item()
-                )
-            if result.final_values is not None:
-                gated_value = result.final_values.detach().float()
-                metrics["gated_value_mean"] = float(gated_value.mean().item())
-                if gated_value.numel() >= 2:
-                    metrics["gated_value_std"] = float(
-                        gated_value.std(unbiased=False).item()
-                    )
-                else:
-                    metrics["gated_value_std"] = 0.0
-            if result.compatibility_loss is not None:
-                metrics["compatibility_loss"] = float(
-                    result.compatibility_loss.detach().item()
-                )
-            if result.compatibility_probs is not None:
-                metrics["compatibility_prob_mean"] = float(
-                    result.compatibility_probs.detach().float().mean().item()
                 )
             # if labels is not None:
             #     metrics["label_pos_frac"] = self._label_pos_frac(labels)

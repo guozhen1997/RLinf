@@ -12,28 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Data pipeline for STEAM binary value learning."""
+"""Shared building blocks for embodied value/critic models."""
 
-from .mixture import PairMixtureDataset
-from .pair_dataset import (
-    BinaryPairDataCollator,
-    PairDataset,
-    TrajectorySource,
-    _scaled_positive_stride_to_bin,
-    _scaled_signed_stride_to_bin,
-    _signed_stride_to_bin,
-    bin_centers,
-    expected_signed_stride,
+from .image_text_processing import (
+    IMAGE_KEYS,
+    BaseMultiViewImageProcessor,
+    BaseValueTextProcessor,
+    normalize_image_to_range,
+    resize_with_pad,
+    resolve_image_size,
+    resolve_vision_image_size,
 )
 
 __all__ = [
-    "BinaryPairDataCollator",
-    "PairMixtureDataset",
-    "PairDataset",
-    "TrajectorySource",
-    "_scaled_positive_stride_to_bin",
-    "_scaled_signed_stride_to_bin",
-    "_signed_stride_to_bin",
-    "bin_centers",
-    "expected_signed_stride",
+    "BaseMultiViewImageProcessor",
+    "BaseValueTextProcessor",
+    "normalize_image_to_range",
+    "resize_with_pad",
+    "resolve_image_size",
+    "resolve_vision_image_size",
+    "IMAGE_KEYS",
 ]

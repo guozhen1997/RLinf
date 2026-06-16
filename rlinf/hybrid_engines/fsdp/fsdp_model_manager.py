@@ -530,13 +530,7 @@ class FSDPModelManager:
                     "betas": betas,
                 }
             )
-        # ``fused=True`` runs Adam in a single CUDA kernel without the
-        # per-step ``torch._foreach_sqrt(v)`` temp list (~the size of all
-        # optimizer ``v`` tensors), which is what blows up
-        # ``warmup_optimizer_state`` for ensemble models that already pay 4×
-        # for params + m + v. Fused requires CUDA + supported param dtypes
-        # (fp16/bf16/fp32) — all true here. Falls back to the default
-        # foreach kernel otherwise.
+
         try:
             optimizer = torch.optim.AdamW(
                 param_groups,

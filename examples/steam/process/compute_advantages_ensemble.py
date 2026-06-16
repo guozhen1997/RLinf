@@ -143,97 +143,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _first_non_none(*values):
-    """Return the first value that is neither ``None`` nor an empty string.
-
-    Use this instead of ``cfg.get(key, fallback)`` whenever the config may
-    explicitly contain ``key: null`` — ``.get`` returns ``None`` in that case
-    and the fallback is skipped. Example::
-
-        default_prompt = _first_non_none(
-            cfg.data.get("default_prompt"),
-            cfg.data.get("prompt"),
-        )
-    """
-    for v in values:
-        if v is None:
-            continue
-        if isinstance(v, str) and v == "":
-            continue
-        return v
-    return None
-
-
-def _default_action_dim_for_robot(robot_type: str) -> int:
-    robot = str(robot_type).lower()
-    return 28 if robot == "x2robot" or robot.endswith("_sm2sm") else 32
-
-
-def _resolve_state_transform_kwargs(
-    *,
-    dataset_entry: DictConfig,
-    data_cfg: DictConfig,
-    model_config,
-) -> dict[str, Any]:
-    """Resolve dataset-side state transform kwargs for value inference."""
-    use_state_compatibility = bool(
-        getattr(model_config, "use_state_compatibility", False)
-    )
-    include_state = bool(
-        getattr(model_config, "include_state_in_prompt", False)
-        or use_state_compatibility
-        or data_cfg.get("include_state_in_prompt", False)
-    )
-    robot_type = _first_non_none(
-        dataset_entry.get("robot_type"),
-        data_cfg.get("robot_type"),
-        "libero",
-    )
-    model_type = _first_non_none(
-        dataset_entry.get("model_type"),
-        data_cfg.get("model_type"),
-        "pi05",
-    )
-    norm_stats_dir = _first_non_none(
-        dataset_entry.get("norm_stats_dir"),
-        data_cfg.get("norm_stats_dir"),
-    )
-    asset_id = _first_non_none(
-        dataset_entry.get("asset_id"),
-        data_cfg.get("asset_id"),
-    )
-    default_prompt = _first_non_none(
-        dataset_entry.get("default_prompt"),
-        dataset_entry.get("prompt"),
-        data_cfg.get("default_prompt"),
-        data_cfg.get("prompt"),
-    )
-    allow_raw = bool(data_cfg.get("allow_raw_state_for_compatibility", False))
-    if use_state_compatibility and norm_stats_dir is None and not allow_raw:
-        raise ValueError(
-            "Loaded value checkpoint has use_state_compatibility=true; "
-            "compute_advantages requires data.norm_stats_dir or per-dataset "
-            "norm_stats_dir unless data.allow_raw_state_for_compatibility=true."
-        )
-    return {
-        "include_state": include_state,
-        "state_transform_enabled": use_state_compatibility,
-        "robot_type": str(robot_type),
-        "model_type": str(model_type),
-        "action_dim": int(
-            _first_non_none(
-                dataset_entry.get("action_dim"),
-                data_cfg.get("action_dim"),
-                _default_action_dim_for_robot(str(robot_type)),
-            )
-        ),
-        "default_prompt": default_prompt,
-        "norm_stats_dir": norm_stats_dir,
-        "asset_id": asset_id,
-        "allow_raw_state_for_compatibility": allow_raw,
-    }
-
-
 def _resolve_quantiles(
     advantage_cfg: DictConfig,
 ) -> tuple[Optional[float], Optional[float]]:
@@ -578,23 +487,21 @@ def _run_inference_for_dataset(
     device: str,
 ) -> pd.DataFrame:
     """Run ensemble inference on one dataset; return a sorted DataFrame on rank 0."""
-    state_kwargs = _resolve_state_transform_kwargs(
-        dataset_entry=dataset_entry,
-        data_cfg=cfg.data,
-        model_config=model.config,
+    include_state = bool(
+        getattr(model.config, "include_state_in_prompt", False)
+        or cfg.data.get("include_state_in_prompt", False)
     )
     dataset = BinaryPairInferenceDataset(
         dataset_path=dataset_entry.dataset_path,
         camera_keys=list(cfg.data.camera_keys),
         k=int(cfg.data.k),
         prompt=cfg.data.get("prompt", None),
-        include_state=bool(state_kwargs.pop("include_state")),
+        include_state=include_state,
         state_max_dim=int(
             getattr(model.config, "max_state_dim", cfg.data.get("max_state_dim", 32))
         ),
         state_key=str(cfg.data.get("state_key", "state")),
         dataset_type=dataset_entry.type,
-        **state_kwargs,
     )
 
     collator = BinaryPairDataCollator(
