@@ -51,8 +51,6 @@ import torch
 from torch.utils.data import Dataset
 
 from .binning import (
-    _positive_stride_to_bin,
-    _scaled_positive_stride_to_bin,
     _scaled_signed_stride_to_bin,
     _signed_stride_to_bin,
 )
@@ -596,10 +594,6 @@ class PairDataset(_BasePairDataset):
             column marks the episode as successful. For LeRobot datasets
             this checks one representative frame row per episode rather
             than relying on episode-level metadata files.
-        open_rewind: Whether to emit negative rewound pairs. When ``False``,
-            the dataset becomes positive-only: each temporal anchor appears
-            once and labels discretize positive strides ``1..k`` into
-            ``num_bins`` bins.
         min_episode_length: Optional override for the minimum-length
             floor (default ``k + 1``).
         length_scale_enabled: If ``True`` (multi-bin modes only), the signed
@@ -637,7 +631,6 @@ class PairDataset(_BasePairDataset):
         k: int = 4,
         dataset_type: Optional[str] = None,
         only_success: Optional[bool] = None,
-        open_rewind: bool = True,
         min_episode_length: Optional[int] = None,
         num_bins: int = 2,
         length_scale_enabled: bool = False,
@@ -650,7 +643,6 @@ class PairDataset(_BasePairDataset):
         self.k = int(k)
         if self.k < 1:
             raise ValueError(f"k must be >= 1, got {self.k}")
-        self.open_rewind = bool(open_rewind)
         # Mode switch. num_bins == 2 → legacy binary mode: fixed-stride k.
         # num_bins > 2 → multi-bin: sample i uniformly from [1, min(K, T-1-t)]
         # per-anchor at __getitem__ time. Both emit a long bin-index label
@@ -660,19 +652,12 @@ class PairDataset(_BasePairDataset):
         # 1 = progress. 2K must be an integer multiple of num_bins so every
         # bin covers the same number of strides (uniform bin widths).
         self.num_bins = int(num_bins)
-        if self.open_rewind and (self.num_bins < 2 or self.num_bins % 2 != 0):
+        if self.num_bins < 2 or self.num_bins % 2 != 0:
             raise ValueError(f"num_bins must be >= 2 and even, got {self.num_bins}")
-        if self.open_rewind and self.num_bins > 2 and (2 * self.k) % self.num_bins != 0:
+        if self.num_bins > 2 and (2 * self.k) % self.num_bins != 0:
             raise ValueError(
                 f"For num_bins={self.num_bins} in multi-bin mode, 2*k must be a "
                 f"multiple of num_bins; got k={self.k} (2*k={2 * self.k})."
-            )
-        if not self.open_rewind and (
-            self.num_bins < 1 or self.num_bins > self.k or self.k % self.num_bins != 0
-        ):
-            raise ValueError(
-                f"Positive-only mode requires 1 <= num_bins <= k and "
-                f"k % num_bins == 0; got k={self.k}, num_bins={self.num_bins}."
             )
         self.length_scale_enabled = bool(length_scale_enabled)
         self.length_scale_percentile = float(length_scale_percentile)
@@ -687,7 +672,7 @@ class PairDataset(_BasePairDataset):
                     "length_scale_percentile must be in (0, 100], got "
                     f"{self.length_scale_percentile}"
                 )
-            if self.open_rewind and self.num_bins == 2:
+            if self.num_bins == 2:
                 logger.warning(
                     "PairDataset length_scale_enabled has no effect in binary "
                     "mode (num_bins == 2): scaling by L_max / L_ep preserves the "
@@ -760,19 +745,16 @@ class PairDataset(_BasePairDataset):
         logger.info(
             "PairDataset: dataset_path=%s, episodes=%d eligible=%d, k=%d, "
             "num_bins=%d (%s mode), total_positions=%d, "
-            "dataset_type=%s, only_success=%s, open_rewind=%s, camera_keys=%s",
+            "dataset_type=%s, only_success=%s, camera_keys=%s",
             self.source_name,
             total_eps,
             len(self._eligible),
             self.k,
             self.num_bins,
-            "binary"
-            if self.open_rewind and self.num_bins == 2
-            else ("multi-bin" if self.open_rewind else "positive-only"),
+            "binary" if self.num_bins == 2 else "multi-bin",
             self._num_pair_positions,
             self.dataset_type,
             self.only_success,
-            self.open_rewind,
             self.camera_keys,
         )
 
@@ -834,8 +816,6 @@ class PairDataset(_BasePairDataset):
         return max(1.0, ref)
 
     def __len__(self) -> int:
-        if not self.open_rewind:
-            return self._num_pair_positions
         # Each temporal anchor contributes two labeled samples:
         #   positive: (t, t+k)
         #   negative: (t+k, t)
@@ -847,9 +827,6 @@ class PairDataset(_BasePairDataset):
             idx += len(self)
         if not (0 <= idx < len(self)):
             raise IndexError(idx)
-
-        if not self.open_rewind:
-            return idx, True
 
         pair_position = idx // 2
         is_positive = (idx % 2) == 0
@@ -901,7 +878,7 @@ class PairDataset(_BasePairDataset):
         pair_position, is_positive = self._decode_sample_index(idx)
         episode, t, t_plus_k_binary = self._resolve_pair_position(pair_position)
 
-        if self.open_rewind and self.num_bins == 2:
+        if self.num_bins == 2:
             # Binary path: fixed stride k with the existing boundary
             # clamp (t+k may degrade to T-1 near episode end). Labels are
             # long bin indices matching the multi-bin layout — 1 for
@@ -944,18 +921,11 @@ class PairDataset(_BasePairDataset):
                 # with |scaled| > K saturating into the extreme bin. An episode
                 # of length L_max reproduces the unscaled layout (scale == 1).
                 scale = self._length_scale_reference / float(episode_length)
-                if self.open_rewind:
-                    label = _scaled_signed_stride_to_bin(
-                        signed_stride * scale, self.k, self.num_bins
-                    )
-                else:
-                    label = _scaled_positive_stride_to_bin(
-                        i * scale, self.k, self.num_bins
-                    )
-            elif self.open_rewind:
-                label = _signed_stride_to_bin(signed_stride, self.k, self.num_bins)
+                label = _scaled_signed_stride_to_bin(
+                    signed_stride * scale, self.k, self.num_bins
+                )
             else:
-                label = _positive_stride_to_bin(i, self.k, self.num_bins)
+                label = _signed_stride_to_bin(signed_stride, self.k, self.num_bins)
 
         raw_t, raw_tk = self._source.get_raw_pair(
             episode,

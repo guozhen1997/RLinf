@@ -32,7 +32,6 @@ from typing import Optional
 from transformers import PretrainedConfig
 
 VALID_STEAM_INFERENCE_MODES = ("mo", "wco", "uwo")
-VALID_STEAM_TARGET_MODES = ("rewind", "positive_only")
 
 
 def normalize_steam_inference_mode(mode: str) -> str:
@@ -41,18 +40,6 @@ def normalize_steam_inference_mode(mode: str) -> str:
     if mode_norm not in VALID_STEAM_INFERENCE_MODES:
         raise ValueError(
             f"inference_mode must be one of {VALID_STEAM_INFERENCE_MODES}, got {mode!r}"
-        )
-    return mode_norm
-
-
-def normalize_steam_target_mode(mode: str) -> str:
-    """Normalise the training target layout string."""
-    mode_norm = str(mode).strip().lower()
-    if mode_norm in ("positive-only", "positive", "norewind", "no_rewind"):
-        mode_norm = "positive_only"
-    if mode_norm not in VALID_STEAM_TARGET_MODES:
-        raise ValueError(
-            f"target_mode must be one of {VALID_STEAM_TARGET_MODES}, got {mode!r}"
         )
     return mode_norm
 
@@ -116,7 +103,6 @@ class SteamConfig(PretrainedConfig):
         # contiguous bins. Must be even so the sign split lands exactly at
         # num_bins // 2.
         num_bins: int = 2,
-        target_mode: str = "rewind",
         stride_k: Optional[int] = None,
         ensemble_size: int = 1,
         inference_mode: str = "mo",
@@ -143,7 +129,6 @@ class SteamConfig(PretrainedConfig):
         self.label_smoothing = label_smoothing
         self.num_frames_per_pair = num_frames_per_pair
         self.num_bins = int(num_bins)
-        self.target_mode = normalize_steam_target_mode(target_mode)
         self.stride_k = None if stride_k is None else int(stride_k)
         self.ensemble_size = int(ensemble_size)
         self.inference_mode = normalize_steam_inference_mode(inference_mode)
@@ -187,20 +172,6 @@ class SteamConfig(PretrainedConfig):
         # a center bin straddling signed-stride == 0, which we don't sample.
         if self.num_bins < 2 or self.num_bins % 2 != 0:
             raise ValueError(f"num_bins must be >= 2 and even, got {self.num_bins}")
-        if self.target_mode == "positive_only":
-            if self.stride_k is None:
-                raise ValueError(
-                    "positive_only target_mode requires stride_k so predicted "
-                    "values can be normalized consistently."
-                )
-            if self.stride_k < 1:
-                raise ValueError(f"stride_k must be >= 1, got {self.stride_k}")
-            if self.num_bins > self.stride_k or self.stride_k % self.num_bins != 0:
-                raise ValueError(
-                    "positive_only target_mode requires "
-                    "1 <= num_bins <= stride_k and stride_k % num_bins == 0; "
-                    f"got stride_k={self.stride_k}, num_bins={self.num_bins}."
-                )
         if self.ensemble_size < 1:
             raise ValueError("ensemble_size must be >= 1")
         if self.uwo_lambda < 0.0:

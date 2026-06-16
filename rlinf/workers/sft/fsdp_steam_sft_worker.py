@@ -142,18 +142,6 @@ def _ensure_steam_precision_cfg(model_cfg: DictConfig) -> str:
     return str(model_cfg.precision)
 
 
-def _normalize_target_mode(mode: Any) -> str:
-    mode_norm = str(mode).strip().lower()
-    if mode_norm in ("positive-only", "positive", "norewind", "no_rewind"):
-        mode_norm = "positive_only"
-    if mode_norm not in ("rewind", "positive_only"):
-        raise ValueError(
-            "actor.model.target_mode must be 'rewind' or 'positive_only', "
-            f"got {mode!r}."
-        )
-    return mode_norm
-
-
 def _collect_non_finite_tensor_paths(value: Any, prefix: str) -> list[str]:
     """Return dotted tensor paths whose values contain NaN/Inf."""
     if isinstance(value, torch.Tensor):
@@ -314,23 +302,13 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         # keeps the head / loss / metrics contract consistent.
         num_bins = int(getattr(model_cfg, "num_bins", 2))
         k = int(data_cfg.get("k", 4))
-        target_mode = _normalize_target_mode(
-            getattr(model_cfg, "target_mode", "rewind")
-        )
         with open_dict(model_cfg):
-            model_cfg.target_mode = target_mode
             model_cfg.stride_k = k
-        if target_mode == "rewind" and num_bins > 2 and (2 * k) % num_bins != 0:
+        if num_bins > 2 and (2 * k) % num_bins != 0:
             raise ValueError(
                 "Binary value multi-bin mode requires 2*data.k to be a "
                 f"multiple of model.num_bins; got data.k={k}, "
                 f"model.num_bins={num_bins} (2*k={2 * k})."
-            )
-        if target_mode == "positive_only" and (num_bins > k or k % num_bins != 0):
-            raise ValueError(
-                "Binary value positive-only mode requires "
-                "1 <= model.num_bins <= data.k and data.k % model.num_bins == 0; "
-                f"got data.k={k}, model.num_bins={num_bins}."
             )
         train_collator = BinaryPairDataCollator(
             processor=processor,
@@ -396,25 +374,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                     "Binary value PairDataset requires an explicit data.only_success "
                     f"or train_data_paths[*].only_success for dataset_path={ds_path!r}."
                 )
-            default_open_rewind = target_mode != "positive_only"
-            if "open_rewind" in entry:
-                open_rewind = entry["open_rewind"]
-            else:
-                open_rewind = data_cfg.get("open_rewind", default_open_rewind)
-            open_rewind = bool(open_rewind)
-            if target_mode == "positive_only" and open_rewind:
-                raise ValueError(
-                    "actor.model.target_mode=positive_only requires "
-                    "data.open_rewind=false or train_data_paths[*].open_rewind=false "
-                    f"for dataset_path={ds_path!r}."
-                )
-            if target_mode == "rewind" and not open_rewind:
-                raise ValueError(
-                    "data.open_rewind=false with actor.model.target_mode=rewind "
-                    "would train only the positive half of a signed ReWiND head. "
-                    "Set actor.model.target_mode=positive_only and reduce "
-                    "actor.model.num_bins to the positive-bin count."
-                )
             length_scale_enabled = bool(
                 entry.get(
                     "length_scale_enabled",
@@ -442,7 +401,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 k=k,
                 dataset_type=dataset_type,
                 only_success=only_success,
-                open_rewind=open_rewind,
                 min_episode_length=data_cfg.get("min_episode_length", None),
                 num_bins=num_bins,
                 length_scale_enabled=length_scale_enabled,
@@ -670,8 +628,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         this degenerates to ``labels == 1``.
         """
         num_bins = int(getattr(self.cfg.actor.model, "num_bins", 2))
-        if getattr(self.cfg.actor.model, "target_mode", "rewind") == "positive_only":
-            return 1.0
         positive_mask = labels >= (num_bins // 2)
         return float(positive_mask.to(dtype=torch.float32).mean().item())
 
@@ -751,10 +707,9 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         logits = getattr(result, "logits", None)
         hidden_states = getattr(result, "hidden_states", None)
         logger.warning(
-            "[SteamSFT][BATCH_DIAG] target_mode=%s num_bins=%d "
+            "[SteamSFT][BATCH_DIAG] num_bins=%d "
             "label_min=%d label_max=%d label_hist=%s image_stats=%s "
             "token_mask_frac=%s logits_std=%s hidden_std=%s",
-            getattr(self.cfg.actor.model, "target_mode", "rewind"),
             num_bins,
             int(labels.min().item()),
             int(labels.max().item()),
@@ -790,7 +745,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
 
         Pure per-micro-batch work: no optimizer step, no grad clearing —
         those belong to the flow-level caller
-        (:meth:`_run_training_single` or :meth:`_run_training_ensemble`).
+        (:meth:`_run_training_members`).
 
         ``member_idx=None`` → single-model forward.
         ``member_idx=int`` → per-member forward; the ensemble wrapper
@@ -845,7 +800,8 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         """Null sibling members' FSDP-materialized phantom grads.
 
         Ensemble-only. Called after each member's backward in
-        :meth:`_run_training_ensemble` and before the optimizer step so
+        :meth:`_run_training_members` (when ``ensemble_size > 1``) and
+        before the optimizer step so
         sibling-member parameters that share a FSDP flat-param bucket
         with the currently trained member don't carry residual zero
         grads into the step (with ``use_orig_params=True`` FSDP can
@@ -866,53 +822,34 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 continue
             param.grad = None
 
-    def _run_training_single(self, grad_accum: int) -> dict[str, float]:
-        """Single-model global training step.
-
-        One grad-accum-long micro-batch loop followed by a single
-        optimizer step + ``zero_grad``. Returns the step-level metric
-        dict (micro-batch means + ``grad_norm`` + ``lr``).
-        """
-        micro_metrics = [
-            self._backward_one_micro_batch(
-                grad_accum=grad_accum,
-                micro_idx=micro_idx,
-                member_idx=None,
-            )
-            for micro_idx in range(grad_accum)
-        ]
-        grad_norm, lr_list = self.optimizer_step()
-        self.optimizer.zero_grad(set_to_none=True)
-
-        train_metrics = self._mean_metrics(micro_metrics)
-        train_metrics["grad_norm"] = float(grad_norm)
-        train_metrics["lr"] = float(lr_list[0]) if lr_list else 0.0
-        return train_metrics
-
-    def _run_training_ensemble(
+    def _run_training_members(
         self,
         grad_accum: int,
         ensemble_size: int,
     ) -> dict[str, float]:
-        """Ensemble global training step with per-member SGD trajectories.
+        """Run one global training step over all members.
 
-        Outer loop over members; inner loop fetches a fresh
-        ``grad_accum``-long sequence of micro batches from the
-        dataloader for that member. After each member's loop: clear
-        phantom grads on sibling members, step, zero_grad. Total loader
-        batches consumed per global step is
-        ``ensemble_size × grad_accum`` — each member trains on its own
-        independent random data (bagging), which is what makes the
-        ensemble's prediction variance a meaningful epistemic
-        uncertainty signal. Peak activations + gradients are only 1× a
-        single member instead of ``ensemble_size×`` thanks to the
-        sequential execution.
+        Single model and ensemble share one flow: each member runs a
+        fresh ``grad_accum``-long micro-batch loop, then ``optimizer_step``
+        + ``zero_grad``. The single-model case (``ensemble_size == 1``) is
+        the degenerate one-member list ``[None]`` — no per-member forward
+        routing and no phantom-grad clearing. For ensembles each member
+        trains on its own independent random data (bagging), which makes
+        the ensemble's prediction variance a meaningful epistemic
+        uncertainty signal; total loader batches consumed per global step
+        is ``ensemble_size × grad_accum``, while peak activations +
+        gradients stay 1× a single member thanks to the sequential
+        execution. Per-member metric breakdowns and ``grad_norm_mean`` are
+        only emitted when ``ensemble_size > 1``.
         """
+        members: list[int | None] = (
+            [None] if ensemble_size == 1 else list(range(ensemble_size))
+        )
         per_member_metrics: list[list[dict[str, float]]] = []
         per_member_grad_norms: list[float] = []
         last_lr_list: list[float] = []
 
-        for member_idx in range(ensemble_size):
+        for member_idx in members:
             micro_metrics = [
                 self._backward_one_micro_batch(
                     grad_accum=grad_accum,
@@ -921,7 +858,8 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 )
                 for micro_idx in range(grad_accum)
             ]
-            self._clear_non_current_member_grads(member_idx)
+            if member_idx is not None:
+                self._clear_non_current_member_grads(member_idx)
             grad_norm, lr_list = self.optimizer_step()
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -931,27 +869,29 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
 
         flat_metrics = [m for member_list in per_member_metrics for m in member_list]
         train_metrics = self._mean_metrics(flat_metrics)
-        for member_idx, micro_metrics in enumerate(per_member_metrics):
-            member_metrics = self._mean_metrics(micro_metrics)
-            for metric_name, metric_value in member_metrics.items():
-                train_metrics[f"member{member_idx}/{metric_name}"] = metric_value
-            train_metrics[f"member{member_idx}/grad_norm"] = per_member_grad_norms[
-                member_idx
-            ]
-        train_metrics["grad_norm"] = max(per_member_grad_norms)
-        train_metrics["grad_norm_mean"] = sum(per_member_grad_norms) / len(
-            per_member_grad_norms
-        )
+        if ensemble_size > 1:
+            for member_idx, micro_metrics in enumerate(per_member_metrics):
+                member_metrics = self._mean_metrics(micro_metrics)
+                for metric_name, metric_value in member_metrics.items():
+                    train_metrics[f"member{member_idx}/{metric_name}"] = metric_value
+                train_metrics[f"member{member_idx}/grad_norm"] = per_member_grad_norms[
+                    member_idx
+                ]
+            train_metrics["grad_norm"] = max(per_member_grad_norms)
+            train_metrics["grad_norm_mean"] = sum(per_member_grad_norms) / len(
+                per_member_grad_norms
+            )
+        else:
+            train_metrics["grad_norm"] = per_member_grad_norms[0]
         train_metrics["lr"] = float(last_lr_list[0]) if last_lr_list else 0.0
         return train_metrics
 
     def run_training(self) -> dict[str, float]:
-        """Execute one global training step (dispatcher).
+        """Execute one global training step.
 
-        Dispatches to :meth:`_run_training_single` or
-        :meth:`_run_training_ensemble` based on ``ensemble_size``, then
-        all-reduces the metrics and steps the LR scheduler. Offload
-        bookends wrap the whole call when enabled.
+        Runs :meth:`_run_training_members` (one flow for both single model
+        and ensemble), then all-reduces the metrics and steps the LR
+        scheduler. Offload bookends wrap the whole call when enabled.
         """
         with self.worker_timer():
             if self.cfg.actor.get("enable_offload", False):
@@ -985,10 +925,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             grad_accum = global_bs // micro_bs // self._world_size
             ensemble_size = int(getattr(self.cfg.actor.model, "ensemble_size", 1))
 
-            if ensemble_size > 1:
-                train_metrics = self._run_training_ensemble(grad_accum, ensemble_size)
-            else:
-                train_metrics = self._run_training_single(grad_accum)
+            train_metrics = self._run_training_members(grad_accum, ensemble_size)
 
             train_metrics = all_reduce_dict(
                 train_metrics, op=torch.distributed.ReduceOp.AVG
@@ -1002,56 +939,50 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
 
             return train_metrics
 
-    def _eval_batch_single(
-        self,
-        observation: dict[str, Any],
-        labels: torch.Tensor,
-    ) -> dict[str, float]:
-        """Eval one batch on the single model. Returns the batch metric dict."""
-        with self.amp_context:
-            result = self.model(observation=observation, labels=labels)
-
-        return self._critic_output_metrics(result, include_std=True)
-
-    def _eval_batch_ensemble(
+    def _eval_batch(
         self,
         observation: dict[str, Any],
         labels: torch.Tensor,
         ensemble_size: int,
     ) -> dict[str, float]:
-        """Eval one batch on every ensemble member over the SAME inputs.
+        """Eval one batch over all members on the SAME inputs.
 
-        Members share the full eval batch (no chunk-slicing), so the
-        training-time "batch divisible by ensemble_size" constraint does
-        not apply. Member-wise metrics are averaged into a single batch
-        metric dict — same shape the single-model path returns, so the
-        outer ``run_eval`` aggregation is uniform.
+        Single model (``ensemble_size == 1``) is the degenerate one-member
+        list ``[None]``. Ensemble members share the full eval batch (no
+        chunk-slicing), so the training-time "batch divisible by
+        ensemble_size" constraint does not apply. Member-wise metrics are
+        averaged into one batch metric dict — the same shape regardless of
+        ``ensemble_size``, so the outer ``run_eval`` aggregation is
+        uniform; per-member breakdowns are only added when
+        ``ensemble_size > 1``.
         """
+        members: list[int | None] = (
+            [None] if ensemble_size == 1 else list(range(ensemble_size))
+        )
         member_metrics: list[dict[str, float]] = []
-        for m_idx in range(ensemble_size):
+        for member_idx in members:
+            forward_kwargs: dict[str, Any] = {}
+            if member_idx is not None:
+                forward_kwargs["member_idx"] = member_idx
             with self.amp_context:
                 result = self.model(
-                    observation=observation,
-                    labels=labels,
-                    member_idx=m_idx,
+                    observation=observation, labels=labels, **forward_kwargs
                 )
-
-            metrics = self._critic_output_metrics(result, include_std=True)
-            member_metrics.append(metrics)
+            member_metrics.append(self._critic_output_metrics(result, include_std=True))
         eval_metrics = self._mean_metrics(member_metrics)
-        for member_idx, metrics in enumerate(member_metrics):
-            for metric_name, metric_value in metrics.items():
-                eval_metrics[f"member{member_idx}/{metric_name}"] = metric_value
+        if ensemble_size > 1:
+            for member_idx, metrics in enumerate(member_metrics):
+                for metric_name, metric_value in metrics.items():
+                    eval_metrics[f"member{member_idx}/{metric_name}"] = metric_value
         return eval_metrics
 
     def run_eval(self) -> dict[str, float]:
         """Run eval over every registered eval dataset.
 
-        Per-batch dispatch to :meth:`_eval_batch_single` or
-        :meth:`_eval_batch_ensemble` based on ``ensemble_size``;
-        per-dataset aggregation is then flattened with cross-dataset
-        means via ``<metric>`` keys (no prefix) alongside the
-        ``<dataset>/<metric>`` breakdown.
+        Each batch goes through :meth:`_eval_batch` (one flow for single
+        model and ensemble); per-dataset aggregation is then flattened
+        with cross-dataset means via ``<metric>`` keys (no prefix)
+        alongside the ``<dataset>/<metric>`` breakdown.
         """
         with self.worker_timer():
             if not self.eval_data_loaders:
@@ -1069,12 +1000,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                     batch_metrics: list[dict[str, float]] = []
                     for batch in loader:
                         observation, labels = self._prepare_input(batch)
-                        if ensemble_size > 1:
-                            metrics = self._eval_batch_ensemble(
-                                observation, labels, ensemble_size
-                            )
-                        else:
-                            metrics = self._eval_batch_single(observation, labels)
+                        metrics = self._eval_batch(observation, labels, ensemble_size)
                         batch_metrics.append(metrics)
                     if not batch_metrics:
                         continue

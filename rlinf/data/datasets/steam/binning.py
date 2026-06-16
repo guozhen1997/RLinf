@@ -20,16 +20,13 @@ sampled frame stride into a long bin-index target) and the model/decoder side
 It is intentionally free of any dataset / I/O dependency so both sides can
 import it without pulling in LeRobot.
 
-Bin layout (``open_rewind`` / multi-bin mode):
+Bin layout (binary / multi-bin mode):
     * ``num_bins`` is even and ``2K`` is an integer multiple of ``num_bins``,
       so every bin owns the same number of consecutive signed strides.
     * Bins ``[0, num_bins // 2)`` are regressive (negative strides) and bins
       ``[num_bins // 2, num_bins)`` are progressive (positive strides).
     * The binary degenerate case ``num_bins == 2`` reduces to
       ``0 = regress``, ``1 = progress``.
-
-Positive-only mode (``open_rewind=False``) discretises strides ``1..K`` into
-``num_bins`` bins with ``1 <= num_bins <= K`` and ``K % num_bins == 0``.
 """
 
 import numpy as np
@@ -66,21 +63,6 @@ def _signed_stride_to_bin(stride: int, K: int, num_bins: int) -> int:
     return int((pos * num_bins) // (2 * K))
 
 
-def _positive_stride_to_bin(stride: int, K: int, num_bins: int) -> int:
-    """Map a positive stride in ``{1,...,K}`` to a positive-only bin index."""
-    if stride < 1 or stride > K:
-        raise ValueError(
-            f"_positive_stride_to_bin requires 1 <= stride <= K, "
-            f"got stride={stride}, K={K}."
-        )
-    if num_bins < 1 or num_bins > K or K % num_bins != 0:
-        raise ValueError(
-            f"positive-only bins require 1 <= num_bins <= K and K % num_bins == 0; "
-            f"got K={K}, num_bins={num_bins}."
-        )
-    return int(((stride - 1) * num_bins) // K)
-
-
 def _scaled_signed_stride_to_bin(scaled_stride: float, K: int, num_bins: int) -> int:
     """Bin a length-scaled signed stride over ``[-K, K]`` (bin width ``2K/num_bins``).
 
@@ -106,17 +88,6 @@ def _scaled_signed_stride_to_bin(scaled_stride: float, K: int, num_bins: int) ->
         s = 1 if scaled_stride > 0 else -1
     s = max(-int(K), min(int(K), s))
     return _signed_stride_to_bin(s, int(K), num_bins)
-
-
-def _scaled_positive_stride_to_bin(scaled_stride: float, K: int, num_bins: int) -> int:
-    """Positive-only analogue of :func:`_scaled_signed_stride_to_bin`.
-
-    Rounds ``|scaled_stride|`` to the nearest integer stride, clamps to
-    ``[1, K]``, then maps via :func:`_positive_stride_to_bin`.
-    """
-    s = int(round(abs(float(scaled_stride))))
-    s = max(1, min(int(K), s))
-    return _positive_stride_to_bin(s, int(K), num_bins)
 
 
 def bin_centers(K: int, num_bins: int) -> np.ndarray:
@@ -195,9 +166,7 @@ def expected_signed_stride(probs, K: int, num_bins: int):
 
 __all__ = [
     "_signed_stride_to_bin",
-    "_positive_stride_to_bin",
     "_scaled_signed_stride_to_bin",
-    "_scaled_positive_stride_to_bin",
     "bin_centers",
     "expected_signed_stride",
 ]

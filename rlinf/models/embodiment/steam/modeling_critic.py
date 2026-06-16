@@ -368,14 +368,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         :func:`~rlinf.data.datasets.steam.binning.bin_centers`.
         """
         num_bins = int(self.config.num_bins)
-        if getattr(self.config, "target_mode", "rewind") == "positive_only":
-            stride_k = int(getattr(self.config, "stride_k"))
-            strides_per_bin = stride_k // num_bins
-            arange = torch.arange(num_bins, device=probs.device, dtype=probs.dtype)
-            centers = 1.0 + arange * float(strides_per_bin)
-            centers = centers + float(strides_per_bin - 1) / 2.0
-            return (probs * centers).sum(dim=-1) / float(stride_k)
-
         half = num_bins // 2
         if half < 1:
             raise ValueError(
@@ -504,7 +496,6 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         label_smoothing: Optional[float] = None,
         num_frames_per_pair: Optional[int] = None,
         num_bins: Optional[int] = None,
-        target_mode: Optional[str] = None,
         stride_k: Optional[int] = None,
         ensemble_size: Optional[int] = None,
         inference_mode: Optional[str] = None,
@@ -553,7 +544,6 @@ ensemble_modeling_critic.EnsembleSteamCriticModel` wrapper when
             "label_smoothing": label_smoothing,
             "num_frames_per_pair": num_frames_per_pair,
             "num_bins": num_bins,
-            "target_mode": target_mode,
             "stride_k": stride_k,
             "ensemble_size": ensemble_size,
             "inference_mode": inference_mode,
