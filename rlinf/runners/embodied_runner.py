@@ -194,15 +194,12 @@ class EmbodiedRunner:
             input_channel=self.env_channel,
             rollout_channel=self.rollout_channel,
         )
-        env_decoupled_mode = self.cfg.env.train.get("env_mode", None) == "decoupled"
-        if not env_decoupled_mode:
-            rollout_handle: Handle = self.rollout.evaluate(
-                input_channel=self.rollout_channel,
-                output_channel=self.env_channel,
-            )
+        rollout_handle: Handle = self.rollout.evaluate(
+            input_channel=self.rollout_channel,
+            output_channel=self.env_channel,
+        )
         env_results = env_handle.wait()
-        if not env_decoupled_mode:
-            rollout_handle.wait()
+        rollout_handle.wait()
         eval_metrics_list = [results for results in env_results if results is not None]
         eval_metrics = compute_evaluate_metrics(eval_metrics_list)
         return eval_metrics
