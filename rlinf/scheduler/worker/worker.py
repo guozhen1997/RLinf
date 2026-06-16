@@ -32,8 +32,6 @@ import ray.util.state
 import torch
 from omegaconf import OmegaConf
 
-from rlinf.scheduler.hardware import AcceleratorType, AcceleratorUtil, HardwareInfo
-from rlinf.scheduler.manager import WorkerAddress
 from rlinf.utils.utils import _split_channel_message
 
 from ..cluster import (
@@ -42,11 +40,13 @@ from ..cluster import (
     load_user_extension_module,
     without_http_proxies,
 )
+from ..hardware import AcceleratorType, AcceleratorUtil, HardwareInfo
+from ..manager import WorkerAddress
 
 if TYPE_CHECKING:
-    from rlinf.scheduler.collective import CollectiveGroupOptions
-    from rlinf.scheduler.manager import WorkerInfo
-    from rlinf.scheduler.worker.worker_group import WorkerGroup
+    from ..collective import CollectiveGroupOptions
+    from ..manager import WorkerInfo
+    from .worker_group import WorkerGroup
 
 WorkerClsType = TypeVar("WorkerClsType")
 

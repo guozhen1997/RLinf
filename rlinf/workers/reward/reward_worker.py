@@ -296,7 +296,7 @@ class EmbodiedRewardWorker(Worker):
             merged_images = merged_data.get("images")
             last_run = merged_data.get("last_run", None)
             last_run_count = int(last_run.sum().item()) if last_run is not None else 0
-            rewards = self._compute_image_rewards(images=merged_images)
+            rewards = self.compute_threshold_image_rewards(images=merged_images)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
@@ -313,8 +313,9 @@ class EmbodiedRewardWorker(Worker):
         if self.enable_offload:
             self.model.to("cpu")
 
-    @Worker.timer("compute_image_rewards")
-    def _compute_image_rewards(self, images: torch.Tensor):
+    @Worker.timer("compute_threshold_image_rewards")
+    def compute_threshold_image_rewards(self, images: torch.Tensor):
+        """Compute binary image rewards by thresholding model probabilities."""
         if isinstance(images, np.ndarray):
             images = torch.from_numpy(images)
 
@@ -331,6 +332,7 @@ class EmbodiedRewardWorker(Worker):
 
         return rewards
 
+    @Worker.timer("compute_image_rewards")
     def compute_image_rewards(
         self, images: torch.Tensor | np.ndarray
     ) -> torch.Tensor | np.ndarray:
@@ -367,7 +369,7 @@ class EmbodiedRewardWorker(Worker):
                 env_decoupled_mode=self.env_decoupled_mode,
             ).async_wait()
             merged_images = merged_data.get("images")
-            rewards = self._compute_image_rewards(images=merged_images)
+            rewards = self.compute_threshold_image_rewards(images=merged_images)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
