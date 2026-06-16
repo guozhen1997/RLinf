@@ -34,7 +34,7 @@ class CommMapper:
         """Compute destination ranks and transfer sizes for one source rank."""
         # in decoupled mode, the src_world_size and dst_world_size are the world size of the source and destination workers.
         # the batch_size is the total batch size of the source workers.
-        # the return value is a list of batch sizes for thi rank destination to send batch split size.
+        # the return value is a list of batch sizes for this rank destination to send batch split size.
         # the queue_size is the size of the queue to be split.
         # split_size will be the larger of src_world_size and dst_world_size.
         # The queue length for workers with a larger quantity is 1,
@@ -47,8 +47,7 @@ class CommMapper:
         )
 
         if src_world_size >= dst_world_size:
-            # Execute the following code when src_world_size == 1 and dst_world_size == 1.
-            # the src_world_size > dst_world_size
+            # the src_world_size >= dst_world_size
             # for example, src_world_size = 4, dst_world_size = 2, split_size = 4, batch_size = 32
             # the rank 0 [8] rank1 [8] rank2 [8] rank3 [8]
             return [batch_size // split_size]
@@ -56,7 +55,7 @@ class CommMapper:
             assert dst_world_size > src_world_size, (
                 f"dst_world_size ({dst_world_size}) must more than src_world_size ({src_world_size})."
             )
-            # the dst_world_size > src_world_size
+            # the src_world_size < dst_world_size
             # for example, src_world_size = 2, dst_world_size = 8, split_size = 8, batch_size = 32
             # the rank 0 [4, 4, 4, 4] rank1 [4, 4, 4, 4]
             if queue_size <= 0:
