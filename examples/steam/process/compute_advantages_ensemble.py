@@ -115,17 +115,17 @@ from rlinf.data.datasets.steam.pair_dataset import (  # noqa: E402
     BinaryPairDataCollator,
     BinaryPairInferenceDataset,
 )
+from rlinf.data.process.distributed import (  # noqa: E402
+    cleanup_distributed,
+    gather_dataframes_to_rank0,
+    get_shard_indices,
+    setup_distributed,
+)
 from rlinf.models.embodiment.steam.ensemble_modeling_critic import (  # noqa: E402
     EnsembleSteamCriticModel,
 )
 from rlinf.models.embodiment.steam.modeling_critic import (  # noqa: E402
     SteamCriticModel,
-)
-from rlinf.utils.dist_inference import (  # noqa: E402
-    cleanup_distributed,
-    gather_all_advantages,
-    get_shard_indices,
-    setup_distributed,
 )
 
 
@@ -557,7 +557,7 @@ def _run_inference_for_dataset(
     local_df = pd.DataFrame(local_rows)
     if world_size > 1:
         dist.barrier()
-        df = gather_all_advantages(local_df, rank, world_size)
+        df = gather_dataframes_to_rank0(local_df, rank, world_size)
     else:
         df = local_df
 

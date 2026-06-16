@@ -143,7 +143,7 @@ def get_shard_indices(
     return start, end
 
 
-def gather_all_advantages(
+def gather_dataframes_to_rank0(
     local_df: pd.DataFrame, rank: int, world_size: int
 ) -> pd.DataFrame:
     """Gather per-rank result frames to a single, sorted DataFrame.

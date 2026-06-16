@@ -58,13 +58,13 @@ from rlinf.data.datasets.recap.utils import (
     load_return_stats_from_dataset,
     load_returns_sidecar,
 )
-from rlinf.models.embodiment.value_model.modeling_critic import ValueCriticModel
-from rlinf.utils.dist_inference import (
+from rlinf.data.process.distributed import (
     cleanup_distributed,
-    gather_all_advantages,
+    gather_dataframes_to_rank0,
     get_shard_indices,
     setup_distributed,
 )
+from rlinf.models.embodiment.value_model.modeling_critic import ValueCriticModel
 
 logger = logging.getLogger(__name__)
 
@@ -1041,7 +1041,7 @@ def main(cfg: DictConfig) -> None:
 
             if world_size > 1:
                 dist.barrier()
-                df = gather_all_advantages(local_df, rank, world_size)
+                df = gather_dataframes_to_rank0(local_df, rank, world_size)
             else:
                 df = local_df
 
