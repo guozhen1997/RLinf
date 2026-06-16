@@ -64,7 +64,6 @@ data:
   camera_keys:
     - image
     - wrist_image
-  state_key: state
 
   # Pair sampling — same k for positive and negative. Negatives are
   # positive pairs fed in reversed order.
@@ -108,9 +107,6 @@ actor:
     tokenizer_path: "/path/to/gemma/tokenizer"
     freeze_vision_encoder: false
     freeze_language_model: false
-    include_state_in_prompt: false
-    max_state_dim: 32
-    state_discretization_bins: 256
     max_token_len: 200
     ensemble_size: 4
     inference_mode: "wco"

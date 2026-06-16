@@ -2,9 +2,9 @@
 
 Robust value model for VLA offline RL, built to sidestep the
 frame-index shortcut that plagues scalar progress regression. Takes a pair
-``(frame_t, frame_{t+k})`` with a fixed language instruction (and optional
-proprio state) and predicts whether the pair is **progress** (forward in
-a success demo) or **regress** (a rewound counterfactual).
+``(frame_t, frame_{t+k})`` with a fixed language instruction and predicts
+whether the pair is **progress** (forward in a success demo) or **regress**
+(a rewound counterfactual).
 
 The folder structure mirrors the sibling `value_model/` on purpose —
 same file roles, same public entry points, same observation-dict contract
@@ -134,9 +134,6 @@ more views (wrist / head / external) without touching the head dim.
 * `model.label_smoothing` — CE label smoothing (paper default 0.05).
 * `model.freeze_language_model` — defaults to `true` (single-task, fixed
   instruction).
-* `model.include_state_in_prompt` — if `true`, the dataset threads proprio
-  state into the prompt via the processor's digitisation path (requires
-  the upstream state to already be normalised into `[-1, 1]`).
 
 ---
 

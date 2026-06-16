@@ -15,8 +15,8 @@
 """Backbone for the STEAM binary pair classifier.
 
 This module owns the neural architecture for deciding whether a pair
-``(frame_t, frame_{t+k})`` drawn with an optional proprio state came from
-a forward success demo (**progress**) or a rewound demo (**regress**).
+``(frame_t, frame_{t+k})`` came from a forward success demo (**progress**)
+or a rewound demo (**regress**).
 
 The stack is a SigLIP vision encoder + Gemma3 language backbone + an MLP
 head, with a forward path designed *for pair classification* rather than

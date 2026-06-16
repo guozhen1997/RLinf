@@ -306,13 +306,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             image_processor=image_processor,
             tokenizer_name_or_path=tokenizer_path,
             max_token_len=int(getattr(model_cfg, "max_token_len", 200)),
-            include_state_in_prompt=bool(
-                getattr(model_cfg, "include_state_in_prompt", True)
-            ),
-            max_state_dim=int(getattr(model_cfg, "max_state_dim", 32)),
-            state_discretization_bins=int(
-                getattr(model_cfg, "state_discretization_bins", 256)
-            ),
         )
         self.processor = processor
         max_token_len = int(getattr(model_cfg, "max_token_len", 200))
@@ -447,11 +440,6 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                     )
                 ),
                 k=k,
-                include_state=bool(
-                    getattr(model_cfg, "include_state_in_prompt", False)
-                ),
-                state_max_dim=int(getattr(model_cfg, "max_state_dim", 32)),
-                state_key=str(data_cfg.get("state_key", "state")),
                 dataset_type=dataset_type,
                 only_success=only_success,
                 open_rewind=open_rewind,

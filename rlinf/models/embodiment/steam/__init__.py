@@ -61,9 +61,6 @@ _STEAM_CONFIG_DEFAULTS: dict[str, Any] = {
     "freeze_language_model": True,
     "use_gradient_checkpointing": False,
     "max_token_len": 200,
-    "include_state_in_prompt": True,
-    "max_state_dim": 32,
-    "state_discretization_bins": 256,
 }
 
 assert all(
@@ -312,8 +309,7 @@ def get_model(
             - precision (one of bf16/fp32/fp16)
             - freeze_vision_encoder, freeze_language_model
             - use_gradient_checkpointing
-            - max_token_len, include_state_in_prompt, max_state_dim,
-              state_discretization_bins
+            - max_token_len
             - model_path: optional fine-tuned checkpoint path
         torch_dtype: unused, kept for interface parity with
             ``value_model.get_value_model``.

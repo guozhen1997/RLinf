@@ -17,8 +17,7 @@
 Thin subclasses of the shared base in
 :mod:`rlinf.models.embodiment.common.image_text_processing`. The value model
 emits BCHW images in the SigLIP-normalised ``[-1, 1]`` range at a fixed
-224x224 resolution and uses the plain ``Task: {prompt}.`` prompt template with
-no state-in-prompt.
+224x224 resolution and uses the plain ``Task: {prompt}.`` prompt template.
 
 All prefix tokens use bidirectional attention. The value model's expert head
 predicts the value via a [CLS] token appended at the model level, not here.
@@ -59,8 +58,6 @@ class ValueProcessor(BaseValueTextProcessor):
     image_processor_class = "ValueImageProcessor"
     _default_image_processor_cls: ClassVar[Optional[type]] = ValueImageProcessor
     text_template: str = "Task: {prompt}."
-    state_template: Optional[str] = None
-    default_include_state_in_prompt: bool = False
 
 
 __all__ = [

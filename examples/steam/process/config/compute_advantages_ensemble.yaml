@@ -62,11 +62,6 @@ data:
     - face_view
     - left_wrist_view
     - right_wrist_view
-  state_key: state
-
-  # Must match training-time include_state_in_prompt.
-  include_state_in_prompt: false
-  max_state_dim: 32
 
   prompt: "perform the task"
 

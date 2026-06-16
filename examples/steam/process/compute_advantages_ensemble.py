@@ -110,10 +110,10 @@ from omegaconf import DictConfig, OmegaConf  # noqa: E402
 from torch.utils.data import DataLoader, Dataset, Subset  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
+from rlinf.data.datasets.steam.binning import expected_signed_stride  # noqa: E402
 from rlinf.data.datasets.steam.pair_dataset import (  # noqa: E402
     BinaryPairDataCollator,
     BinaryPairInferenceDataset,
-    expected_signed_stride,
 )
 from rlinf.models.embodiment.steam.ensemble_modeling_critic import (  # noqa: E402
     EnsembleSteamCriticModel,
@@ -487,20 +487,11 @@ def _run_inference_for_dataset(
     device: str,
 ) -> pd.DataFrame:
     """Run ensemble inference on one dataset; return a sorted DataFrame on rank 0."""
-    include_state = bool(
-        getattr(model.config, "include_state_in_prompt", False)
-        or cfg.data.get("include_state_in_prompt", False)
-    )
     dataset = BinaryPairInferenceDataset(
         dataset_path=dataset_entry.dataset_path,
         camera_keys=list(cfg.data.camera_keys),
         k=int(cfg.data.k),
         prompt=cfg.data.get("prompt", None),
-        include_state=include_state,
-        state_max_dim=int(
-            getattr(model.config, "max_state_dim", cfg.data.get("max_state_dim", 32))
-        ),
-        state_key=str(cfg.data.get("state_key", "state")),
         dataset_type=dataset_entry.type,
     )
 
@@ -807,11 +798,10 @@ def main(cfg: DictConfig) -> None:
     if rank == 0:
         logger.info(
             "Ensemble loaded: ensemble_size=%d, inference_mode=%s, "
-            "max_token_len=%d, include_state_in_prompt=%s",
+            "max_token_len=%d",
             int(model.config.ensemble_size),
             str(model.config.inference_mode),
             int(getattr(model.config, "max_token_len", 200)),
-            bool(getattr(model.config, "include_state_in_prompt", False)),
         )
 
     try:

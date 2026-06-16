@@ -14,8 +14,8 @@
 
 """STEAM value model configuration.
 
-Shares the SigLIP + Gemma3 backbone knobs and state-in-prompt fields with
-the sibling embodied value models, but:
+Shares the SigLIP + Gemma3 backbone knobs with the sibling embodied value
+models, but:
 
 * the categorical-value fields (``num_bins`` / ``bin_min`` / ``bin_max``) are
   replaced by ``label_smoothing`` because the head is a single-logit binary
@@ -128,11 +128,8 @@ class SteamConfig(PretrainedConfig):
         freeze_vision_encoder: bool = False,
         freeze_language_model: bool = True,
         use_gradient_checkpointing: bool = False,
-        # Interface compat for SteamProcessor (state-in-prompt)
+        # Prompt tokenization length (SteamProcessor interface compat).
         max_token_len: int = 200,
-        include_state_in_prompt: bool = True,
-        max_state_dim: int = 32,
-        state_discretization_bins: int = 256,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -162,9 +159,6 @@ class SteamConfig(PretrainedConfig):
         self.use_gradient_checkpointing = use_gradient_checkpointing
 
         self.max_token_len = max_token_len
-        self.include_state_in_prompt = include_state_in_prompt
-        self.max_state_dim = max_state_dim
-        self.state_discretization_bins = state_discretization_bins
 
         self._validate()
 
@@ -217,10 +211,6 @@ class SteamConfig(PretrainedConfig):
             )
         if self.max_token_len <= 0:
             raise ValueError("max_token_len must be > 0")
-        if self.max_state_dim <= 0:
-            raise ValueError("max_state_dim must be > 0")
-        if self.state_discretization_bins < 2:
-            raise ValueError("state_discretization_bins must be >= 2")
 
     def to_diff_dict(self) -> dict:
         """Return a full config dict without instantiating an empty default config.

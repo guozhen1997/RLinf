@@ -34,15 +34,8 @@ freeze_vision_encoder: false
 freeze_language_model: false
 use_gradient_checkpointing: false
 
-# Prompt + state-in-prompt. When true, the processor
-# builds "Task: {task}, State: {b0 b1 ... bN}\nValue: " from the
-# dataset-provided state. Requires that state reaches the processor already
-# normalised into [-1, 1] (dataset's responsibility; the PairDataset does
-# not normalise).
+# Prompt tokenization length.
 max_token_len: 200
-include_state_in_prompt: false
-max_state_dim: 32
-state_discretization_bins: 256
 
 # Optional: previously trained SteamCriticModel checkpoint to resume.
 # model_path: "/path/to/checkpoint"

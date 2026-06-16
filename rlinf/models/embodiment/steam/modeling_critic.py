@@ -518,10 +518,7 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         language_repo_id: Optional[str] = None,
         fusion_hidden_dim: Optional[int] = None,
         dropout: Optional[float] = None,
-        # State-in-prompt and interface compat — must match training config.
-        include_state_in_prompt: Optional[bool] = None,
-        max_state_dim: Optional[int] = None,
-        state_discretization_bins: Optional[int] = None,
+        # Prompt tokenization length — must match training config.
         max_token_len: Optional[int] = None,
         **kwargs,
     ) -> "SteamCriticModel | EnsembleSteamCriticModel":
@@ -567,9 +564,6 @@ ensemble_modeling_critic.EnsembleSteamCriticModel` wrapper when
             "ensemble_head_seed_base": ensemble_head_seed_base,
             "fusion_hidden_dim": fusion_hidden_dim,
             "dropout": dropout,
-            "include_state_in_prompt": include_state_in_prompt,
-            "max_state_dim": max_state_dim,
-            "state_discretization_bins": state_discretization_bins,
             "max_token_len": max_token_len,
         }
         for key, value in optional_overrides.items():
@@ -629,21 +623,10 @@ ensemble_modeling_critic.EnsembleSteamCriticModel` wrapper when
                 model_image_size,
             )
 
-        # Read state-in-prompt fields off the just-constructed model.config so
-        # inference-time prompt construction matches what the model was trained
-        # on. Backward-compat defaults kick in when the checkpoint predates
-        # these fields.
         processor = SteamProcessor(
             image_processor=image_processor,
             tokenizer=tokenizer,
             max_token_len=getattr(model.config, "max_token_len", 200),
-            include_state_in_prompt=getattr(
-                model.config, "include_state_in_prompt", True
-            ),
-            max_state_dim=getattr(model.config, "max_state_dim", 32),
-            state_discretization_bins=getattr(
-                model.config, "state_discretization_bins", 256
-            ),
         )
 
         model.attach_runtime_assets(

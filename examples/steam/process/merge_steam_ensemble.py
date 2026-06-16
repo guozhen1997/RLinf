@@ -66,8 +66,6 @@ CONFIG_COMPAT_KEYS = (
     "stride_k",
     "fusion_hidden_dim",
     "num_frames_per_pair",
-    "include_state_in_prompt",
-    "max_state_dim",
     "vision_repo_id",
     "language_repo_id",
     "precision",

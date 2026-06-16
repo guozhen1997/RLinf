@@ -23,10 +23,7 @@ value-model flavour, STEAM:
       normalisation — keeping the vision encoder swappable;
     * uses the vision encoder's native resolution (default 384x384), not a
       fixed 224x224;
-    * uses the ``Task: {prompt}\\nValue: `` template, with an optional
-      state-in-prompt branch (``Task: {prompt}, State: {b0 ... bN}\\nValue: ``).
-      The state branch is wired but stays off unless the dataset actually loads
-      per-sample state.
+    * uses the ``Task: {prompt}\\nValue: `` template.
 
 The camera-view time axis (frame_t vs frame_{t+k}) is handled outside the
 processor by the pair collator, which runs ``process_images`` once per frame
@@ -72,18 +69,11 @@ class SteamImageProcessor(BaseMultiViewImageProcessor):
 
 
 class SteamProcessor(BaseValueTextProcessor):
-    """STEAM value model processor.
-
-    Text template ``Task: {prompt}\\nValue: ``; optional state-in-prompt
-    ``Task: {prompt}, State: {b0 b1 ... bN}\\nValue: `` where each ``bi`` is the
-    integer bucket index of the corresponding state dim.
-    """
+    """STEAM value model processor. Text template: ``Task: {prompt}\\nValue: ``."""
 
     image_processor_class = "SteamImageProcessor"
     _default_image_processor_cls: ClassVar[Optional[type]] = SteamImageProcessor
     text_template: str = "Task: {prompt}\nValue: "
-    state_template: str = "Task: {prompt}, State: {state}\nValue: "
-    default_include_state_in_prompt: bool = True
 
 
 __all__ = [

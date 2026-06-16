@@ -22,8 +22,6 @@ Dataset contract (``__getitem__``):
         "image_mask_t":  {cam_name: bool, ...},
         "image_mask_tk": {cam_name: bool, ...},
         "prompt": str,
-        "state":    Optional[np.ndarray],  # proprio at t (for state-in-prompt)
-        "state_tk": Optional[np.ndarray],  # proprio at t+k (reserved)
         "label": int,                      # long bin index in [0, num_bins); binary: 0 = regress, 1 = progress
         "episode": int,
         "frame_idx_t": int,
@@ -53,6 +51,13 @@ from typing import Any, Callable, Optional, Sequence
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+from .binning import (
+    _positive_stride_to_bin,
+    _scaled_positive_stride_to_bin,
+    _scaled_signed_stride_to_bin,
+    _signed_stride_to_bin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,21 +95,13 @@ def _isolate_hf_datasets_cache_for_process() -> None:
 
 # Camera-view aliases tried against raw LeRobot sample dicts. Callers pass
 # a plain camera key (e.g. ``image``) and the dataset probes the standard
-# LeRobot path templates. Unlike the camera axis, state only has a single
-# canonical field, so its alias list is shorter.
+# LeRobot path templates.
 _IMAGE_KEY_ALIASES = (
     "{key}",
     "observation/{key}",
     "observation.{key}",
     "observation.images.{key}",
     "observation/images/{key}",
-)
-_STATE_KEY_ALIASES = (
-    "{key}",
-    "observation/{key}",
-    "observation.{key}",
-    "observation.state",
-    "observation/state",
 )
 
 
@@ -157,205 +154,6 @@ def _to_uint8_hwc(frame: Any) -> np.ndarray:
     return arr.astype(np.uint8)
 
 
-def _to_float32_1d(state: Any, *, max_dim: Optional[int] = None) -> np.ndarray:
-    """Normalise state to a rank-1 float32 array, optionally truncated/padded."""
-    arr = _to_float32_array(state).reshape(-1)
-    if max_dim is None:
-        return arr
-    if arr.shape[0] > max_dim:
-        return arr[:max_dim]
-    if arr.shape[0] < max_dim:
-        padded = np.zeros((max_dim,), dtype=np.float32)
-        padded[: arr.shape[0]] = arr
-        return padded
-    return arr
-
-
-def _to_float32_array(value: Any) -> np.ndarray:
-    """Convert tensor/list/scalar-like state payloads to float32 numpy."""
-    if isinstance(value, torch.Tensor):
-        return value.detach().cpu().numpy().astype(np.float32, copy=False)
-    return np.asarray(value, dtype=np.float32)
-
-
-# ---------------------------------------------------------------------------
-# Signed-stride → bin mapping (multi-bin mode)
-# ---------------------------------------------------------------------------
-
-
-def _signed_stride_to_bin(stride: int, K: int, num_bins: int) -> int:
-    """Map a signed stride in ``{-K,...,-1,1,...,K}`` to a bin index.
-
-    Layout:
-        * ``pos = stride + K``         if stride < 0  (pos ∈ [0, K))
-        * ``pos = stride + K - 1``     if stride > 0  (pos ∈ [K, 2K))
-        * ``bin_idx = (pos * num_bins) // (2 * K)``   in [0, num_bins)
-
-    With ``num_bins`` even and ``2K % num_bins == 0`` (enforced at
-    :class:`PairDataset` construction), the sign split lands exactly at
-    ``num_bins // 2``: bins ``[0, num_bins // 2)`` are regressive and
-    bins ``[num_bins // 2, num_bins)`` are progressive.
-
-    Raises:
-        ValueError: if ``stride == 0`` (sampling excludes zero strides)
-            or if ``abs(stride) > K``.
-    """
-    if stride == 0:
-        raise ValueError(
-            "_signed_stride_to_bin does not accept stride == 0; the multi-bin "
-            "sampling path skips i == 0."
-        )
-    if abs(stride) > K:
-        raise ValueError(
-            f"_signed_stride_to_bin requires |stride| <= K, got stride={stride}, K={K}."
-        )
-    pos = stride + K if stride < 0 else stride + K - 1
-    return int((pos * num_bins) // (2 * K))
-
-
-def _positive_stride_to_bin(stride: int, K: int, num_bins: int) -> int:
-    """Map a positive stride in ``{1,...,K}`` to a positive-only bin index."""
-    if stride < 1 or stride > K:
-        raise ValueError(
-            f"_positive_stride_to_bin requires 1 <= stride <= K, "
-            f"got stride={stride}, K={K}."
-        )
-    if num_bins < 1 or num_bins > K or K % num_bins != 0:
-        raise ValueError(
-            f"positive-only bins require 1 <= num_bins <= K and K % num_bins == 0; "
-            f"got K={K}, num_bins={num_bins}."
-        )
-    return int(((stride - 1) * num_bins) // K)
-
-
-def _scaled_signed_stride_to_bin(scaled_stride: float, K: int, num_bins: int) -> int:
-    """Bin a length-scaled signed stride over ``[-K, K]`` (bin width ``2K/num_bins``).
-
-    The scaled stride ``signed_stride * L_max / L_ep`` is rounded to the nearest
-    integer-equivalent stride, clamped to ``[-K, K] \\ {0}`` with the sign
-    preserved, then mapped through :func:`_signed_stride_to_bin` — the *same*
-    layout (and resolution) as the unscaled path. Consequences:
-
-    * An episode of length ``L_max`` (``scale == 1``) reproduces the unscaled
-      bins exactly.
-    * Shorter episodes (``scale > 1``) push a fixed frame stride into a higher
-      progress bin and saturate at ``±K`` earlier — a stride covering fraction
-      ``K / L_max`` of its episode already hits the extreme bin.
-    * Longer episodes (``scale < 1``) under-reach: their max stride lands below
-      the extreme bin.
-
-    Only the position on the ``±K`` axis is length-dependent; the regress/
-    progress split at ``half`` is preserved, so the model loss and the
-    bin-index decoders (``_predicted_signed_value``) stay unchanged.
-    """
-    s = int(round(float(scaled_stride)))
-    if s == 0:  # a non-zero stride must keep a direction, never "no progress"
-        s = 1 if scaled_stride > 0 else -1
-    s = max(-int(K), min(int(K), s))
-    return _signed_stride_to_bin(s, int(K), num_bins)
-
-
-def _scaled_positive_stride_to_bin(scaled_stride: float, K: int, num_bins: int) -> int:
-    """Positive-only analogue of :func:`_scaled_signed_stride_to_bin`.
-
-    Rounds ``|scaled_stride|`` to the nearest integer stride, clamps to
-    ``[1, K]``, then maps via :func:`_positive_stride_to_bin`.
-    """
-    s = int(round(abs(float(scaled_stride))))
-    s = max(1, min(int(K), s))
-    return _positive_stride_to_bin(s, int(K), num_bins)
-
-
-def bin_centers(K: int, num_bins: int) -> np.ndarray:
-    """Return the ``[num_bins]`` signed-stride centers for the bin layout.
-
-    Each bin owns a contiguous set of ``strides_per_bin = 2K / num_bins``
-    signed strides; the center is their arithmetic mean. By construction
-    :func:`_signed_stride_to_bin` maps every stride into the bin whose
-    center is closest (for even ``strides_per_bin`` the boundary ties
-    are absorbed by the half-integer offsets).
-
-    Examples:
-        * ``K=8, num_bins=8``  → ``[-7.5, -5.5, -3.5, -1.5, 1.5, 3.5, 5.5, 7.5]``
-        * ``K=4, num_bins=4``  → ``[-3.5, -1.5, 1.5, 3.5]``
-        * ``K=K, num_bins=2``  → ``[-K/2, K/2]`` — binary degenerate:
-          :math:`E[s] / K = 2 \\cdot p_\\text{progress} - 1`, matching
-          the existing ``2·P − 1`` signed-confidence derivation.
-
-    Raises:
-        ValueError: ``num_bins`` not even or ``2K % num_bins != 0``.
-    """
-    if num_bins < 2 or num_bins % 2 != 0:
-        raise ValueError(f"num_bins must be >= 2 and even, got {num_bins}")
-    if (2 * K) % num_bins != 0:
-        raise ValueError(
-            f"bin_centers requires 2*K to be a multiple of num_bins; "
-            f"got K={K}, num_bins={num_bins} (2K={2 * K})."
-        )
-    strides_per_bin = (2 * K) // num_bins
-    half = num_bins // 2
-    # Regressive bins: cover signed strides [-K, -1] in order.
-    # Progressive bins: cover signed strides [1, K] in order.
-    # Center of a regressive bin b ∈ [0, half): midpoint of its
-    # strides_per_bin consecutive strides starting at -K + b * strides_per_bin.
-    # Center of a progressive bin b ∈ [half, num_bins): midpoint starting
-    # at 1 + (b - half) * strides_per_bin.
-    centers = np.empty(num_bins, dtype=np.float32)
-    for b in range(num_bins):
-        if b < half:
-            low = -K + b * strides_per_bin
-        else:
-            low = 1 + (b - half) * strides_per_bin
-        high = low + strides_per_bin - 1
-        centers[b] = (low + high) / 2.0
-    return centers
-
-
-def positive_bin_centers(K: int, num_bins: int) -> np.ndarray:
-    """Return ``[num_bins]`` positive-stride centers for positive-only mode."""
-    if num_bins < 1 or num_bins > K or K % num_bins != 0:
-        raise ValueError(
-            f"positive_bin_centers requires 1 <= num_bins <= K and "
-            f"K % num_bins == 0; got K={K}, num_bins={num_bins}."
-        )
-    strides_per_bin = K // num_bins
-    centers = np.empty(num_bins, dtype=np.float32)
-    for b in range(num_bins):
-        low = 1 + b * strides_per_bin
-        high = low + strides_per_bin - 1
-        centers[b] = (low + high) / 2.0
-    return centers
-
-
-def expected_signed_stride(probs, K: int, num_bins: int):
-    """Return ``E[s] = Σ_b probs[..., b] * bin_centers[b]``.
-
-    Backend-polymorphic: if ``probs`` is a :class:`torch.Tensor` the
-    computation stays on the input's device / dtype; otherwise falls
-    back to numpy. The last dim of ``probs`` must equal ``num_bins``.
-
-    For the binary degenerate case ``num_bins == 2``, equals
-    ``K * (probs[..., 1] - probs[..., 0]) = K * (2·p_progress - 1)``.
-    Dividing by ``K`` gives a ``[-1, 1]``-range signed confidence score
-    consistent with the cumulative-progress integrator used in the
-    visualize script.
-    """
-    centers_np = bin_centers(K, num_bins)
-    if isinstance(probs, torch.Tensor):
-        if probs.shape[-1] != num_bins:
-            raise ValueError(
-                f"probs last dim must be num_bins={num_bins}, got {tuple(probs.shape)}"
-            )
-        centers_t = torch.as_tensor(centers_np, dtype=probs.dtype, device=probs.device)
-        return (probs * centers_t).sum(dim=-1)
-    probs_np = np.asarray(probs)
-    if probs_np.shape[-1] != num_bins:
-        raise ValueError(
-            f"probs last dim must be num_bins={num_bins}, got {probs_np.shape}"
-        )
-    return (probs_np * centers_np).sum(axis=-1)
-
-
 # ---------------------------------------------------------------------------
 # Trajectory sources
 # ---------------------------------------------------------------------------
@@ -383,14 +181,6 @@ class TrajectorySource:
     ) -> Optional[np.ndarray]:
         """Return a view from an already-loaded raw sample."""
         del sample, camera_key
-        raise NotImplementedError
-
-    def get_state(self, episode: int, frame: int, state_key: str) -> np.ndarray:
-        raise NotImplementedError
-
-    def get_state_from_sample(self, sample: dict, state_key: str) -> np.ndarray:
-        """Return state from an already-loaded raw sample."""
-        del sample, state_key
         raise NotImplementedError
 
     def get_raw_sample(self, episode: int, frame: int) -> dict:
@@ -447,18 +237,11 @@ class _LeRobotSource(TrajectorySource):
         dataset_type: str,
     ) -> None:
         _isolate_hf_datasets_cache_for_process()
-        try:
-            from lerobot.common.datasets.lerobot_dataset import (  # noqa: E501
-                LeRobotDataset,
-                LeRobotDatasetMetadata,
-            )
-            from lerobot.common.datasets.utils import hf_transform_to_torch
-        except ImportError:  # pragma: no cover — older lerobot layout
-            from lerobot.common.datasets.lerobot_dataset import (  # noqa: E501
-                LeRobotDataset,
-                LeRobotDatasetMetadata,
-            )
-            from lerobot.common.datasets.utils import hf_transform_to_torch
+        from lerobot.common.datasets.lerobot_dataset import (
+            LeRobotDataset,
+            LeRobotDatasetMetadata,
+        )
+        from lerobot.common.datasets.utils import hf_transform_to_torch
         from PIL import Image as PILImage
 
         local_path = Path(dataset_path).absolute()
@@ -469,7 +252,6 @@ class _LeRobotSource(TrajectorySource):
         )
         self._only_success = bool(only_success)
         self.dataset_type = dataset_type
-        self._state_column_cache: dict[str, Any] = {}
 
         eps = self.base.episode_data_index
         self._ep_starts = [int(x) for x in eps["from"].tolist()]
@@ -592,28 +374,6 @@ class _LeRobotSource(TrajectorySource):
             return None
         return _to_uint8_hwc(raw)
 
-    def get_state(self, episode: int, frame: int, state_key: str) -> np.ndarray:
-        global_idx = self._ep_starts[episode] + int(frame)
-        if state_key not in self._state_column_cache:
-            self._state_column_cache[state_key] = None
-            for template in _STATE_KEY_ALIASES:
-                resolved = template.format(key=state_key)
-                if resolved in self.base.hf_dataset.column_names:
-                    self._state_column_cache[state_key] = (
-                        self.base.hf_dataset.data.column(resolved)
-                    )
-                    break
-        state_column = self._state_column_cache[state_key]
-        if state_column is not None:
-            raw = state_column[global_idx].as_py()
-            return _to_float32_1d(raw)
-        sample = self._sample(episode, frame)
-        return self.get_state_from_sample(sample, state_key)
-
-    def get_state_from_sample(self, sample: dict, state_key: str) -> np.ndarray:
-        raw = _resolve_alias(sample, state_key, _STATE_KEY_ALIASES)
-        return _to_float32_1d(raw)
-
     def get_raw_sample(self, episode: int, frame: int) -> dict:
         return self._sample(episode, frame)
 
@@ -721,11 +481,133 @@ class _LeRobotSource(TrajectorySource):
 
 
 # ---------------------------------------------------------------------------
+# Shared pair-dataset base
+# ---------------------------------------------------------------------------
+
+
+class _BasePairDataset(Dataset):
+    """Shared trajectory-pair indexing for the train and inference datasets.
+
+    Holds the logic common to :class:`PairDataset` (training) and
+    :class:`BinaryPairInferenceDataset` (inference): the flat-index →
+    ``(episode, t, t+k)`` anchor mapping over eligible episodes, and the
+    per-frame view / prompt loading. Subclasses are expected to set
+    ``self._source`` (a :class:`TrajectorySource`), ``self._eligible`` (the
+    trained/scored episode ids), ``self.camera_keys``, ``self.k`` and
+    ``self.source_name``, then
+    call :meth:`_init_anchor_index`. An optional ``self.prompt`` attribute, if
+    present and non-``None``, is used as the per-sample instruction fallback.
+    """
+
+    @property
+    def source(self) -> TrajectorySource:
+        return self._source
+
+    @property
+    def eligible_episodes(self) -> list[int]:
+        return list(self._eligible)
+
+    @property
+    def num_pair_positions(self) -> int:
+        """Number of distinct ``(episode, t)`` anchors before label duplication."""
+        return self._num_pair_positions
+
+    def _init_anchor_index(self) -> None:
+        """Build the cumulative anchor index over eligible episodes.
+
+        Each eligible episode contributes ``T_ep - 1`` temporal anchors
+        ``t ∈ [0, T_ep - 1)``; the cumulative sum lets ``__getitem__`` map a
+        flat index to ``(eligible-slot, t)`` in ``O(log |eligible|)`` via
+        :func:`numpy.searchsorted`.
+        """
+        pair_positions_per_episode = np.array(
+            [self._source.episode_length(ep) - 1 for ep in self._eligible],
+            dtype=np.int64,
+        )
+        self._pair_position_ends = np.cumsum(pair_positions_per_episode)
+        self._num_pair_positions = int(self._pair_position_ends[-1])
+
+    def _resolve_pair_position(self, pair_position: int) -> tuple[int, int, int]:
+        """Map a pair-position index to ``(episode, t, t_plus_k)``.
+
+        ``t_plus_k`` uses the boundary clamp: when ``t + k`` overruns the
+        episode the second slot collapses to the last frame ``T - 1`` (stride
+        degrades to ``T - 1 - t < k``).
+        """
+        if pair_position < 0 or pair_position >= self._num_pair_positions:
+            raise IndexError(pair_position)
+        episode_slot = int(
+            np.searchsorted(self._pair_position_ends, pair_position, side="right")
+        )
+        prev_episode_end = (
+            int(self._pair_position_ends[episode_slot - 1]) if episode_slot > 0 else 0
+        )
+        episode = int(self._eligible[episode_slot])
+        t = int(pair_position - prev_episode_end)
+        t_plus_k = min(t + self.k, self._source.episode_length(episode) - 1)
+        return episode, t, t_plus_k
+
+    def _load_views(
+        self,
+        episode: int,
+        frame_idx: int,
+        *,
+        sample: Optional[dict] = None,
+    ) -> tuple[dict[str, np.ndarray], dict[str, bool]]:
+        views: dict[str, np.ndarray] = {}
+        masks: dict[str, bool] = {}
+        for camera_key in self.camera_keys:
+            view = (
+                self._source.get_view_from_sample(sample, camera_key)
+                if sample is not None
+                else self._source.get_view(episode, frame_idx, camera_key)
+            )
+            if view is None:
+                masks[camera_key] = False
+            else:
+                views[camera_key] = view
+                masks[camera_key] = True
+        return views, masks
+
+    def _resolve_prompt(self, episode: int, frame_idx: int) -> str:
+        """Return the per-sample task instruction; raises if missing."""
+        prompt = self._source.get_prompt(episode, frame_idx)
+        return self._prompt_or_fallback(prompt, episode, frame_idx)
+
+    def _resolve_prompt_from_sample(
+        self,
+        sample: dict,
+        episode: int,
+        frame_idx: int,
+    ) -> str:
+        """Return the per-sample task instruction from an already-loaded sample."""
+        prompt = self._source.get_prompt_from_sample(sample, episode, frame_idx)
+        return self._prompt_or_fallback(prompt, episode, frame_idx)
+
+    def _prompt_or_fallback(
+        self,
+        prompt: Optional[str],
+        episode: int,
+        frame_idx: int,
+    ) -> str:
+        if prompt:
+            return prompt
+        fallback = getattr(self, "prompt", None)
+        if fallback is None:
+            raise RuntimeError(
+                f"No per-episode task instruction for episode={episode} "
+                f"frame={frame_idx} in {self.source_name!r} and no fallback "
+                "prompt was provided."
+            )
+        return fallback
+
+
+# ---------------------------------------------------------------------------
 # Pair dataset
 # ---------------------------------------------------------------------------
 
 
-class PairDataset(Dataset):
+class PairDataset(_BasePairDataset):
     """Yields ``(frame_t, frame_{t+k})`` pairs with multi-view per frame.
 
     Args:
@@ -736,10 +618,6 @@ class PairDataset(Dataset):
             with zero placeholders (mask=False). Default:
             ``("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")``.
         k: Forward pair stride.
-        include_state: If ``True``, samples carry ``state`` (proprio at
-            ``t``) and ``state_tk`` (reserved).
-        state_max_dim: Pad / truncate state to this dim.
-        state_key: Fuzzy LeRobot state alias.
         dataset_type: Must be explicitly provided and be either ``"sft"``
             or ``"rollout"``. ``sft`` datasets are treated as all-success
             episodes, so they do not require an ``is_success`` column.
@@ -787,9 +665,6 @@ class PairDataset(Dataset):
             "right_wrist_0_rgb",
         ),
         k: int = 4,
-        include_state: bool = False,
-        state_max_dim: Optional[int] = None,
-        state_key: str = "state",
         dataset_type: Optional[str] = None,
         only_success: Optional[bool] = None,
         open_rewind: bool = True,
@@ -849,9 +724,6 @@ class PairDataset(Dataset):
                     "stride sign, so labels are unchanged. Set num_bins > 2 for "
                     "length-scaled multi-bin labels."
                 )
-        self.include_state = bool(include_state)
-        self.state_max_dim = state_max_dim
-        self.state_key = state_key
         self._rng: np.random.Generator | None = None
         self.source_name = str(dataset_path)
         if dataset_type is None:
@@ -903,20 +775,11 @@ class PairDataset(Dataset):
                 f"(dataset has {total_eps} episodes)."
             )
 
-        # Per-eligible-episode count of valid pair start positions
-        # t ∈ [0, T_ep - 1). For t in [0, T_ep - k) the pair is the regular
-        # (t, t+k); for t in [T_ep - k, T_ep - 1) the second slot is clamped
-        # to T_ep - 1 (boundary pair, stride < k). Cumulative sum lets
-        # __getitem__ map a flat index to (eligible-slot, t) in
-        # O(log |eligible|) via searchsorted.
-        pair_positions_per_episode = np.array(
-            [self._source.episode_length(ep) - 1 for ep in self._eligible],
-            dtype=np.int64,
-        )
-        self._pair_position_ends = np.cumsum(pair_positions_per_episode)
-        # Total number of distinct temporal anchors before we duplicate each
-        # anchor into its positive and negative training samples.
-        self._num_pair_positions = int(self._pair_position_ends[-1])
+        # Enumerate temporal anchors t ∈ [0, T_ep - 1) per eligible episode.
+        # For t in [0, T_ep - k) the pair is the regular (t, t+k); near the end
+        # the second slot is clamped to T_ep - 1 (boundary pair, stride < k).
+        # Each anchor is later duplicated into a positive and a negative sample.
+        self._init_anchor_index()
 
         # Resolve the per-dataset length-scale reference (L_max) as the
         # configured percentile of eligible-episode lengths, unless an explicit
@@ -926,7 +789,7 @@ class PairDataset(Dataset):
 
         logger.info(
             "PairDataset: dataset_path=%s, episodes=%d eligible=%d, k=%d, "
-            "num_bins=%d (%s mode), total_positions=%d, include_state=%s, "
+            "num_bins=%d (%s mode), total_positions=%d, "
             "dataset_type=%s, only_success=%s, open_rewind=%s, camera_keys=%s",
             self.source_name,
             total_eps,
@@ -937,28 +800,14 @@ class PairDataset(Dataset):
             if self.open_rewind and self.num_bins == 2
             else ("multi-bin" if self.open_rewind else "positive-only"),
             self._num_pair_positions,
-            self.include_state,
             self.dataset_type,
             self.only_success,
             self.open_rewind,
             self.camera_keys,
         )
 
-    @property
-    def source(self) -> TrajectorySource:
-        return self._source
-
-    @property
-    def eligible_episodes(self) -> list[int]:
-        return list(self._eligible)
-
     def set_epoch(self, epoch: int) -> None:
         del epoch  # no RNG state, retained for DataLoader wrapper compat
-
-    @property
-    def num_pair_positions(self) -> int:
-        """Number of distinct ``(episode, t)`` anchors before label duplication."""
-        return self._num_pair_positions
 
     @property
     def length_scale_reference(self) -> Optional[float]:
@@ -1036,52 +885,10 @@ class PairDataset(Dataset):
         is_positive = (idx % 2) == 0
         return pair_position, is_positive
 
-    def _resolve_pair_position(self, pair_position: int) -> tuple[int, int, int]:
-        """Map a pair-position index to ``(episode, t, t_plus_k)``."""
-        episode_slot = int(
-            np.searchsorted(self._pair_position_ends, pair_position, side="right")
-        )
-        prev_episode_end = (
-            int(self._pair_position_ends[episode_slot - 1]) if episode_slot > 0 else 0
-        )
-        episode = int(self._eligible[episode_slot])
-        t = int(pair_position - prev_episode_end)
-        # Boundary clamp: when t+k overruns the episode, use the last
-        # available frame as the second slot. Stride degrades to T-1-t < k.
-        t_plus_k = min(t + self.k, self._source.episode_length(episode) - 1)
-        return episode, t, t_plus_k
-
-    def _resolve_prompt(self, episode: int, frame_idx: int) -> str:
-        """Return the per-sample task instruction; raises if missing."""
-        return self._source.get_prompt(episode, frame_idx)
-
-    def _resolve_prompt_from_sample(
-        self,
-        sample: dict,
-        episode: int,
-        frame_idx: int,
-    ) -> str:
-        """Return the per-sample task instruction from an already-loaded sample."""
-        return self._source.get_prompt_from_sample(sample, episode, frame_idx)
-
     def _rng_for_worker(self) -> np.random.Generator:
         if self._rng is None:
             self._rng = np.random.default_rng()
         return self._rng
-
-    def _load_state(self, episode: int, frame_idx: int) -> np.ndarray:
-        """Load raw state and pad/truncate to max_state_dim."""
-        state = self._source.get_state(episode, frame_idx, self.state_key)
-        return self._normalize_loaded_state(state)
-
-    def _load_state_from_sample(self, sample: dict) -> np.ndarray:
-        """Load raw state from an already-loaded sample."""
-        state = self._source.get_state_from_sample(sample, self.state_key)
-        return self._normalize_loaded_state(state)
-
-    def _normalize_loaded_state(self, state: Any) -> np.ndarray:
-        """Pad/truncate a raw state payload to ``state_max_dim``."""
-        return _to_float32_1d(state, max_dim=self.state_max_dim)
 
     def _build_sample(
         self,
@@ -1118,37 +925,7 @@ class PairDataset(Dataset):
             "source_name": self.source_name,
         }
 
-        if self.include_state:
-            state_t = (
-                self._load_state_from_sample(raw_t)
-                if raw_t is not None
-                else self._load_state(episode, frame_idx_t)
-            )
-            sample["state"] = state_t  # consumed by state-in-prompt branch
-
         return sample
-
-    def _load_views(
-        self,
-        episode: int,
-        frame_idx: int,
-        *,
-        sample: Optional[dict] = None,
-    ) -> tuple[dict[str, np.ndarray], dict[str, bool]]:
-        views: dict[str, np.ndarray] = {}
-        masks: dict[str, bool] = {}
-        for camera_key in self.camera_keys:
-            view = (
-                self._source.get_view_from_sample(sample, camera_key)
-                if sample is not None
-                else self._source.get_view(episode, frame_idx, camera_key)
-            )
-            if view is None:
-                masks[camera_key] = False
-            else:
-                views[camera_key] = view
-                masks[camera_key] = True
-        return views, masks
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         pair_position, is_positive = self._decode_sample_index(idx)
@@ -1356,7 +1133,6 @@ ValueDataCollator`. Runs the :class:`SteamProcessor` **twice**
             raise ValueError("BinaryPairDataCollator received an empty batch")
 
         prompts: list[str] = [ex["prompt"] for ex in examples]
-        states_list: list[Optional[np.ndarray]] = [ex.get("state") for ex in examples]
 
         # Frame-t and frame-tk run through the processor independently so
         # image augmentations are sampled per frame and so the per-camera
@@ -1417,30 +1193,8 @@ ValueDataCollator`. Runs the :class:`SteamProcessor` **twice**
             images_observation[cam] = img
             masks_observation[cam] = mask
 
-        any_state = any(s is not None for s in states_list)
-        state_batch: Any = None
-        if any_state:
-            template = next((s for s in states_list if s is not None), None)
-            state_dim = int(template.shape[0])
-            state_batch = np.stack(
-                [
-                    (
-                        np.asarray(s, dtype=np.float32).reshape(-1)
-                        if s is not None
-                        else np.zeros(state_dim, dtype=np.float32)
-                    )
-                    for s in states_list
-                ]
-            )
-
-        text_states = (
-            state_batch
-            if bool(getattr(self.processor, "include_state_in_prompt", False))
-            else None
-        )
         processed_txt = self.processor.process_text(
             prompts=prompts,
-            states=text_states,
             max_length=self.max_length,
             return_tensors="pt",
         )
@@ -1478,7 +1232,7 @@ ValueDataCollator`. Runs the :class:`SteamProcessor` **twice**
         }
 
 
-class BinaryPairInferenceDataset(Dataset):
+class BinaryPairInferenceDataset(_BasePairDataset):
     """Yields one ``(frame_t, frame_{t+k})`` pair per anchor for inference.
 
     Differences vs :class:`PairDataset`:
@@ -1497,9 +1251,6 @@ class BinaryPairInferenceDataset(Dataset):
         camera_keys: list[str],
         k: int,
         prompt: Optional[str],
-        include_state: bool,
-        state_max_dim: Optional[int],
-        state_key: str,
         dataset_type: str,
         min_episode_length: Optional[int] = None,
     ) -> None:
@@ -1516,9 +1267,6 @@ class BinaryPairInferenceDataset(Dataset):
         self.k = int(k)
         self.camera_keys = tuple(camera_keys)
         self.prompt = prompt
-        self.include_state = bool(include_state)
-        self.state_max_dim = state_max_dim
-        self.state_key = str(state_key)
         self.dataset_type = dataset_type
         self.source_name = str(dataset_path)
 
@@ -1548,106 +1296,22 @@ class BinaryPairInferenceDataset(Dataset):
             )
 
         # One anchor per t in [0, T - 2]; total = sum(T_ep - 1).
-        pair_positions_per_episode = np.array(
-            [self._source.episode_length(ep) - 1 for ep in self._eligible],
-            dtype=np.int64,
-        )
-        self._pair_position_ends = np.cumsum(pair_positions_per_episode)
-        self._num_pair_positions = int(self._pair_position_ends[-1])
+        self._init_anchor_index()
 
         logger.info(
             "BinaryPairInferenceDataset: source=%s, episodes=%d, k=%d, "
-            "total_anchors=%d, include_state=%s, dataset_type=%s, "
+            "total_anchors=%d, dataset_type=%s, "
             "camera_keys=%s",
             self.source_name,
             len(self._eligible),
             self.k,
             self._num_pair_positions,
-            self.include_state,
             self.dataset_type,
             self.camera_keys,
         )
 
     def __len__(self) -> int:
         return self._num_pair_positions
-
-    def _resolve_pair_position(self, idx: int) -> tuple[int, int, int]:
-        if idx < 0 or idx >= self._num_pair_positions:
-            raise IndexError(idx)
-        episode_slot = int(np.searchsorted(self._pair_position_ends, idx, side="right"))
-        prev_episode_end = (
-            int(self._pair_position_ends[episode_slot - 1]) if episode_slot > 0 else 0
-        )
-        episode = int(self._eligible[episode_slot])
-        t = int(idx - prev_episode_end)
-        t_plus_k = min(t + self.k, self._source.episode_length(episode) - 1)
-        return episode, t, t_plus_k
-
-    def _resolve_prompt(self, episode: int, frame_idx: int) -> str:
-        prompt = self._source.get_prompt(episode, frame_idx)
-        if prompt:
-            return prompt
-        if self.prompt is None:
-            raise RuntimeError(
-                f"No per-episode task instruction for episode={episode} in "
-                f"{self.source_name!r} and no fallback prompt was provided."
-            )
-        return self.prompt
-
-    def _resolve_prompt_from_sample(
-        self,
-        sample: dict,
-        episode: int,
-        frame_idx: int,
-    ) -> str:
-        if hasattr(self._source, "get_prompt_from_sample"):
-            prompt = self._source.get_prompt_from_sample(sample, episode, frame_idx)
-        else:
-            prompt = self._source.get_prompt(episode, frame_idx)
-        if prompt:
-            return prompt
-        if self.prompt is None:
-            raise RuntimeError(
-                f"No per-episode task instruction for episode={episode} in "
-                f"{self.source_name!r} and no fallback prompt was provided."
-            )
-        return self.prompt
-
-    def _load_views(
-        self,
-        episode: int,
-        frame_idx: int,
-        *,
-        sample: Optional[dict] = None,
-    ) -> tuple[dict[str, np.ndarray], dict[str, bool]]:
-        views: dict[str, np.ndarray] = {}
-        masks: dict[str, bool] = {}
-        for cam in self.camera_keys:
-            view = (
-                self._source.get_view_from_sample(sample, cam)
-                if sample is not None and hasattr(self._source, "get_view_from_sample")
-                else self._source.get_view(episode, frame_idx, cam)
-            )
-            if view is None:
-                masks[cam] = False
-            else:
-                views[cam] = view
-                masks[cam] = True
-        return views, masks
-
-    def _load_state(
-        self,
-        episode: int,
-        frame_idx: int,
-        *,
-        sample: Optional[dict] = None,
-    ) -> np.ndarray:
-        if sample is not None and hasattr(self._source, "get_state_from_sample"):
-            state = self._source.get_state_from_sample(sample, self.state_key)
-            return _to_float32_1d(state, max_dim=self.state_max_dim)
-
-        state = self._source.get_state(episode, frame_idx, self.state_key)
-        return _to_float32_1d(state, max_dim=self.state_max_dim)
 
     def _build_sample_from_pair(
         self,
@@ -1682,36 +1346,16 @@ class BinaryPairInferenceDataset(Dataset):
             "source_name": self.source_name,
         }
 
-        if self.include_state:
-            state_t = self._load_state(episode, t, sample=raw_t)
-            state_tk = self._load_state(episode, t_plus_k, sample=raw_tk)
-            sample["state"] = state_t
-            sample["state_tk"] = state_tk
-
         return sample
 
     def _supports_batched_video_query(self) -> bool:
-        if not hasattr(self._source, "base") or not hasattr(
-            self._source.base,
-            "_query_videos",
-        ):
-            return False
-        if not hasattr(self._source, "_metadata_sample"):
+        # _source is always a _LeRobotSource (has .base, .meta and
+        # _metadata_sample); only the lerobot base._query_videos fast path is
+        # version-dependent, so that is the sole capability worth probing.
+        if not hasattr(self._source.base, "_query_videos"):
             return False
         video_keys = set(getattr(self._source.meta, "video_keys", []))
         return bool(video_keys) and all(cam in video_keys for cam in self.camera_keys)
-
-    @staticmethod
-    def _scalar_item(value: Any) -> Any:
-        if isinstance(value, torch.Tensor):
-            return value.item()
-        if isinstance(value, np.ndarray):
-            return value.reshape(-1)[0].item()
-        if isinstance(value, (list, tuple)):
-            if len(value) != 1:
-                raise ValueError(f"Expected scalar-like list/tuple, got {value!r}")
-            return BinaryPairInferenceDataset._scalar_item(value[0])
-        return value
 
     def _getitems_batched_video(self, indices: list[int]) -> list[dict[str, Any]]:
         resolved: list[tuple[int, int, int, int]] = []
@@ -1735,11 +1379,11 @@ class BinaryPairInferenceDataset(Dataset):
                 for frame in frame_indices
             }
             timestamps = [
-                float(self._scalar_item(metadata_by_frame[frame]["timestamp"]))
+                float(_scalar_item(metadata_by_frame[frame]["timestamp"]))
                 for frame in frame_indices
             ]
             ep_idx = int(
-                self._scalar_item(
+                _scalar_item(
                     metadata_by_frame[frame_indices[0]].get("episode_index", episode)
                 )
             )
@@ -1792,25 +1436,18 @@ class BinaryPairInferenceDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         episode, t, t_plus_k = self._resolve_pair_position(idx)
-
-        if hasattr(self._source, "get_raw_pair"):
-            raw_t, raw_tk = self._source.get_raw_pair(
-                episode,
-                t,
-                t_plus_k,
-                camera_keys=self.camera_keys,
-            )
-            return self._build_sample_from_pair(
-                episode=episode,
-                t=t,
-                t_plus_k=t_plus_k,
-                raw_t=raw_t,
-                raw_tk=raw_tk,
-            )
+        raw_t, raw_tk = self._source.get_raw_pair(
+            episode,
+            t,
+            t_plus_k,
+            camera_keys=self.camera_keys,
+        )
         return self._build_sample_from_pair(
             episode=episode,
             t=t,
             t_plus_k=t_plus_k,
+            raw_t=raw_t,
+            raw_tk=raw_tk,
         )
 
 
@@ -1819,5 +1456,4 @@ __all__ = [
     "BinaryPairInferenceDataset",
     "PairDataset",
     "TrajectorySource",
-    "positive_bin_centers",
 ]

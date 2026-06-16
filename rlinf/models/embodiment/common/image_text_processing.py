@@ -24,8 +24,7 @@ logic lives here; the two flavours differ only in:
   vision encoder stays swappable).
 * **Default image resolution** — 224x224 vs the vision encoder's native size
   (384x384 for ``siglip-so400m-patch14-384``).
-* **Prompt template** — ``"Task: {prompt}."`` vs ``"Task: {prompt}\\nValue: "``
-  with optional state-in-prompt discretisation.
+* **Prompt template** — ``"Task: {prompt}."`` vs ``"Task: {prompt}\\nValue: "``.
 
 Concrete processors in ``value_model/processing.py`` and
 ``steam/processing.py`` subclass these and only set the differing defaults, so
@@ -467,17 +466,8 @@ class BaseMultiViewImageProcessor(ImageProcessingMixin):
 class BaseValueTextProcessor(ProcessorMixin):
     """Combined image + text processor for embodied value/critic models.
 
-    Subclasses set the prompt templates and the default image-processor class.
-
-    Text templates use ``str.format`` with a ``{prompt}`` field (and a
-    ``{state}`` field for ``state_template``):
-
-        - No state: ``self.text_template.format(prompt=...)``
-        - With state (``include_state_in_prompt`` and a non-None state and a
-          non-None ``state_template``): each state dim is clipped to ``[-1, 1]``
-          and bucketed via ``np.digitize`` over ``state_discretization_bins``
-          uniform bins, serialised space-separated, then
-          ``self.state_template.format(prompt=..., state=...)``.
+    Subclasses set the prompt template and the default image-processor class.
+    The prompt text is ``self.text_template.format(prompt=...)``.
     """
 
     attributes: ClassVar[list[str]] = ["image_processor", "tokenizer"]
@@ -488,8 +478,6 @@ class BaseValueTextProcessor(ProcessorMixin):
     image_processor_class: Optional[str] = None
     _default_image_processor_cls: ClassVar[Optional[type]] = None
     text_template: str = "Task: {prompt}."
-    state_template: Optional[str] = None
-    default_include_state_in_prompt: bool = False
 
     def __init__(
         self,
@@ -499,9 +487,6 @@ class BaseValueTextProcessor(ProcessorMixin):
         tokenizer_name_or_path: Optional[str] = None,
         image_keys: Optional[tuple] = None,
         do_augment: bool = True,
-        include_state_in_prompt: Optional[bool] = None,
-        max_state_dim: int = 32,
-        state_discretization_bins: int = 256,
         **kwargs,
     ):
         if image_processor is None:
@@ -531,11 +516,6 @@ class BaseValueTextProcessor(ProcessorMixin):
         self.tokenizer: PreTrainedTokenizerBase = tokenizer
         self.max_token_len = max_token_len
         self.tokenizer_name_or_path = tokenizer_name_or_path
-        if include_state_in_prompt is None:
-            include_state_in_prompt = self.default_include_state_in_prompt
-        self.include_state_in_prompt = include_state_in_prompt
-        self.max_state_dim = max_state_dim
-        self.state_discretization_bins = state_discretization_bins
         # Required for save_pretrained compatibility with ProcessorMixin.
         self.chat_template = None
         self.audio_tokenizer = None
@@ -548,48 +528,20 @@ class BaseValueTextProcessor(ProcessorMixin):
             return text[:-1]
         return text
 
-    def _build_prefix_text(
-        self, prompt: str, state: Optional[np.ndarray] = None
-    ) -> str:
-        """Build the prefix text from a task prompt and optional state."""
+    def _build_prefix_text(self, prompt: str) -> str:
+        """Build the prefix text from a task prompt."""
         cleaned = self._strip_trailing_punctuation(self._clean_text(prompt))
-        use_state = (
-            self.include_state_in_prompt
-            and state is not None
-            and self.state_template is not None
-        )
-        if not use_state:
-            return self.text_template.format(prompt=cleaned)
-
-        state_arr = np.asarray(state, dtype=np.float32).reshape(-1)
-        target_dim = int(self.max_state_dim)
-        if state_arr.shape[0] < target_dim:
-            state_arr = np.pad(
-                state_arr,
-                (0, target_dim - state_arr.shape[0]),
-                constant_values=0.0,
-            )
-        elif state_arr.shape[0] > target_dim:
-            state_arr = state_arr[:target_dim]
-
-        state_arr = np.clip(state_arr, -1.0, 1.0)
-        bins = int(self.state_discretization_bins)
-        # Interior edges only → np.digitize returns indices in [0, bins-1].
-        edges = np.linspace(-1.0, 1.0, bins + 1, dtype=np.float32)[1:-1]
-        bucket_indices = np.digitize(state_arr, edges)
-        state_str = " ".join(str(int(b)) for b in bucket_indices)
-        return self.state_template.format(prompt=cleaned, state=state_str)
+        return self.text_template.format(prompt=cleaned)
 
     def _tokenize_single(
         self,
         prompt: str,
-        state: Optional[np.ndarray] = None,
         max_length: Optional[int] = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         if max_length is None:
             max_length = self.max_token_len
 
-        prefix_text = self._build_prefix_text(prompt, state)
+        prefix_text = self._build_prefix_text(prompt)
         tokens = self.tokenizer.encode(prefix_text, add_special_tokens=True)
 
         seq_len = len(tokens)
@@ -617,11 +569,10 @@ class BaseValueTextProcessor(ProcessorMixin):
             type(self)._tokenize_log_count += 1
             decoded = self.tokenizer.decode(tokens, skip_special_tokens=False)
             logger.info(
-                "[Tokenization Example #%d] prompt=%r (state=%s) → %r  "
+                "[Tokenization Example #%d] prompt=%r → %r  "
                 "(raw_len=%d, pad_to=%d)",
                 type(self)._tokenize_log_count,
                 prompt,
-                "provided" if state is not None else "none",
                 decoded,
                 seq_len,
                 max_length,
@@ -632,19 +583,14 @@ class BaseValueTextProcessor(ProcessorMixin):
     def process_text(
         self,
         prompts: list[str],
-        states: Optional[Union[np.ndarray, torch.Tensor, list]] = None,
         max_length: Optional[int] = None,
         return_tensors: Optional[str] = "pt",
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Tokenize a batch of prompts with optional per-sample state.
+        """Tokenize a batch of prompts.
 
         Args:
             prompts: List of task prompts.
-            states: Optional batched state — an ``np.ndarray``/``torch.Tensor``
-                of shape ``[B, D]`` or a length-``B`` list of 1-D arrays. Only
-                used when ``include_state_in_prompt`` and ``state_template`` are
-                set; otherwise ignored.
             max_length: Padding/truncation length (defaults to ``max_token_len``).
             return_tensors: ``"pt"`` returns ``torch.Tensor``; else ``np.ndarray``.
         """
@@ -652,34 +598,11 @@ class BaseValueTextProcessor(ProcessorMixin):
         if max_length is None:
             max_length = self.max_token_len
 
-        if states is not None:
-            if isinstance(states, torch.Tensor):
-                states = states.detach().cpu().numpy()
-            if isinstance(states, np.ndarray):
-                if states.ndim == 1:
-                    states = states[None, :]
-                if states.shape[0] != len(prompts):
-                    raise ValueError(
-                        f"states batch size ({states.shape[0]}) does not match "
-                        f"prompts batch size ({len(prompts)})"
-                    )
-            elif isinstance(states, (list, tuple)):
-                if len(states) != len(prompts):
-                    raise ValueError(
-                        f"states length ({len(states)}) does not match "
-                        f"prompts length ({len(prompts)})"
-                    )
-            else:
-                raise TypeError(
-                    f"states must be ndarray/Tensor/list, got {type(states)}"
-                )
-
         batch_tokens = []
         batch_masks = []
-        for i, prompt in enumerate(prompts):
-            state_i = states[i] if states is not None else None
+        for prompt in prompts:
             tokens, mask = self._tokenize_single(
-                prompt=prompt, state=state_i, max_length=max_length
+                prompt=prompt, max_length=max_length
             )
             batch_tokens.append(tokens)
             batch_masks.append(mask)
@@ -699,7 +622,6 @@ class BaseValueTextProcessor(ProcessorMixin):
         text: Optional[Union[str, list[str]]] = None,
         images: Union[dict[str, torch.Tensor], list[torch.Tensor], torch.Tensor] = None,
         image_masks: Optional[dict[str, torch.Tensor]] = None,
-        state: Optional[Union[np.ndarray, torch.Tensor, list]] = None,
         return_tensors: Optional[str] = "pt",
         train: bool = False,
         **kwargs,
@@ -712,22 +634,9 @@ class BaseValueTextProcessor(ProcessorMixin):
         if text is not None:
             is_batched = isinstance(text, list)
             texts = text if is_batched else [text]
-            # Lift a single state to a batch of 1 so the per-sample path works.
-            batched_state = state
-            if state is not None and not is_batched:
-                if isinstance(state, torch.Tensor):
-                    batched_state = state.detach().cpu().numpy()
-                    if batched_state.ndim == 1:
-                        batched_state = batched_state[None, :]
-                elif isinstance(state, np.ndarray):
-                    if state.ndim == 1:
-                        batched_state = state[None, :]
-                elif isinstance(state, (list, tuple)):
-                    batched_state = [state]
 
             processed = self.process_text(
                 prompts=texts,
-                states=batched_state,
                 return_tensors=return_tensors,
             )
             result_data.update(processed)
