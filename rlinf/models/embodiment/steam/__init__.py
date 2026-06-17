@@ -53,8 +53,6 @@ _STEAM_CONFIG_DEFAULTS: dict[str, Any] = {
     "num_bins": 2,
     "stride_k": None,
     "ensemble_size": 1,
-    "inference_mode": "mo",
-    "uwo_lambda": 1.0,
     "ensemble_head_seed_base": None,
     "freeze_vision_encoder": False,
     "freeze_language_model": True,

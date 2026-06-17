@@ -24,8 +24,7 @@ This module owns every ensemble-only concept in the stack:
   produce logits; this class is purely responsible for cloning /
   re-seeding members, per-member training orchestration (via
   ``forward(..., member_idx=int)``), and aggregating member predictions
-  into a single inference output under the configured
-  ``inference_mode``.
+  into a single inference output with the worst-of-N (minimum) rule.
 
 The single-model path in :mod:`modeling_critic` intentionally knows
 nothing about ensembles — no ``member_predicted_values`` fake-stats
@@ -137,34 +136,24 @@ class EnsembleSteamCriticModel(nn.Module):
     Supports both the legacy binary (num_bins == 2) and the multi-bin
     (num_bins > 2) head shapes. The per-member call returns logits /
     probs of shape ``[B, num_bins]`` in either mode, and the aggregator
-    below reduces across the ensemble axis according to
-    ``config.inference_mode``.
+    below reduces across the ensemble axis with the worst-of-N
+    (minimum signed value) rule.
 
     Aggregation contract. ``predicted_values`` carries the single-model
     ``_predicted_signed_value`` output — a bin-weighted, ``half``-normalized
     expectation in ``[-1, 1]`` (see
-    :meth:`SteamCriticModel._predicted_signed_value`). The ensemble
-    preserves that scale across all three modes:
-
-        * ``mo``  — ``aggregated_probs`` is the per-bin member mean, and
-          ``aggregated`` is the signed-value of that mean distribution.
-          By linearity it equals ``prediction_mean``, so the equality
-          ``signed_value(aggregated_probs) == predicted_values`` holds
-          by construction.
-        * ``wco`` — gather the worst member's logits / probs per batch
-          item (worst = lowest signed value, i.e. most regressive). The
-          gathered distribution is a real single-member distribution and
-          its signed-value equals ``prediction_min``, so the equality
-          above still holds.
-        * ``uwo`` — apply the mean-minus-``λ``·variance penalty directly
-          in the ``[-1, 1]`` signed-value space (no logit/sigmoid
-          round-trip) and clamp to ``[-1, 1]``. ``aggregated_logits /
-          probs`` fall back to the member mean for reporting only — they
-          are **not** the distribution that produced ``aggregated`` in
-          UWO mode, so the equality above does **not** hold in UWO.
-          Downstream code in this repo consumes ``predicted_values``
-          (plus the ensemble stats), so the UWO-specific divergence is
-          safe.
+    :meth:`SteamCriticModel._predicted_signed_value`). The ensemble reduces
+    across members with the **worst-of-N** rule from the STEAM paper
+    (``A_STEAM = min_m A_m``): per batch item it gathers the worst member —
+    the one with the lowest signed value, i.e. most regressive — so
+    ``predicted_values`` equals ``prediction_min``. The gathered logits /
+    probs form a real single-member distribution whose signed value equals
+    ``prediction_min`` by construction, so
+    ``signed_value(aggregated_probs) == predicted_values`` holds. This
+    conservative ``min`` aggregation exploits members agreeing
+    in-distribution but diverging on out-of-distribution rollouts, which
+    suppresses the overestimated advantages a single predictor would assign
+    there.
     """
 
     def __init__(
@@ -234,60 +223,26 @@ class EnsembleSteamCriticModel(nn.Module):
         member_probs: Tensor,
         member_predicted_values: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+        # Worst-of-N aggregation (STEAM, Eq. 5): the advantage is the minimum
+        # predicted signed value across the ensemble. ``prediction_mean`` /
+        # ``prediction_variance`` are computed for diagnostics only.
         prediction_mean = member_predicted_values.mean(dim=0)
         prediction_min, worst_member_indices = member_predicted_values.min(dim=0)
         prediction_variance = member_predicted_values.var(dim=0, unbiased=False)
 
-        if self.config.inference_mode == "mo":
-            aggregated_probs = member_probs.mean(dim=0)  # [B, num_bins]
-            # By linearity of expectation, the signed-value of the
-            # mean-of-probs equals the mean of member signed-values. Use
-            # the pre-computed ``prediction_mean`` so ``predicted_values``
-            # stays bit-identical with ``prediction_mean`` in mo mode.
-            aggregated = prediction_mean
-            # Reporting-only: the mean-of-logits does not recover
-            # ``aggregated`` via softmax, but the mean-of-probs does.
-            # Keep the member-logit mean so downstream code that
-            # inspects the logits sees a sensible per-bin signal.
-            aggregated_logits = member_logits.mean(dim=0)
-        elif self.config.inference_mode == "wco":
-            aggregated_logits = self._gather_member_batch_values(
-                member_logits,
-                worst_member_indices,
-            )
-            aggregated_probs = self._gather_member_batch_values(
-                member_probs,
-                worst_member_indices,
-            )
-            # Worst member = lowest signed value = most regressive. The
-            # gathered distribution's signed-value equals prediction_min
-            # by construction (worst_member_indices come from argmin on
-            # member_predicted_values), so reuse it directly.
-            aggregated = prediction_min
-        elif self.config.inference_mode == "uwo":
-            # UWO in signed-value space: ``mean - λ · variance`` applied
-            # directly on the ``[-1, 1]`` score, with a final clamp to
-            # keep ``predicted_values`` in range. No logit/sigmoid
-            # round-trip — the signed score already encodes direction
-            # and strength, so penalizing disagreement on this scale is
-            # the native form. ``uwo_lambda`` is a coefficient on variance
-            # in ``[-1, 1]`` space, so tune its magnitude on that scale.
-            aggregated_margin = prediction_mean - (
-                self.config.uwo_lambda * prediction_variance
-            )
-            aggregated = aggregated_margin.clamp(min=-1.0, max=1.0).to(
-                dtype=member_predicted_values.dtype
-            )
-            # Reporting-only: member means do NOT match ``aggregated``
-            # under UWO. Documented on the class docstring; downstream
-            # consumers only read ``predicted_values`` plus the
-            # ensemble stats, so this divergence is safe here.
-            aggregated_probs = member_probs.mean(dim=0)
-            aggregated_logits = member_logits.mean(dim=0)
-        else:
-            raise ValueError(
-                f"Unsupported inference_mode: {self.config.inference_mode}"
-            )
+        # Worst member = lowest signed value = most regressive. The gathered
+        # distribution's signed value equals ``prediction_min`` by construction
+        # (``worst_member_indices`` come from argmin on member signed values),
+        # so reuse it directly for ``predicted_values``.
+        aggregated_logits = self._gather_member_batch_values(
+            member_logits,
+            worst_member_indices,
+        )
+        aggregated_probs = self._gather_member_batch_values(
+            member_probs,
+            worst_member_indices,
+        )
+        aggregated = prediction_min
 
         return (
             aggregated,

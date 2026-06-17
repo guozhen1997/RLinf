@@ -108,8 +108,6 @@ actor:
     freeze_language_model: false
     max_token_len: 200
     ensemble_size: 4
-    inference_mode: "wco"
-    uwo_lambda: 1.0
     ensemble_head_seed_base: 0
     use_gradient_checkpointing: true
 

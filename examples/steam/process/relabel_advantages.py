@@ -47,7 +47,7 @@ neither is available the script raises — we never silently default to
 ``rollout`` or ``sft``.
 
 The new tag's metadata inherits everything from ``tags[source_tag]`` (so
-ensemble_size, inference_mode, etc. survive) and then overrides
+ensemble_size, num_bins, etc. survive) and then overrides
 ``positive_threshold`` (the threshold applied to THIS dataset), ``label_mode``,
 ``total_samples``, ``num_positive``, ``dataset_type``, ``derived_from_tag`` —
 plus ``rollout_quantile`` / ``expert_quantile`` when ``--mode=quantile``.
@@ -390,9 +390,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                 "--rollout_quantile must be in (0, 1) — fraction of top "
                 f"rollout frames; got {args.rollout_quantile}"
             )
-        if args.expert_quantile is not None and not (
-            0.0 < args.expert_quantile < 1.0
-        ):
+        if args.expert_quantile is not None and not (0.0 < args.expert_quantile < 1.0):
             parser.error(
                 "--expert_quantile must be in (0, 1) — fraction of top sft "
                 f"frames; got {args.expert_quantile}"
@@ -499,9 +497,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             if sft_scores:
                 combined_sft = np.concatenate(sft_scores)
                 expert_threshold = float(
-                    np.percentile(
-                        combined_sft, (1.0 - args.expert_quantile) * 100.0
-                    )
+                    np.percentile(combined_sft, (1.0 - args.expert_quantile) * 100.0)
                 )
                 n_positive_sft = int((combined_sft > expert_threshold).sum())
                 logger.info(

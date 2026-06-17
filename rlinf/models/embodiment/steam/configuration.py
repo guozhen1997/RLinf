@@ -31,28 +31,17 @@ from typing import Optional
 
 from transformers import PretrainedConfig
 
-VALID_STEAM_INFERENCE_MODES = ("mo", "wco", "uwo")
-
-
-def normalize_steam_inference_mode(mode: str) -> str:
-    """Normalise an ensemble inference mode string."""
-    mode_norm = str(mode).strip().lower()
-    if mode_norm not in VALID_STEAM_INFERENCE_MODES:
-        raise ValueError(
-            f"inference_mode must be one of {VALID_STEAM_INFERENCE_MODES}, got {mode!r}"
-        )
-    return mode_norm
-
 
 def validate_steam_ensemble_settings(
     *,
     ensemble_size: int,
-    inference_mode: str,
-    uwo_lambda: float,
     micro_batch_size: Optional[int] = None,
     global_batch_size: Optional[int] = None,
-) -> tuple[int, str, float]:
-    """Validate binary-value ensemble settings shared by training and inference.
+) -> int:
+    """Validate the ensemble size shared by training and inference.
+
+    The ensemble always reduces members with the worst-of-N (minimum) rule
+    from the STEAM paper, so there is no inference-mode knob to validate.
 
     ``micro_batch_size`` / ``global_batch_size`` are accepted for call-site
     parity but are intentionally not constrained: per-member sequential
@@ -66,12 +55,7 @@ def validate_steam_ensemble_settings(
     if ensemble_size < 1:
         raise ValueError("ensemble_size must be >= 1")
 
-    inference_mode = normalize_steam_inference_mode(inference_mode)
-    uwo_lambda = float(uwo_lambda)
-    if uwo_lambda < 0.0:
-        raise ValueError("uwo_lambda must be >= 0")
-
-    return ensemble_size, inference_mode, uwo_lambda
+    return ensemble_size
 
 
 class SteamConfig(PretrainedConfig):
@@ -105,8 +89,6 @@ class SteamConfig(PretrainedConfig):
         num_bins: int = 2,
         stride_k: Optional[int] = None,
         ensemble_size: int = 1,
-        inference_mode: str = "mo",
-        uwo_lambda: float = 1.0,
         ensemble_head_seed_base: Optional[int] = None,
         # Runtime
         dtype: str = "bfloat16",
@@ -131,8 +113,6 @@ class SteamConfig(PretrainedConfig):
         self.num_bins = int(num_bins)
         self.stride_k = None if stride_k is None else int(stride_k)
         self.ensemble_size = int(ensemble_size)
-        self.inference_mode = normalize_steam_inference_mode(inference_mode)
-        self.uwo_lambda = float(uwo_lambda)
         self.ensemble_head_seed_base = (
             None if ensemble_head_seed_base is None else int(ensemble_head_seed_base)
         )
@@ -174,8 +154,6 @@ class SteamConfig(PretrainedConfig):
             raise ValueError(f"num_bins must be >= 2 and even, got {self.num_bins}")
         if self.ensemble_size < 1:
             raise ValueError("ensemble_size must be >= 1")
-        if self.uwo_lambda < 0.0:
-            raise ValueError("uwo_lambda must be >= 0")
         if self.dtype not in {"bfloat16", "float32", "float16"}:
             raise ValueError(
                 f"dtype must be one of bfloat16/float32/float16, got {self.dtype}"

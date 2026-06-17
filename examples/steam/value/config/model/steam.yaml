@@ -24,8 +24,6 @@ label_smoothing: 0.05
 num_frames_per_pair: 2   # (frame_t, frame_{t+k}) — keep at 2 for the standard recipe
 stride_k: null            # filled from data.k by the STEAM SFT worker
 ensemble_size: 1
-inference_mode: "wco"     # mo | wco | uwo
-uwo_lambda: 1.0
 ensemble_head_seed_base: null
 
 # Runtime

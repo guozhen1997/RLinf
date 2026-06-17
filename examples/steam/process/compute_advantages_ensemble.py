@@ -661,7 +661,6 @@ def _update_mixture_config(
     dataset_path: str,
     tag: str,
     positive_threshold: float,
-    inference_mode: str,
     ensemble_size: int,
     num_bins: int,
     total_samples: int,
@@ -715,7 +714,6 @@ def _update_mixture_config(
     entry: dict[str, Any] = {
         "positive_threshold": float(positive_threshold),
         "label_mode": str(label_mode),
-        "inference_mode": str(inference_mode),
         "ensemble_size": int(ensemble_size),
         "num_bins": int(num_bins),
         "total_samples": int(total_samples),
@@ -758,7 +756,6 @@ def main(cfg: DictConfig) -> None:
 
     _validate_cfg(cfg)
 
-    inference_mode = str(cfg.advantage.model.get("inference_mode", "wco"))
     precision = cfg.advantage.model.get("precision", None)
     label_mode = str(cfg.advantage.label_mode).lower()
     # Coerce the knobs the selected mode reads eagerly so any late YAML typo
@@ -790,17 +787,14 @@ def main(cfg: DictConfig) -> None:
         device=device,
         env_type=str(cfg.data.robot_type),
         model_type=str(cfg.data.model_type),
-        inference_mode=inference_mode,
         precision=precision,
     )
     model = _coerce_inference_model(raw_model)
 
     if rank == 0:
         logger.info(
-            "Ensemble loaded: ensemble_size=%d, inference_mode=%s, "
-            "max_token_len=%d",
+            "Ensemble loaded: ensemble_size=%d, max_token_len=%d",
             int(model.config.ensemble_size),
-            str(model.config.inference_mode),
             int(getattr(model.config, "max_token_len", 200)),
         )
 
@@ -945,7 +939,6 @@ def main(cfg: DictConfig) -> None:
                     dataset_path=entry.dataset_path,
                     tag=tag,
                     positive_threshold=recorded_threshold,
-                    inference_mode=str(model.config.inference_mode),
                     ensemble_size=int(model.config.ensemble_size),
                     num_bins=int(getattr(model.config, "num_bins", 2)),
                     total_samples=total_samples,
@@ -960,8 +953,7 @@ def main(cfg: DictConfig) -> None:
                     expert_quantile=(
                         float(expert_quantile_cfg)
                         if (
-                            label_mode == "quantile"
-                            and expert_quantile_cfg is not None
+                            label_mode == "quantile" and expert_quantile_cfg is not None
                         )
                         else None
                     ),

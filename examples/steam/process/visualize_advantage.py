@@ -45,7 +45,6 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Loaders
 # ---------------------------------------------------------------------------
@@ -361,7 +360,7 @@ def plot_episode_timelines(
             color="tab:purple",
             linewidth=1.5,
             linestyle="--",
-            label="aggregated (wco)",
+            label="aggregated (worst-of-N)",
         )
         if threshold is not None:
             ax.axhline(threshold, color="orange", linestyle=":", linewidth=1.0)

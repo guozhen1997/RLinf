@@ -244,12 +244,13 @@ def _write_config(
     output_actor_dir: Path,
     *,
     ensemble_size: int,
-    inference_mode: str | None,
 ) -> None:
     config = dict(reference_config)
     config["ensemble_size"] = int(ensemble_size)
-    if inference_mode is not None:
-        config["inference_mode"] = inference_mode
+    # Drop the retired inference-mode knobs if an older checkpoint carries
+    # them; the ensemble always aggregates with the worst-of-N rule now.
+    config.pop("inference_mode", None)
+    config.pop("uwo_lambda", None)
 
     with (output_actor_dir / "config.json").open("w") as f:
         json.dump(config, f, indent=2)
@@ -275,11 +276,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Output actor directory. The script will create "
             "OUTPUT/model_state_dict/full_weights.pt."
         ),
-    )
-    parser.add_argument(
-        "--inference-mode",
-        default=None,
-        help="Optional inference_mode to write into config.json, e.g. wco/mo/uwo.",
     )
     parser.add_argument(
         "--overwrite",
@@ -321,7 +317,6 @@ def main() -> None:
         reference_config,
         output_actor_dir,
         ensemble_size=len(specs),
-        inference_mode=args.inference_mode or reference_config.get("inference_mode"),
     )
 
     merged: dict[str, torch.Tensor] = {}

@@ -43,7 +43,6 @@ advantage:
   tag: steam_k32_ensemble3_ckpt16000_wco_exp_and_rollout
 
   model:
-    inference_mode: "wco"
     precision: "bf16"
 
 data:

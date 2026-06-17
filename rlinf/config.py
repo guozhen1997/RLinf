@@ -1193,10 +1193,8 @@ def _validate_steam_ensemble_cfg(actor_cfg: DictConfig) -> None:
     )
 
     try:
-        ensemble_size, inference_mode, uwo_lambda = validate_steam_ensemble_settings(
+        ensemble_size = validate_steam_ensemble_settings(
             ensemble_size=model_cfg.get("ensemble_size", 1),
-            inference_mode=model_cfg.get("inference_mode", "mo"),
-            uwo_lambda=model_cfg.get("uwo_lambda", 1.0),
             micro_batch_size=actor_cfg.micro_batch_size,
             global_batch_size=actor_cfg.global_batch_size,
         )
@@ -1205,8 +1203,6 @@ def _validate_steam_ensemble_cfg(actor_cfg: DictConfig) -> None:
 
     with open_dict(model_cfg):
         model_cfg.ensemble_size = ensemble_size
-        model_cfg.inference_mode = inference_mode
-        model_cfg.uwo_lambda = uwo_lambda
 
 
 def validate_reasoning_cfg(cfg: DictConfig) -> DictConfig:
