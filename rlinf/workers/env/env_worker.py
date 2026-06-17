@@ -156,19 +156,12 @@ class EnvWorker(Worker):
                 torch.zeros(self.eval_num_envs_per_stage, dtype=torch.bool)
                 for _ in range(self.stage_num)
             ]
-
-    def init_worker(self):
-        # This is a barrier to ensure all envs' initial setup upon import is done
-        # Essential for RealWorld env to ensure initial ROS node setup is done
-        self.broadcast(
-            True,
-            groups=[(self._group_name, list(range(self._world_size)))],
-        )
         # check env mode
-        env_mode = self.cfg.env.train.get("env_mode", None)
+        env_mode = (
+            train_env_cfg.get("env_mode", None) if train_env_cfg is not None else None
+        )
         assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
         self.env_decoupled_mode = env_mode == "decoupled"
-        self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
 
         if self.env_decoupled_mode:
             # Init the batch_router for env decoupled mode
@@ -179,6 +172,14 @@ class EnvWorker(Worker):
             ) >= self._component_placement.get_world_size("rollout"), (
                 "the world size of env must be greater than the world size of rollout in env_decoupled_mode"
             )
+
+    def init_worker(self):
+        # This is a barrier to ensure all envs' initial setup upon import is done
+        # Essential for RealWorld env to ensure initial ROS node setup is done
+        self.broadcast(
+            True,
+            groups=[(self._group_name, list(range(self._world_size)))],
+        )
 
         self.update_env_cfg()
 
