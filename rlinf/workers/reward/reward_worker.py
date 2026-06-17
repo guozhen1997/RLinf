@@ -82,11 +82,19 @@ class RewardWorker(Worker):
     def compute_rewards(
         self, input_channel: Channel, output_channel: Channel, total_batch_size=None
     ):
-        """Compute rewards.
-
+        """Compute rewards for reasoning/agentic rollout batches.
+        This method is used by the generic ``RewardWorker`` path. It consumes
+        ``RolloutResult`` objects from ``input_channel`` until this worker has received
+        its expected share of sequences, fills missing rewards with rule-based rewards,
+        optionally applies down-sampling, and sends the processed ``RolloutResult`` to
+        ``output_channel``.
+        Unlike the embodied reward path, this method works on text/token rollout data
+        and is bounded by ``total_batch_size_per_dp``.
         Args:
-            input_channel: The input channel to read from.
-            output_channel: The output channel to send results to.
+            input_channel: Channel that provides ``RolloutResult`` batches.
+            output_channel: Channel used to send rewarded ``RolloutResult`` batches.
+            total_batch_size: Optional global batch size. If provided, it is divided by
+                the reward worker world size to determine this rank's receive quota.
         """
         recv_batch_size = 0
         if total_batch_size is None:
@@ -296,7 +304,7 @@ class EmbodiedRewardWorker(Worker):
             merged_images = merged_data.get("images")
             last_run = merged_data.get("last_run", None)
             last_run_count = int(last_run.sum().item()) if last_run is not None else 0
-            rewards = self.compute_threshold_image_rewards(images=merged_images)
+            rewards = self.compute_image_rewards(images=merged_images)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
@@ -312,25 +320,6 @@ class EmbodiedRewardWorker(Worker):
 
         if self.enable_offload:
             self.model.to("cpu")
-
-    @Worker.timer("compute_threshold_image_rewards")
-    def compute_threshold_image_rewards(self, images: torch.Tensor):
-        """Compute binary image rewards by thresholding model probabilities."""
-        if isinstance(images, np.ndarray):
-            images = torch.from_numpy(images)
-
-        model_dtype = next(self.model.parameters()).dtype
-        images = images.to(device=self.device, dtype=model_dtype)
-
-        with torch.no_grad():
-            outputs = self.model(images)
-            probs = outputs["probabilities"]
-            rewards = (probs > self.reward_threshold).to(probs.dtype)
-
-        if rewards.dim() == 1:
-            rewards = rewards.unsqueeze(-1)
-
-        return rewards
 
     @Worker.timer("compute_image_rewards")
     def compute_image_rewards(
@@ -359,6 +348,21 @@ class EmbodiedRewardWorker(Worker):
             pass
 
     async def _compute_rewards(self, input_channel: Channel, output_channel: Channel):
+        """Continuously compute image rewards for embodied env batches.
+
+        This private coroutine is used by ``compute_rewards_async`` in embodied RL. It
+        receives image observations from Env Workers through routed worker communication,
+        runs the embodied reward model with ``compute_image_rewards``, and sends the
+        resulting rewards back to the Env Worker group.
+
+        Unlike ``RewardWorker.compute_rewards``, this path operates on image data from
+        ``train_reward_obs`` messages, can use ``env_decoupled_mode`` routing, and runs
+        as a long-lived async loop until the task is stopped.
+
+        Args:
+            input_channel: Channel used to receive reward inputs from Env Workers.
+            output_channel: Channel used to return computed rewards to Env Workers.
+        """
         while True:
             merged_data = await self.recv_from(
                 group_name=self.cfg.env.group_name,
@@ -369,7 +373,11 @@ class EmbodiedRewardWorker(Worker):
                 env_decoupled_mode=self.env_decoupled_mode,
             ).async_wait()
             merged_images = merged_data.get("images")
-            rewards = self.compute_threshold_image_rewards(images=merged_images)
+            assert merged_images is not None, (
+                "Expected reward input to contain key 'images', but got "
+                f"keys: {list(merged_data.keys())}"
+            )
+            rewards = self.compute_image_rewards(images=merged_images)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
