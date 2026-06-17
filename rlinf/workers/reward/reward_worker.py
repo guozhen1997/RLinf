@@ -14,7 +14,7 @@
 
 import asyncio
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -297,7 +297,7 @@ class EmbodiedRewardWorker(Worker):
             ).async_wait()
             last_run = merged_data.get("last_run", None)
             last_run_count = int(last_run.sum().item()) if last_run is not None else 0
-            rewards = self.compute_image_rewards(images=merged_data)
+            rewards = self.compute_image_rewards(obeservations=merged_data)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
@@ -316,10 +316,10 @@ class EmbodiedRewardWorker(Worker):
 
     @Worker.timer("compute_image_rewards")
     def compute_image_rewards(
-        self, images: torch.Tensor | np.ndarray
+        self, obeservations: dict[str, Any]
     ) -> torch.Tensor | np.ndarray:
         """Run one-shot reward inference and return CPU results."""
-        rewards = self.model.compute_reward({"main_images": images})
+        rewards = self.model.compute_reward(obeservations)
         if rewards is not None and rewards.dim() == 1:
             rewards = rewards.unsqueeze(-1)
         if isinstance(rewards, torch.Tensor):
@@ -365,7 +365,7 @@ class EmbodiedRewardWorker(Worker):
                 batch_size=self.train_batch_size,
                 env_decoupled_mode=self.env_decoupled_mode,
             ).async_wait()
-            rewards = self.compute_image_rewards(images=merged_data)
+            rewards = self.compute_image_rewards(obeservations=merged_data)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
