@@ -164,6 +164,7 @@ class EnvWorker(Worker):
 
         if self.env_decoupled_mode:
             # Init the batch_router for env decoupled mode
+            # The batch_router is a dictionary that maps the tag to the list of batch_index.
             self.batch_router = {}
             assert self._component_placement.get_world_size(
                 "env"

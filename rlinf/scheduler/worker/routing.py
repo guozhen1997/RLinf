@@ -217,7 +217,7 @@ def env_decoupled_build_send_plan(
     route_key: Any = None,
     batch_size: int,
     mode: str | None = None,
-    batch_router: list[str] | None = None,
+    tag_batch_router: list[str] | None = None,
     send_queue_size: int = 0,
 ) -> RoutePlan:
     """Build the route plan for one sender rank."""
@@ -232,9 +232,9 @@ def env_decoupled_build_send_plan(
             queue_size=send_queue_size,
         )
     ):
-        if batch_router is not None:
-            # if the batch_router is provided, use the batch_router to get the batch_index
-            batch_index = batch_router[index]
+        if tag_batch_router is not None:
+            # if the tag_batch_router is provided, use the tag_batch_router to get the batch_index
+            batch_index = tag_batch_router[index]
             # get the send_rank from the batch_index
             send_rank, _, _, tag = _split_channel_message(batch_index)
         else:

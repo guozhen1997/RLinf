@@ -61,6 +61,10 @@ class MultiStepRolloutWorker(Worker):
 
         self.train_batch_size = self.total_num_train_envs // self.num_pipeline_stages
         self.eval_batch_size = self.total_num_eval_envs // self.num_pipeline_stages
+
+        self.per_node_train_batch_size = self.train_batch_size // self._world_size
+        self.per_node_eval_batch_size = self.eval_batch_size // self._world_size
+
         self.enable_cuda_graph = cfg.rollout.get("enable_cuda_graph", False)
         self.enable_eval = cfg.runner.val_check_interval > 0 or cfg.runner.only_eval
 
@@ -90,6 +94,7 @@ class MultiStepRolloutWorker(Worker):
 
         if self.env_decoupled_mode:
             # save the run-time imformation in communicate channel for decoupled mode
+            # The batch_router is a dictionary that maps the tag to the list of batch_index.
             self.batch_router = {
                 "rollout_results": [],
             }
@@ -131,8 +136,8 @@ class MultiStepRolloutWorker(Worker):
             self.hf_model.enable_torch_compile(mode=mode)
         if self.enable_cuda_graph and not self.enable_offload:
             self.hf_model.capture_cuda_graph(
-                train_batch_size=self.train_batch_size,
-                eval_batch_size=self.eval_batch_size,
+                train_batch_size=self.per_node_train_batch_size,
+                eval_batch_size=self.per_node_eval_batch_size,
             )
 
         self.setup_sample_params()
@@ -527,8 +532,8 @@ class MultiStepRolloutWorker(Worker):
         self.hf_model.to(self.device)
         if self.enable_cuda_graph:
             self.hf_model.capture_cuda_graph(
-                train_batch_size=self.train_batch_size,
-                eval_batch_size=self.eval_batch_size,
+                train_batch_size=self.per_node_train_batch_size,
+                eval_batch_size=self.per_node_eval_batch_size,
             )
 
     @staticmethod

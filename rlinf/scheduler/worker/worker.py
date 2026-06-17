@@ -953,7 +953,7 @@ class Worker(metaclass=WorkerMeta):
                 # Use the batch_router[tag] to get the batch_index to create the send plan ->
                 # Send data to the worker that originally sent it.
                 # the src_rank get from the batch_router[tag]
-                batch_router = self.batch_router[tag]
+                tag_batch_router = self.batch_router[tag]
                 src_rank = None
             else:
                 # if the batch_router does not have this tag
@@ -962,7 +962,7 @@ class Worker(metaclass=WorkerMeta):
                 # Any workers can recv the data and save the batch_index -> handle the data in the worker ->
                 # Send the data to the worker that originally sent it by the batch_index.
                 # the src_rank is the current worker's rank
-                batch_router = None
+                tag_batch_router = None
                 src_rank = self._rank
 
             plan = env_decoupled_build_send_plan(
@@ -974,11 +974,11 @@ class Worker(metaclass=WorkerMeta):
                 tag=tag,
                 route_key=route_key,
                 batch_size=batch_size,
-                batch_router=batch_router,
+                tag_batch_router=tag_batch_router,
                 send_queue_size=send_queue_size,
                 mode=mode,
             )
-            if batch_router is not None:
+            if tag_batch_router is not None:
                 # delete the used batch_router item to avoid duplicate sending
                 self.batch_router[tag] = []
 

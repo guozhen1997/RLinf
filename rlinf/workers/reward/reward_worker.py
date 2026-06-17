@@ -245,6 +245,7 @@ class EmbodiedRewardWorker(Worker):
 
         if self.env_decoupled_mode:
             # save the run-time imformation in communicate channel for decoupled mode
+            # The batch_router is a dictionary that maps the tag to the list of batch_index.
             self.batch_router = {
                 "train_reward_obs": [],
             }
