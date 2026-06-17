@@ -82,8 +82,12 @@ class MultiStepRolloutWorker(Worker):
         self.train_batch_size = self.total_num_train_envs // self.num_pipeline_stages
         self.eval_batch_size = self.total_num_eval_envs // self.num_pipeline_stages
 
-        self.per_node_train_batch_size = self.train_batch_size // self._world_size if self.enable_train else 0
-        self.per_node_eval_batch_size = self.eval_batch_size // self._world_size if self.enable_eval else 0
+        self.per_node_train_batch_size = (
+            self.train_batch_size // self._world_size if self.enable_train else 0
+        )
+        self.per_node_eval_batch_size = (
+            self.eval_batch_size // self._world_size if self.enable_eval else 0
+        )
 
         self.enable_cuda_graph = cfg.rollout.get("enable_cuda_graph", False)
 
