@@ -268,20 +268,12 @@ class EmbodiedRewardWorker(Worker):
         """Initialize the reward worker for inference."""
         if self._standalone_realworld:
             self.local_num_train_envs = self.total_num_train_envs
-            self.dst_ranks = {"train": [(0, self.local_num_train_envs)]}
-            self.src_ranks = {"train": [(0, self.local_num_train_envs)]}
         else:
-            self.dst_ranks = {
-                "train": self._setup_dst_ranks(
-                    self.total_num_train_envs // self.num_pipeline_stages
-                ),
-            }
-            self.src_ranks = {
-                "train": self._setup_src_ranks(
-                    self.total_num_train_envs // self.num_pipeline_stages
-                ),
-            }
-            self.local_num_train_envs = sum(size for _, size in self.src_ranks["train"])
+            assert self.train_batch_size % self._world_size == 0, (
+                f"train_batch_size ({self.train_batch_size}) must be divisible by "
+                f"world_size ({self._world_size})."
+            )
+            self.local_num_train_envs = self.train_batch_size // self._world_size
 
         self.model = self.model_provider_func()
 
