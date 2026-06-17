@@ -2,7 +2,7 @@ Env Decoupled Mode
 ==================
 
 ``env_decoupled_mode`` 是 RLinf embodied 任务中用于解耦 Env Worker 与 Rollout Worker
-通信的一种模式。它通过配置 ``env.train.env_mode: "decoupled"`` 开启。
+通信的一种模式。它通过配置 ``runner.enable_decoupled_mode: true`` 开启。
 
 开启后，Env Worker 不再与固定的 Rollout Worker rank 一一绑定。Env Worker 会将观测
 数据放入共享 Channel，空闲的 Rollout Worker 可以动态获取 batch 进行推理，并在完成后
@@ -18,15 +18,16 @@ Env Decoupled Mode
 
 .. code-block:: yaml
 
-   env:
-     train:
-       env_mode: "decoupled"
-       rollout_queue_size: 0
+   runner:
+     enable_decoupled_mode: true
+
+   rollout:
+     rollout_queue_size: 0
 
 其中：
 
-- ``env_mode: "decoupled"`` 表示启用 Env Decoupled Mode。
-- 不配置 ``env_mode`` 时，使用普通通信模式。
+- ``runner.enable_decoupled_mode: true`` 表示启用 Env Decoupled Mode。
+- 不配置 ``runner.enable_decoupled_mode`` 时，使用普通通信模式。
 - ``rollout_queue_size`` 控制 Rollout Worker 单次最多聚合多少组 Env 数据。
   设置为 ``0`` 时使用默认策略，此时 Rollout Worker 单次聚合的 Env 数据数量为
   ``ceil(env_world_size // rollout_world_size)``。
@@ -60,10 +61,11 @@ Channel 排队时间。
 
 .. code-block:: yaml
 
-   env:
-     train:
-       env_mode: "decoupled"
-       rollout_queue_size: 2
+   runner:
+     enable_decoupled_mode: true
+
+   rollout:
+     rollout_queue_size: 2
 
 较小的 ``rollout_queue_size`` 通常降低等待时间；较大的值可能提高推理 batch 利用率，
 但也可能增加单次聚合等待。
@@ -79,7 +81,7 @@ Channel 排队时间。
 4. Rollout Worker 执行模型推理，生成 action 或 rollout result，并将结果返回给发送该请求的 Env Worker。
 5. Env Worker 根据返回结果继续进行环境交互。
 
-用户通常不需要直接处理路由细节。只要在配置中开启 ``env_mode: "decoupled"``，
+用户通常不需要直接处理路由细节。只要在配置中开启 ``runner.enable_decoupled_mode``，
 并使用支持该模式的 Env Worker、Rollout Worker 和 Runner 即可。
 
 评估流程

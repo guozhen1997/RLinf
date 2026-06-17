@@ -138,7 +138,7 @@ class AsyncEmbodiedRunner(EmbodiedRunner):
             input_channel=self.env_channel,
             rollout_channel=self.rollout_channel,
         )
-        env_decoupled_mode = self.cfg.env.train.get("env_mode", None) == "decoupled"
+        env_decoupled_mode = self.cfg.runner.get("enable_decoupled_mode", False)
         if not env_decoupled_mode:
             rollout_handle: Handle = self.rollout.evaluate(
                 input_channel=self.rollout_channel,

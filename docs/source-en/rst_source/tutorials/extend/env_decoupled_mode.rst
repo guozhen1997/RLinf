@@ -3,7 +3,7 @@ Env Decoupled Mode
 
 ``env_decoupled_mode`` is a communication mode used in RLinf embodied tasks to
 decouple Env Workers from Rollout Workers. It is enabled by setting
-``env.train.env_mode: "decoupled"``.
+``runner.enable_decoupled_mode: true``.
 
 After it is enabled, an Env Worker is no longer bound to a fixed Rollout Worker
 rank. Env Workers put observation data into a shared Channel, and idle Rollout
@@ -22,15 +22,17 @@ Set the following fields in an embodied configuration:
 
 .. code-block:: yaml
 
-   env:
-     train:
-       env_mode: "decoupled"
-       rollout_queue_size: 0
+   runner:
+     enable_decoupled_mode: true
+
+   rollout:
+     rollout_queue_size: 0
 
 Where:
 
-- ``env_mode: "decoupled"`` enables Env Decoupled Mode.
-- If ``env_mode`` is not configured, RLinf uses the normal communication mode.
+- ``runner.enable_decoupled_mode: true`` enables Env Decoupled Mode.
+- If ``runner.enable_decoupled_mode`` is not configured, RLinf uses the normal
+  communication mode.
 - ``rollout_queue_size`` controls the maximum number of Env data groups that a
   Rollout Worker aggregates at once. When set to ``0``, the default strategy is
   used. In this case, the number of Env data groups aggregated by one Rollout
@@ -70,10 +72,11 @@ Worker aggregates at once:
 
 .. code-block:: yaml
 
-   env:
-     train:
-       env_mode: "decoupled"
-       rollout_queue_size: 2
+   runner:
+     enable_decoupled_mode: true
+
+   rollout:
+     rollout_queue_size: 2
 
 A smaller ``rollout_queue_size`` usually reduces waiting time. A larger value may
 improve inference batch utilization, but it may also increase the waiting time
@@ -92,8 +95,8 @@ After decoupled mode is enabled, the training flow is roughly:
 5. The Env Worker continues environment interaction with the returned result.
 
 Users usually do not need to handle routing details directly. In most cases, it
-is enough to enable ``env_mode: "decoupled"`` in the configuration and use Env
-Workers, Rollout Workers, and Runners that support this mode.
+is enough to enable ``runner.enable_decoupled_mode`` in the configuration and
+use Env Workers, Rollout Workers, and Runners that support this mode.
 
 Evaluation Flow
 ---------------
@@ -125,7 +128,7 @@ Notes
 
 - The current implementation requires ``env_world_size >= rollout_world_size``.
 - Decoupled mode currently does not support ``enable_p2p=True``.
-- ``env.train.env_mode`` currently supports ``"decoupled"`` or ``null``.
+- ``runner.enable_decoupled_mode`` controls whether this mode is enabled.
 - ``rollout_queue_size`` affects both throughput and latency, and should be tuned
   according to Env/Rollout speed.
 - Env, Rollout, and Reward Workers need to use communication paths that support

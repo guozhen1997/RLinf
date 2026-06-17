@@ -156,12 +156,7 @@ class EnvWorker(Worker):
                 torch.zeros(self.eval_num_envs_per_stage, dtype=torch.bool)
                 for _ in range(self.stage_num)
             ]
-        # check env mode
-        env_mode = (
-            train_env_cfg.get("env_mode", None) if train_env_cfg is not None else None
-        )
-        assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
-        self.env_decoupled_mode = env_mode == "decoupled"
+        self.env_decoupled_mode = self.cfg.runner.get("enable_decoupled_mode", False)
 
         if self.env_decoupled_mode:
             # Init the batch_router for env decoupled mode

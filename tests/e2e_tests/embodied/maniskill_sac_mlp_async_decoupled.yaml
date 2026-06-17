@@ -22,6 +22,10 @@ cluster:
 
 runner:
   task_type: embodied
+  # When decoupled mode is enabled, the communication mechanism between the env
+  # worker and the rollout worker changes. The rollout and env workers are fully
+  # decoupled, removing the static mapping.
+  enable_decoupled_mode: True
   logger:
     log_path: /workspace/results/maniskill_sac_mlp_async_decoupled
     project_name: rlinf
@@ -97,12 +101,6 @@ env:
     use_fixed_reset_state_ids: False
     max_episode_steps: 50 # max episode steps for truncation
     max_steps_per_rollout_epoch: 50
-    # When decoupled mode is enabled, the communication mechanism between the env worker and the rollout worker will be changed. 
-    # When set rollout worker to "decoupled":
-    # The rollout and env workers are fully decoupled, removing the static mapping.
-    # This is to handle situations where the env worker may become deadlocked.
-    env_mode: "decoupled"
-    rollout_queue_size: 5
   
   eval:
     total_num_envs: 80
@@ -123,6 +121,7 @@ rollout:
   backend: "huggingface"
   enable_offload: False
   pipeline_stage_num: 1
+  rollout_queue_size: 5
 
   collect_transitions: True
   collect_prev_infos: False

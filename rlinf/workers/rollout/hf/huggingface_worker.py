@@ -117,12 +117,7 @@ class MultiStepRolloutWorker(Worker):
             self.weight_syncer = WeightSyncer.create(weight_syncer_cfg)
             self._sync_weight_comm_options = self.weight_syncer.comm_options
 
-        # check env mode
-        env_mode = (
-            train_env_cfg.get("env_mode", None) if train_env_cfg is not None else None
-        )
-        assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
-        self.env_decoupled_mode = env_mode == "decoupled"
+        self.env_decoupled_mode = self.cfg.runner.get("enable_decoupled_mode", False)
 
         if self.env_decoupled_mode:
             # save the run-time imformation in communicate channel for decoupled mode
@@ -130,11 +125,7 @@ class MultiStepRolloutWorker(Worker):
             self.batch_router = {
                 "rollout_results": [],
             }
-        self.rollout_queue_size = (
-            train_env_cfg.get("rollout_queue_size", 0)
-            if train_env_cfg is not None
-            else 0
-        )
+        self.rollout_queue_size = self.cfg.rollout.get("rollout_queue_size", 0)
 
     def init_worker(self):
         rollout_model_config = copy.deepcopy(self.model_cfg)

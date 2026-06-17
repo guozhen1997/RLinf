@@ -38,6 +38,11 @@ runner:
   resume_dir: null # Optional: path to a saved checkpoint directory, such as 'checkpoints/global_step_10'. If not None, it will be used to resume training.
   ckpt_path: null  # Optional: path to a .pt checkpoint. If not None, it will be loaded after the model is instantiated (for evaluation).
 
+  # Enable decoupled communication between Env Workers and Rollout Workers.
+  # This removes the static rank mapping and lets idle Rollout Workers fetch Env
+  # requests dynamically, which helps when Env Workers have long-tail latency.
+  enable_decoupled_mode: True
+
 algorithm:
   update_epoch: 32
   group_size: 1
@@ -98,14 +103,6 @@ env:
     use_fixed_reset_state_ids: False
     max_episode_steps: 50 # max episode steps for truncation
     max_steps_per_rollout_epoch: 50
-    # When decoupled mode is enabled, the communication mechanism between the env worker and the rollout worker will be changed. 
-    # When set rollout worker to "decoupled":
-    # The rollout and env workers are fully decoupled, removing the static mapping.
-    # This is to handle situations where the env worker may become deadlocked.
-    env_mode: "decoupled"
-    # in decoupled mode, the rollout_queue_size = ceil(env_world_size // rollout_world_size)
-    # the rollout can be set a value, If not set, the default value is ceil(env_world_size // rollout_world_size).
-    rollout_queue_size: 0
   
   eval:
     total_num_envs: 32
@@ -124,6 +121,10 @@ rollout:
   backend: "huggingface"
   enable_offload: False
   pipeline_stage_num: 1
+  # In decoupled mode, 0 means using the default queue size:
+  # ceil(env_world_size // rollout_world_size).
+  # Set a positive value to cap how many Env shards one Rollout Worker aggregates.
+  rollout_queue_size: 0
 
   collect_transitions: True
   collect_prev_infos: False
