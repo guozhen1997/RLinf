@@ -14,7 +14,7 @@
 
 import copy
 import gc
-from typing import Any, Literal
+from typing import Any, Callable, Literal, Optional
 
 import numpy as np
 import torch
@@ -216,10 +216,11 @@ class MultiStepRolloutWorker(Worker):
     def send_rollout_result(
         self,
         output_channel: Channel,
-        rollout_result: RolloutResult,
+        rollout_result: Any,
         *,
         tag: str,
         batch_size: int,
+        split_fn: Optional[Callable[[Any, list[int]], list[Any]]] = None,
     ):
         self.send_to(
             group_name=self.cfg.env.group_name,
@@ -228,7 +229,7 @@ class MultiStepRolloutWorker(Worker):
             tag=tag,
             async_op=True,
             batch_size=batch_size,
-            split_fn=self._split_rollout_result,
+            split_fn=split_fn,
         )
 
     async def recv_env_output(
@@ -455,9 +456,10 @@ class MultiStepRolloutWorker(Worker):
                     rollout_result=rollout_result,
                     tag="train_rollout_results",
                     batch_size=self.train_batch_size,
+                    split_fn=self._split_rollout_result,
                 )
         for _ in range(self.num_pipeline_stages):
-            env_output = self.recv_env_output(
+            env_output = await self.recv_env_output(
                 input_channel=input_channel,
                 tag="train_rollout_results",
                 batch_size=self.train_batch_size,
@@ -476,6 +478,7 @@ class MultiStepRolloutWorker(Worker):
                 rollout_result=rollout_result,
                 tag="train_rollout_results",
                 batch_size=self.train_batch_size,
+                split_fn=self._split_rollout_result,
             )
 
     @Worker.timer("rollout/generate")
@@ -533,7 +536,7 @@ class MultiStepRolloutWorker(Worker):
             ):
                 for _ in range(self.n_eval_chunk_steps):
                     for _ in range(self.num_pipeline_stages):
-                        env_output = self.recv_env_output(
+                        env_output = await self.recv_env_output(
                             input_channel=input_channel,
                             tag="eval_rollout_results",
                             batch_size=self.eval_batch_size,

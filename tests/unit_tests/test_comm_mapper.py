@@ -77,7 +77,7 @@ def test_build_send_plan_load_balance_rollout_to_env():
         src_world_size=3,
         dst_world_size=2,
         tag="train_actions",
-        local_batch_size=4,
+        batch_size=4,
     )
     assert [(entry.peer_rank, entry.batch_size) for entry in plan.entries] == [(0, 4)]
 
@@ -88,7 +88,7 @@ def test_build_send_plan_load_balance_rollout_to_env():
         src_world_size=3,
         dst_world_size=2,
         tag="train_actions",
-        local_batch_size=4,
+        batch_size=4,
     )
     assert [(entry.peer_rank, entry.batch_size) for entry in plan.entries] == [
         (0, 2),
@@ -102,7 +102,7 @@ def test_build_send_plan_load_balance_rollout_to_env():
         src_world_size=3,
         dst_world_size=2,
         tag="train_actions",
-        local_batch_size=4,
+        batch_size=4,
     )
     assert [(entry.peer_rank, entry.batch_size) for entry in plan.entries] == [(1, 4)]
 
@@ -117,7 +117,7 @@ def test_build_recv_plan_matches_expected_receive_sizes():
             src_world_size=2,
             dst_world_size=3,
             tag="train_obs",
-            local_batch_size=4,
+            batch_size=4,
         ).entries
     ] == [(0, 4)]
     assert [
@@ -129,7 +129,7 @@ def test_build_recv_plan_matches_expected_receive_sizes():
             src_world_size=2,
             dst_world_size=3,
             tag="train_obs",
-            local_batch_size=4,
+            batch_size=4,
         ).entries
     ] == [(0, 2), (1, 2)]
     assert [
@@ -141,7 +141,7 @@ def test_build_recv_plan_matches_expected_receive_sizes():
             src_world_size=2,
             dst_world_size=3,
             tag="train_obs",
-            local_batch_size=4,
+            batch_size=4,
         ).entries
     ] == [(1, 4)]
 
