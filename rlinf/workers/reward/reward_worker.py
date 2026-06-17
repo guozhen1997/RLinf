@@ -298,14 +298,9 @@ class EmbodiedRewardWorker(Worker):
                 async_op=True,
                 batch_size=self.train_batch_size,
             ).async_wait()
-            merged_images = merged_data.get("images")
-            assert merged_images is not None, (
-                "Expected reward input to contain key 'images', but got "
-                f"keys: {list(merged_data.keys())}"
-            )
             last_run = merged_data.get("last_run", None)
             last_run_count = int(last_run.sum().item()) if last_run is not None else 0
-            rewards = self.compute_image_rewards(images=merged_images)
+            rewards = self.compute_image_rewards(images=merged_data)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
@@ -373,12 +368,7 @@ class EmbodiedRewardWorker(Worker):
                 batch_size=self.train_batch_size,
                 env_decoupled_mode=self.env_decoupled_mode,
             ).async_wait()
-            merged_images = merged_data.get("images")
-            assert merged_images is not None, (
-                "Expected reward input to contain key 'images', but got "
-                f"keys: {list(merged_data.keys())}"
-            )
-            rewards = self.compute_image_rewards(images=merged_images)
+            rewards = self.compute_image_rewards(images=merged_data)
             if isinstance(rewards, torch.Tensor):
                 rewards = rewards.cpu().contiguous()
             self.send_to(
