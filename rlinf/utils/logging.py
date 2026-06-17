@@ -20,6 +20,9 @@ def get_logger():
     return Worker.logger
 
 
+_LIBAV_LOGS_SILENCED = False
+
+
 def silence_libav_logs() -> None:
     """Suppress the ``[libdav1d @ 0x..] libdav1d 0.9.2`` chatter that
     torchcodec (LeRobot's default video backend) emits every frame.
@@ -31,9 +34,17 @@ def silence_libav_logs() -> None:
     filtered line-by-line; all other stderr output (our own logs,
     tracebacks, etc.) still reaches the terminal.
 
+    Idempotent: once the fd=2 redirect is installed, repeated calls return
+    immediately so we never stack multiple ``grep`` filter subprocesses or
+    re-duplicate the file descriptor.
+
     Call this once, as early as possible, before the heavy ``torch`` /
     ``torchcodec`` imports so the redirect is installed before libav loads.
     """
+    global _LIBAV_LOGS_SILENCED
+    if _LIBAV_LOGS_SILENCED:
+        return
+
     import atexit
     import os
     import shutil
@@ -96,3 +107,4 @@ def silence_libav_logs() -> None:
             grep.kill()
 
     atexit.register(_restore_and_drain)
+    _LIBAV_LOGS_SILENCED = True

@@ -45,8 +45,9 @@ def setup_distributed(cfg: Any) -> tuple[int, int, str]:
             (``backend``, ``timeout`` seconds).
 
     Returns:
-        Tuple of ``(rank, world_size, device_string)``. Falls back to
-        ``(0, 1, "cuda")`` when not launched under torchrun.
+        Tuple of ``(rank, world_size, device_string)``. The device is
+        ``cuda[:local_rank]`` when CUDA is available, else ``"cpu"``. Falls
+        back to ``(0, 1, <device>)`` when not launched under torchrun.
     """
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         rank = int(os.environ["RANK"])
@@ -63,16 +64,22 @@ def setup_distributed(cfg: Any) -> tuple[int, int, str]:
                 timeout=timedelta(seconds=timeout_seconds),
             )
 
-        torch.cuda.set_device(local_rank)
+        # Only bind a CUDA device when CUDA is actually present; CPU-only
+        # torchrun jobs (e.g. a gloo backend) must not hard-fail here.
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+            device = f"cuda:{local_rank}"
+        else:
+            device = "cpu"
 
         if rank == 0:
-            logger.info("Distributed mode enabled: %d GPUs", world_size)
+            logger.info("Distributed mode enabled: %d ranks", world_size)
             logger.info("  Backend: %s, Timeout: %ss", backend, timeout_seconds)
 
-        return rank, world_size, f"cuda:{local_rank}"
+        return rank, world_size, device
 
-    # Single GPU fallback
-    return 0, 1, "cuda"
+    # Single-process fallback
+    return 0, 1, "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def _release_cuda_memory_for_exit() -> None:

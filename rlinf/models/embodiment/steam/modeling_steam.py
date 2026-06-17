@@ -336,7 +336,16 @@ class SteamBackbone(nn.Module):
             flat_images = flat_images.to(dtype=torch.float32) / 255.0
         else:
             flat_images = flat_images.to(dtype=torch.float32)
-            if bool(flat_images.max() > 1.0) or bool(flat_images.min() < 0.0):
+            # Degenerate-input safety. Inputs are expected in [0, 1]; map the
+            # other two conventions we may receive back into [0, 1] without
+            # corrupting a signed-normalised image:
+            #   * [-1, 1] (min < 0, max <= 1) -> (x + 1) / 2
+            #   * [0, 255] (max > 1)          -> x / 255
+            value_min = float(flat_images.min())
+            value_max = float(flat_images.max())
+            if value_min < 0.0 and value_max <= 1.0:
+                flat_images = ((flat_images + 1.0) * 0.5).clamp(0.0, 1.0)
+            elif value_max > 1.0:
                 flat_images = (flat_images / 255.0).clamp(0.0, 1.0)
 
         if flat_images.shape[-2:] != self.image_resolution:

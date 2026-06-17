@@ -96,8 +96,13 @@ def resize_with_pad(
     resized_height = int(cur_height / ratio)
     resized_width = int(cur_width / ratio)
 
+    # ``F.interpolate(mode="bilinear")`` does not support uint8 tensors, so
+    # interpolate in float and cast back to the original dtype below.
+    interpolation_input = (
+        images.to(torch.float32) if images.dtype == torch.uint8 else images
+    )
     resized_images = F.interpolate(
-        images,
+        interpolation_input,
         size=(resized_height, resized_width),
         mode=mode,
         align_corners=False if mode == "bilinear" else None,
@@ -491,6 +496,11 @@ class BaseValueTextProcessor(ProcessorMixin):
     ):
         if image_processor is None:
             cls = self._default_image_processor_cls
+            if cls is None:
+                raise ValueError(
+                    f"{type(self).__name__} must set _default_image_processor_cls "
+                    "or be constructed with an explicit image_processor."
+                )
             image_processor = (
                 cls(image_keys=image_keys, do_augment=do_augment)
                 if image_keys
@@ -569,8 +579,7 @@ class BaseValueTextProcessor(ProcessorMixin):
             type(self)._tokenize_log_count += 1
             decoded = self.tokenizer.decode(tokens, skip_special_tokens=False)
             logger.info(
-                "[Tokenization Example #%d] prompt=%r → %r  "
-                "(raw_len=%d, pad_to=%d)",
+                "[Tokenization Example #%d] prompt=%r → %r  (raw_len=%d, pad_to=%d)",
                 type(self)._tokenize_log_count,
                 prompt,
                 decoded,
@@ -601,9 +610,7 @@ class BaseValueTextProcessor(ProcessorMixin):
         batch_tokens = []
         batch_masks = []
         for prompt in prompts:
-            tokens, mask = self._tokenize_single(
-                prompt=prompt, max_length=max_length
-            )
+            tokens, mask = self._tokenize_single(prompt=prompt, max_length=max_length)
             batch_tokens.append(tokens)
             batch_masks.append(mask)
 

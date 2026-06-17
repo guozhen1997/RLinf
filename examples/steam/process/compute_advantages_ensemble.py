@@ -315,16 +315,19 @@ def _build_dataloader(
     start, end = get_shard_indices(total, rank, world_size)
     shard_indices = list(range(start, end))
     shard = Subset(dataset, shard_indices)
-    loader = DataLoader(
-        shard,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        prefetch_factor=prefetch_factor if num_workers > 0 else None,
-        persistent_workers=num_workers > 0,
-        pin_memory=True,
-        shuffle=False,
-        collate_fn=collate_fn,
-    )
+    loader_kwargs: dict[str, Any] = {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": True,
+        "shuffle": False,
+        "collate_fn": collate_fn,
+    }
+    # prefetch_factor / persistent_workers are only valid with worker
+    # processes; passing them when num_workers == 0 errors on older PyTorch.
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
+        loader_kwargs["persistent_workers"] = True
+    loader = DataLoader(shard, **loader_kwargs)
     return loader, len(shard_indices)
 
 

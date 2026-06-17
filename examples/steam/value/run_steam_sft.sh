@@ -52,3 +52,6 @@ HYDRA_ARGS=(
 CMD_BASE="python ${SRC_FILE} --config-path ${SCRIPT_DIR}/config/ --config-name ${CONFIG_NAME}"
 echo "${CMD_BASE} ${HYDRA_ARGS[*]} ${EXTRA_ARGS}" > "${LOG_FILE}"
 ${CMD_BASE} "${HYDRA_ARGS[@]}" ${EXTRA_ARGS} 2>&1 | grep -v "libdav1d" | tee -a "${LOG_FILE}"
+# The grep|tee pipeline would otherwise return tee's exit status and mask a
+# training failure; propagate the Python process's exit code instead.
+exit "${PIPESTATUS[0]}"

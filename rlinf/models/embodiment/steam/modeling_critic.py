@@ -480,7 +480,11 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
 
     @torch.no_grad()
     def predict_value(self, observation) -> Tensor:
-        """Return P(progress) per sample (shape ``[B]``)."""
+        """Return the signed value in ``[-1, 1]`` per sample (shape ``[B]``).
+
+        This is ``predicted_values`` — for the binary head it equals
+        ``2 · P(progress) - 1``, not ``P(progress)`` itself.
+        """
         return self.predict(observation).predicted_values
 
     @classmethod
