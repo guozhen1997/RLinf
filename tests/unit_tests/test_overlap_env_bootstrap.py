@@ -64,6 +64,7 @@ class TestOverlapEnvBootstrap(unittest.TestCase):
                     }
                 },
                 "rollout": {
+                    "group_name": "RolloutGroup",
                     "pipeline_stage_num": 1,
                     "collect_transitions": False,
                 },

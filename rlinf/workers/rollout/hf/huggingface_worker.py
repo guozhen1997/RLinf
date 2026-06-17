@@ -118,7 +118,9 @@ class MultiStepRolloutWorker(Worker):
             self._sync_weight_comm_options = self.weight_syncer.comm_options
 
         # check env mode
-        env_mode = self.cfg.env.train.get("env_mode", None)
+        env_mode = (
+            train_env_cfg.get("env_mode", None) if train_env_cfg is not None else None
+        )
         assert env_mode in ["decoupled", None], f"{env_mode} is not supported"
         self.env_decoupled_mode = env_mode == "decoupled"
 
@@ -128,7 +130,11 @@ class MultiStepRolloutWorker(Worker):
             self.batch_router = {
                 "rollout_results": [],
             }
-        self.rollout_queue_size = self.cfg.env.train.get("rollout_queue_size", 0)
+        self.rollout_queue_size = (
+            train_env_cfg.get("rollout_queue_size", 0)
+            if train_env_cfg is not None
+            else 0
+        )
 
     def init_worker(self):
         rollout_model_config = copy.deepcopy(self.model_cfg)
@@ -530,7 +536,7 @@ class MultiStepRolloutWorker(Worker):
                 )
         else:
             for _ in tqdm(
-                range(self.cfg.algorithm.eval_rollout_epoch),
+                range(self.eval_rollout_epoch),
                 desc="Evaluating Rollout Epochs",
                 disable=(self._rank != 0),
             ):
