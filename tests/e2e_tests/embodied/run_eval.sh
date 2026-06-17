@@ -22,4 +22,4 @@ export ISAAC_PATH=${ISAAC_PATH:-/path/to/isaac-sim}
 export EXP_PATH=${EXP_PATH:-$ISAAC_PATH/apps}
 export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
-python ${REPO_PATH}/examples/evaluations/eval_embodied_agent.py --config-path ${REPO_PATH}/tests/e2e_tests/embodied --config-name ${CONFIG}
+python ${REPO_PATH}/evaluations/eval_embodied_agent.py --config-path ${REPO_PATH}/tests/e2e_tests/embodied --config-name ${CONFIG}
