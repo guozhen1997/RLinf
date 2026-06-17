@@ -298,7 +298,7 @@ YAML 示例（LIBERO 冷启动，见 ``libero_sft_dreamzero_5b.yaml``）：
    * - 字段
      - 含义与作用
    * - ``target_video_height`` / ``target_video_width``
-     - WAN 策略头在**多视角拼接后**的目标分辨率（5B 预设如 176×320；Libero 常用 160×320）。仅作用于模型内部 resize，**不要**用于 data transform 的单视角 resize。
+     - WAN 策略头在 **多视角拼接后** 的目标分辨率（5B 预设如 176×320；Libero 常用 160×320）。仅作用于模型内部 resize， **不要** 用于 data transform 的单视角 resize。
    * - ``droid_view_height`` / ``droid_view_width``
      - （可选）DROID 各视角 resize 覆盖。
    * - ``relative_action`` / ``relative_action_keys`` / ``relative_action_per_horizon``
