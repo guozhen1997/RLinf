@@ -116,6 +116,9 @@ class EmbodiedRunner:
         self.enable_per_worker_metric_log = bool(
             self.cfg.runner.get("per_worker_log", False)
         )
+        assert self.cfg.env.train.get("env_mode", None) != "decoupled", (
+            "env_decoupled_mode is not supported in embodied runner"
+        )
 
         # Async logging setup
         self.stop_logging = False
