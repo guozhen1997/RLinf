@@ -357,10 +357,47 @@ class EnsembleSteamCriticModel(nn.Module):
         return SteamCriticModel.from_checkpoint(*args, **kwargs)
 
 
+def coerce_to_ensemble(model) -> EnsembleSteamCriticModel:
+    """Return an ensemble-shaped inference model, allowing ``ensemble_size == 1``.
+
+    The advantage pipeline always consumes an :class:`EnsembleSteamCriticModel`
+    so a single code path can read ``member_*`` aggregate stats. A checkpoint
+    saved with ``ensemble_size == 1`` rehydrates as a plain
+    :class:`SteamCriticModel`; this wraps it in a single-member ensemble,
+    carrying over the runtime processor / device, so downstream readers never
+    branch on the single-vs-ensemble distinction.
+    """
+    if isinstance(model, EnsembleSteamCriticModel):
+        return model
+
+    if isinstance(model, SteamCriticModel):
+        ensemble_size = int(getattr(model.config, "ensemble_size", 1))
+        if ensemble_size == 1:
+            wrapped = EnsembleSteamCriticModel(model.config, [model])
+            processor = getattr(model, "processor", None)
+            device = getattr(model, "_device", None)
+            if processor is not None and device is not None:
+                wrapped.attach_runtime_assets(processor, device)
+            elif processor is not None:
+                wrapped.processor = processor
+            elif device is not None:
+                wrapped._device = device
+            wrapped.eval()
+            return wrapped
+
+    raise RuntimeError(
+        "Expected an ensemble-compatible checkpoint, but "
+        "SteamCriticModel.from_checkpoint returned "
+        f"{type(model).__name__}. Check that the saved config.json has "
+        "ensemble_size >= 1."
+    )
+
+
 __all__ = [
     "EnsembleSteamCriticModel",
     "EnsembleCriticOutput",
     "build_ensemble_members",
     "clone_ensemble_members",
+    "coerce_to_ensemble",
     "reinitialize_member_value_heads",
 ]

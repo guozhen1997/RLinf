@@ -12,26 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Visualise the ensemble binary value model's per-frame advantage parquet.
+"""Visualise a STEAM ensemble advantages parquet (offline diagnostics).
 
-Reads ``meta/advantages_{tag}.parquet`` produced by
-``compute_advantages_ensemble.py`` and writes aggregate diagnostics:
-
-    1. ``distribution.png``              — aggregated signed-progress histogram
-    2. ``members.png``                   — per-member signed-progress overlay
-    3. ``uncertainty.png``               — ensemble mean vs variance scatter
-    4. ``positive_rate_per_episode.png`` — per-episode positive fraction
-    5. ``timeline_episodes.png``         — 3x3 episode timeline grid
-    6. ``summary.json``                  — aggregate statistics
-
-The script does NOT load the value model and does NOT recompute anything —
-every score comes from the parquet.
-
-Usage:
-    python visualize_advantage.py \\
-        --dataset /path/to/lerobot_dataset \\
-        --tag fail150_k8_ensemble4_wco \\
-        --output /path/to/visualization_dir
+Reads ``meta/advantages_{tag}.parquet`` and writes distribution, per-member,
+uncertainty, per-episode positive-rate, and episode-timeline plots plus a
+``summary.json`` — no value model is loaded and nothing is recomputed; every
+score comes from the parquet. See the STEAM pipeline docs for the output gallery
+and CLI options.
 """
 
 import argparse

@@ -164,9 +164,21 @@ def expected_signed_stride(probs, K: int, num_bins: int):
     return (probs_np * centers_np).sum(axis=-1)
 
 
+def entropy_nats(probs) -> np.ndarray:
+    """Per-sample categorical entropy in nats; ``[..., num_bins]`` -> ``[...]``.
+
+    Probabilities are clipped to ``[1e-12, 1]`` before the ``-Σ p·log p`` sum so
+    a zero bin never produces a ``nan``. Used by the advantage pipeline to log
+    aggregate and per-member predictive entropy alongside the signed score.
+    """
+    p = np.clip(np.asarray(probs, dtype=np.float64), 1e-12, 1.0)
+    return -np.sum(p * np.log(p), axis=-1)
+
+
 __all__ = [
     "_signed_stride_to_bin",
     "_scaled_signed_stride_to_bin",
     "bin_centers",
+    "entropy_nats",
     "expected_signed_stride",
 ]
