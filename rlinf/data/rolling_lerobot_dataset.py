@@ -605,6 +605,19 @@ class RollingLeRobotDataset(Dataset):
         self._shard_cache_hits: int = 0
         self._shard_cache_misses: int = 0
 
+        logger.info(
+            "[RollingLeRobotDataset] root_dir=%s, chunk_size=%d, "
+            "sub_datasets=%d, logical_samples=%d, "
+            "physical_frames=%d, require_all_intervene=%s, window_size=%s",
+            self.root_dir,
+            self.chunk_size,
+            len(self._sub_datasets),
+            len(self),
+            self._num_physical_frames(),
+            self.require_all_intervene,
+            self.window_size,
+        )
+
     # ------------------------------------------------------------------
     # Readiness gate
     # ------------------------------------------------------------------
@@ -1074,83 +1087,3 @@ class RollingLeRobotDataset(Dataset):
             return [self._load_item_from_lerobot(p) for p in physicals]
 
 
-# ---------------------------------------------------------------------------
-# Factory
-# ---------------------------------------------------------------------------
-
-
-def build_rolling_lerobot_dataset(
-    root_dir: str | Path,
-    chunk_size: int = 1,
-    delta_timestamps: dict[str, list[float]] | None = None,
-    keys: list[str] | None = None,
-    image_transforms: Callable | None = None,
-    min_frames: int = 1,
-    wait_interval_s: float = 10.0,
-    action_sequence_keys: list[str] | None = ["actions"],
-    require_all_intervene: bool = False,
-    intervene_flag_key: str = "intervene_flag",
-    window_size: int | None = None,
-    in_memory_mode: bool = False,
-    fps: int = 10,
-) -> RollingLeRobotDataset:
-    """Build a :class:`RollingLeRobotDataset` for rolling data collection.
-
-    Args:
-        root_dir: Root directory containing ``rank_N/id_M/`` sub-datasets.
-        chunk_size: Consecutive frames per sample.  Defaults to ``1``
-            (single-frame).  Set to the model's action-chunk horizon for
-            OpenPI / DAgger training.
-        delta_timestamps: Explicit ``delta_timestamps`` passed to each
-            :class:`~lerobot.common.datasets.lerobot_dataset.LeRobotDataset`.
-            Auto-generated from ``chunk_size`` and fps when ``None``.
-        keys: Parquet column names to keep in each sample.  ``None`` keeps all
-            keys returned by LeRobotDataset.
-        image_transforms: Optional transform passed to each LeRobotDataset's
-            ``image_transforms`` argument.
-        min_frames: Minimum number of safe sub-datasets required before the
-            dataset returns.  Construction sleeps until the threshold is met.
-            Defaults to ``1``.
-        wait_interval_s: Seconds between readiness polls.  Defaults to ``10.0``.
-        action_sequence_keys: List of keys to apply chunking to.  Defaults to
-            ``["actions"]``.
-        require_all_intervene: See :class:`RollingLeRobotDataset`.
-        intervene_flag_key: Column name for the per-frame intervention flag.
-        window_size: Caps the dataset to the last ``window_size`` **logical**
-            frames.  See :class:`RollingLeRobotDataset`.
-        in_memory_mode: Must be ``True`` for rolling in-memory shard loading.
-        fps: Dataset frame rate used when auto-generating ``delta_timestamps``.
-
-    Returns:
-        A :class:`RollingLeRobotDataset` instance.
-    """
-    dataset = RollingLeRobotDataset(
-        root_dir=root_dir,
-        chunk_size=chunk_size,
-        delta_timestamps=delta_timestamps,
-        keys=keys,
-        image_transforms=image_transforms,
-        min_frames=min_frames,
-        wait_interval_s=wait_interval_s,
-        action_sequence_keys=action_sequence_keys,
-        require_all_intervene=require_all_intervene,
-        intervene_flag_key=intervene_flag_key,
-        window_size=window_size,
-        in_memory_mode=in_memory_mode,
-        fps=fps,
-    )
-
-    logger.info(
-        "[build_rolling_lerobot_dataset] root_dir=%s, chunk_size=%d, "
-        "sub_datasets=%d, logical_samples=%d, "
-        "physical_frames=%d, require_all_intervene=%s, window_size=%s",
-        root_dir,
-        chunk_size,
-        len(dataset._sub_datasets),
-        len(dataset),
-        dataset._num_physical_frames(),
-        require_all_intervene,
-        window_size,
-    )
-
-    return dataset

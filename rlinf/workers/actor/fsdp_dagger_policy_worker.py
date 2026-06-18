@@ -24,7 +24,7 @@ from omegaconf import DictConfig
 from rlinf.config import SupportedModel
 from rlinf.data.embodied_io_struct import Trajectory
 from rlinf.data.replay_buffer import TrajectoryReplayBuffer
-from rlinf.data.rolling_lerobot_dataset import build_rolling_lerobot_dataset
+from rlinf.data.rolling_lerobot_dataset import RollingLeRobotDataset
 from rlinf.data.utils import build_dataloader_from_dataset
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.scheduler import Channel, Worker
@@ -70,7 +70,7 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
                 "Online LeRobot DAgger requires actor.lerobot.in_memory_mode=True."
             )
         lerobot_fps = int(lerobot_cfg.get("fps", 10))
-        self.dataset = build_rolling_lerobot_dataset(
+        self.dataset = RollingLeRobotDataset(
             root_dir=self.cfg.actor.sft_data_path,
             chunk_size=self.cfg.actor.model.num_action_chunks,
             min_frames=self.cfg.actor.get("min_frames", 1),

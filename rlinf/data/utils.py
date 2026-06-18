@@ -19,6 +19,7 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader, Dataset, DistributedSampler, Sampler
 
+from rlinf.data.rolling_lerobot_dataset import RollingLeRobotDataset
 from rlinf.utils.logging import get_logger
 
 logger = get_logger()
@@ -267,7 +268,7 @@ def build_dataloader_from_dataset(
         A :class:`DataLoader` instance.  The sampler is accessible via
         ``loader.sampler``.  Typical training loop ::
 
-            dataset = build_rolling_lerobot_dataset(
+            dataset = RollingLeRobotDataset(
                 root_dir="logs/run/maniskill",
                 chunk_size=16,
             )
