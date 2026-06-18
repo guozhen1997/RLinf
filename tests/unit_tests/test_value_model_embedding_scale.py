@@ -34,7 +34,7 @@ class _FakeValueExpert:
 
 def _load_value_critic_model(monkeypatch):
     value_model_dir = (
-        Path(__file__).resolve().parents[2] / "rlinf/models/embodiment/value_model"
+        Path(__file__).resolve().parents[2] / "rlinf/models/embodiment/pi06star"
     )
     package_name = "value_model_under_test"
     package = ModuleType(package_name)

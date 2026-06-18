@@ -15,7 +15,7 @@
 """STEAM value model factory.
 
 Provides ``get_model(cfg)`` with the same signature as
-:func:`rlinf.models.embodiment.value_model.get_model` so the router in
+:func:`rlinf.models.embodiment.pi06star.get_model` so the router in
 ``rlinf/models/__init__.py`` can dispatch between value-model flavours
 uniformly.
 """
@@ -295,7 +295,7 @@ def get_model(
 ) -> Union[SteamCriticModel, EnsembleSteamCriticModel]:
     """Build a binary value critic or its ensemble wrapper.
 
-    Signature matches :func:`rlinf.models.embodiment.value_model.get_model`
+    Signature matches :func:`rlinf.models.embodiment.pi06star.get_model`
     so the router in ``rlinf/models/__init__.py`` can dispatch via
     ``from rlinf.models.embodiment.steam import get_model``.
 
@@ -309,7 +309,7 @@ def get_model(
             - max_token_len
             - model_path: optional fine-tuned checkpoint path
         torch_dtype: unused, kept for interface parity with
-            ``value_model.get_value_model``.
+            ``pi06star.get_value_model``.
 
     Returns:
         A :class:`SteamCriticModel` or

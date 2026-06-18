@@ -1,4 +1,4 @@
-model_type: "value_model"
+model_type: "pi06star"
 
 precision: bf16
 

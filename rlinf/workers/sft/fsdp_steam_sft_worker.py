@@ -245,7 +245,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             SteamProcessor,
             resolve_vision_image_size,
         )
-        from rlinf.models.embodiment.value_model.checkpoint_utils import (
+        from rlinf.models.embodiment.pi06star.checkpoint_utils import (
             has_tokenizer_files,
         )
 

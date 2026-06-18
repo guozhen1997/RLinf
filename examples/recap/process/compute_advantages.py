@@ -64,7 +64,7 @@ from rlinf.data.process.distributed import (
     get_shard_indices,
     setup_distributed,
 )
-from rlinf.models.embodiment.value_model.modeling_critic import ValueCriticModel
+from rlinf.models.embodiment.pi06star.modeling_critic import ValueCriticModel
 
 logger = logging.getLogger(__name__)
 

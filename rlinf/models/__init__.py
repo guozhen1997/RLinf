@@ -126,8 +126,8 @@ def _register_builtin_models():
 
         return get_model(cfg, torch_dtype)
 
-    def _build_value_model(cfg: DictConfig, torch_dtype):
-        from rlinf.models.embodiment.value_model import get_model
+    def _build_pi06star(cfg: DictConfig, torch_dtype):
+        from rlinf.models.embodiment.pi06star import get_model
 
         return get_model(cfg, torch_dtype)
 
@@ -221,8 +221,8 @@ def _register_builtin_models():
         force=True,
     )
     register_model(
-        SupportedModel.VALUE_MODEL.value,
-        _build_value_model,
+        SupportedModel.PI06STAR.value,
+        _build_pi06star,
         category="embodied",
         force=True,
     )

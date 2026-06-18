@@ -14,10 +14,10 @@
 
 """Shared image + text processing for embodied value/critic models.
 
-The ``value_model`` and ``steam`` processors are ~90% identical. The shared
+The ``pi06star`` and ``steam`` processors are ~90% identical. The shared
 logic lives here; the two flavours differ only in:
 
-* **Output pixel range** — ``"signed"`` (``[-1, 1]``, value_model: the
+* **Output pixel range** — ``"signed"`` (``[-1, 1]``, pi06star: the
   processor itself applies the SigLIP ``mean=std=0.5`` normalisation) vs
   ``"unit"`` (``[0, 1]``, steam: it emits raw pixels and defers the encoder's
   real ``image_mean``/``image_std`` normalisation to the backbone, so the
@@ -26,7 +26,7 @@ logic lives here; the two flavours differ only in:
   (384x384 for ``siglip-so400m-patch14-384``).
 * **Prompt template** — ``"Task: {prompt}."`` vs ``"Task: {prompt}\\nValue: "``.
 
-Concrete processors in ``value_model/processing.py`` and
+Concrete processors in ``pi06star/processing.py`` and
 ``steam/processing.py`` subclass these and only set the differing defaults, so
 existing class names — and therefore checkpoint ``from_pretrained`` paths —
 keep working.

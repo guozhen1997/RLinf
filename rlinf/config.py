@@ -98,7 +98,7 @@ SupportedModel.LINGBOTVLA = SupportedModel.register("lingbotvla", force=True)
 SupportedModel.ABOT_M0 = SupportedModel.register("abot_m0", force=True)
 SupportedModel.RESNET_REWARD = SupportedModel.register("resnet", force=True)
 SupportedModel.CFG_MODEL = SupportedModel.register("cfg_model", force=True)
-SupportedModel.VALUE_MODEL = SupportedModel.register("value_model", force=True)
+SupportedModel.PI06STAR = SupportedModel.register("pi06star", force=True)
 SupportedModel.STEAM = SupportedModel.register("steam", force=True)
 
 SupportedModel.QWEN2_5_VL_SFT = SupportedModel.register("qwen2.5_vl", force=True)
@@ -127,7 +127,7 @@ EMBODIED_MODEL = set(
         SupportedModel.GR00T_N1D6,
         SupportedModel.GR00T_N1D7,
         SupportedModel.CFG_MODEL,
-        SupportedModel.VALUE_MODEL,
+        SupportedModel.PI06STAR,
         SupportedModel.STEAM,
     }
 )

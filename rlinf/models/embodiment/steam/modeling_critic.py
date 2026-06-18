@@ -15,7 +15,7 @@
 """STEAM value critic — RLinf-facing entry point.
 
 The observation/forward contract is compatible with the sibling
-``rlinf.models.embodiment.value_model.modeling_critic`` (same keys in
+``rlinf.models.embodiment.pi06star.modeling_critic`` (same keys in
 the observation dict, same ``images: dict[cam_name, Tensor[B,3,H,W]]``
 layout, same CriticOutput dataclass), so the FSDP value-SFT worker and the
 offline advantage pipeline can dispatch on ``model_type`` alone.
@@ -32,7 +32,7 @@ Compared with a categorical value-regression critic:
       2`` — instead of a scalar expected value over value bins.
       ``CriticOutput.atoms`` is ``None``.
 
-Public API (mirrors value_model.modeling_critic.ValueCriticModel):
+Public API (mirrors pi06star.modeling_critic.ValueCriticModel):
     - forward(observation, labels=None) -> CriticOutput
     - predict(observation) -> CriticOutput
     - predict_value(observation) -> Tensor   (signed value in [-1, 1])
@@ -103,7 +103,7 @@ def _resolve_tokenizer_source(
 class CriticOutput(ModelOutput):
     """Output for the single-model STEAM binary critic.
 
-    Field list deliberately matches :class:`~rlinf.models.embodiment.value_model.\
+    Field list deliberately matches :class:`~rlinf.models.embodiment.pi06star.\
 modeling_critic.CriticOutput` so worker code stays duck-type-compatible.
     For the binary variant:
 
@@ -148,7 +148,7 @@ class SteamCriticModel(nn.Module):
 
         - ``forward(observation, labels)`` returns a :class:`CriticOutput`.
         - ``observation`` is a dict in the same format produced by
-          :class:`~rlinf.models.embodiment.value_model.data_collator.\
+          :class:`~rlinf.models.embodiment.pi06star.data_collator.\
 ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
           ``image_masks: dict[cam_name, Tensor[B]]``, ``tokenized_prompt``,
           ``tokenized_prompt_mask``. The ``cam_name`` entries are
@@ -166,7 +166,7 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
         self.label_smoothing = float(config.label_smoothing)
         self.gradient_checkpointing_enabled = False
 
-        # FSDP wrap-name tagging (mirrors value_model/modeling_critic.py:160-162)
+        # FSDP wrap-name tagging (mirrors pi06star/modeling_critic.py:160-162)
         for name, module in self.named_modules():
             path_parts = name.split(".")
             setattr(module, "_fsdp_wrap_name", path_parts[-1] if path_parts else name)
