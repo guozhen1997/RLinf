@@ -274,6 +274,7 @@ class MultiStepRolloutWorker(Worker):
                 receive plan.
 
         Returns:
+
             A merged payload and its split sizes. If only one shard is received, the
             current implementation returns that shard directly.
         """
@@ -393,6 +394,7 @@ class MultiStepRolloutWorker(Worker):
                 as ``self.batch_router[tag]``.
 
         Returns:
+
             AsyncRouteWork wrapping the async channel put operations.
         """
         from rlinf.scheduler.collective import AsyncRouteWork
