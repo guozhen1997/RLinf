@@ -251,12 +251,8 @@ class MultiStepRolloutWorker(Worker):
         source worker group, receives shard messages from ``channel`` one by one, and
         stops when all planned items are received or ``timeout_time`` is reached.
 
-        Each received channel item is expected to contain:
-
-            {
-                "batch_index": <route metadata>,
-                "batch": <payload shard>,
-            }
+        Each received channel item must be a dict with ``batch_index`` (route
+        metadata) and ``batch`` (payload shard).
 
         The ``batch_index`` values are stored in ``self.batch_router[tag]`` so a
         later send call can split the response and send each shard back to the original
@@ -380,12 +376,8 @@ class MultiStepRolloutWorker(Worker):
         The outgoing ``data`` is split according to ``split_sizes`` and each shard is
         sent to the rank encoded in the corresponding recorded batch index.
 
-        Each channel item has the form:
-
-            {
-                "batch_index": <recorded batch index>,
-                "batch": <payload shard>,
-            }
+        Each outgoing channel item is a dict with ``batch_index`` (recorded batch
+        index) and ``batch`` (payload shard).
 
         After all shards are queued, the recorded batch indices for ``tag`` are cleared
         to avoid reusing stale routes.
