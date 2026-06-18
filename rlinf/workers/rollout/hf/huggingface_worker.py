@@ -252,6 +252,7 @@ class MultiStepRolloutWorker(Worker):
         stops when all planned items are received or ``timeout_time`` is reached.
 
         Each received channel item is expected to contain:
+
             {
                 "batch_index": <route metadata>,
                 "batch": <payload shard>,
@@ -380,6 +381,7 @@ class MultiStepRolloutWorker(Worker):
         sent to the rank encoded in the corresponding recorded batch index.
 
         Each channel item has the form:
+
             {
                 "batch_index": <recorded batch index>,
                 "batch": <payload shard>,
