@@ -126,8 +126,15 @@ rollout:
   collect_prev_infos: False
 
   model:
+    model_type: ${actor.model.model_type}
     model_path: ""
+    policy_setup: ${actor.model.policy_setup}
+    obs_dim: ${actor.model.obs_dim}
+    action_dim: ${actor.model.action_dim}
+    num_action_chunks: ${actor.model.num_action_chunks}
     precision: ${actor.model.precision}
+    add_value_head: ${actor.model.add_value_head}
+    add_q_head: ${actor.model.add_q_head}
 
 actor:
   group_name: "ActorGroup"
@@ -139,7 +146,7 @@ actor:
   enable_offload: False
 
   model:
-    model_name: "mlp_policy"
+    model_type: "mlp_policy"
     policy_setup: "panda-ee-dpos"
     action_dim: 4
     
