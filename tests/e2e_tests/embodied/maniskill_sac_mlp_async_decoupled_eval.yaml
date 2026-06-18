@@ -132,9 +132,12 @@ rollout:
     obs_dim: ${actor.model.obs_dim}
     action_dim: ${actor.model.action_dim}
     num_action_chunks: ${actor.model.num_action_chunks}
+    hidden_dim: ${actor.model.hidden_dim}
     precision: ${actor.model.precision}
     add_value_head: ${actor.model.add_value_head}
     add_q_head: ${actor.model.add_q_head}
+    is_lora: ${actor.model.is_lora}
+    lora_rank: ${actor.model.lora_rank}
 
 actor:
   group_name: "ActorGroup"
