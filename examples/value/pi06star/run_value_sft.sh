@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Run Value Model SFT training
-# Usage: bash examples/recap/value/run_value_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
-# Example: bash examples/recap/value/run_value_sft.sh libero_sft_value
-# Example: bash examples/recap/value/run_value_sft.sh libero_sft_value data.tag=my_tag
-# Example: bash examples/recap/value/run_value_sft.sh libero_sft_value data.eval_data_paths="[{dataset_path: /path}]"
+# Usage: bash examples/value/pi06star/run_value_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
+# Example: bash examples/value/pi06star/run_value_sft.sh libero_sft_value
+# Example: bash examples/value/pi06star/run_value_sft.sh libero_sft_value data.tag=my_tag
+# Example: bash examples/value/pi06star/run_value_sft.sh libero_sft_value data.eval_data_paths="[{dataset_path: /path}]"
 
 export SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
 export REPO_PATH="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

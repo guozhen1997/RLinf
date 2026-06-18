@@ -33,7 +33,9 @@ from rlinf.workers.sft.fsdp_cfg_worker import FSDPCfgWorker
 mp.set_start_method("spawn", force=True)
 
 
-@hydra.main(version_base="1.1", config_path="config", config_name="libero_cfg_openpi")
+@hydra.main(
+    version_base="1.1", config_path="config/cfg", config_name="libero_cfg_openpi"
+)
 def main(cfg) -> None:
     cfg = validate_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))

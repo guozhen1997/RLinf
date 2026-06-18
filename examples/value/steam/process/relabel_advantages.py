@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 # Make the rlinf package importable regardless of the cwd the user launched from.
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 from rlinf.data.process.steam.labelling import resolve_quantile_alias  # noqa: E402
 from rlinf.data.process.steam.relabel import relabel_advantages  # noqa: E402

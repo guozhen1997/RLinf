@@ -6,7 +6,7 @@
 # always labelled True (they are success demos by construction).
 #
 # Usage:
-#   cd examples/steam/process
+#   cd examples/value/steam/process
 #   python compute_advantages_ensemble.py \
 #       --config-name compute_advantages_ensemble
 #   # Multi-GPU

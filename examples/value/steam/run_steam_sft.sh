@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Run STEAM value model SFT training
-# Usage: bash examples/steam/value/run_steam_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
-# Example: bash examples/steam/value/run_steam_sft.sh steam_value_model
-# Example: bash examples/steam/value/run_steam_sft.sh steam_value_model data.k=8
-# Example: bash examples/steam/value/run_steam_sft.sh steam_value_model data.tag=my_tag
+# Usage: bash examples/value/steam/run_steam_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
+# Example: bash examples/value/steam/run_steam_sft.sh steam_value_model
+# Example: bash examples/value/steam/run_steam_sft.sh steam_value_model data.k=8
+# Example: bash examples/value/steam/run_steam_sft.sh steam_value_model data.tag=my_tag
 
 export SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
 export REPO_PATH="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

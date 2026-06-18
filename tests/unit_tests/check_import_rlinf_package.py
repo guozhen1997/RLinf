@@ -33,6 +33,7 @@ DEFAULT_NO_TEST_MODULES = [
     "rlinf/data/datasets/recap/cfg_model.py",
     "rlinf/data/datasets/recap/utils.py",
     "rlinf/data/datasets/recap/pi06star.py",
+    "rlinf/data/process/recap/compute_advantages.py",
     "rlinf/workers/sft/fsdp_cfg_worker.py",
     "rlinf/workers/sft/fsdp_value_sft_worker.py",
     "rlinf/utils/ckpt_convertor/convert_openpi_jax_to_python.py",

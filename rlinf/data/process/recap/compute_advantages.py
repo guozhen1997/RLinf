@@ -39,7 +39,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import hydra
 import numpy as np
 import pandas as pd
 import torch
@@ -50,8 +49,6 @@ from lerobot.common.datasets.lerobot_dataset import (
 )
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from rlinf.data.datasets.recap.utils import (
     decode_image_struct_batch,
@@ -901,12 +898,7 @@ def save_advantages_to_dataset(
         dist.barrier()
 
 
-@hydra.main(
-    version_base=None,
-    config_path="config",
-    config_name="compute_advantages",
-)
-def main(cfg: DictConfig) -> None:
+def compute_advantages(cfg: DictConfig) -> None:
     """Main entry point for advantage computation.
 
     Supports both single-GPU and multi-GPU (via torchrun) execution.
@@ -1165,7 +1157,3 @@ def main(cfg: DictConfig) -> None:
 
     finally:
         cleanup_distributed()
-
-
-if __name__ == "__main__":
-    main()

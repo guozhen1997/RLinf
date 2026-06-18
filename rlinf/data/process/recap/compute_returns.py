@@ -31,18 +31,14 @@ import json
 import logging
 import math
 import shutil
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import hydra
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 logger = logging.getLogger(__name__)
 
@@ -382,12 +378,7 @@ def process_dataset(
     return stats
 
 
-@hydra.main(
-    version_base=None,
-    config_path="config",
-    config_name="compute_returns",
-)
-def main(cfg: DictConfig) -> None:
+def compute_returns(cfg: DictConfig) -> None:
     """Main entry point for return computation."""
     logging.basicConfig(level=logging.INFO)
     logger.info("Starting return computation...")
@@ -501,7 +492,3 @@ def main(cfg: DictConfig) -> None:
         logger.info(
             f"    return: min={ret_stats['min']:.2f}, max={ret_stats['max']:.2f}"
         )
-
-
-if __name__ == "__main__":
-    main()

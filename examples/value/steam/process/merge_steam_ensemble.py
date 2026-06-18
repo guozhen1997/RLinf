@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 # Make the rlinf package importable regardless of the cwd the user launched from.
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 from rlinf.models.embodiment.steam.checkpoint_merge import (  # noqa: E402
     merge_ensemble_checkpoints,

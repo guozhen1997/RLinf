@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hydra entry point: compute STEAM ensemble advantages for CFG-RL training.
+"""Hydra entry point: compute RECAP advantages for CFG-RL training.
 
 Thin wrapper around
-:func:`rlinf.data.process.steam.pipeline.compute_ensemble_advantages`. See the
-STEAM pipeline docs for the output column schema, ``label_mode`` semantics, and
-launch commands (single-GPU and ``torchrun``).
+:func:`rlinf.data.process.recap.compute_advantages.compute_advantages`. See the
+RECAP pipeline docs for the output column schema and launch commands
+(single-GPU and ``torchrun``).
 """
 
 import os
@@ -27,29 +27,19 @@ from pathlib import Path
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 # Make the rlinf package importable regardless of the cwd the user launched from.
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-
-# Install the libav/libdav1d stderr filter before the heavy torch / torchcodec
-# imports so the fd=2 redirect is in place before libav loads.
-from rlinf.utils.logging import silence_libav_logs  # noqa: E402
-
-silence_libav_logs()
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 import hydra  # noqa: E402
 from omegaconf import DictConfig  # noqa: E402
 
-from rlinf.data.process.steam.pipeline import (  # noqa: E402
-    compute_ensemble_advantages,
+from rlinf.data.process.recap.compute_advantages import (  # noqa: E402
+    compute_advantages,
 )
 
 
-@hydra.main(
-    version_base=None,
-    config_path="config",
-    config_name="compute_advantages_ensemble",
-)
+@hydra.main(version_base=None, config_path="config", config_name="compute_advantages")
 def main(cfg: DictConfig) -> None:
-    compute_ensemble_advantages(cfg)
+    compute_advantages(cfg)
 
 
 if __name__ == "__main__":

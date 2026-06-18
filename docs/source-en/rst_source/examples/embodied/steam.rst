@@ -181,7 +181,7 @@ The STEAM value model is built from two pretrained backbones:
    hf download google/siglip-so400m-patch14-384 --local-dir siglip-so400m-patch14-384
    hf download google/gemma-3-270m --local-dir gemma-3-270m
 
-Set the paths in the model config (``examples/steam/value/config/model/steam.yaml``):
+Set the paths in the model config (``examples/value/steam/config/model/steam.yaml``):
 
 .. code:: yaml
 
@@ -233,7 +233,7 @@ heads are re-seeded so ensemble variance is a meaningful epistemic signal.
 
 **Configuration**
 
-The config is ``examples/steam/value/config/steam_value_model.yaml``; the model
+The config is ``examples/value/steam/config/steam_value_model.yaml``; the model
 defaults live in ``config/model/steam.yaml``. Key fields:
 
 .. code:: yaml
@@ -292,10 +292,10 @@ defaults live in ``config/model/steam.yaml``. Key fields:
 
 .. code:: bash
 
-   bash examples/steam/value/run_steam_sft.sh steam_value_model
+   bash examples/value/steam/run_steam_sft.sh steam_value_model
 
    # Override config fields inline:
-   bash examples/steam/value/run_steam_sft.sh steam_value_model data.k=8
+   bash examples/value/steam/run_steam_sft.sh steam_value_model data.k=8
 
 **Output**
 
@@ -315,7 +315,7 @@ Run the trained ensemble over every frame and write per-frame advantage labels.
 
 **Configuration**
 
-The config is ``examples/steam/process/config/compute_advantages_ensemble.yaml``:
+The config is ``examples/value/steam/process/config/compute_advantages_ensemble.yaml``:
 
 .. code:: yaml
 
@@ -374,10 +374,10 @@ The config is ``examples/steam/process/config/compute_advantages_ensemble.yaml``
 .. code:: bash
 
    # Auto-detects #GPUs; single-GPU or torchrun multi-GPU both supported.
-   bash examples/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble
+   bash examples/value/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble
 
    # Force a GPU count:
-   bash examples/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble --nproc 4
+   bash examples/value/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble --nproc 4
 
 **Output Files**
 
@@ -396,7 +396,7 @@ RECAP CFG stage. Point the CFG config's ``data.advantage_tag`` at the Step 2
 
 .. code:: bash
 
-   bash examples/recap/cfg/run_cfg_sft.sh libero_cfg_openpi \
+   bash examples/embodiment/run_cfg_sft.sh libero_cfg_openpi \
        data.advantage_tag=steam_k32_ensemble3_q30
 
 See :doc:`RECAP Step 4 <recap>` for the full CFG configuration and parameters.
@@ -413,7 +413,7 @@ is a checkpoint path, or ``PATH:idx`` to pull member ``idx`` from an ensemble:
 
 .. code:: bash
 
-   python examples/steam/process/merge_steam_ensemble.py \
+   python examples/value/steam/process/merge_steam_ensemble.py \
        --member /path/to/seed1/checkpoints/global_step_5000/actor \
        --member /path/to/seed2/checkpoints/global_step_5000/actor \
        --member /path/to/ensemble/checkpoints/global_step_6000/actor:2 \
@@ -430,7 +430,7 @@ existing advantages parquet (pure CPU — ``advantage_continuous`` is reused):
 
 .. code:: bash
 
-   python examples/steam/process/relabel_advantages.py \
+   python examples/value/steam/process/relabel_advantages.py \
        --dataset_paths /path/to/sft_ds /path/to/rollout_ds \
        --source_tag steam_k32_ensemble3_q30 \
        --new_tag steam_k32_ensemble3_q20 \
@@ -447,7 +447,7 @@ diagnostics from an advantages parquet:
 
 .. code:: bash
 
-   python examples/steam/process/visualize_advantage.py \
+   python examples/value/steam/process/visualize_advantage.py \
        --dataset /path/to/dataset \
        --tag steam_k32_ensemble3_q30 \
        --output outputs/steam_viz
@@ -471,23 +471,21 @@ model-agnostic post-processing with RECAP via ``rlinf/data/process/``:
 
 .. code-block:: text
 
-   examples/
-   └── steam/
-       ├── value/
-       │   ├── train_steam.py                     # Step 1: value model SFT entry
-       │   ├── run_steam_sft.sh                   # Step 1 launch script
-       │   └── config/
-       │       ├── steam_value_model.yaml
-       │       └── model/steam.yaml
-       └── process/
-           ├── compute_advantages_ensemble.py     # Step 2: ensemble inference +
-           │                                      #   two-pool labelling (self-contained)
-           ├── merge_steam_ensemble.py            # CLI: merge ensemble checkpoints
-           ├── relabel_advantages.py              # CLI: relabel advantages (CPU)
-           ├── visualize_advantage.py             # advantage visualization
-           ├── run_compute_advantages_ensemble.sh # Step 2 launch script
-           └── config/
-               └── compute_advantages_ensemble.yaml
+   examples/value/steam/
+   ├── train_steam.py                         # Step 1: value model SFT entry
+   ├── run_steam_sft.sh                       # Step 1 launch script
+   ├── config/
+   │   ├── steam_value_model.yaml
+   │   └── model/steam.yaml
+   └── process/
+       ├── compute_advantages_ensemble.py     # Step 2: ensemble inference +
+       │                                      #   two-pool labelling (self-contained)
+       ├── merge_steam_ensemble.py            # CLI: merge ensemble checkpoints
+       ├── relabel_advantages.py              # CLI: relabel advantages (CPU)
+       ├── visualize_advantage.py             # advantage visualization
+       ├── run_compute_advantages_ensemble.sh # Step 2 launch script
+       └── config/
+           └── compute_advantages_ensemble.yaml
 
    rlinf/
    ├── models/embodiment/steam/                   # critic, ensemble, config, merge

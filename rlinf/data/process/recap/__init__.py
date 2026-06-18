@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared, dependency-light helpers for the offline dataset-annotation pipelines.
+"""RECAP offline dataset-annotation pipelines (returns + advantages).
 
-Importable from the ``compute_advantages*`` example scripts in
-``examples/value/pi06star/process`` and ``examples/value/steam/process`` without pulling heavy
-deps (``rlinf.scheduler``, megatron, lerobot). Keep submodules here light.
+Importable logic behind the thin ``compute_returns`` / ``compute_advantages``
+Hydra entry points in ``examples/value/pi06star/process``. Mirrors the sibling
+:mod:`rlinf.data.process.steam` package.
 """
