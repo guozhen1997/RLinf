@@ -15,7 +15,7 @@
 """Image and text processors for the STEAM value model.
 
 Thin subclasses of the shared base in
-:mod:`rlinf.models.embodiment.value_common.image_text_processing`. Versus the
+:mod:`rlinf.models.embodiment.value.value_common.image_text_processing`. Versus the
 value-model flavour, STEAM:
 
     * emits raw BCHW ``[0, 1]`` float images (not ``[-1, 1]``) so the

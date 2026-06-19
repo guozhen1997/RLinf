@@ -127,12 +127,12 @@ def _register_builtin_models():
         return get_model(cfg, torch_dtype)
 
     def _build_pi06star(cfg: DictConfig, torch_dtype):
-        from rlinf.models.embodiment.pi06star import get_model
+        from rlinf.models.embodiment.value.pi06star import get_model
 
         return get_model(cfg, torch_dtype)
 
     def _build_steam(cfg: DictConfig, torch_dtype):
-        from rlinf.models.embodiment.steam import get_model
+        from rlinf.models.embodiment.value.steam import get_model
 
         return get_model(cfg, torch_dtype)
 

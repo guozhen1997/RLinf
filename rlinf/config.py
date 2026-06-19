@@ -1188,7 +1188,7 @@ def _validate_steam_ensemble_cfg(actor_cfg: DictConfig) -> None:
 
     # Import lazily to avoid a circular dependency:
     # rlinf.config -> rlinf.models.embodiment... -> rlinf.models -> rlinf.config
-    from rlinf.models.embodiment.steam.configuration import (
+    from rlinf.models.embodiment.value.steam.configuration import (
         validate_steam_ensemble_settings,
     )
 

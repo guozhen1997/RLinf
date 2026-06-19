@@ -148,8 +148,8 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             pass
 
         from rlinf.data.datasets.recap.pi06star import ValueDataset
-        from rlinf.models.embodiment.pi06star.data_collator import ValueDataCollator
-        from rlinf.models.embodiment.pi06star.processing import ValueProcessor
+        from rlinf.models.embodiment.value.pi06star.data_collator import ValueDataCollator
+        from rlinf.models.embodiment.value.pi06star.processing import ValueProcessor
 
         data_cfg = self.cfg.get("data", {})
         model_cfg = self.cfg.actor.model
@@ -171,7 +171,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             return kwargs
 
         # Tokenizer resolution: explicit tokenizer_path > backbone path > error
-        from rlinf.models.embodiment.pi06star.checkpoint_utils import (
+        from rlinf.models.embodiment.value.pi06star.checkpoint_utils import (
             has_tokenizer_files,
         )
 

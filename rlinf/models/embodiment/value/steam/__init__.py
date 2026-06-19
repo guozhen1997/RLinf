@@ -15,7 +15,7 @@
 """STEAM value model factory.
 
 Provides ``get_model(cfg)`` with the same signature as
-:func:`rlinf.models.embodiment.pi06star.get_model` so the router in
+:func:`rlinf.models.embodiment.value.pi06star.get_model` so the router in
 ``rlinf/models/__init__.py`` can dispatch between value-model flavours
 uniformly.
 """
@@ -295,9 +295,9 @@ def get_model(
 ) -> Union[SteamCriticModel, EnsembleSteamCriticModel]:
     """Build a binary value critic or its ensemble wrapper.
 
-    Signature matches :func:`rlinf.models.embodiment.pi06star.get_model`
+    Signature matches :func:`rlinf.models.embodiment.value.pi06star.get_model`
     so the router in ``rlinf/models/__init__.py`` can dispatch via
-    ``from rlinf.models.embodiment.steam import get_model``.
+    ``from rlinf.models.embodiment.value.steam import get_model``.
 
     Args:
         cfg: Hydra model config. Expected keys:

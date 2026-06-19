@@ -209,7 +209,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         super().save_checkpoint(save_path, step)
 
         if self._rank == 0:
-            from rlinf.models.embodiment.steam import (
+            from rlinf.models.embodiment.value.steam import (
                 save_steam_checkpoint_assets,
             )
 
@@ -240,12 +240,12 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             PairDataset,
         )
         from rlinf.data.datasets.steam.mixture import PairMixtureDataset
-        from rlinf.models.embodiment.steam.processing import (
+        from rlinf.models.embodiment.value.steam.processing import (
             SteamImageProcessor,
             SteamProcessor,
             resolve_vision_image_size,
         )
-        from rlinf.models.embodiment.pi06star.checkpoint_utils import (
+        from rlinf.models.embodiment.value.pi06star.checkpoint_utils import (
             has_tokenizer_files,
         )
 

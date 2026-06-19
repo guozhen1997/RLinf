@@ -15,7 +15,7 @@
 """Image and text processors for the value model.
 
 Thin subclasses of the shared base in
-:mod:`rlinf.models.embodiment.value_common.image_text_processing`. The value model
+:mod:`rlinf.models.embodiment.value.value_common.image_text_processing`. The value model
 emits BCHW images in the SigLIP-normalised ``[-1, 1]`` range at a fixed
 224x224 resolution and uses the plain ``Task: {prompt}.`` prompt template.
 

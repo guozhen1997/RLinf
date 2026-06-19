@@ -44,7 +44,7 @@ from rlinf.data.process.distributed import (
     gather_dataframes_to_rank0,
     get_shard_indices,
 )
-from rlinf.models.embodiment.steam.ensemble_modeling_critic import (
+from rlinf.models.embodiment.value.steam.ensemble_modeling_critic import (
     EnsembleSteamCriticModel,
 )
 

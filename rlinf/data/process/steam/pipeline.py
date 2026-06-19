@@ -49,8 +49,8 @@ from rlinf.data.process.steam.labelling import (
     resolve_quantile_alias,
 )
 from rlinf.data.process.steam.mixture_config import update_advantage_tag
-from rlinf.models.embodiment.steam.ensemble_modeling_critic import coerce_to_ensemble
-from rlinf.models.embodiment.steam.modeling_critic import SteamCriticModel
+from rlinf.models.embodiment.value.steam.ensemble_modeling_critic import coerce_to_ensemble
+from rlinf.models.embodiment.value.steam.modeling_critic import SteamCriticModel
 
 logger = logging.getLogger(__name__)
 

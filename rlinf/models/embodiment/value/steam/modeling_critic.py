@@ -15,7 +15,7 @@
 """STEAM value critic — RLinf-facing entry point.
 
 The observation/forward contract is compatible with the sibling
-``rlinf.models.embodiment.pi06star.modeling_critic`` (same keys in
+``rlinf.models.embodiment.value.pi06star.modeling_critic`` (same keys in
 the observation dict, same ``images: dict[cam_name, Tensor[B,3,H,W]]``
 layout, same CriticOutput dataclass), so the FSDP value-SFT worker and the
 offline advantage pipeline can dispatch on ``model_type`` alone.
@@ -103,7 +103,7 @@ def _resolve_tokenizer_source(
 class CriticOutput(ModelOutput):
     """Output for the single-model STEAM binary critic.
 
-    Field list deliberately matches :class:`~rlinf.models.embodiment.pi06star.\
+    Field list deliberately matches :class:`~rlinf.models.embodiment.value.pi06star.\
 modeling_critic.CriticOutput` so worker code stays duck-type-compatible.
     For the binary variant:
 
@@ -120,7 +120,7 @@ modeling_critic.CriticOutput` so worker code stays duck-type-compatible.
 
     Ensemble aggregate fields (member-wise predictions, mean/min/variance)
     are deliberately **not** on this dataclass — they live on
-    :class:`~rlinf.models.embodiment.steam.\
+    :class:`~rlinf.models.embodiment.value.steam.\
 ensemble_modeling_critic.EnsembleCriticOutput`, which is what the
     :class:`EnsembleSteamCriticModel` wrapper returns. Consumers that
     need those stats must call ensemble-specific surfaces (see
@@ -148,7 +148,7 @@ class SteamCriticModel(nn.Module):
 
         - ``forward(observation, labels)`` returns a :class:`CriticOutput`.
         - ``observation`` is a dict in the same format produced by
-          :class:`~rlinf.models.embodiment.pi06star.data_collator.\
+          :class:`~rlinf.models.embodiment.value.pi06star.data_collator.\
 ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
           ``image_masks: dict[cam_name, Tensor[B]]``, ``tokenized_prompt``,
           ``tokenized_prompt_mask``. The ``cam_name`` entries are
@@ -517,7 +517,7 @@ ValueDataCollator`: ``images: dict[cam_name, Tensor[B,3,H,W]]`` in [0, 1],
 
         Dispatches through :func:`get_model`: returns a single-model
         :class:`SteamCriticModel` when ``ensemble_size == 1``, or an
-        :class:`~rlinf.models.embodiment.steam.\
+        :class:`~rlinf.models.embodiment.value.steam.\
 ensemble_modeling_critic.EnsembleSteamCriticModel` wrapper when
         ``ensemble_size > 1``. Either return value exposes the same
         ``predict`` surface; callers that want ensemble aggregate stats

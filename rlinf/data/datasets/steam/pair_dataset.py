@@ -965,7 +965,7 @@ class PairDataset(_BasePairDataset):
 class BinaryPairDataCollator:
     """Collator that produces the backbone's observation dict for binary pairs.
 
-    Parallel to :class:`~rlinf.models.embodiment.pi06star.data_collator.\
+    Parallel to :class:`~rlinf.models.embodiment.value.pi06star.data_collator.\
 ValueDataCollator`. Runs the :class:`SteamProcessor` **twice**
     — once for frame_t's multi-view images, once for frame_{t+k}'s — then
     stacks the per-camera outputs along a new ``num_frames`` axis. The

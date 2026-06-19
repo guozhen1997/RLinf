@@ -420,7 +420,7 @@ is a checkpoint path, or ``PATH:idx`` to pull member ``idx`` from an ensemble:
        --output /path/to/merged/actor
 
 The merge logic lives in
-``rlinf.models.embodiment.steam.checkpoint_merge.merge_ensemble_checkpoints``.
+``rlinf.models.embodiment.value.steam.checkpoint_merge.merge_ensemble_checkpoints``.
 
 Threshold / Quantile Relabeling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -488,7 +488,7 @@ model-agnostic post-processing with RECAP via ``rlinf/data/process/``:
            └── compute_advantages_ensemble.yaml
 
    rlinf/
-   ├── models/embodiment/steam/                   # critic, ensemble, config, merge
+   ├── models/embodiment/value/steam/                   # critic, ensemble, config, merge
    │   ├── modeling_steam.py / modeling_critic.py
    │   ├── ensemble_modeling_critic.py            # worst-of-N + coerce_to_ensemble
    │   └── checkpoint_merge.py                    # ensemble checkpoint merge
