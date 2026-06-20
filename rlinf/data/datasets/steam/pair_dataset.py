@@ -920,7 +920,9 @@ class PairDataset(_BasePairDataset):
                 # (bin width 2K/num_bins, same resolution as the unscaled path),
                 # with |scaled| > K saturating into the extreme bin. An episode
                 # of length L_max reproduces the unscaled layout (scale == 1).
-                scale = self._length_scale_reference / float(episode_length)
+                scale = max(
+                    1.0, self._length_scale_reference / float(episode_length)
+                )
                 label = _scaled_signed_stride_to_bin(
                     signed_stride * scale, self.k, self.num_bins
                 )
