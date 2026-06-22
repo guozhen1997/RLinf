@@ -775,8 +775,7 @@ RECAP 支持迭代优化：使用 Step 4 训练的策略模型采集新数据，
    │   ├── train_value.py                    # Step 2: 训练价值模型
    │   ├── run_value_sft.sh                  # Step 2 启动脚本
    │   ├── config/
-   │   │   ├── libero_sft_value.yaml
-   │   │   └── model/value.yaml              # 价值模型配置
+   │   │   └── libero_sft_value.yaml
    │   └── process/
    │       ├── compute_returns.py            # Step 1 入口（薄封装）
    │       ├── compute_advantages.py         # Step 3 入口（薄封装）
@@ -786,7 +785,8 @@ RECAP 支持迭代优化：使用 Step 4 训练的策略模型采集新数据，
    │       ├── run_compute_advantages.sh     # Step 3 启动脚本
    │       └── config/
    │           ├── compute_returns.yaml
-   │           └── compute_advantages.yaml
+   │           ├── compute_advantages.yaml
+   │           └── model/value.yaml          # 价值模型配置
    └── embodiment/
        ├── train_cfg.py                      # Step 4: CFG 策略训练
        ├── run_cfg_sft.sh                    # Step 4 启动脚本

@@ -2,9 +2,9 @@
 
 # Run STEAM value model SFT training
 # Usage: bash examples/value/steam/run_steam_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
-# Example: bash examples/value/steam/run_steam_sft.sh steam_value_model
-# Example: bash examples/value/steam/run_steam_sft.sh steam_value_model data.k=8
-# Example: bash examples/value/steam/run_steam_sft.sh steam_value_model data.tag=my_tag
+# Example: bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1
+# Example: bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
+# Example: bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1 data.tag=my_tag
 
 export SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
 export REPO_PATH="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -32,7 +32,7 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 source switch_env openpi 2>/dev/null || echo "Warning: switch_env not found, using current environment"
 
 if [ -z "$1" ]; then
-    CONFIG_NAME="steam_value_model"
+    CONFIG_NAME="steam_model_ensemble1"
 else
     CONFIG_NAME=$1
 fi

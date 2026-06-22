@@ -15,7 +15,7 @@
 """Entry point for STEAM value model SFT training.
 
 Usage:
-    python train_steam.py --config-path config --config-name steam_value_model
+    python train_steam.py --config-path config --config-name steam_model_ensemble1
 """
 
 import json
@@ -46,7 +46,7 @@ mp.set_start_method("spawn", force=True)
 @hydra.main(
     version_base="1.1",
     config_path="config",
-    config_name="steam_value_model",
+    config_name="steam_model_ensemble1",
 )
 def main(cfg) -> None:
     data_root = cfg.data.get("data_root", None)

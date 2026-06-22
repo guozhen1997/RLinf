@@ -188,7 +188,7 @@ Step 1：价值模型 SFT
 
 **配置**
 
-配置文件为 ``examples/value/steam/config/steam_value_model.yaml``\ ；模型默认值在 ``config/model/steam.yaml``\ 。关键字段：
+配置文件为 ``examples/value/steam/config/steam_model_ensemble1.yaml``\ ；模型默认值在 ``config/model/steam.yaml``\ 。关键字段：
 
 .. code:: yaml
 
@@ -246,10 +246,10 @@ Step 1：价值模型 SFT
 
 .. code:: bash
 
-   bash examples/value/steam/run_steam_sft.sh steam_value_model
+   bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1
 
    # 命令行覆盖配置字段：
-   bash examples/value/steam/run_steam_sft.sh steam_value_model data.k=8
+   bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
 
 **输出**
 
@@ -417,7 +417,7 @@ STEAM 在 ``examples/`` 下保留轻量入口，将模型 / 优势逻辑放在 `
    ├── train_steam.py                         # Step 1：价值模型 SFT 入口
    ├── run_steam_sft.sh                       # Step 1 启动脚本
    ├── config/
-   │   ├── steam_value_model.yaml
+   │   ├── steam_model_ensemble1.yaml
    │   └── model/steam.yaml
    └── process/
        ├── compute_advantages_ensemble.py     # Step 2：hydra 入口（薄）
@@ -434,7 +434,10 @@ STEAM 在 ``examples/`` 下保留轻量入口，将模型 / 优势逻辑放在 `
    │   ├── ensemble_modeling_critic.py            # worst-of-N + coerce_to_ensemble
    │   └── checkpoint_merge.py
    ├── data/datasets/steam/binning.py             # 有符号步幅 ↔ bin 数学
-   └── data/process/steam/                        # 优势流程
-       ├── labelling.py / mixture_config.py       # 标注 + 元数据（CPU）
-       ├── inference.py / pipeline.py             # 集成推理 + 编排
-       └── relabel.py                             # CPU 重标注核心
+   └── data/process/                              # 与 RECAP 共享的后处理
+       ├── advantage.py                           # 分位数阈值 + 布尔标签
+       ├── distributed.py                         # 分片推理辅助
+       └── steam/                                 # STEAM 专用流程
+           ├── inference.py / pipeline.py         # 集成推理 + 编排
+           ├── labelling.py / mixture_config.py   # 标注 + 元数据 I/O
+           └── relabel.py                         # CPU 重标注核心

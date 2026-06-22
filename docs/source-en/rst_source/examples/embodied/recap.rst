@@ -787,8 +787,7 @@ File Structure
    │   ├── train_value.py                    # Step 2: value model training
    │   ├── run_value_sft.sh                  # Step 2 launch script
    │   ├── config/
-   │   │   ├── libero_sft_value.yaml
-   │   │   └── model/value.yaml              # value model config
+   │   │   └── libero_sft_value.yaml
    │   └── process/
    │       ├── compute_returns.py            # Step 1 entry (thin wrapper)
    │       ├── compute_advantages.py         # Step 3 entry (thin wrapper)
@@ -798,7 +797,8 @@ File Structure
    │       ├── run_compute_advantages.sh     # Step 3 launch script
    │       └── config/
    │           ├── compute_returns.yaml
-   │           └── compute_advantages.yaml
+   │           ├── compute_advantages.yaml
+   │           └── model/value.yaml          # value model config
    └── embodiment/
        ├── train_cfg.py                      # Step 4: CFG policy training
        ├── run_cfg_sft.sh                    # Step 4 launch script

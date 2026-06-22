@@ -286,26 +286,43 @@ def compute_ensemble_advantages(cfg: DictConfig) -> None:
                     if str(e.type).lower() == "rollout"
                 ]
                 if not rollout_scores:
-                    raise ValueError(
-                        "advantage.label_mode='quantile' requires at least one "
-                        "rollout dataset to derive the rollout threshold; none "
-                        "of the configured train_data_paths has type='rollout'."
+                    # No rollout pool. This is only well-defined when
+                    # expert_quantile is set: sft frames are then labelled by
+                    # their own quantile and no rollout threshold is needed.
+                    # Without expert_quantile there is nothing to threshold on.
+                    if expert_quantile_cfg is None:
+                        raise ValueError(
+                            "advantage.label_mode='quantile' requires either at "
+                            "least one rollout dataset (type='rollout') to derive "
+                            "the rollout threshold, or advantage.expert_quantile "
+                            "set so sft frames are labelled by their own "
+                            "quantile. Neither was provided."
+                        )
+                    rollout_threshold = None
+                    logger.info(
+                        "label_mode='quantile' with no rollout datasets; "
+                        "labelling sft frames by expert_quantile=%.3f only.",
+                        float(expert_quantile_cfg),
                     )
-                combined_rollout = np.concatenate(rollout_scores)
-                rollout_threshold = quantile_threshold(
-                    combined_rollout, float(rollout_quantile_cfg)
-                )
-                logger.info(
-                    "label_mode='quantile' rollout_quantile=%.3f (top %.1f%% of "
-                    "%d rollout samples) → rollout_threshold=%.4f "
-                    "(advantage_continuous range [%.4f, %.4f])",
-                    float(rollout_quantile_cfg),
-                    float(rollout_quantile_cfg) * 100.0,
-                    len(combined_rollout),
-                    rollout_threshold,
-                    float(combined_rollout.min()),
-                    float(combined_rollout.max()),
-                )
+                else:
+                    combined_rollout = np.concatenate(rollout_scores)
+                    rollout_threshold = float(
+                        np.percentile(
+                            combined_rollout,
+                            (1.0 - float(rollout_quantile_cfg)) * 100.0,
+                        )
+                    )
+                    logger.info(
+                        "label_mode='quantile' rollout_quantile=%.3f (top %.1f%% of "
+                        "%d rollout samples) → rollout_threshold=%.4f "
+                        "(advantage_continuous range [%.4f, %.4f])",
+                        float(rollout_quantile_cfg),
+                        float(rollout_quantile_cfg) * 100.0,
+                        len(combined_rollout),
+                        rollout_threshold,
+                        float(combined_rollout.min()),
+                        float(combined_rollout.max()),
+                    )
                 if expert_quantile_cfg is not None:
                     sft_scores: list[np.ndarray] = [
                         d["advantage_continuous"].values

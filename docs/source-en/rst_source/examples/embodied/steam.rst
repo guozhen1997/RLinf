@@ -233,7 +233,7 @@ heads are re-seeded so ensemble variance is a meaningful epistemic signal.
 
 **Configuration**
 
-The config is ``examples/value/steam/config/steam_value_model.yaml``; the model
+The config is ``examples/value/steam/config/steam_model_ensemble1.yaml``; the model
 defaults live in ``config/model/steam.yaml``. Key fields:
 
 .. code:: yaml
@@ -292,10 +292,10 @@ defaults live in ``config/model/steam.yaml``. Key fields:
 
 .. code:: bash
 
-   bash examples/value/steam/run_steam_sft.sh steam_value_model
+   bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1
 
    # Override config fields inline:
-   bash examples/value/steam/run_steam_sft.sh steam_value_model data.k=8
+   bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
 
 **Output**
 
@@ -475,7 +475,7 @@ model-agnostic post-processing with RECAP via ``rlinf/data/process/``:
    ├── train_steam.py                         # Step 1: value model SFT entry
    ├── run_steam_sft.sh                       # Step 1 launch script
    ├── config/
-   │   ├── steam_value_model.yaml
+   │   ├── steam_model_ensemble1.yaml
    │   └── model/steam.yaml
    └── process/
        ├── compute_advantages_ensemble.py     # Step 2: ensemble inference +
@@ -495,5 +495,8 @@ model-agnostic post-processing with RECAP via ``rlinf/data/process/``:
    ├── data/datasets/steam/binning.py             # signed-stride ↔ bin math + entropy
    └── data/process/                              # shared post-processing (RECAP + STEAM)
        ├── advantage.py                           # quantile threshold + boolean label
-       ├── mixture_config.py                      # tags[tag] metadata I/O
-       └── distributed.py                         # sharded-inference helpers
+       ├── distributed.py                         # sharded-inference helpers
+       └── steam/                                 # STEAM-specific pipeline
+           ├── inference.py / pipeline.py         # ensemble inference + orchestration
+           ├── labelling.py / mixture_config.py   # labelling + metadata I/O
+           └── relabel.py                         # CPU relabelling core
