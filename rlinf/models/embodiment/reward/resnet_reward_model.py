@@ -29,10 +29,10 @@ import torchvision.models as models
 from omegaconf import DictConfig
 
 from rlinf.config import torch_dtype_from_precision
-from rlinf.models.embodiment.reward.base_image_reward_model import BaseImageRewardModel
+from rlinf.models.embodiment.reward.base_reward_model import BaseRewardModel
 
 
-class ResNetRewardModel(BaseImageRewardModel):
+class ResNetRewardModel(BaseRewardModel):
     """ResNet-based reward model using binary classification loss.
 
     This model uses a pretrained ResNet backbone followed by a linear head
@@ -49,6 +49,8 @@ class ResNetRewardModel(BaseImageRewardModel):
 
     # Supported ResNet architectures
     SUPPORTED_ARCHS = ["resnet18", "resnet34", "resnet50", "resnet101", "resnet152"]
+    IMAGENET_MEAN = [0.485, 0.456, 0.406]
+    IMAGENET_STD = [0.229, 0.224, 0.225]
 
     def __init__(self, cfg: DictConfig):
         """Initialize the ResNet reward model.
@@ -63,6 +65,20 @@ class ResNetRewardModel(BaseImageRewardModel):
         super().__init__(cfg)
 
         self.cfg = cfg
+        self.image_size = cfg.get("image_size", [3, 224, 224])
+        self.normalize = cfg.get("normalize", True)
+
+        # Register normalization constants as buffers (move with model).
+        self.register_buffer(
+            "_mean",
+            torch.tensor(self.IMAGENET_MEAN).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "_std",
+            torch.tensor(self.IMAGENET_STD).view(1, 3, 1, 1),
+            persistent=False,
+        )
 
         self.arch = cfg.get("arch", "resnet18")
         if self.arch not in self.SUPPORTED_ARCHS:
@@ -82,6 +98,30 @@ class ResNetRewardModel(BaseImageRewardModel):
 
         torch_dtype = torch_dtype_from_precision(cfg.precision)
         self.to(torch_dtype)
+
+    def preprocess_images(self, images: torch.Tensor) -> torch.Tensor:
+        """Preprocess images for ResNet backbone input."""
+        if images.dim() == 4 and images.shape[-1] in [1, 3, 4]:
+            images = images.permute(0, 3, 1, 2)
+
+        if images.dtype == torch.uint8:
+            images = images.float() / 255.0
+        elif images.max() > 1.0:
+            images = images / 255.0
+
+        target_h, target_w = self.image_size[1], self.image_size[2]
+        if images.shape[2] != target_h or images.shape[3] != target_w:
+            images = F.interpolate(
+                images,
+                size=(target_h, target_w),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+        if self.normalize:
+            images = (images - self._mean) / self._std
+
+        return images
 
     def _build_model(self) -> None:
         """Build the ResNet backbone and reward head."""
