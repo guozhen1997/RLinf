@@ -98,7 +98,7 @@ jobs:
               - 'rlinf/runners/*reward*.py'
               - 'examples/embodiment/**'
               - 'examples/value/pi06star/process/**'
-              - 'rlinf/data/process/recap/**'
+              - 'rlinf/data/process/**'
               - 'examples/reward/**'
               - 'tests/e2e_tests/embodied/**'
               - 'tests/e2e_tests/evaluations/**'

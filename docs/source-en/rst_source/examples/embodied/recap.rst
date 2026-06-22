@@ -744,12 +744,12 @@ Threshold Relabeling
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 To adjust the quantile threshold (e.g., from 30% to 20%) without rerunning the full Step 3,
-use ``recompute_advantages_from_value_reward.py`` for threshold-only relabeling:
+use ``relabel_advantages.py`` for threshold-only relabeling:
 
 .. code:: bash
 
    cd examples/value/pi06star/process
-   python recompute_advantages_from_value_reward.py \
+   python relabel_advantages.py \
        --dataset_paths /path/to/sft_dataset /path/to/rollout_dataset \
        --source_tag "fail300_N10_ckpt18000_q30" \
        --new_tag "fail300_N10_ckpt18000_q20" \
@@ -759,7 +759,7 @@ You can also use ``--dataset_root`` to specify a root directory containing multi
 
 .. code:: bash
 
-   python recompute_advantages_from_value_reward.py \
+   python relabel_advantages.py \
        --dataset_root /path/to/dataset_root \
        --advantage_lookahead_step 20 \
        --positive_quantile 0.3
@@ -789,10 +789,10 @@ File Structure
    │   ├── config/
    │   │   └── libero_sft_value.yaml
    │   └── process/
-   │       ├── compute_returns.py            # Step 1 entry (thin wrapper)
-   │       ├── compute_advantages.py         # Step 3 entry (thin wrapper)
-   │       ├── recompute_advantages_from_value_reward.py  # threshold relabeling
-   │       ├── visualize_advantage_dataset.py             # advantage visualization
+   │       ├── compute_returns.py            # Step 1: returns logic + Hydra entry
+   │       ├── compute_advantages.py         # Step 3: advantage logic + Hydra entry
+   │       ├── relabel_advantages.py             # threshold relabeling (CPU)
+   │       ├── visualize_advantage_dataset.py    # advantage visualization
    │       ├── run_compute_returns.sh        # Step 1 launch script
    │       ├── run_compute_advantages.sh     # Step 3 launch script
    │       └── config/
@@ -805,6 +805,7 @@ File Structure
        └── config/cfg/
            └── libero_cfg_openpi.yaml
 
-   rlinf/data/process/recap/                 # importable pipeline logic
-   ├── compute_returns.py                    # compute_returns(cfg)
-   └── compute_advantages.py                 # compute_advantages(cfg)
+   rlinf/data/process/                       # shared, model-agnostic helpers (RECAP + STEAM)
+   ├── advantage.py                          # quantile threshold + boolean label
+   ├── distributed.py                        # sharded-inference helpers
+   └── mixture_config.py                     # meta/mixture_config.yaml tag I/O

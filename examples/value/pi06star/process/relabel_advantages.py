@@ -24,14 +24,14 @@ Uses: A = normalize(reward_sum) + gamma^N * v_next - v_curr
 
 Usage:
   # Full recompute (provide --advantage_lookahead_step)
-  python recompute_advantages_from_value_reward.py \
+  python relabel_advantages.py \
     --dataset_root /path/to/transformed_advantage_dataset \
     --advantage_lookahead_step 20 \
     --positive_quantile 0.3 \
     --num_workers 4
 
   # Threshold-only relabeling (omit --advantage_lookahead_step)
-  python recompute_advantages_from_value_reward.py \
+  python relabel_advantages.py \
     --dataset_paths /path/to/ds_a /path/to/ds_b \
     --source_tag old_q20 \
     --new_tag new_q30 \

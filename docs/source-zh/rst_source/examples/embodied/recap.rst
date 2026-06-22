@@ -732,12 +732,12 @@ RECAP 实验结果
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 如果需要修改分位数阈值（如从 30% 调整为 20%），无需重新运行完整的 Step 3。
-可以使用 ``recompute_advantages_from_value_reward.py`` 仅重标阈值：
+可以使用 ``relabel_advantages.py`` 仅重标阈值：
 
 .. code:: bash
 
    cd examples/value/pi06star/process
-   python recompute_advantages_from_value_reward.py \
+   python relabel_advantages.py \
        --dataset_paths /path/to/sft_dataset /path/to/rollout_dataset \
        --source_tag "fail300_N10_ckpt18000_q30" \
        --new_tag "fail300_N10_ckpt18000_q20" \
@@ -747,7 +747,7 @@ RECAP 实验结果
 
 .. code:: bash
 
-   python recompute_advantages_from_value_reward.py \
+   python relabel_advantages.py \
        --dataset_root /path/to/dataset_root \
        --advantage_lookahead_step 20 \
        --positive_quantile 0.3
@@ -777,10 +777,10 @@ RECAP 支持迭代优化：使用 Step 4 训练的策略模型采集新数据，
    │   ├── config/
    │   │   └── libero_sft_value.yaml
    │   └── process/
-   │       ├── compute_returns.py            # Step 1 入口（薄封装）
-   │       ├── compute_advantages.py         # Step 3 入口（薄封装）
-   │       ├── recompute_advantages_from_value_reward.py  # 阈值重标
-   │       ├── visualize_advantage_dataset.py             # 优势可视化
+   │       ├── compute_returns.py            # Step 1：回报逻辑 + Hydra 入口
+   │       ├── compute_advantages.py         # Step 3：优势逻辑 + Hydra 入口
+   │       ├── relabel_advantages.py             # 阈值重标（CPU）
+   │       ├── visualize_advantage_dataset.py    # 优势可视化
    │       ├── run_compute_returns.sh        # Step 1 启动脚本
    │       ├── run_compute_advantages.sh     # Step 3 启动脚本
    │       └── config/
@@ -793,6 +793,7 @@ RECAP 支持迭代优化：使用 Step 4 训练的策略模型采集新数据，
        └── config/cfg/
            └── libero_cfg_openpi.yaml
 
-   rlinf/data/process/recap/                 # 可导入的流程逻辑
-   ├── compute_returns.py                    # compute_returns(cfg)
-   └── compute_advantages.py                 # compute_advantages(cfg)
+   rlinf/data/process/                       # 共享、模型无关的工具（RECAP + STEAM）
+   ├── advantage.py                          # 分位数阈值 + 布尔标签
+   ├── distributed.py                        # 分片推理辅助
+   └── mixture_config.py                     # meta/mixture_config.yaml tag I/O

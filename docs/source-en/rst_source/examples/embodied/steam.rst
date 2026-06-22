@@ -437,7 +437,7 @@ existing advantages parquet (pure CPU — ``advantage_continuous`` is reused):
        --mode quantile --rollout_quantile 0.2
 
 The relabel logic lives in
-``rlinf.data.process.steam.relabel.relabel_advantages``.
+``examples/value/steam/process/relabel_advantages.py``.
 
 Visualize Advantages
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -477,26 +477,22 @@ model-agnostic post-processing with RECAP via ``rlinf/data/process/``:
    ├── config/
    │   ├── steam_model_ensemble1.yaml
    │   └── model/steam.yaml
-   └── process/
-       ├── compute_advantages_ensemble.py     # Step 2: ensemble inference +
-       │                                      #   two-pool labelling (self-contained)
-       ├── merge_steam_ensemble.py            # CLI: merge ensemble checkpoints
+   └── process/                                # Step 2: self-contained entries (like pi06star)
+       ├── compute_advantages_ensemble.py     # Step 2: ensemble inference + labelling (Hydra)
        ├── relabel_advantages.py              # CLI: relabel advantages (CPU)
+       ├── merge_steam_ensemble.py            # CLI: merge ensemble checkpoints
        ├── visualize_advantage.py             # advantage visualization
        ├── run_compute_advantages_ensemble.sh # Step 2 launch script
        └── config/
            └── compute_advantages_ensemble.yaml
 
    rlinf/
-   ├── models/embodiment/value/steam/                   # critic, ensemble, config, merge
+   ├── models/embodiment/value/steam/             # critic, ensemble, config, merge
    │   ├── modeling_steam.py / modeling_critic.py
    │   ├── ensemble_modeling_critic.py            # worst-of-N + coerce_to_ensemble
    │   └── checkpoint_merge.py                    # ensemble checkpoint merge
    ├── data/datasets/steam/binning.py             # signed-stride ↔ bin math + entropy
-   └── data/process/                              # shared post-processing (RECAP + STEAM)
+   └── data/process/                              # shared, model-agnostic (RECAP + STEAM)
        ├── advantage.py                           # quantile threshold + boolean label
        ├── distributed.py                         # sharded-inference helpers
-       └── steam/                                 # STEAM-specific pipeline
-           ├── inference.py / pipeline.py         # ensemble inference + orchestration
-           ├── labelling.py / mixture_config.py   # labelling + metadata I/O
-           └── relabel.py                         # CPU relabelling core
+       └── mixture_config.py                      # meta/mixture_config.yaml tag I/O
