@@ -363,7 +363,7 @@ class EmbodiedRewardWorker(Worker):
                 tag="train_reward_obs",
                 async_op=True,
                 batch_size=self.train_batch_size,
-                env_decoupled_mode=self.env_decoupled_mode,
+                decoupled_mode=self.env_decoupled_mode,
             ).async_wait()
             rewards = self.compute_image_rewards(obeservations=merged_data)
             if isinstance(rewards, torch.Tensor):
@@ -374,7 +374,7 @@ class EmbodiedRewardWorker(Worker):
                 data=rewards,
                 tag="train_reward_obs",
                 async_op=True,
-                env_decoupled_mode=self.env_decoupled_mode,
+                decoupled_mode=self.env_decoupled_mode,
             )
 
     async def stop(self):
