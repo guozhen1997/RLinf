@@ -100,14 +100,42 @@ class ResNetRewardModel(BaseRewardModel):
         self.to(torch_dtype)
 
     def preprocess_images(self, images: torch.Tensor) -> torch.Tensor:
-        """Preprocess images for ResNet backbone input."""
+        """Preprocess images for ResNet backbone input.
+
+        This method accepts image tensors in ``uint8`` or floating-point format.
+        ``uint8`` inputs are interpreted as ``[0, 255]`` and scaled to ``[0, 1]``.
+        Floating-point inputs must already be in ``[0, 1]``.
+
+        Args:
+            images: Image tensor in ``NCHW`` or ``NHWC`` layout.
+
+        Returns:
+            A preprocessed tensor in ``NCHW`` layout, resized to
+            ``self.image_size[1:]`` and optionally ImageNet-normalized.
+
+        Raises:
+            ValueError: If floating-point inputs are outside ``[0, 1]``.
+            TypeError: If ``images`` is neither ``uint8`` nor floating point.
+        """
         if images.dim() == 4 and images.shape[-1] in [1, 3, 4]:
             images = images.permute(0, 3, 1, 2)
 
         if images.dtype == torch.uint8:
             images = images.float() / 255.0
-        elif images.max() > 1.0:
-            images = images / 255.0
+        elif torch.is_floating_point(images):
+            min_val = float(images.min().detach().item())
+            max_val = float(images.max().detach().item())
+            if min_val < 0.0 or max_val > 1.0:
+                raise ValueError(
+                    "ResNetRewardModel expects floating-point images in [0, 1]. "
+                    f"Got min={min_val:.6f}, max={max_val:.6f}. "
+                    "Please normalize upstream or pass uint8 images."
+                )
+        else:
+            raise TypeError(
+                "ResNetRewardModel expects images to be uint8 or floating point. "
+                f"Got dtype={images.dtype}."
+            )
 
         target_h, target_w = self.image_size[1], self.image_size[2]
         if images.shape[2] != target_h or images.shape[3] != target_w:
@@ -249,7 +277,7 @@ class ResNetRewardModel(BaseRewardModel):
         if isinstance(images, np.ndarray):
             images = torch.from_numpy(images)
         model_parameter = next(self.parameters())
-        images = images.to(device=model_parameter.device, dtype=model_parameter.dtype)
+        images = images.to(device=model_parameter.device)
 
         images = self.preprocess_images(images)
 
