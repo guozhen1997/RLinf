@@ -61,8 +61,6 @@ data:
     - left_wrist_view
     - right_wrist_view
 
-  prompt: "perform the task"
-
   # Same dataset list as the training config so the corpus the ensemble
   # was trained on is scored. Override per run as needed.
   train_data_paths:

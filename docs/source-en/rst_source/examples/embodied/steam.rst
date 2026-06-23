@@ -31,7 +31,7 @@ ensemble progress critic and steering with classifier-free guidance.
    .. grid-item-card:: Models
       :text-align: center
 
-      SigLIP2 + Gemma3 critic
+      SigLIP + Gemma3 critic · π₀.₅
 
    .. grid-item-card:: Environments / Data
       :text-align: center
@@ -41,10 +41,10 @@ ensemble progress critic and steering with classifier-free guidance.
    .. grid-item-card:: Training
       :text-align: center
 
-      Offline · 2 + CFG stages
+      Offline · 3 stages
 
 | **You'll do:** SFT an ensemble progress critic → compute ensemble advantages → CFG-train the policy → evaluate.
-| **Prerequisites:** :doc:`Installation </rst_source/start/installation>` · SigLIP2 + Gemma3 + π₀.₅ checkpoints · LeRobot-format datasets (steps below).
+| **Prerequisites:** :doc:`Installation </rst_source/start/installation>` · SigLIP + Gemma3 + π₀.₅ checkpoints · LeRobot-format datasets (steps below).
 
 Pipeline
 --------
@@ -65,7 +65,7 @@ stages followed by RECAP Step 4:
 
 **Core Idea**
 
-1. **Value Model SFT**: Train an ensemble of progress critics (SigLIP2 + Gemma3
+1. **Value Model SFT**: Train an ensemble of progress critics (SigLIP + Gemma3
    backbone + classifier head). Each member sees a frame pair
    :math:`(o_t, o_{t+k})` and classifies the signed frame stride into bins, so
    the head predicts *temporal progress* rather than a regressed return.
@@ -84,46 +84,71 @@ stages followed by RECAP Step 4:
 How STEAM Works
 ---------------
 
-**Pair-classification progress critic**
+**STEAM Core Components**
 
-Each critic consumes a frame pair :math:`(o_t, o_{t+k})` (a SigLIP2 vision
-encoder + Gemma3 language model fused per frame) and classifies the **signed
-stride** :math:`s \in \{-K, \dots, -1, 1, \dots, K\}` into ``num_bins``
-contiguous bins. Bins ``[0, num_bins/2)`` are regressive (negative stride) and
-``[num_bins/2, num_bins)`` are progressive. The degenerate ``num_bins == 2``
-case is binary progress classification; ``num_bins > 2`` gives a finer signed
-stride distribution.
+1. **Advantage modeling**
 
-**Signed score**
+   STEAM (*Self-supervised Temporal Ensemble Advantage Modeling*) learns
+   advantages from the *temporal order* of expert demonstrations alone — no
+   rewards, human labels, or external value model. For a frame pair
+   :math:`(f_i, f_j)` from an expert episode, the **temporal offset** is the
+   signed frame stride :math:`j - i`: pairing a frame with a future frame
+   supervises forward progress, while feeding the pair in reverse gives a
+   negative offset, exposing regressive motion from successful demos alone.
+   Offsets are **normalized by trajectory length**
+   (:math:`\propto L_{\max}/L_\tau`) so the target measures *temporal efficiency*
+   rather than raw step count — shorter, more efficient executions score higher,
+   slower or suboptimal ones lower.
 
-The per-member prediction is a bin-weighted expectation normalized to
-:math:`[-1, 1]`:
+   Each predictor (a SigLIP vision encoder + Gemma3 language model + a
+   task-specific head) maps the frame pair and language instruction to a
+   categorical distribution over :math:`N` (``num_bins``) temporal-offset bins,
+   trained with a cross-entropy loss against the binned offset target. The
+   per-member advantage subtracts a fixed **baseline** offset from the predicted
+   expected bin, so it scores progress *relative to the expected pace*:
 
-.. math::
+   .. math::
 
-   \text{signed\_score} = \frac{1}{K}\sum_b p_b \cdot \text{center}(b)
+      A_m = \frac{2}{N}\left( E_{b \sim p_{\theta_m}}[b] - b_{\mathrm{ref}} \right) \in [-1, 1]
 
-For ``num_bins == 2`` this reduces to :math:`2 \cdot P(\text{progress}) - 1`.
+   where :math:`E_{b}[b]` is the expected bin index of predictor :math:`m`'s
+   distribution and :math:`b_{\mathrm{ref}}` is the deterministic reference — the
+   length-normalized ground-truth offset for a fixed lookahead :math:`H` on the
+   longest episode. :math:`A_m` is high near efficient progress and low (or
+   negative) near stalls and regressions. (``num_bins == 2`` reduces to a binary
+   progress classifier.)
 
-**Worst-of-N ensemble aggregation**
+2. **Advantage estimation**
 
-Members agree in-distribution but diverge on out-of-distribution rollouts. STEAM
-reduces them with the conservative worst-of-N rule from the STEAM paper —
-``predicted_values = min_m signed_score_m`` — so an over-confident single member
-cannot inflate the advantage where the ensemble disagrees. Per-member mean / min
-/ variance are recorded for diagnostics.
+   A single predictor can over-estimate on out-of-distribution rollout states.
+   Members agree in-distribution but diverge in unfamiliar states, so STEAM
+   aggregates the :math:`M` predictors with the conservative **worst-of-N** rule
+   — penalizing high variance to suppress false positives:
 
-**Advantage labelling**
+   .. math::
 
-``advantage_continuous`` (the aggregated signed score) is turned into the boolean
-``advantage`` under one of two ``label_mode`` rules:
+      A_{\text{STEAM}} = \min_{m \in \{1, \dots, M\}} A_m
 
-- ``threshold``: ``advantage = advantage_continuous > positive_threshold`` for
-  rollout frames (a signed-score threshold in :math:`[-1, 1]`); sft frames are
-  always True (success demos by construction).
-- ``quantile``: label the top ``rollout_quantile`` fraction of rollout frames
-  True and, when ``expert_quantile`` is set, the top ``expert_quantile`` fraction
-  of sft frames True — the two pools are scored independently.
+   :math:`A_{\text{STEAM}}` is written to ``advantage_continuous``; per-member
+   mean / min / variance are recorded for diagnostics. Because different data
+   sources have different advantage distributions, ``advantage_continuous`` is
+   turned into the boolean ``advantage`` per source under one of two
+   ``label_mode`` rules:
+
+   - ``threshold``: ``advantage = advantage_continuous > positive_threshold`` for
+     rollout frames (a signed-score threshold in :math:`[-1, 1]`); sft frames are
+     always True (success demos by construction).
+   - ``quantile``: label the top ``rollout_quantile`` fraction of rollout frames
+     True and, when ``expert_quantile`` is set, the top ``expert_quantile``
+     fraction of sft frames True — the two pools are scored independently.
+
+3. **Classifier-Free Guidance (CFG) Training**
+
+   STEAM advantage labels drive RECAP's CFG stage on the OpenPI (π₀.₅) policy:
+   positive (high-advantage) samples serve as conditional inputs and negative
+   samples as unconditional inputs, enabling classifier-free guidance for policy
+   optimization. See :doc:`RECAP Step 4 <recap>` for the full CFG mechanism
+   (``positive_only_conditional``, ``unconditional_prob``, ``cfgrl_guidance_scale``).
 
 Installation
 ------------
@@ -153,12 +178,20 @@ STEAM shares the OpenPI environment with RECAP.
       --name rlinf \
       -v .:/workspace/RLinf \
       rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
+      # For mainland China users, you can use the following for better download speed:
+      # docker.1ms.run/rlinf/rlinf:agentic-rlinf0.2-maniskill_libero
+
+Please switch to the OpenPI virtual environment via the built-in ``switch_env`` utility:
+
+.. code:: bash
 
    source switch_env openpi
 
 **Option 2: Custom Environment**
 
 .. code:: bash
+
+   # For mainland China users, you can add the `--use-mirror` flag to the install.sh command for better download speed.
 
    bash requirements/install.sh embodied --model openpi --env maniskill_libero
    source .venv/bin/activate
@@ -168,16 +201,21 @@ Download the Model
 
 The STEAM value model is built from two pretrained backbones:
 
-- **SigLIP2-so400m** (``google/siglip-so400m-patch14-384``): vision encoder
+- **SigLIP-so400m** (``google/siglip-so400m-patch14-384``): vision encoder
 - **Gemma3-270M** (``google/gemma-3-270m``): language model and tokenizer
 
 .. code:: bash
 
+   # Download models (choose either method)
+   # Method 1: Using git clone
    git lfs install
    git clone https://huggingface.co/google/siglip-so400m-patch14-384
    git clone https://huggingface.co/google/gemma-3-270m
 
-   # Or via huggingface-hub (set HF_ENDPOINT=https://hf-mirror.com for a mirror)
+   # Method 2: Using huggingface-hub
+   # For mainland China users, you can use the following for better download speed:
+   # export HF_ENDPOINT=https://hf-mirror.com
+   pip install huggingface-hub
    hf download google/siglip-so400m-patch14-384 --local-dir siglip-so400m-patch14-384
    hf download google/gemma-3-270m --local-dir gemma-3-270m
 
@@ -196,9 +234,9 @@ Data Preparation
 
 STEAM uses datasets in the LeRobot format, categorized into two types:
 
-- **SFT datasets**: Successful trajectories (human demos or trained policies).
-- **Rollout datasets**: Online-collected trajectories with both successes and
-  failures.
+- **SFT datasets**: Expert-level demonstrations (successful expert trajectories).
+- **Rollout datasets**: Trajectories collected from online interaction (containing
+  both successes and failures), plus human-intervention data.
 
 Example dataset configuration:
 
@@ -220,14 +258,29 @@ Example dataset configuration:
 Pipeline Tag System
 ~~~~~~~~~~~~~~~~~~~~~
 
-STEAM uses an **advantage tag** to pass data from Step 2 to the CFG stage. Set
-Step 2's ``advantage.tag`` and the CFG stage's ``data.advantage_tag`` to the same
-value so CFG reads ``meta/advantages_{tag}.parquet``.
+STEAM uses an **advantage tag** for data passing across steps. Unlike RECAP,
+STEAM has no compute-returns step, so there is no ``returns_tag`` — the only tag
+is the **advantage_tag**: written by Step 2 and read by Step 3. Ensure that
+Step 2's ``advantage.tag`` and Step 3's ``data.advantage_tag`` are consistent so
+CFG reads ``meta/advantages_{tag}.parquet``.
+
+.. list-table:: **Tag Flow Across Pipeline Steps**
+   :header-rows: 1
+
+   * - Step
+     - Config Field
+     - Description
+   * - 2
+     - ``advantage.tag``
+     - Writes ``meta/advantages_{tag}.parquet``
+   * - 3
+     - ``data.advantage_tag``
+     - Reads ``meta/advantages_{tag}.parquet``
 
 Step 1: Value Model SFT
 -----------------------
 
-Train the ensemble progress critic. Each member is a SigLIP2 + Gemma3 backbone
+Train the ensemble progress critic. Each member is a SigLIP + Gemma3 backbone
 with a classifier head; members are cloned from a shared backbone and their value
 heads are re-seeded so ensemble variance is a meaningful epistemic signal.
 
@@ -243,8 +296,9 @@ defaults live in ``config/model/steam.yaml``. Key fields:
        - dataset_path: /path/to/sft_dataset
          type: sft
      k: 32                       # max signed stride K (pair temporal scale)
+     # Image (view) names the critic loads per frame; must match the views the
+     # checkpoint was trained on. Missing views become zero-placeholders.
      camera_keys: [face_view, left_wrist_view, right_wrist_view]
-     prompt: "perform the task"
 
    actor:
      micro_batch_size: 32
@@ -278,15 +332,6 @@ defaults live in ``config/model/steam.yaml``. Key fields:
    * - ``actor.model.ensemble_size``
      - ``1``
      - Number of ensemble members. ``> 1`` enables worst-of-N aggregation and uncertainty stats.
-   * - ``actor.model.fusion_hidden_dim``
-     - ``512``
-     - Hidden width of the per-frame fusion MLP.
-   * - ``actor.model.freeze_vision_encoder``
-     - ``false``
-     - Freeze the SigLIP2 encoder.
-   * - ``actor.model.use_gradient_checkpointing``
-     - ``false``
-     - Recompute backbone activations in backward (needed for full-backbone + ensemble on 80GB cards).
 
 **Launch Command**
 
@@ -339,6 +384,14 @@ The config is ``examples/value/steam/process/config/compute_advantages_ensemble.
          type: rollout
 
 **Key Parameters**
+
+``label_mode`` decides which knobs are active. In ``threshold`` mode only
+``advantage.positive_threshold`` applies — a signed-score cut in :math:`[-1, 1]`;
+rollout frames scoring above it are positive and sft frames are always positive.
+In ``quantile`` mode ``positive_threshold`` is ignored and the
+``rollout_quantile`` / ``expert_quantile`` fractions select the top-scoring frames
+in each pool independently (omit ``expert_quantile`` to mark every sft frame
+positive).
 
 .. list-table::
    :header-rows: 1
@@ -400,6 +453,78 @@ RECAP CFG stage. Point the CFG config's ``data.advantage_tag`` at the Step 2
        data.advantage_tag=steam_k32_ensemble3_q30
 
 See :doc:`RECAP Step 4 <recap>` for the full CFG configuration and parameters.
+
+STEAM Results
+-------------
+
+We evaluate STEAM against behavior cloning (**BC**), **HG-DAgger**, and
+:doc:`RECAP <recap>` on four real-robot manipulation tasks. STEAM markedly raises
+the task success rate over the BC baseline on every task (absolute gain over BC
+shown as ↑):
+
+.. list-table:: Success rate (%) — higher is better
+   :header-rows: 1
+   :widths: 28 18 18 18 18
+
+   * - Task
+     - BC
+     - HG-DAgger
+     - RECAP
+     - STEAM
+   * - Towel Folding
+     - 33.3
+     - 40
+     - 55.6
+     - **92.3** (↑59)
+   * - Chips Checkout
+     - 39.5
+     - 53.3
+     - 53.3
+     - **93.8** (↑54.3)
+   * - Pick-and-Place
+     - 63.8
+     - —
+     - 53.8
+     - **80** (↑16.2)
+   * - Cola Restocking
+     - 52
+     - —
+     - 52.9
+     - **75** (↑23)
+
+.. list-table:: Throughput (successful episodes per hour) — higher is better
+   :header-rows: 1
+   :widths: 28 18 18 18 18
+
+   * - Task
+     - BC
+     - HG-DAgger
+     - RECAP
+     - STEAM
+   * - Towel Folding
+     - 42
+     - 48
+     - 39
+     - **58**
+   * - Chips Checkout
+     - 16.3
+     - 22.0
+     - 23.9
+     - **47.5**
+   * - Pick-and-Place
+     - 230
+     - —
+     - 161
+     - **254**
+   * - Cola Restocking
+     - 71
+     - —
+     - 46
+     - **90**
+
+Across the four tasks STEAM raises success rates to 75–93.8% and delivers the
+highest throughput, with the largest success-rate gains on Towel Folding (↑59)
+and Chips Checkout (↑54.3). (↑ marks the absolute gain over the BC baseline.)
 
 Advanced Usage
 --------------
