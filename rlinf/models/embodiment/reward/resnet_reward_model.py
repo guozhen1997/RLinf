@@ -233,6 +233,11 @@ class ResNetRewardModel(BaseRewardModel):
 
         # Preprocess images (normalization, etc.)
         images = self.preprocess_images(images)
+        model_parameter = next(self.parameters())
+        images = images.to(
+            device=model_parameter.device,
+            dtype=model_parameter.dtype,
+        )
 
         # Forward through backbone
         logits = self.backbone(images).squeeze(-1)  # (B,)
@@ -280,6 +285,7 @@ class ResNetRewardModel(BaseRewardModel):
         images = images.to(device=model_parameter.device)
 
         images = self.preprocess_images(images)
+        images = images.to(dtype=model_parameter.dtype)
 
         with torch.no_grad():
             logits = self.backbone(images).squeeze(-1)  # (B,)
