@@ -52,7 +52,7 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 # Make the rlinf package importable regardless of the cwd the user launched from.
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 
 from rlinf.data.datasets.recap.utils import (
     decode_image_struct_batch,

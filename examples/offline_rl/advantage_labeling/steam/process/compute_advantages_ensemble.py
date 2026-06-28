@@ -39,7 +39,7 @@ from typing import Any, Optional, Sequence
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 # Make the rlinf package importable regardless of the cwd the user launched from.
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 
 # Install the libav/libdav1d stderr filter before the heavy torch / torchcodec
 # imports so the fd=2 redirect is in place before libav loads.

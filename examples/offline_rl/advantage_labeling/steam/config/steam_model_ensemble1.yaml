@@ -1,7 +1,7 @@
 # STEAM value model SFT — RLinf FSDP runner.
 #
 # Usage:
-#   bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1
+#   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1
 #
 # The model default lives in ``config/model/steam.yaml`` and the FSDP
 # training backend is loaded from the shared

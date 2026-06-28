@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Run STEAM value model SFT training
-# Usage: bash examples/value/steam/run_steam_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
-# Example: bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1
-# Example: bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
-# Example: bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1 data.tag=my_tag
+# Usage: bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
+# Example: bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1
+# Example: bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
+# Example: bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1 data.tag=my_tag
 
 export SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
-export REPO_PATH="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+export REPO_PATH="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 export EMBODIED_PATH="${SCRIPT_DIR}"
 export SRC_FILE="${SCRIPT_DIR}/train_steam.py"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HOME}/.cache/huggingface/datasets}"

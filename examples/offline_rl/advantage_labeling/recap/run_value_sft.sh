@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Run Value Model SFT training
-# Usage: bash examples/value/pi06star/run_value_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
-# Example: bash examples/value/pi06star/run_value_sft.sh libero_sft_value
-# Example: bash examples/value/pi06star/run_value_sft.sh libero_sft_value data.tag=my_tag
-# Example: bash examples/value/pi06star/run_value_sft.sh libero_sft_value data.eval_data_paths="[{dataset_path: /path}]"
+# Usage: bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh [CONFIG_NAME] [EXTRA_ARGS...]
+# Example: bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh libero_sft_value
+# Example: bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh libero_sft_value data.tag=my_tag
+# Example: bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh libero_sft_value data.eval_data_paths="[{dataset_path: /path}]"
 
 export SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
-export REPO_PATH="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+export REPO_PATH="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 export EMBODIED_PATH="${SCRIPT_DIR}"
 export SRC_FILE="${SCRIPT_DIR}/train_value.py"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HOME}/.cache/huggingface/datasets}"

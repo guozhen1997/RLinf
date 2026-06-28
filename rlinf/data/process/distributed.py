@@ -14,8 +14,8 @@
 
 """Distributed helpers shared by the offline dataset-annotation scripts.
 
-Used by the ``compute_advantages*`` scripts (``examples/value/pi06star/process`` and
-``examples/value/steam/process``) to shard a dataset across ``torchrun`` ranks, run
+Used by the ``compute_advantages*`` scripts (``examples/offline_rl/advantage_labeling/recap/process`` and
+``examples/offline_rl/advantage_labeling/steam/process``) to shard a dataset across ``torchrun`` ranks, run
 single-pass inference, and gather the per-frame results back to rank 0.
 
 Kept deliberately dependency-light — only ``torch``, ``pandas`` and the stdlib

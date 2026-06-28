@@ -15,6 +15,6 @@
 """Shared, dependency-light helpers for the offline dataset-annotation pipelines.
 
 Importable from the ``compute_advantages*`` example scripts in
-``examples/value/pi06star/process`` and ``examples/value/steam/process`` without pulling heavy
+``examples/offline_rl/advantage_labeling/recap/process`` and ``examples/offline_rl/advantage_labeling/steam/process`` without pulling heavy
 deps (``rlinf.scheduler``, megatron, lerobot). Keep submodules here light.
 """

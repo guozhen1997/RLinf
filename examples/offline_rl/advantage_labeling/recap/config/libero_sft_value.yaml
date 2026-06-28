@@ -1,4 +1,4 @@
-# Usage: bash examples/value/pi06star/run_value_sft.sh libero_sft_value
+# Usage: bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh libero_sft_value
 
 defaults:
   - model/value@actor.model

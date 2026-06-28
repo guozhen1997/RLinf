@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
 # Make the rlinf package importable regardless of the cwd the user launched from.
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402

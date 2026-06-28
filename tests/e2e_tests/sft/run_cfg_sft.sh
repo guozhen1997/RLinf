@@ -10,4 +10,4 @@ export MUJOCO_GL=${BACKEND}
 export PYOPENGL_PLATFORM=${BACKEND}
 export PYTHONPATH=${REPO_PATH}:$PYTHONPATH
 
-python ${REPO_PATH}/examples/embodiment/train_cfg.py --config-path ${REPO_PATH}/tests/e2e_tests/sft --config-name ${CONFIG}
+python ${REPO_PATH}/examples/offline_rl/policy_optimization/cfg_rl/train_cfg.py --config-path ${REPO_PATH}/tests/e2e_tests/sft --config-name ${CONFIG}

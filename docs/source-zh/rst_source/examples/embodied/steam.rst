@@ -39,12 +39,12 @@ STEAM：用于离线策略优化的集成优势建模
 流程
 ----------------------------------------
 
-STEAM 复用 RECAP 的 CFG 训练阶段，因此一次 STEAM 运行是两个 STEAM 特有阶段加上 RECAP 的 Step 4：
+一次 STEAM 运行包含两个 STEAM 特有阶段，外加一个 CFG 训练阶段：
 
 .. code-block:: text
 
    ┌────────────────────────┐     ┌────────────────────────┐     ┌──────────────────────┐
-   │  Step 1                │     │  Step 2                │     │  Step 3 (RECAP CFG)  │
+   │  Step 1                │     │  Step 2                │     │  Step 3              │
    │  STEAM Value Model SFT │────▶│  Compute Ensemble      │────▶│  CFG Training        │
    │                        │     │  Advantages            │     │                      │
    │  训练一组成对分类的    │     │  worst-of-N 集成有符号 │     │  用无分类器引导      │
@@ -57,7 +57,7 @@ STEAM 复用 RECAP 的 CFG 训练阶段，因此一次 STEAM 运行是两个 STE
 
 2. **Compute Ensemble Advantages**：对每一帧，让所有集成成员在帧对 :math:`(o_t, o_{t+k})` 上推理，并以 **worst-of-N** 规则（:math:`A = \min_m A_m`）聚合，得到有符号分数 ``advantage_continuous`` :math:`\in [-1, 1]`，再按阈值或分位数规则将帧标记为正/负。
 
-3. **CFG Training**：将优势标签交给 RECAP 的 CFG 阶段——正样本（高优势）作为条件输入，负样本作为无条件输入，实现 classifier-free guidance 策略优化。
+3. **CFG Training**：将优势标签交给 CFG 阶段——正样本（高优势）作为条件输入，负样本作为无条件输入，实现 classifier-free guidance 策略优化。
 
 STEAM 工作原理
 ----------------------------------------
@@ -91,7 +91,7 @@ STEAM 工作原理
 
 3. **无分类器引导（Classifier-Free Guidance, CFG）训练**
 
-   STEAM 的优势标签驱动 RECAP 在 OpenPI（π₀.₅）策略上的 CFG 阶段：正样本（高优势）作为条件输入，负样本作为无条件输入，实现 classifier-free guidance 策略优化。完整的 CFG 机制（``positive_only_conditional``\ 、``unconditional_prob``\ 、``cfgrl_guidance_scale``\ ）见 :doc:`RECAP Step 4 <recap>`。
+   STEAM 的优势标签驱动 OpenPI（π₀.₅）策略上的 CFG 阶段：正样本（高优势）作为条件输入，负样本作为无条件输入，实现 classifier-free guidance 策略优化。完整的 CFG 机制（``positive_only_conditional``\ 、``unconditional_prob``\ 、``cfgrl_guidance_scale``\ ）见 :doc:`CFG 训练阶段 <recap>`。
 
 安装
 ----------------------------------------
@@ -162,7 +162,7 @@ STEAM 价值模型由两个预训练 backbone 构成：
    hf download google/siglip-so400m-patch14-384 --local-dir siglip-so400m-patch14-384
    hf download google/gemma-3-270m --local-dir gemma-3-270m
 
-在模型配置（``examples/value/steam/config/model/steam.yaml``\ ）中设置路径：
+在模型配置（``examples/offline_rl/advantage_labeling/steam/config/model/steam.yaml``\ ）中设置路径：
 
 .. code:: yaml
 
@@ -220,7 +220,7 @@ Step 1：价值模型 SFT
 
 **配置**
 
-配置文件为 ``examples/value/steam/config/steam_model_ensemble1.yaml``\ ；模型默认值在 ``config/model/steam.yaml``\ 。关键字段：
+配置文件为 ``examples/offline_rl/advantage_labeling/steam/config/steam_model_ensemble1.yaml``\ ；模型默认值在 ``config/model/steam.yaml``\ 。关键字段：
 
 .. code:: yaml
 
@@ -270,10 +270,10 @@ Step 1：价值模型 SFT
 
 .. code:: bash
 
-   bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1
+   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1
 
    # 命令行覆盖配置字段：
-   bash examples/value/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
+   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
 
 **输出**
 
@@ -293,7 +293,7 @@ Step 2：计算集成优势
 
 **配置**
 
-配置文件为 ``examples/value/steam/process/config/compute_advantages_ensemble.yaml``：
+配置文件为 ``examples/offline_rl/advantage_labeling/steam/process/config/compute_advantages_ensemble.yaml``：
 
 .. code:: yaml
 
@@ -354,10 +354,10 @@ Step 2：计算集成优势
 .. code:: bash
 
    # 自动检测 GPU 数；单卡与 torchrun 多卡均支持。
-   bash examples/value/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble
+   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble
 
    # 指定 GPU 数：
-   bash examples/value/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble --nproc 4
+   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble --nproc 4
 
 **输出文件**
 
@@ -367,14 +367,14 @@ Step 2：计算集成优势
 Step 3：CFG 训练
 ----------------------------------------
 
-STEAM 优势 parquet 与 RECAP 共享 schema，因此策略优化复用 RECAP 的 CFG 阶段。将 CFG 配置的 ``data.advantage_tag`` 指向 Step 2 的 ``advantage.tag`` 并启动：
+策略优化直接在 STEAM 优势 parquet 上运行共享的 CFG 阶段。将 CFG 配置的 ``data.advantage_tag`` 指向 Step 2 的 ``advantage.tag`` 并启动：
 
 .. code:: bash
 
-   bash examples/embodiment/run_cfg_sft.sh libero_cfg_openpi \
+   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_sft.sh libero_cfg_openpi \
        data.advantage_tag=steam_k32_ensemble3_q30
 
-完整的 CFG 配置与参数见 :doc:`RECAP Step 4 <recap>`。
+完整的 CFG 配置与参数见 :doc:`CFG 训练阶段 <recap>`。
 
 STEAM 实验结果
 ----------------------------------------
@@ -453,7 +453,7 @@ STEAM 实验结果
 
 .. code:: bash
 
-   python examples/value/steam/process/merge_steam_ensemble.py \
+   python examples/offline_rl/advantage_labeling/steam/process/merge_steam_ensemble.py \
        --member /path/to/seed1/checkpoints/global_step_5000/actor \
        --member /path/to/seed2/checkpoints/global_step_5000/actor \
        --member /path/to/ensemble/checkpoints/global_step_6000/actor:2 \
@@ -469,13 +469,13 @@ STEAM 实验结果
 
 .. code:: bash
 
-   python examples/value/steam/process/relabel_advantages.py \
+   python examples/offline_rl/advantage_labeling/steam/process/relabel_advantages.py \
        --dataset_paths /path/to/sft_ds /path/to/rollout_ds \
        --source_tag steam_k32_ensemble3_q30 \
        --new_tag steam_k32_ensemble3_q20 \
        --mode quantile --rollout_quantile 0.2
 
-重标注逻辑位于 ``examples/value/steam/process/relabel_advantages.py``。
+重标注逻辑位于 ``examples/offline_rl/advantage_labeling/steam/process/relabel_advantages.py``。
 
 可视化优势
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -484,7 +484,7 @@ STEAM 实验结果
 
 .. code:: bash
 
-   python examples/value/steam/process/visualize_advantage.py \
+   python examples/offline_rl/advantage_labeling/steam/process/visualize_advantage.py \
        --dataset /path/to/dataset \
        --tag steam_k32_ensemble3_q30 \
        --output outputs/steam_viz
@@ -505,7 +505,7 @@ STEAM 将各步骤脚本自包含在 ``examples/`` 下（绑定模型的推理 +
 
 .. code-block:: text
 
-   examples/value/steam/
+   examples/offline_rl/advantage_labeling/steam/
    ├── train_steam.py                         # Step 1：价值模型 SFT 入口
    ├── run_steam_sft.sh                       # Step 1 启动脚本
    ├── config/

@@ -252,7 +252,7 @@ This step computes discounted cumulative returns for each trajectory in reverse 
 
 **Configuration**
 
-The configuration file is located at ``examples/value/pi06star/process/config/compute_returns.yaml``:
+The configuration file is located at ``examples/offline_rl/advantage_labeling/recap/process/config/compute_returns.yaml``:
 
 .. code:: yaml
 
@@ -294,7 +294,7 @@ The configuration file is located at ``examples/value/pi06star/process/config/co
 
 .. code:: bash
 
-   bash examples/value/pi06star/process/run_compute_returns.sh compute_returns
+   bash examples/offline_rl/advantage_labeling/recap/process/run_compute_returns.sh compute_returns
 
 **Output Files**
 
@@ -330,7 +330,7 @@ The output is a Categorical Value Distribution over 201 bins spanning :math:`[-1
 
 **Configuration**
 
-The configuration file is located at ``examples/value/pi06star/config/libero_sft_value.yaml``. Key fields:
+The configuration file is located at ``examples/offline_rl/advantage_labeling/recap/config/libero_sft_value.yaml``. Key fields:
 
 .. code:: yaml
 
@@ -401,7 +401,7 @@ The training script automatically initializes the Ray cluster:
 
 .. code:: bash
 
-   bash examples/value/pi06star/run_value_sft.sh libero_sft_value
+   bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh libero_sft_value
 
 **Output**
 
@@ -438,7 +438,7 @@ where :math:`N` is the lookahead steps (``advantage_lookahead_step``) and :math:
 
 **Configuration**
 
-The configuration file is located at ``examples/value/pi06star/process/config/compute_advantages.yaml``:
+The configuration file is located at ``examples/offline_rl/advantage_labeling/recap/process/config/compute_advantages.yaml``:
 
 .. code:: yaml
 
@@ -489,7 +489,7 @@ Supports multi-GPU distributed inference:
 
 .. code:: bash
 
-   bash examples/value/pi06star/process/run_compute_advantages.sh compute_advantages
+   bash examples/offline_rl/advantage_labeling/recap/process/run_compute_advantages.sh compute_advantages
 
 **Output Files**
 
@@ -522,7 +522,7 @@ Using the advantage labels from Step 3, train the OpenPI policy model with class
 
 **Configuration**
 
-The configuration file is located at ``examples/embodiment/config/cfg/libero_cfg_openpi.yaml``:
+The configuration file is located at ``examples/offline_rl/policy_optimization/cfg_rl/config/cfg/libero_cfg_openpi.yaml``:
 
 .. code:: yaml
 
@@ -585,7 +585,7 @@ The configuration file is located at ``examples/embodiment/config/cfg/libero_cfg
 
 .. code:: bash
 
-   bash examples/embodiment/run_cfg_sft.sh libero_cfg_openpi
+   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_sft.sh libero_cfg_openpi
 
 **Key Metrics**
 
@@ -596,7 +596,7 @@ The configuration file is located at ``examples/embodiment/config/cfg/libero_cfg
 Visualize Advantages
 -------------------------
 
-After Step 3, use ``examples/value/pi06star/process/visualize_advantage_dataset.py`` to analyze the advantage distribution,
+After Step 3, use ``examples/offline_rl/advantage_labeling/recap/process/visualize_advantage_dataset.py`` to analyze the advantage distribution,
 including advantage histograms, value prediction distributions, per-episode positive rates, and episode replay videos with advantage annotations.
 
 **Basic Usage**
@@ -605,7 +605,7 @@ Generate distribution plots and episode videos:
 
 .. code:: bash
 
-   python examples/value/pi06star/process/visualize_advantage_dataset.py \
+   python examples/offline_rl/advantage_labeling/recap/process/visualize_advantage_dataset.py \
        --dataset /path/to/your/dataset \
        --output outputs/advantage_viz \
        --tag "fail300_N10_ckpt18000_q30" \
@@ -615,7 +615,7 @@ Distribution plot only (no videos):
 
 .. code:: bash
 
-   python examples/value/pi06star/process/visualize_advantage_dataset.py \
+   python examples/offline_rl/advantage_labeling/recap/process/visualize_advantage_dataset.py \
        --dataset /path/to/your/dataset \
        --output outputs/advantage_viz \
        --tag "fail300_N10_ckpt18000_q30" \
@@ -625,7 +625,7 @@ Visualize specific episodes:
 
 .. code:: bash
 
-   python examples/value/pi06star/process/visualize_advantage_dataset.py \
+   python examples/offline_rl/advantage_labeling/recap/process/visualize_advantage_dataset.py \
        --dataset /path/to/your/dataset \
        --output outputs/advantage_viz \
        --tag "fail300_N10_ckpt18000_q30" \
@@ -748,7 +748,7 @@ use ``relabel_advantages.py`` for threshold-only relabeling:
 
 .. code:: bash
 
-   cd examples/value/pi06star/process
+   cd examples/offline_rl/advantage_labeling/recap/process
    python relabel_advantages.py \
        --dataset_paths /path/to/sft_dataset /path/to/rollout_dataset \
        --source_tag "fail300_N10_ckpt18000_q30" \
@@ -782,28 +782,30 @@ File Structure
 
 .. code-block:: text
 
-   examples/
-   ├── value/pi06star/
-   │   ├── train_value.py                    # Step 2: value model training
-   │   ├── run_value_sft.sh                  # Step 2 launch script
-   │   ├── config/
-   │   │   └── libero_sft_value.yaml
-   │   └── process/
-   │       ├── compute_returns.py            # Step 1: returns logic + Hydra entry
-   │       ├── compute_advantages.py         # Step 3: advantage logic + Hydra entry
-   │       ├── relabel_advantages.py             # threshold relabeling (CPU)
-   │       ├── visualize_advantage_dataset.py    # advantage visualization
-   │       ├── run_compute_returns.sh        # Step 1 launch script
-   │       ├── run_compute_advantages.sh     # Step 3 launch script
-   │       └── config/
-   │           ├── compute_returns.yaml
-   │           ├── compute_advantages.yaml
-   │           └── model/value.yaml          # value model config
-   └── embodiment/
-       ├── train_cfg.py                      # Step 4: CFG policy training
-       ├── run_cfg_sft.sh                    # Step 4 launch script
-       └── config/cfg/
-           └── libero_cfg_openpi.yaml
+   examples/offline_rl/
+   ├── advantage_labeling/
+   │   └── recap/
+   │       ├── train_value.py                    # Step 2: value model training
+   │       ├── run_value_sft.sh                  # Step 2 launch script
+   │       ├── config/
+   │       │   └── libero_sft_value.yaml
+   │       └── process/
+   │           ├── compute_returns.py            # Step 1: returns logic + Hydra entry
+   │           ├── compute_advantages.py         # Step 3: advantage logic + Hydra entry
+   │           ├── relabel_advantages.py             # threshold relabeling (CPU)
+   │           ├── visualize_advantage_dataset.py    # advantage visualization
+   │           ├── run_compute_returns.sh        # Step 1 launch script
+   │           ├── run_compute_advantages.sh     # Step 3 launch script
+   │           └── config/
+   │               ├── compute_returns.yaml
+   │               ├── compute_advantages.yaml
+   │               └── model/value.yaml          # value model config
+   └── policy_optimization/
+       └── cfg_rl/
+           ├── train_cfg.py                      # Step 4: CFG policy training
+           ├── run_cfg_sft.sh                    # Step 4 launch script
+           └── config/cfg/
+               └── libero_cfg_openpi.yaml
 
    rlinf/data/process/                       # shared, model-agnostic helpers (RECAP + STEAM)
    ├── advantage.py                          # quantile threshold + boolean label

@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # CFG SFT Training Launch Script
-# Usage: bash examples/embodiment/run_cfg_sft.sh [CONFIG_NAME] [ADDITIONAL_ARGS]
-# Example: bash examples/embodiment/run_cfg_sft.sh libero_cfg_openpi runner.max_epochs=10
+# Usage: bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_sft.sh [CONFIG_NAME] [ADDITIONAL_ARGS]
+# Example: bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_sft.sh libero_cfg_openpi runner.max_epochs=10
 
 export SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
-export REPO_PATH="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+export REPO_PATH="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 export EMBODIED_PATH="${SCRIPT_DIR}"
 export SRC_FILE="${SCRIPT_DIR}/train_cfg.py"
 export HF_HOME="${HF_HOME:-${HOME}/.cache/huggingface}"
