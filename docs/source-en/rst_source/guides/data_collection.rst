@@ -524,7 +524,7 @@ creates output like ``episode_000000/step_000003_image.jpg`` and
 
 With ``--export-mp4``, each episode folder also contains:
 
-- ``episode_<image_key>.mp4``: one video per image field
+- ``episode_{image_key}.mp4``: one video per image field
 - ``episode_merged.mp4`` (only when there are 2+ image fields): a stitched
   multi-view video
 

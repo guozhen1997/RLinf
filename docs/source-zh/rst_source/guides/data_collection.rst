@@ -504,7 +504,7 @@ wrapper 从 info 字典中按以下优先级推断 episode 是否成功（从最
 
 启用 ``--export-mp4`` 时，每个 episode 目录还会生成：
 
-- ``episode_<image_key>.mp4``：每个图像字段一条独立视频
+- ``episode_{image_key}.mp4``：每个图像字段一条独立视频
 - ``episode_merged.mp4``（仅当存在 2 个及以上图像字段时）：多视角拼接视频
 
 多视角拼接规则（各面板统一高度并标注字段名）：
