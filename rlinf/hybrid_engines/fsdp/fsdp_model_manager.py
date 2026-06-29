@@ -545,7 +545,7 @@ class FSDPModelManager:
                 param_groups,
                 eps=adam_eps,
                 weight_decay=weight_decay,
-                fused=torch.cuda.is_available(),
+                fused=Worker.torch_platform.is_available(),
             )
         except (RuntimeError, TypeError):
             optimizer = torch.optim.AdamW(

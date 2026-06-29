@@ -40,8 +40,6 @@ os.environ["OPENCV_LOG_LEVEL"] = "OFF"
 logging.getLogger("libav").setLevel(logging.ERROR)
 logging.getLogger("av").setLevel(logging.ERROR)
 
-logger = logging.getLogger(__name__)
-
 import torch  # noqa: E402
 from omegaconf import DictConfig, open_dict  # noqa: E402
 
@@ -118,30 +116,6 @@ def _validate_train_dataset_shapes(
         )
 
 
-def _ensure_steam_precision_cfg(model_cfg: DictConfig) -> str:
-    """Default unset binary-value precision to fp32 for stable FSDP training.
-
-    The model load dtype controls FSDP's master parameter dtype. Loading in
-    bf16 makes the master copy bf16 too, which collapses Adam's second
-    moment after a couple of steps and produces non-finite ``hidden_states``
-    inside the SigLIP/Gemma backbone. Default to fp32 master and let
-    ``fsdp_config.mixed_precision.param_dtype`` decide the forward dtype.
-    """
-    precision = getattr(model_cfg, "precision", None)
-    if precision not in (None, "", "null"):
-        return str(precision)
-
-    with open_dict(model_cfg):
-        model_cfg.precision = "fp32"
-
-    logger.warning(
-        "[SteamSFT] actor.model.precision was unset; defaulting to fp32 "
-        "so FSDP keeps an fp32 master copy. Forward compute dtype is still "
-        "controlled by fsdp_config.mixed_precision.param_dtype."
-    )
-    return str(model_cfg.precision)
-
-
 def _collect_non_finite_tensor_paths(value: Any, prefix: str) -> list[str]:
     """Return dotted tensor paths whose values contain NaN/Inf."""
     if isinstance(value, torch.Tensor):
@@ -180,8 +154,8 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         super().__init__(cfg.actor, self._world_size, self._rank)
 
         self.cfg = cfg
-        torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", 0)))
-        self.device = torch.cuda.current_device()
+        self.torch_platform.set_device(int(os.environ.get("LOCAL_RANK", 0)))
+        self.device = self.torch_platform.current_device()
 
         self.data_loader, self.eval_data_loaders = self.build_dataloader()
         self.data_iter = iter(self.data_loader)
@@ -193,8 +167,31 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             self.offload_param_and_grad()
             self.offload_optimizer()
 
+    def _ensure_steam_precision_cfg(self, model_cfg: DictConfig) -> str:
+        """Default unset binary-value precision to fp32 for stable FSDP training.
+
+        The model load dtype controls FSDP's master parameter dtype. Loading in
+        bf16 makes the master copy bf16 too, which collapses Adam's second
+        moment after a couple of steps and produces non-finite ``hidden_states``
+        inside the SigLIP/Gemma backbone. Default to fp32 master and let
+        ``fsdp_config.mixed_precision.param_dtype`` decide the forward dtype.
+        """
+        precision = getattr(model_cfg, "precision", None)
+        if precision not in (None, "", "null"):
+            return str(precision)
+
+        with open_dict(model_cfg):
+            model_cfg.precision = "fp32"
+
+        self._logger.warning(
+            "[SteamSFT] actor.model.precision was unset; defaulting to fp32 "
+            "so FSDP keeps an fp32 master copy. Forward compute dtype is still "
+            "controlled by fsdp_config.mixed_precision.param_dtype."
+        )
+        return str(model_cfg.precision)
+
     def model_provider_func(self) -> torch.nn.Module:
-        _ensure_steam_precision_cfg(self.cfg.actor.model)
+        self._ensure_steam_precision_cfg(self.cfg.actor.model)
         ensemble_size = int(getattr(self.cfg.actor.model, "ensemble_size", 1))
         if (
             ensemble_size > 1
@@ -284,7 +281,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             image_keys=camera_keys_tuple,
             do_augment=bool(data_cfg.get("do_augment", True)),
         )
-        logger.info(
+        self._logger.info(
             "Binary value image processor uses %sx%s for vision_repo_id=%s",
             image_size[0],
             image_size[1],
@@ -432,7 +429,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             weight = float(entry.get("weight", 1.0))
             datasets_with_weights.append((dataset, weight))
             named_train_datasets.append((resolved_path, dataset))
-            logger.info(
+            self._logger.info(
                 "[SteamSFT] Loaded train dataset: %s "
                 "(type=%s, %d samples, weight=%.4f)",
                 resolved_path,
@@ -460,7 +457,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             )
             for ds, _ in datasets_with_weights:
                 ds.set_length_scale_reference(global_length_scale_reference)
-            logger.info(
+            self._logger.info(
                 "[SteamSFT] Global length-scale L_max (p%.1f) = %.2f, applied to "
                 "%d train dataset(s).",
                 percentile,
@@ -477,7 +474,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 balance_dataset_weights=balance_dataset_weights,
                 seed=int(data_cfg.get("seed", 42)),
             )
-        logger.info(
+        self._logger.info(
             "[SteamSFT] Train: %d dataset(s), %d samples total",
             len(datasets_with_weights),
             len(train_dataset),
@@ -494,7 +491,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         ensemble_size = max(1, int(getattr(model_cfg, "ensemble_size", 1)))
         train_loader_batch_size = int(self.cfg.actor.micro_batch_size)
         if ensemble_size > 1:
-            logger.info(
+            self._logger.info(
                 "[SteamSFT] Per-member dataloader batch_size=%d "
                 "(micro_batch_size is interpreted as the per-member micro "
                 "batch; each global step consumes ensemble_size=%d × "
@@ -552,7 +549,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                 **_loader_worker_kwargs(eval_num_workers),
             )
             eval_data_loaders.append((name, _PairDataLoaderImpl(eval_loader)))
-            logger.info(
+            self._logger.info(
                 "[SteamSFT] Eval '%s': %d samples",
                 name,
                 len(ds),
@@ -706,7 +703,7 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
         )
         logits = getattr(result, "logits", None)
         hidden_states = getattr(result, "hidden_states", None)
-        logger.warning(
+        self._logger.warning(
             "[SteamSFT][BATCH_DIAG] num_bins=%d "
             "label_min=%d label_max=%d label_hist=%s image_stats=%s "
             "token_mask_frac=%s logits_std=%s hidden_std=%s",
@@ -795,6 +792,36 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             for k, v in m.items():
                 agg.setdefault(k, []).append(v)
         return {k: sum(v) / len(v) for k, v in agg.items()}
+
+    @staticmethod
+    def _all_reduce_eval_metrics(metrics: dict[str, float]) -> dict[str, float]:
+        """Cross-rank mean; only ranks that produced a key participate."""
+        if not torch.distributed.is_initialized():
+            return metrics
+
+        world_size = torch.distributed.get_world_size()
+        key_lists: list[list[str] | None] = [None] * world_size
+        torch.distributed.all_gather_object(key_lists, sorted(metrics.keys()))
+        union_keys = sorted({k for keys in key_lists for k in (keys or [])})
+        if not union_keys:
+            return {}
+
+        device = Worker.torch_platform.current_device()
+        sum_tensor = torch.zeros(len(union_keys), dtype=torch.float32, device=device)
+        count_tensor = torch.zeros(len(union_keys), dtype=torch.float32, device=device)
+        key_to_idx = {k: i for i, k in enumerate(union_keys)}
+        for key, value in metrics.items():
+            idx = key_to_idx[key]
+            sum_tensor[idx] = value
+            count_tensor[idx] = 1.0
+
+        torch.distributed.all_reduce(sum_tensor, op=torch.distributed.ReduceOp.SUM)
+        torch.distributed.all_reduce(count_tensor, op=torch.distributed.ReduceOp.SUM)
+        return {
+            key: (sum_tensor[idx] / count_tensor[idx]).item()
+            for idx, key in enumerate(union_keys)
+            if count_tensor[idx] > 0
+        }
 
     def _clear_non_current_member_grads(self, member_idx: int) -> None:
         """Null sibling members' FSDP-materialized phantom grads.
@@ -1006,23 +1033,21 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
                         continue
                     per_dataset[ds_name] = self._mean_metrics(batch_metrics)
 
-            if not per_dataset:
-                return {}
-
             final: dict[str, float] = {}
-            for ds_name, metrics in per_dataset.items():
-                for k, v in metrics.items():
-                    final[f"{ds_name}/{k}"] = v
+            if per_dataset:
+                for ds_name, metrics in per_dataset.items():
+                    for k, v in metrics.items():
+                        final[f"{ds_name}/{k}"] = v
 
-            all_keys: set[str] = set()
-            for metrics in per_dataset.values():
-                all_keys.update(metrics.keys())
-            for k in sorted(all_keys):
-                vals = [m[k] for m in per_dataset.values() if k in m]
-                if vals:
-                    final[k] = sum(vals) / len(vals)
+                all_keys: set[str] = set()
+                for metrics in per_dataset.values():
+                    all_keys.update(metrics.keys())
+                for k in sorted(all_keys):
+                    vals = [m[k] for m in per_dataset.values() if k in m]
+                    if vals:
+                        final[k] = sum(vals) / len(vals)
 
-            final = all_reduce_dict(final, op=torch.distributed.ReduceOp.AVG)
+            final = self._all_reduce_eval_metrics(final)
 
             if self.cfg.actor.get("enable_offload", False):
                 with self.device_lock:
