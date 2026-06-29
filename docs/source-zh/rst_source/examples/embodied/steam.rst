@@ -163,7 +163,7 @@ STEAM 价值模型由两个预训练 backbone 构成：
    hf download google/siglip-so400m-patch14-384 --local-dir siglip-so400m-patch14-384
    hf download google/gemma-3-270m --local-dir gemma-3-270m
 
-在模型配置（``examples/offline_rl/advantage_labeling/steam/config/model/steam.yaml``\ ）中设置路径：
+在模型配置（``examples/offline_rl/config/model/steam_value_model.yaml``\ ）中设置路径：
 
 .. code:: yaml
 
@@ -221,7 +221,7 @@ Step 1：价值模型 SFT
 
 **配置**
 
-配置文件为 ``examples/offline_rl/advantage_labeling/steam/config/steam_model_ensemble1.yaml``\ ；模型默认值在 ``config/model/steam.yaml``\ 。关键字段：
+配置文件位于 ``examples/offline_rl/config/steam_value_model_sft.yaml``；模型默认值在 ``examples/offline_rl/config/model/steam_value_model.yaml``。关键字段：
 
 .. code:: yaml
 
@@ -271,10 +271,10 @@ Step 1：价值模型 SFT
 
 .. code:: bash
 
-   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1
+   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_value_model_sft
 
    # 命令行覆盖配置字段：
-   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
+   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_value_model_sft data.k=8
 
 **输出**
 
@@ -294,7 +294,7 @@ Step 2：计算集成优势
 
 **配置**
 
-配置文件为 ``examples/offline_rl/advantage_labeling/steam/process/config/compute_advantages_ensemble.yaml``：
+配置文件为 ``examples/offline_rl/config/steam_compute_advantages_ensemble.yaml``：
 
 .. code:: yaml
 
@@ -307,8 +307,6 @@ Step 2：计算集成优势
      tag: steam_k32_ensemble3_q30
 
    data:
-     model_type: "pi0"
-     robot_type: "restock_cola_sm2sm"
      k: 32                       # 必须与 Step 1 的 data.k 一致
      camera_keys: [face_view, left_wrist_view, right_wrist_view]
      train_data_paths:
@@ -355,10 +353,10 @@ Step 2：计算集成优势
 .. code:: bash
 
    # 自动检测 GPU 数；单卡与 torchrun 多卡均支持。
-   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble
+   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh steam_compute_advantages_ensemble
 
    # 指定 GPU 数：
-   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble --nproc 4
+   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh steam_compute_advantages_ensemble --nproc 4
 
 **输出文件**
 
@@ -372,7 +370,7 @@ Step 3：CFG 训练
 
 .. code:: bash
 
-   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_sft.sh libero_cfg_openpi \
+   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_rl.sh cfg_rl_openpi \
        data.advantage_tag=steam_k32_ensemble3_q30
 
 完整的 CFG 配置与参数见 :doc:`CFG 训练阶段 <recap>`。
@@ -461,7 +459,7 @@ STEAM 实验结果
        --output /path/to/merged/actor
 
 合并逻辑位于
-``rlinf.models.embodiment.value.steam.checkpoint_merge.merge_ensemble_checkpoints``。
+``rlinf.models.embodiment.value_model.steam.checkpoint_merge.merge_ensemble_checkpoints``。
 
 阈值 / 分位数重标注
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -506,28 +504,35 @@ STEAM 将各步骤脚本自包含在 ``examples/`` 下（绑定模型的推理 +
 
 .. code-block:: text
 
-   examples/offline_rl/advantage_labeling/steam/
-   ├── train_steam.py                         # Step 1：价值模型 SFT 入口
-   ├── run_steam_sft.sh                       # Step 1 启动脚本
-   ├── config/
-   │   ├── steam_model_ensemble1.yaml
-   │   └── model/steam.yaml
-   └── process/                                # Step 2：自包含入口脚本（与 pi06star 一致）
-       ├── compute_advantages_ensemble.py     # Step 2：集成推理 + 标注（Hydra）
-       ├── relabel_advantages.py              # CLI：重标注优势（CPU）
-       ├── merge_steam_ensemble.py            # CLI：合并集成检查点
-       ├── visualize_advantage.py             # 优势可视化
-       ├── run_compute_advantages_ensemble.sh # Step 2 启动脚本
-       └── config/
-           └── compute_advantages_ensemble.yaml
+   examples/offline_rl/
+   ├── config/                                  # 共享生产配置
+   │   ├── steam_value_model_sft.yaml           # Step 1
+   │   ├── steam_compute_advantages_ensemble.yaml   # Step 2
+   │   ├── cfg_rl_openpi.yaml                   # Step 3（CFG，与 RECAP 共用）
+   │   └── model/
+   │       └── steam_value_model.yaml           # 价值模型架构默认配置
+   ├── advantage_labeling/
+   │   └── steam/
+   │       ├── train_steam.py                   # Step 1：价值模型 SFT 入口
+   │       ├── run_steam_sft.sh                 # Step 1 启动脚本
+   │       └── process/                         # Step 2：自包含入口脚本（与 recap 一致）
+   │           ├── compute_advantages_ensemble.py     # Step 2：集成推理 + 标注（Hydra）
+   │           ├── relabel_advantages.py              # CLI：重标注优势（CPU）
+   │           ├── merge_steam_ensemble.py            # CLI：合并集成检查点
+   │           ├── visualize_advantage.py             # 优势可视化
+   │           └── run_compute_advantages_ensemble.sh # Step 2 启动脚本
+   └── policy_optimization/
+       └── cfg_rl/
+           ├── train_cfg.py                      # Step 3：CFG 策略训练
+           └── run_cfg_rl.sh                     # Step 3 启动脚本
 
    rlinf/
-   ├── models/embodiment/value/steam/             # 评论器、集成、配置、合并
+   ├── models/embodiment/value_model/steam/     # 评论器、集成、配置、合并
    │   ├── modeling_steam.py / modeling_critic.py
-   │   ├── ensemble_modeling_critic.py            # worst-of-N + coerce_to_ensemble
+   │   ├── ensemble_modeling_critic.py          # worst-of-N + coerce_to_ensemble
    │   └── checkpoint_merge.py
-   ├── data/datasets/steam/binning.py             # 有符号步幅 ↔ bin 数学
-   └── data/process/                              # 共享、模型无关（RECAP + STEAM）
-       ├── advantage.py                           # 分位数阈值 + 布尔标签
-       ├── distributed.py                         # 分片推理辅助
-       └── mixture_config.py                      # meta/mixture_config.yaml tag I/O
+   ├── data/datasets/steam/                     # pair_dataset.py、mixture.py、binning.py
+   └── data/process/                            # 共享、模型无关（RECAP + STEAM）
+       ├── advantage.py                         # 分位数阈值 + 布尔标签
+       ├── distributed.py                       # 分片推理辅助
+       └── mixture_config.py                    # meta/mixture_config.yaml tag I/O

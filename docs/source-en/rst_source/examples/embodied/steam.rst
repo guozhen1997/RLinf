@@ -218,7 +218,7 @@ The STEAM value model is built from two pretrained backbones:
    hf download google/siglip-so400m-patch14-384 --local-dir siglip-so400m-patch14-384
    hf download google/gemma-3-270m --local-dir gemma-3-270m
 
-Set the paths in the model config (``examples/offline_rl/advantage_labeling/steam/config/model/steam.yaml``):
+Set the paths in the model config (``examples/offline_rl/config/model/steam_value_model.yaml``):
 
 .. code:: yaml
 
@@ -285,8 +285,8 @@ heads are re-seeded so ensemble variance is a meaningful epistemic signal.
 
 **Configuration**
 
-The config is ``examples/offline_rl/advantage_labeling/steam/config/steam_model_ensemble1.yaml``; the model
-defaults live in ``config/model/steam.yaml``. Key fields:
+The config is ``examples/offline_rl/config/steam_value_model_sft.yaml``; the model
+defaults live in ``examples/offline_rl/config/model/steam_value_model.yaml``. Key fields:
 
 .. code:: yaml
 
@@ -336,10 +336,10 @@ defaults live in ``config/model/steam.yaml``. Key fields:
 
 .. code:: bash
 
-   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1
+   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_value_model_sft
 
    # Override config fields inline:
-   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_model_ensemble1 data.k=8
+   bash examples/offline_rl/advantage_labeling/steam/run_steam_sft.sh steam_value_model_sft data.k=8
 
 **Output**
 
@@ -359,7 +359,7 @@ Run the trained ensemble over every frame and write per-frame advantage labels.
 
 **Configuration**
 
-The config is ``examples/offline_rl/advantage_labeling/steam/process/config/compute_advantages_ensemble.yaml``:
+The config is ``examples/offline_rl/config/steam_compute_advantages_ensemble.yaml``:
 
 .. code:: yaml
 
@@ -372,8 +372,6 @@ The config is ``examples/offline_rl/advantage_labeling/steam/process/config/comp
      tag: steam_k32_ensemble3_q30
 
    data:
-     model_type: "pi0"
-     robot_type: "restock_cola_sm2sm"
      k: 32                       # must match Step 1 data.k
      camera_keys: [face_view, left_wrist_view, right_wrist_view]
      train_data_paths:
@@ -426,10 +424,10 @@ positive).
 .. code:: bash
 
    # Auto-detects #GPUs; single-GPU or torchrun multi-GPU both supported.
-   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble
+   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh steam_compute_advantages_ensemble
 
    # Force a GPU count:
-   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh compute_advantages_ensemble --nproc 4
+   bash examples/offline_rl/advantage_labeling/steam/process/run_compute_advantages_ensemble.sh steam_compute_advantages_ensemble --nproc 4
 
 **Output Files**
 
@@ -448,7 +446,7 @@ parquets. Point the CFG config's ``data.advantage_tag`` at the Step 2
 
 .. code:: bash
 
-   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_sft.sh libero_cfg_openpi \
+   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_rl.sh cfg_rl_openpi \
        data.advantage_tag=steam_k32_ensemble3_q30
 
 See :doc:`the CFG training stage <recap>` for the full CFG configuration and parameters.
@@ -544,7 +542,7 @@ is a checkpoint path, or ``PATH:idx`` to pull member ``idx`` from an ensemble:
        --output /path/to/merged/actor
 
 The merge logic lives in
-``rlinf.models.embodiment.value.steam.checkpoint_merge.merge_ensemble_checkpoints``.
+``rlinf.models.embodiment.value_model.steam.checkpoint_merge.merge_ensemble_checkpoints``.
 
 Threshold / Quantile Relabeling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -595,28 +593,35 @@ model-agnostic post-processing with RECAP via ``rlinf/data/process/``:
 
 .. code-block:: text
 
-   examples/offline_rl/advantage_labeling/steam/
-   ├── train_steam.py                         # Step 1: value model SFT entry
-   ├── run_steam_sft.sh                       # Step 1 launch script
-   ├── config/
-   │   ├── steam_model_ensemble1.yaml
-   │   └── model/steam.yaml
-   └── process/                                # Step 2: self-contained entries (like pi06star)
-       ├── compute_advantages_ensemble.py     # Step 2: ensemble inference + labelling (Hydra)
-       ├── relabel_advantages.py              # CLI: relabel advantages (CPU)
-       ├── merge_steam_ensemble.py            # CLI: merge ensemble checkpoints
-       ├── visualize_advantage.py             # advantage visualization
-       ├── run_compute_advantages_ensemble.sh # Step 2 launch script
-       └── config/
-           └── compute_advantages_ensemble.yaml
+   examples/offline_rl/
+   ├── config/                                  # shared production configs
+   │   ├── steam_value_model_sft.yaml           # Step 1
+   │   ├── steam_compute_advantages_ensemble.yaml   # Step 2
+   │   ├── cfg_rl_openpi.yaml                   # Step 3 (CFG, shared with RECAP)
+   │   └── model/
+   │       └── steam_value_model.yaml           # value model architecture defaults
+   ├── advantage_labeling/
+   │   └── steam/
+   │       ├── train_steam.py                   # Step 1: value model SFT entry
+   │       ├── run_steam_sft.sh                 # Step 1 launch script
+   │       └── process/                         # Step 2: self-contained entries (like recap)
+   │           ├── compute_advantages_ensemble.py     # Step 2: ensemble inference + labelling (Hydra)
+   │           ├── relabel_advantages.py              # CLI: relabel advantages (CPU)
+   │           ├── merge_steam_ensemble.py            # CLI: merge ensemble checkpoints
+   │           ├── visualize_advantage.py             # advantage visualization
+   │           └── run_compute_advantages_ensemble.sh # Step 2 launch script
+   └── policy_optimization/
+       └── cfg_rl/
+           ├── train_cfg.py                      # Step 3: CFG policy training
+           └── run_cfg_rl.sh                     # Step 3 launch script
 
    rlinf/
-   ├── models/embodiment/value/steam/             # critic, ensemble, config, merge
+   ├── models/embodiment/value_model/steam/     # critic, ensemble, config, merge
    │   ├── modeling_steam.py / modeling_critic.py
-   │   ├── ensemble_modeling_critic.py            # worst-of-N + coerce_to_ensemble
-   │   └── checkpoint_merge.py                    # ensemble checkpoint merge
-   ├── data/datasets/steam/binning.py             # signed-stride ↔ bin math + entropy
-   └── data/process/                              # shared, model-agnostic (RECAP + STEAM)
-       ├── advantage.py                           # quantile threshold + boolean label
-       ├── distributed.py                         # sharded-inference helpers
-       └── mixture_config.py                      # meta/mixture_config.yaml tag I/O
+   │   ├── ensemble_modeling_critic.py          # worst-of-N + coerce_to_ensemble
+   │   └── checkpoint_merge.py                  # ensemble checkpoint merge
+   ├── data/datasets/steam/                     # pair_dataset.py, mixture.py, binning.py
+   └── data/process/                            # shared, model-agnostic (RECAP + STEAM)
+       ├── advantage.py                         # quantile threshold + boolean label
+       ├── distributed.py                       # sharded-inference helpers
+       └── mixture_config.py                    # meta/mixture_config.yaml tag I/O

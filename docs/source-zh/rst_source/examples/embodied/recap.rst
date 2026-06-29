@@ -244,7 +244,7 @@ Step 1：计算回报（Compute Returns）
 
 **配置文件**
 
-配置文件位于 ``examples/offline_rl/advantage_labeling/recap/process/config/compute_returns.yaml``：
+配置文件位于 ``examples/offline_rl/config/recap_compute_returns.yaml``：
 
 .. code:: yaml
 
@@ -286,7 +286,7 @@ Step 1：计算回报（Compute Returns）
 
 .. code:: bash
 
-   bash examples/offline_rl/advantage_labeling/recap/process/run_compute_returns.sh compute_returns
+   bash examples/offline_rl/advantage_labeling/recap/process/run_compute_returns.sh recap_compute_returns
 
 **输出文件**
 
@@ -322,7 +322,7 @@ Step 2：训练价值模型（Value Model SFT）
 
 **配置文件**
 
-配置文件位于 ``examples/offline_rl/advantage_labeling/recap/config/libero_sft_value.yaml``，核心字段如下：
+配置文件位于 ``examples/offline_rl/config/recap_value_model_sft.yaml``，核心字段如下：
 
 .. code:: yaml
 
@@ -393,7 +393,7 @@ Step 2：训练价值模型（Value Model SFT）
 
 .. code:: bash
 
-   bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh libero_sft_value
+   bash examples/offline_rl/advantage_labeling/recap/run_value_sft.sh recap_value_model_sft
 
 **输出**
 
@@ -430,7 +430,7 @@ Step 3：计算优势（Compute Advantages）
 
 **配置文件**
 
-配置文件位于 ``examples/offline_rl/advantage_labeling/recap/process/config/compute_advantages.yaml``：
+配置文件位于 ``examples/offline_rl/config/recap_compute_advantages.yaml``：
 
 .. code:: yaml
 
@@ -481,7 +481,7 @@ Step 3：计算优势（Compute Advantages）
 
 .. code:: bash
 
-   bash examples/offline_rl/advantage_labeling/recap/process/run_compute_advantages.sh compute_advantages
+   bash examples/offline_rl/advantage_labeling/recap/process/run_compute_advantages.sh recap_compute_advantages
 
 **输出文件**
 
@@ -514,7 +514,7 @@ Step 4：CFG Training
 
 **配置文件**
 
-配置文件位于 ``examples/offline_rl/policy_optimization/cfg_rl/config/cfg/libero_cfg_openpi.yaml``：
+配置文件位于 ``examples/offline_rl/config/cfg_rl_openpi.yaml``：
 
 .. code:: yaml
 
@@ -577,7 +577,7 @@ Step 4：CFG Training
 
 .. code:: bash
 
-   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_sft.sh libero_cfg_openpi
+   bash examples/offline_rl/policy_optimization/cfg_rl/run_cfg_rl.sh cfg_rl_openpi
 
 **关键监控指标**
 
@@ -771,31 +771,33 @@ RECAP 支持迭代优化：使用 Step 4 训练的策略模型采集新数据，
 .. code-block:: text
 
    examples/offline_rl/
+   ├── config/                                  # 共享生产配置
+   │   ├── recap_compute_returns.yaml           # Step 1
+   │   ├── recap_value_model_sft.yaml           # Step 2
+   │   ├── recap_compute_advantages.yaml        # Step 3
+   │   ├── cfg_rl_openpi.yaml                   # Step 4
+   │   └── model/
+   │       └── recap_value_model.yaml           # 价值模型架构默认配置
    ├── advantage_labeling/
    │   └── recap/
    │       ├── train_value.py                    # Step 2: 训练价值模型
    │       ├── run_value_sft.sh                  # Step 2 启动脚本
-   │       ├── config/
-   │       │   └── libero_sft_value.yaml
    │       └── process/
    │           ├── compute_returns.py            # Step 1：回报逻辑 + Hydra 入口
    │           ├── compute_advantages.py         # Step 3：优势逻辑 + Hydra 入口
-   │           ├── relabel_advantages.py             # 阈值重标（CPU）
+   │           ├── relabel_advantages.py         # 阈值重标（CPU）
    │           ├── visualize_advantage_dataset.py    # 优势可视化
    │           ├── run_compute_returns.sh        # Step 1 启动脚本
-   │           ├── run_compute_advantages.sh     # Step 3 启动脚本
-   │           └── config/
-   │               ├── compute_returns.yaml
-   │               ├── compute_advantages.yaml
-   │               └── model/value.yaml          # 价值模型配置
+   │           └── run_compute_advantages.sh     # Step 3 启动脚本
    └── policy_optimization/
        └── cfg_rl/
            ├── train_cfg.py                      # Step 4: CFG 策略训练
-           ├── run_cfg_sft.sh                    # Step 4 启动脚本
-           └── config/cfg/
-               └── libero_cfg_openpi.yaml
+           └── run_cfg_rl.sh                     # Step 4 启动脚本
 
-   rlinf/data/process/                       # 共享、模型无关的工具（RECAP + STEAM）
-   ├── advantage.py                          # 分位数阈值 + 布尔标签
-   ├── distributed.py                        # 分片推理辅助
-   └── mixture_config.py                     # meta/mixture_config.yaml tag I/O
+   rlinf/
+   ├── models/embodiment/value_model/recap/     # 价值评论器、配置、checkpoint 工具
+   ├── data/datasets/recap/                     # value_dataset.py、cfg_model.py 等
+   └── data/process/                            # 共享、模型无关（RECAP + STEAM）
+       ├── advantage.py                          # 分位数阈值 + 布尔标签
+       ├── distributed.py                        # 分片推理辅助
+       └── mixture_config.py                     # meta/mixture_config.yaml tag I/O

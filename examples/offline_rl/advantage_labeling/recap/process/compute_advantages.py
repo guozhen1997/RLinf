@@ -70,7 +70,7 @@ from rlinf.data.process.mixture_config import (
     read_mixture_config,
     write_mixture_config,
 )
-from rlinf.models.embodiment.value.pi06star.modeling_critic import ValueCriticModel
+from rlinf.models.embodiment.value_model.recap.modeling_critic import ValueCriticModel
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +209,6 @@ def _parse_value_model_kwargs(cfg: DictConfig) -> dict:
     return {
         "checkpoint_dir": checkpoint_path,
         "env_type": robot_type,
-        "model_type": data_cfg.get("model_type", "pi05"),
         "num_return_bins": model_cfg.get("num_bins", 201),
         "return_min": model_cfg.get("v_min", -1.0),
         "return_max": model_cfg.get("v_max", 0.0),
@@ -1159,7 +1158,7 @@ def compute_advantages(cfg: DictConfig) -> None:
         cleanup_distributed()
 
 
-@hydra.main(version_base=None, config_path="config", config_name="compute_advantages")
+@hydra.main(version_base=None, config_path=None, config_name="recap_compute_advantages")
 def main(cfg: DictConfig) -> None:
     compute_advantages(cfg)
 

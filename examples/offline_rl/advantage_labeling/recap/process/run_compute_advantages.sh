@@ -23,6 +23,7 @@ source switch_env openpi 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_PATH=$(dirname $(dirname $(dirname $(dirname $(dirname "$SCRIPT_DIR")))))
+export OFFLINE_RL_CONFIG="${REPO_PATH}/examples/offline_rl/config"
 export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:$PYTHONPATH
 cd "$SCRIPT_DIR"
 
@@ -33,7 +34,7 @@ export TMPDIR="${TMPDIR:-/tmp}"
 
 mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$HF_DATASETS_CACHE" "$TMPDIR"
 
-CONFIG_NAME="${1:-compute_advantages}"
+CONFIG_NAME="${1:-recap_compute_advantages}"
 shift 1 2>/dev/null || true
 
 NPROC_PER_NODE=$(nvidia-smi -L 2>/dev/null | wc -l || echo 1)
@@ -78,13 +79,14 @@ fi
 echo ""
 
 if [ "$NPROC_PER_NODE" -eq 1 ]; then
-    CMD="python compute_advantages.py --config-name $CONFIG_NAME $OVERRIDES"
+    CMD="python compute_advantages.py --config-path ${OFFLINE_RL_CONFIG} --config-name $CONFIG_NAME $OVERRIDES"
     echo "Running single-GPU mode..."
 else
     CMD="torchrun \
         --nproc_per_node=$NPROC_PER_NODE \
         --master_port=$MASTER_PORT \
         compute_advantages.py \
+        --config-path ${OFFLINE_RL_CONFIG} \
         --config-name $CONFIG_NAME \
         $OVERRIDES"
     echo "Running multi-GPU mode with torchrun..."

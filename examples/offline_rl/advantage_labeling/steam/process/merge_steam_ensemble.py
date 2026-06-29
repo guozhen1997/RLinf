@@ -15,7 +15,7 @@
 """CLI: merge single / ensemble STEAM critic checkpoints into one ensemble checkpoint.
 
 Thin wrapper around
-:func:`rlinf.models.embodiment.value.steam.checkpoint_merge.merge_ensemble_checkpoints`.
+:func:`rlinf.models.embodiment.value_model.steam.checkpoint_merge.merge_ensemble_checkpoints`.
 See the STEAM pipeline docs for the full workflow and examples.
 """
 
@@ -27,7 +27,7 @@ from pathlib import Path
 # Make the rlinf package importable regardless of the cwd the user launched from.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent.parent))
 
-from rlinf.models.embodiment.value.steam.checkpoint_merge import (  # noqa: E402
+from rlinf.models.embodiment.value_model.steam.checkpoint_merge import (  # noqa: E402
     merge_ensemble_checkpoints,
 )
 

@@ -17,10 +17,11 @@ source switch_env openpi 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_PATH=$(dirname $(dirname $(dirname $(dirname $(dirname "$SCRIPT_DIR")))))
+export OFFLINE_RL_CONFIG="${REPO_PATH}/examples/offline_rl/config"
 export PYTHONPATH=${REPO_PATH}:${LIBERO_REPO_PATH}:$PYTHONPATH
 cd "$SCRIPT_DIR"
 
-CONFIG_NAME=${1:-"compute_returns"}
+CONFIG_NAME=${1:-"recap_compute_returns"}
 shift 1 2>/dev/null || true
 EXTRA_ARGS="$@"
 
@@ -38,7 +39,7 @@ if [ -n "$EXTRA_ARGS" ]; then
 fi
 echo ""
 
-CMD="python compute_returns.py --config-name $CONFIG_NAME $OVERRIDES"
+CMD="python compute_returns.py --config-path ${OFFLINE_RL_CONFIG} --config-name $CONFIG_NAME $OVERRIDES"
 
 echo "Command: $CMD"
 echo ""

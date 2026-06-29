@@ -22,11 +22,12 @@ source switch_env openpi 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_PATH=$(dirname $(dirname $(dirname $(dirname $(dirname "$SCRIPT_DIR")))))
+export OFFLINE_RL_CONFIG="${REPO_PATH}/examples/offline_rl/config"
 export PYTHONPATH=${REPO_PATH}:${PYTHONPATH}
 cd "$SCRIPT_DIR"
 
 # First positional arg = config name (unless it starts with --).
-CONFIG_NAME="compute_advantages_ensemble"
+CONFIG_NAME="steam_compute_advantages_ensemble"
 if [ $# -gt 0 ] && [[ "$1" != --* ]] && [[ "$1" != *=* ]]; then
     CONFIG_NAME="$1"
     shift
@@ -78,6 +79,7 @@ echo ""
 # program's exit code is preserved (a pipe would mask it with grep's exit).
 if [ "$NPROC_PER_NODE" -eq 1 ]; then
     python compute_advantages_ensemble.py \
+        --config-path "${OFFLINE_RL_CONFIG}" \
         --config-name "$CONFIG_NAME" \
         "${OVERRIDES[@]}" \
         2> >(grep -v --line-buffered -E "libdav1d" >&2)
@@ -86,6 +88,7 @@ else
         --nproc_per_node="$NPROC_PER_NODE" \
         --master_port="$MASTER_PORT" \
         compute_advantages_ensemble.py \
+        --config-path "${OFFLINE_RL_CONFIG}" \
         --config-name "$CONFIG_NAME" \
         "${OVERRIDES[@]}" \
         2> >(grep -v --line-buffered -E "libdav1d" >&2)

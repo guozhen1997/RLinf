@@ -499,7 +499,7 @@ def compute_returns(cfg: DictConfig) -> None:
         )
 
 
-@hydra.main(version_base=None, config_path="config", config_name="compute_returns")
+@hydra.main(version_base=None, config_path=None, config_name="recap_compute_returns")
 def main(cfg: DictConfig) -> None:
     compute_returns(cfg)
 

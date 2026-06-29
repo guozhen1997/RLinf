@@ -16,7 +16,7 @@
 Entry point for Value Model SFT training.
 
 Usage:
-    python train_value.py --config-path config --config-name libero_sft_value
+    python train_value.py --config-path examples/offline_rl/config --config-name recap_value_model_sft
 """
 
 import json
@@ -36,7 +36,7 @@ from rlinf.workers.sft.fsdp_value_sft_worker import (
 mp.set_start_method("spawn", force=True)
 
 
-@hydra.main(version_base="1.1", config_path="config", config_name="libero_sft_value")
+@hydra.main(version_base="1.1", config_path=None, config_name="recap_value_model_sft")
 def main(cfg) -> None:
     cfg = validate_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))

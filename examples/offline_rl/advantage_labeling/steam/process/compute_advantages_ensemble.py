@@ -75,11 +75,11 @@ from rlinf.data.process.distributed import (  # noqa: E402
     setup_distributed,
 )
 from rlinf.data.process.mixture_config import write_mixture_config_tag  # noqa: E402
-from rlinf.models.embodiment.value.steam.ensemble_modeling_critic import (  # noqa: E402
+from rlinf.models.embodiment.value_model.steam.ensemble_modeling_critic import (  # noqa: E402
     EnsembleSteamCriticModel,
     coerce_to_ensemble,
 )
-from rlinf.models.embodiment.value.steam.modeling_critic import (  # noqa: E402
+from rlinf.models.embodiment.value_model.steam.modeling_critic import (  # noqa: E402
     SteamCriticModel,
 )
 
@@ -681,8 +681,6 @@ def compute_ensemble_advantages(cfg: DictConfig) -> None:
     raw_model = SteamCriticModel.from_checkpoint(
         cfg.advantage.value_checkpoint,
         device=device,
-        env_type=str(cfg.data.robot_type),
-        model_type=str(cfg.data.model_type),
         precision=precision,
     )
     model = coerce_to_ensemble(raw_model)
@@ -888,8 +886,8 @@ def compute_ensemble_advantages(cfg: DictConfig) -> None:
 
 @hydra.main(
     version_base=None,
-    config_path="config",
-    config_name="compute_advantages_ensemble",
+    config_path=None,
+    config_name="steam_compute_advantages_ensemble",
 )
 def main(cfg: DictConfig) -> None:
     compute_ensemble_advantages(cfg)

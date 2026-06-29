@@ -28,12 +28,12 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.datasets.recap.pi06star import (
-    ValueDataLoaderImpl,
-    ValueMixtureDataset,
-)
 from rlinf.data.datasets.recap.utils import (
     load_return_stats_from_dataset,
+)
+from rlinf.data.datasets.recap.value_dataset import (
+    ValueDataLoaderImpl,
+    ValueMixtureDataset,
 )
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
@@ -147,11 +147,11 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
         except (ImportError, AttributeError):
             pass
 
-        from rlinf.data.datasets.recap.pi06star import ValueDataset
-        from rlinf.models.embodiment.value.pi06star.data_collator import (
+        from rlinf.data.datasets.recap.value_dataset import ValueDataset
+        from rlinf.models.embodiment.value_model.recap.data_collator import (
             ValueDataCollator,
         )
-        from rlinf.models.embodiment.value.pi06star.processing import ValueProcessor
+        from rlinf.models.embodiment.value_model.recap.processing import ValueProcessor
 
         data_cfg = self.cfg.get("data", {})
         model_cfg = self.cfg.actor.model
@@ -173,7 +173,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             return kwargs
 
         # Tokenizer resolution: explicit tokenizer_path > backbone path > error
-        from rlinf.models.embodiment.value.pi06star.checkpoint_utils import (
+        from rlinf.models.embodiment.value_model.recap.checkpoint_utils import (
             has_tokenizer_files,
         )
 
@@ -378,7 +378,7 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             f"pin_memory={pin_memory}"
         )
 
-        data_config = {"model_type": "pi06star"}
+        data_config = {"model_type": "recap_value_model"}
         train_data_loader = ValueDataLoaderImpl(data_config, torch_loader)
 
         eval_data_loaders: list[tuple[str, ValueDataLoaderImpl]] = []
