@@ -415,9 +415,7 @@ def relabel_advantages(
             source_tag=source_tag,
             recorded_threshold=recorded_threshold,
             label_mode=mode,
-            rollout_quantile=(
-                float(rollout_quantile) if mode == "quantile" else None
-            ),
+            rollout_quantile=(float(rollout_quantile) if mode == "quantile" else None),
             expert_quantile=(
                 float(expert_quantile)
                 if (mode == "quantile" and expert_quantile is not None)
@@ -483,9 +481,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--positive_threshold",
         type=float,
         default=None,
-        help=(
-            "Signed-score threshold in [-1, 1] (required when --mode=threshold)."
-        ),
+        help=("Signed-score threshold in [-1, 1] (required when --mode=threshold)."),
     )
     parser.add_argument(
         "--rollout_quantile",

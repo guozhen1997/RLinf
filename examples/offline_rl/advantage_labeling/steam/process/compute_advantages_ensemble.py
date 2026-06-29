@@ -218,6 +218,7 @@ def update_advantage_tag(
             entry["expert_quantile"] = float(expert_quantile)
     return write_mixture_config_tag(dataset_path, tag, entry)
 
+
 def move_to_device(obj: Any, device: str):
     """Recursive ``.to(device)`` for tensors nested in dicts / lists."""
     if isinstance(obj, torch.Tensor):
@@ -859,7 +860,9 @@ def compute_ensemble_advantages(cfg: DictConfig) -> None:
                     ),
                     expert_quantile=(
                         float(expert_quantile_cfg)
-                        if (label_mode == "quantile" and expert_quantile_cfg is not None)
+                        if (
+                            label_mode == "quantile" and expert_quantile_cfg is not None
+                        )
                         else None
                     ),
                 )

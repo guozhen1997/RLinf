@@ -28,12 +28,12 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.datasets.recap.utils import (
-    load_return_stats_from_dataset,
-)
 from rlinf.data.datasets.recap.pi06star import (
     ValueDataLoaderImpl,
     ValueMixtureDataset,
+)
+from rlinf.data.datasets.recap.utils import (
+    load_return_stats_from_dataset,
 )
 from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models import get_model
@@ -148,7 +148,9 @@ class FSDPValueSftWorker(FSDPModelManager, Worker):
             pass
 
         from rlinf.data.datasets.recap.pi06star import ValueDataset
-        from rlinf.models.embodiment.value.pi06star.data_collator import ValueDataCollator
+        from rlinf.models.embodiment.value.pi06star.data_collator import (
+            ValueDataCollator,
+        )
         from rlinf.models.embodiment.value.pi06star.processing import ValueProcessor
 
         data_cfg = self.cfg.get("data", {})

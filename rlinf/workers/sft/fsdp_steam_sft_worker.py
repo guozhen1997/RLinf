@@ -240,13 +240,13 @@ class FSDPSteamSftWorker(FSDPModelManager, Worker):
             PairDataset,
         )
         from rlinf.data.datasets.steam.mixture import PairMixtureDataset
+        from rlinf.models.embodiment.value.pi06star.checkpoint_utils import (
+            has_tokenizer_files,
+        )
         from rlinf.models.embodiment.value.steam.processing import (
             SteamImageProcessor,
             SteamProcessor,
             resolve_vision_image_size,
-        )
-        from rlinf.models.embodiment.value.pi06star.checkpoint_utils import (
-            has_tokenizer_files,
         )
 
         data_cfg = self.cfg.get("data", {})
