@@ -47,8 +47,9 @@ STEAM：用于离线策略优化的集成优势建模
    │  Step 1                │     │  Step 2                │     │  Step 3              │
    │  STEAM Value Model SFT │────▶│  Compute Ensemble      │────▶│  CFG Training        │
    │                        │     │  Advantages            │     │                      │
-   │  训练一组成对分类的    │     │  worst-of-N 集成有符号 │     │  用无分类器引导      │
-   │  进度评论器            │     │  分数 → 布尔优势标签   │     │  训练策略            │
+   │  Train an ensemble of  │     │  Worst-of-N ensemble   │     │  Train the policy    │
+   │  pair-classification   │     │  signed score -> bool  │     │  with classifier-    │
+   │  progress critics      │     │  advantage labels      │     │  free guidance       │
    └────────────────────────┘     └────────────────────────┘     └──────────────────────┘
 
 **核心思路**

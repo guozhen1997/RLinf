@@ -58,7 +58,7 @@ A STEAM run is two STEAM-specific stages followed by a CFG training stage:
    │  STEAM Value Model SFT │────▶│  Compute Ensemble      │────▶│  CFG Training        │
    │                        │     │  Advantages            │     │                      │
    │  Train an ensemble of  │     │  Worst-of-N ensemble   │     │  Train the policy    │
-   │  pair-classification   │     │  signed score → bool   │     │  with classifier-    │
+   │  pair-classification   │     │  signed score -> bool  │     │  with classifier-    │
    │  progress critics      │     │  advantage labels      │     │  free guidance       │
    └────────────────────────┘     └────────────────────────┘     └──────────────────────┘
 
