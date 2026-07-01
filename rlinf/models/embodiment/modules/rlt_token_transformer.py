@@ -158,9 +158,11 @@ class RLTTokenEncoder(nn.Module):
         )
         prefix_tokens = prefix_embs + prefix_pos
         batch_size = prefix_embs.shape[0]
-        rl_tokens = self.rl_token_embed.to(
-            device=prefix_embs.device, dtype=prefix_embs.dtype
-        ).unsqueeze(0).expand(batch_size, -1, -1)
+        rl_tokens = (
+            self.rl_token_embed.to(device=prefix_embs.device, dtype=prefix_embs.dtype)
+            .unsqueeze(0)
+            .expand(batch_size, -1, -1)
+        )
         rl_pos = self.rl_token_pos_enc.to(
             device=prefix_embs.device, dtype=prefix_embs.dtype
         )
@@ -206,8 +208,12 @@ class RLTTokenDecoder(nn.Module):
         self.prefix_token_embed = nn.Parameter(
             sinusoidal_pe_init(prefix_seq_len, embed_dim)
         )
-        self.prefix_pos_enc = nn.Parameter(sinusoidal_pe_init(prefix_seq_len, embed_dim))
-        self.rl_token_pos_enc = nn.Parameter(sinusoidal_pe_init(num_rl_tokens, embed_dim))
+        self.prefix_pos_enc = nn.Parameter(
+            sinusoidal_pe_init(prefix_seq_len, embed_dim)
+        )
+        self.rl_token_pos_enc = nn.Parameter(
+            sinusoidal_pe_init(num_rl_tokens, embed_dim)
+        )
         self.layers = nn.ModuleList(
             [
                 RLTSelfAttentionLayer(
@@ -238,9 +244,12 @@ class RLTTokenDecoder(nn.Module):
             device=rl_tokens.device, dtype=rl_tokens.dtype
         )
         rl_tokens = rl_tokens + rl_pos
-        prefix_tokens = self.prefix_token_embed[:target_seq_len].to(
-            device=rl_tokens.device, dtype=rl_tokens.dtype
-        ).unsqueeze(0).expand(batch_size, -1, -1)
+        prefix_tokens = (
+            self.prefix_token_embed[:target_seq_len]
+            .to(device=rl_tokens.device, dtype=rl_tokens.dtype)
+            .unsqueeze(0)
+            .expand(batch_size, -1, -1)
+        )
         prefix_pos = self.prefix_pos_enc[:target_seq_len].to(
             device=rl_tokens.device, dtype=rl_tokens.dtype
         )
