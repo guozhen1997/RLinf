@@ -901,12 +901,20 @@ class EnvWorker(Worker):
         transition: bool = False,
     ) -> dict[str, Any]:
         prefix = "rlt_transition_" if transition else ""
+        required = ("z_rl", "proprio", "ref_chunk")
+        missing = [
+            f"{prefix}{key}"
+            for key in required
+            if f"{prefix}{key}" not in forward_inputs
+        ]
+        if missing:
+            raise ValueError(
+                f"Missing RLT forward_inputs keys: {missing}. Ensure "
+                "rollout.rlt_feature_model is configured and the rollout worker "
+                "populates RLT features."
+            )
         return copy_dict_tensor(
-            {
-                "z_rl": forward_inputs[f"{prefix}z_rl"],
-                "proprio": forward_inputs[f"{prefix}proprio"],
-                "ref_chunk": forward_inputs[f"{prefix}ref_chunk"],
-            }
+            {key: forward_inputs[f"{prefix}{key}"] for key in required}
         )
 
     def _update_rlt_stage2_transitions(

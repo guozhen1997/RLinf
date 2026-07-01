@@ -523,7 +523,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
 
     def _select_configured_state(self, states):
         indices = self.config.state_indices
-        if indices is None:
+        if not indices:
             return states
         indices = list(indices)
 
