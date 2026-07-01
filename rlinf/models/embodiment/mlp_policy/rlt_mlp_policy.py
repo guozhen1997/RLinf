@@ -43,6 +43,14 @@ class RLTMLPPolicy(MLPPolicy):
         proprio_dim = int(proprio_dim)
         step_action_dim = int(action_dim)
         chunk_len = int(num_action_chunks)
+        ref_chunk_len = (
+            chunk_len if ref_num_action_chunks is None else int(ref_num_action_chunks)
+        )
+        if ref_chunk_len < chunk_len:
+            raise ValueError(
+                "ref_num_action_chunks must be >= num_action_chunks, got "
+                f"{ref_chunk_len} < {chunk_len}."
+            )
         flat_action_dim = chunk_len * step_action_dim
 
         actor_obs_dim = z_dim + proprio_dim + flat_action_dim
@@ -61,6 +69,7 @@ class RLTMLPPolicy(MLPPolicy):
         self.proprio_dim = proprio_dim
         self.step_action_dim = step_action_dim
         self.chunk_len = chunk_len
+        self.ref_chunk_len = ref_chunk_len
         self.flat_action_dim = flat_action_dim
 
     def preprocess_env_obs(self, env_obs):
@@ -83,14 +92,10 @@ class RLTMLPPolicy(MLPPolicy):
         return self._flatten_batch(obs["proprio"])
 
     def _get_ref_chunk(self, obs: dict) -> torch.Tensor:
-        ref_chunk = obs["ref_chunk"]
-        if ref_chunk.dim() == 3:
-            ref_chunk = ref_chunk[:, : self.chunk_len]
-        else:
-            ref_chunk = self._flatten_batch(ref_chunk).reshape(
-                ref_chunk.shape[0], -1, self.step_action_dim
-            )
-            ref_chunk = ref_chunk[:, : self.chunk_len]
+        ref_chunk = self._flatten_batch(obs["ref_chunk"]).reshape(
+            obs["ref_chunk"].shape[0], -1, self.step_action_dim
+        )
+        ref_chunk = ref_chunk[:, : self.chunk_len]
         return ref_chunk.reshape(ref_chunk.shape[0], -1)
 
     def _maybe_drop_reference(
