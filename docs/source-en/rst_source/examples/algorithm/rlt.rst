@@ -47,8 +47,7 @@ RLT separates representation learning from online RL control.
 | **You'll do:** prepare demonstrations -> train Stage 1 -> point Stage 2 at
   the Stage 1 checkpoint -> launch SAC -> monitor replay-buffer and task
   success metrics.
-| **Prerequisites:** :doc:`Installation </rst_source/start/installation>`.
-  For the provided Franka config, also prepare the
+| **Prerequisites:** install the OpenPI π₀.₅ checkpoint and prepare the
   :doc:`Franka real-world setup <../embodied/franka>`.
 
 Provided Configuration Files
@@ -73,11 +72,6 @@ Provided Configuration Files
 
 Installation
 ------------
-
-RLT uses the same OpenPI inference environment as RECAP for Stage 1 training
-and Stage 2 feature extraction. If you run the provided Franka config, the
-robot control node still needs the Franka runtime described in
-:doc:`../embodied/franka`.
 
 1. Clone RLinf Repository
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -257,6 +251,42 @@ the human action.
 
 Run the Provided Franka Example
 -------------------------------
+
+Data: Collect Franka Demonstrations and Compute Normalization Stats
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stage 1 expects a Franka demonstration dataset in LeRobot format; the dataset
+directory should directly contain ``data/`` and ``meta/``. On the controller
+node, follow the data-collection flow in the :doc:`Franka real-world guide
+<../embodied/franka>` to prepare the robot and target pose, and export LeRobot
+data from the collection config:
+
+.. code:: yaml
+
+   env:
+     data_collection:
+       enabled: True
+       export_format: "lerobot"
+
+Then launch collection:
+
+.. code:: bash
+
+   bash examples/embodiment/collect_data.sh realworld_collect_data
+
+After collection, place the LeRobot dataset on the training node and compute
+normalization statistics for the RLT OpenPI dataconfig. ``repo_id`` should
+match ``rlt.openpi_repo_id`` in the Stage 1 / Stage 2 configs:
+
+.. code:: bash
+
+   export HF_LEROBOT_HOME=/path/to/lerobot_root
+   python toolkits/lerobot/calculate_norm_stats.py \
+       --config-name pi05_franka_state7d \
+       --repo-id realworld_peg_insertion_rlt_stage1_7d
+
+Then point ``rlt.train_data_path`` in the Stage 1 config at that LeRobot
+dataset directory.
 
 Stage 1: Train the RLT Feature Model
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -37,7 +37,7 @@ RLT 将表示学习和在线 RL 控制拆开。
       当前是真机示例，结构可扩展到仿真
 
 | **你将完成：** 准备示范数据 -> 训练 Stage 1 -> 在 Stage 2 中加载 Stage 1 检查点 -> 启动 SAC -> 观察 replay buffer 与任务成功率指标。
-| **前置条件：** :doc:`安装 </rst_source/start/installation>`。如果运行当前提供的 Franka 配置，还需要准备 :doc:`Franka 真机环境 <../embodied/franka>`。
+| **前置条件：** 安装 OpenPI π₀.₅ checkpoint，并准备 :doc:`Franka 真机环境 <../embodied/franka>`。
 
 提供的配置文件
 ~~~~~~~~~~~~~~
@@ -61,8 +61,6 @@ RLT 将表示学习和在线 RL 控制拆开。
 
 安装
 ----
-
-RLT 的 Stage 1 训练和 Stage 2 特征提取使用的 OpenPI 推理环境与 RECAP 一致。如果运行当前提供的 Franka 配置，机器人控制节点仍然需要 :doc:`Franka 真机环境 <../embodied/franka>` 中说明的 Franka runtime。
 
 1. 克隆 RLinf 仓库
 ~~~~~~~~~~~~~~~~~~
@@ -223,6 +221,40 @@ Stage 2 的 actor loss 为：
 
 运行当前 Franka 示例
 --------------------
+
+数据：采集 Franka 示范并计算归一化统计
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stage 1 需要 LeRobot 格式的 Franka 示范数据，数据目录应直接包含
+``data/`` 和 ``meta/``。在控制节点上按照 :doc:`Franka 真机文档
+<../embodied/franka>` 的数据采集流程准备机器人和目标位姿，并在采集配置中导出
+LeRobot 格式数据：
+
+.. code:: yaml
+
+   env:
+     data_collection:
+       enabled: True
+       export_format: "lerobot"
+
+然后启动采集：
+
+.. code:: bash
+
+   bash examples/embodiment/collect_data.sh realworld_collect_data
+
+采集完成后，将 LeRobot 数据集放到训练节点，并为当前 RLT OpenPI dataconfig
+计算归一化统计。``repo_id`` 需要与 Stage 1 / Stage 2 配置中的
+``rlt.openpi_repo_id`` 保持一致：
+
+.. code:: bash
+
+   export HF_LEROBOT_HOME=/path/to/lerobot_root
+   python toolkits/lerobot/calculate_norm_stats.py \
+       --config-name pi05_franka_state7d \
+       --repo-id realworld_peg_insertion_rlt_stage1_7d
+
+后续将 Stage 1 配置中的 ``rlt.train_data_path`` 指向该 LeRobot 数据集目录。
 
 Stage 1：训练 RLT 特征模型
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

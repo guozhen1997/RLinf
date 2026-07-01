@@ -81,7 +81,8 @@ class RLTSACLossMixin:
                 self._flatten_chunk(intervene_flags)
                 .to(device=pi_chunk.device)
                 .bool()
-                .reshape(pi_chunk.shape[0], chunk_len)
+                .reshape(pi_chunk.shape[0], chunk_len, action_dim)
+                .any(dim=-1)
             )
 
         bc_target = torch.where(human_mask[..., None], action_chunk, bc_ref_chunk)

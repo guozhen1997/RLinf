@@ -763,11 +763,7 @@ class MultiStepRolloutWorker(Worker):
                 bootstrap_values=self.get_bootstrap_values(
                     env_output.get("final_obs", None)
                 ),
-                forward_inputs=(
-                    result["forward_inputs"]
-                    if self.rlt_feature_model is not None
-                    else {}
-                ),
+                forward_inputs=result["forward_inputs"],
             )
             self.send_rollout_result(
                 output_channel=output_channel,
