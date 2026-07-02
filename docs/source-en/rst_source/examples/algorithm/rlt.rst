@@ -64,7 +64,7 @@ Provided Configuration Files
      - ``examples/sft/config/rlt_sft_openpi_pi05.yaml``
      - SFT pi0.5 together with the RLT token transformer.
    * - Stage 2
-     - ``examples/embodiment/config/rlt_stage2_sac_mlp.yaml``
+     - ``examples/embodiment/config/rlt_stage2_ac_mlp.yaml``
      - Run RLT Stage 2 actor-critic training with the frozen Stage 1 feature model.
    * - Stage 2 model
      - ``examples/embodiment/config/model/rlt_mlp_policy.yaml``
@@ -349,7 +349,7 @@ Launch the async run from the master node:
 
 .. code:: bash
 
-   bash examples/embodiment/run_realworld_async.sh rlt_stage2_sac_mlp
+   bash examples/embodiment/run_realworld_async.sh rlt_stage2_ac_mlp
 
 During real-robot rollout, use the keyboard policy switch:
 

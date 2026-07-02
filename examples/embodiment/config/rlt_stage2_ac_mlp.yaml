@@ -43,7 +43,7 @@ runner:
   logger:
     log_path: "../results"
     project_name: rlinf-rlt
-    experiment_name: "rlt_stage2_sac_mlp_${rlt.task_name}"
+    experiment_name: "rlt_stage2_ac_mlp_${rlt.task_name}"
     logger_backends: ["tensorboard"]
 
   max_epochs: 8000

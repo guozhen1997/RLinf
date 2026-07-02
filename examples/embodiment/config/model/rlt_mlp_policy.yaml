@@ -16,7 +16,8 @@ action_dim: 7
 num_action_chunks: 50
 ref_num_action_chunks: 100
 
-precision: "32"
+# RLT AC defaults to fp32 for Q-learning and target-update stability.
+precision: fp32
 add_value_head: False
 add_q_head: True
 q_head_type: "default"

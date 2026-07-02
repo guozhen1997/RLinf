@@ -23,12 +23,12 @@ from rlinf.workers.actor.async_fsdp_sac_policy_worker import (
 from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
 
-class RLTSACLossMixin:
-    """RLT actor-critic losses on top of RLinf SAC worker infrastructure.
+class RLTACLossMixin:
+    """RLT actor-critic losses on top of RLinf replay-buffer worker plumbing.
 
-    The class name and forward types follow the existing SAC worker API, but
-    the RLT objective disables entropy/alpha and uses a fixed-std actor,
-    min-Q critic target, Q1 actor objective, and BC regularization.
+    Forward types follow the existing off-policy actor-critic API, while the
+    RLT objective disables entropy/alpha and uses a fixed-std actor, min-Q
+    critic target, Q1 actor objective, and BC regularization.
     """
 
     @staticmethod
@@ -264,12 +264,15 @@ class RLTSACLossMixin:
     @Worker.timer("forward_alpha")
     def forward_alpha(self, batch):
         del batch
-        return self.entropy_temp.compute_alpha() * 0.0
+        raise NotImplementedError(
+            "RLT AC disables entropy/alpha training. Use "
+            "algorithm.entropy_tuning.alpha_type=fixed_alpha."
+        )
 
 
-class RLTSACFSDPPolicy(RLTSACLossMixin, EmbodiedSACFSDPPolicy):
+class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
     pass
 
 
-class AsyncRLTSACFSDPPolicy(RLTSACLossMixin, AsyncEmbodiedSACFSDPPolicy):
+class AsyncRLTACFSDPPolicy(RLTACLossMixin, AsyncEmbodiedSACFSDPPolicy):
     pass

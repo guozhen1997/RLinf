@@ -55,10 +55,10 @@ def main(cfg) -> None:
         actor_worker_cls = AsyncEmbodiedSACFSDPPolicy
     elif cfg.algorithm.loss_type == "rlt_ac":
         from rlinf.runners.async_embodied_runner import AsyncEmbodiedRunner
-        from rlinf.workers.actor.rlt_sac_policy_worker import AsyncRLTSACFSDPPolicy
+        from rlinf.workers.actor.rlt_ac_policy_worker import AsyncRLTACFSDPPolicy
 
         runner_cls = AsyncEmbodiedRunner
-        actor_worker_cls = AsyncRLTSACFSDPPolicy
+        actor_worker_cls = AsyncRLTACFSDPPolicy
     elif cfg.algorithm.loss_type == "embodied_dagger":
         from rlinf.runners.async_embodied_runner import AsyncEmbodiedRunner
         from rlinf.workers.actor.async_fsdp_dagger_policy_worker import (

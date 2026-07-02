@@ -433,14 +433,13 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = (
             self.embed_suffix(state, x_t, time)
         )
-        if (
-            self.paligemma_with_expert.paligemma.language_model.layers[
-                0
-            ].self_attn.q_proj.weight.dtype
-            == torch.bfloat16
-        ):
-            suffix_embs = suffix_embs.to(dtype=torch.bfloat16)
-            prefix_embs = prefix_embs.to(dtype=torch.bfloat16)
+        backbone_dtype = self.paligemma_with_expert.paligemma.language_model.layers[
+            0
+        ].self_attn.q_proj.weight.dtype
+        if prefix_embs.dtype != backbone_dtype:
+            prefix_embs = prefix_embs.to(dtype=backbone_dtype)
+        if suffix_embs.dtype != backbone_dtype:
+            suffix_embs = suffix_embs.to(dtype=backbone_dtype)
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
@@ -855,6 +854,42 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         }
         return actions, result
 
+    @torch.no_grad()
+    def sample_actions(
+        self,
+        observation: _model.Observation,
+        noise=None,
+        mode="train",
+        compute_values=True,
+    ) -> torch.Tensor:
+        """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
+        bsize = observation.state.shape[0]
+        device = observation.state.device
+        if noise is None:
+            actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
+            noise = self.sample_noise(actions_shape, device)
+        else:
+            # DSRL: SAC provides noise, convert dtype to match action_in_proj
+            noise = noise.to(self.action_in_proj.weight.dtype)
+
+        images, img_masks, lang_tokens, lang_masks, state = (
+            self._preprocess_observation(observation, train=False)
+        )
+
+        prefix_output, prefix_pad_masks, past_key_values = self._build_prefix_cache(
+            images, img_masks, lang_tokens, lang_masks
+        )
+
+        return self._sample_actions_with_prefix_cache(
+            state,
+            prefix_output,
+            prefix_pad_masks,
+            past_key_values,
+            noise=noise,
+            mode=mode,
+            compute_values=compute_values,
+        )
+
     def _sample_actions_with_prefix_cache(
         self,
         state,
@@ -969,42 +1004,6 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             result.update(nft_state)
             result["nft_x0"] = x_0.detach()
         return result
-
-    @torch.no_grad()
-    def sample_actions(
-        self,
-        observation: _model.Observation,
-        noise=None,
-        mode="train",
-        compute_values=True,
-    ) -> torch.Tensor:
-        """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
-        bsize = observation.state.shape[0]
-        device = observation.state.device
-        if noise is None:
-            actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
-            noise = self.sample_noise(actions_shape, device)
-        else:
-            # DSRL: SAC provides noise, convert dtype to match action_in_proj
-            noise = noise.to(self.action_in_proj.weight.dtype)
-
-        images, img_masks, lang_tokens, lang_masks, state = (
-            self._preprocess_observation(observation, train=False)
-        )
-
-        prefix_output, prefix_pad_masks, past_key_values = self._build_prefix_cache(
-            images, img_masks, lang_tokens, lang_masks
-        )
-
-        return self._sample_actions_with_prefix_cache(
-            state,
-            prefix_output,
-            prefix_pad_masks,
-            past_key_values,
-            noise=noise,
-            mode=mode,
-            compute_values=compute_values,
-        )
 
     def _get_timesteps(self, denoise_steps, device):
         timesteps = torch.linspace(1, 1 / denoise_steps, denoise_steps, device=device)

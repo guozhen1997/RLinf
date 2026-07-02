@@ -53,7 +53,7 @@ RLT 将表示学习和在线 RL 控制拆开。
      - ``examples/sft/config/rlt_sft_openpi_pi05.yaml``
      - 联合 SFT pi0.5 和 RLT token transformer。
    * - Stage 2
-     - ``examples/embodiment/config/rlt_stage2_sac_mlp.yaml``
+     - ``examples/embodiment/config/rlt_stage2_ac_mlp.yaml``
      - 使用冻结的 Stage 1 特征模型训练 RLT Stage 2 actor-critic。
    * - Stage 2 模型
      - ``examples/embodiment/config/model/rlt_mlp_policy.yaml``
@@ -317,7 +317,7 @@ Stage 2：运行 RLT Actor-Critic
 
 .. code:: bash
 
-   bash examples/embodiment/run_realworld_async.sh rlt_stage2_sac_mlp
+   bash examples/embodiment/run_realworld_async.sh rlt_stage2_ac_mlp
 
 真机 rollout 时，键盘切换逻辑如下：
 
