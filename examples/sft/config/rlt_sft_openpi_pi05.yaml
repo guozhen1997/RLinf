@@ -75,7 +75,7 @@ actor:
 
   model:
     model_type: "openpi"
-    precision: fp32
+    precision: null
     model_path: ${rlt.base_model_path}
     action_dim: ${rlt.action_dim}
     num_action_chunks: ${rlt.ref_num_action_chunks}
@@ -133,6 +133,6 @@ actor:
     use_orig_params: False
     gradient_checkpointing: False
     mixed_precision:
-      param_dtype: bf16
-      reduce_dtype: bf16
-      buffer_dtype: bf16
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}
