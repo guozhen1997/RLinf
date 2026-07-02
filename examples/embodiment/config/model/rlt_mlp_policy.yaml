@@ -20,6 +20,7 @@ precision: "32"
 add_value_head: False
 add_q_head: True
 q_head_type: "default"
+fixed_std: 0.002
 
 is_lora: False
 lora_rank: 32

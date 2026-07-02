@@ -8,8 +8,8 @@ stages:
 
 1. Train a VLA checkpoint together with an RLT token transformer on
    demonstration data.
-2. Freeze that feature model and train a lightweight actor-critic policy with
-   SAC using the extracted RLT state.
+2. Freeze that feature model and train a lightweight off-policy actor-critic
+   policy using the extracted RLT state.
 
 The checked-in example currently targets Franka peg insertion, while the
 pipeline itself is not tied to that task. A simulator version can reuse the
@@ -32,7 +32,7 @@ RLT separates representation learning from online RL control.
    .. grid-item-card:: Stage 2
       :text-align: center
 
-      SAC with a compact actor-critic
+      Compact off-policy actor-critic
 
    .. grid-item-card:: State
       :text-align: center
@@ -45,7 +45,7 @@ RLT separates representation learning from online RL control.
       Real robot now, simulator-ready layout
 
 | **You'll do:** prepare demonstrations -> train Stage 1 -> point Stage 2 at
-  the Stage 1 checkpoint -> launch SAC -> monitor replay-buffer and task
+  the Stage 1 checkpoint -> launch actor-critic training -> monitor replay-buffer and task
   success metrics.
 | **Prerequisites:** install the OpenPI π₀.₅ checkpoint and prepare the
   :doc:`Franka real-world setup <../embodied/franka>`.
@@ -65,7 +65,7 @@ Provided Configuration Files
      - SFT pi0.5 together with the RLT token transformer.
    * - Stage 2
      - ``examples/embodiment/config/rlt_stage2_sac_mlp.yaml``
-     - Run SAC with the frozen Stage 1 feature model.
+     - Run RLT Stage 2 actor-critic training with the frozen Stage 1 feature model.
    * - Stage 2 model
      - ``examples/embodiment/config/model/rlt_mlp_policy.yaml``
      - Defines the RLT MLP actor and Q-head dimensions.
@@ -134,8 +134,8 @@ The total Stage 1 loss is:
 
 The OpenPI model exposes the VLA prefix hidden states. The RLT token
 transformer reads those prefix states and produces a compact vector ``z_rl``.
-Stage 2 uses ``z_rl`` as the learned RL representation rather than training SAC
-directly on image observations.
+Stage 2 uses ``z_rl`` as the learned RL representation rather than training the
+actor-critic directly on image observations.
 
 Important Stage 1 fields:
 
@@ -166,11 +166,15 @@ Stage 1 and Stage 2, so it must match the dataset preprocessing, action space,
 and model configuration. Different robots or simulators should use the
 corresponding indices from their own state vectors.
 
-Stage 2: Train the SAC Policy
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Stage 2: Train the Actor-Critic Policy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Stage 2 freezes the Stage 1 feature model and trains only the compact RLT MLP
 actor and critic.
+
+.. note::
+
+   The current Stage 2 implementation is not standard maximum-entropy SAC.
 
 During rollout:
 
@@ -213,7 +217,7 @@ Important Stage 2 fields:
 .. code:: yaml
 
    algorithm:
-     loss_type: rlt_sac
+     loss_type: rlt_ac
      q_weight: 1.0
      bc_weight: 1.0
      gamma: 0.96
@@ -313,8 +317,8 @@ The saved checkpoint directory should look like:
 
 Use this directory as ``rlt.stage1_model_path`` in Stage 2.
 
-Stage 2: Run RLT SAC
-~~~~~~~~~~~~~~~~~~~~
+Stage 2: Run RLT Actor-Critic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Edit the Stage 2 config:
 
@@ -365,8 +369,8 @@ During real-robot rollout, use the keyboard policy switch:
 Replay Buffer Behavior
 ----------------------
 
-For ``loss_type: rlt_sac``, the replay buffer does not store raw image
-observations as the SAC state. The environment worker waits for the rollout
+For ``loss_type: rlt_ac``, the replay buffer does not store raw image
+observations as the RL state. The environment worker waits for the rollout
 worker to return RLT features and stores those features as transitions.
 
 This means:
@@ -392,7 +396,7 @@ Useful RLT signals:
   - ``vla_loss``: the OpenPI action-prediction loss.
   - ``rlt_loss``: the RLT token reconstruction/compression loss.
 
-- Stage 2 SAC:
+- Stage 2 actor-critic:
 
   - ``train/sac/critic_loss``: Q-function TD loss.
   - ``train/sac/actor_loss``: combined ``-Q + BC`` actor objective.
@@ -408,9 +412,10 @@ Practical Notes
   ``state_indices``, ``ref_num_action_chunks``, ``z_dim``, and
   ``num_rl_tokens`` must agree.
 - ``rollout.rlt_feature_model`` should point to the Stage 1 checkpoint, while
-  ``actor.model`` is the Stage 2 MLP policy that SAC updates.
+  ``actor.model`` is the Stage 2 MLP policy updated by the actor-critic
+  worker.
 - ``keyboard_reward_wrapper: rlt_policy_switch`` is only needed for
   operator-controlled critical-phase switching.
 - To add a simulator example, create a simulator environment config, keep
-  ``loss_type: rlt_sac`` and ``rollout.rlt_feature_model``, and replace the
+  ``loss_type: rlt_ac`` and ``rollout.rlt_feature_model``, and replace the
   real-robot switching/reset settings with simulator-appropriate ones.

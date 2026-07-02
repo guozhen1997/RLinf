@@ -24,7 +24,12 @@ from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
 
 class RLTSACLossMixin:
-    """RLT actor/critic losses on top of RLinf SAC infrastructure."""
+    """RLT actor-critic losses on top of RLinf SAC worker infrastructure.
+
+    The class name and forward types follow the existing SAC worker API, but
+    the RLT objective disables entropy/alpha and uses a fixed-std actor,
+    min-Q critic target, Q1 actor objective, and BC regularization.
+    """
 
     @staticmethod
     def _flatten_chunk(tensor: torch.Tensor) -> torch.Tensor:
@@ -40,13 +45,28 @@ class RLTSACLossMixin:
     def _ref_chunk(self, obs: dict[str, torch.Tensor]) -> torch.Tensor:
         return self._flatten_chunk(obs["ref_chunk"])
 
+    @staticmethod
+    def _require_twin_q(all_q_values: torch.Tensor) -> None:
+        if all_q_values.shape[-1] < 2:
+            raise ValueError(
+                "RLT Stage 2 requires at least two Q heads for twin-Q training, "
+                f"got Q shape {tuple(all_q_values.shape)}."
+            )
+
+    def _min_twin_q(self, all_q_values: torch.Tensor) -> torch.Tensor:
+        self._require_twin_q(all_q_values)
+        return torch.minimum(all_q_values[..., 0:1], all_q_values[..., 1:2])
+
+    def _q1(self, all_q_values: torch.Tensor) -> torch.Tensor:
+        self._require_twin_q(all_q_values)
+        return all_q_values[..., 0:1]
+
     def _aggregate_q(self, all_q_values: torch.Tensor, agg_q: str) -> torch.Tensor:
         if agg_q == "min":
-            q_values, _ = torch.min(all_q_values, dim=1, keepdim=True)
-            return q_values
+            return self._min_twin_q(all_q_values)
         if agg_q == "mean":
             return torch.mean(all_q_values, dim=1, keepdim=True)
-        raise NotImplementedError(f"{agg_q=} is not supported for RLT SAC.")
+        raise NotImplementedError(f"{agg_q=} is not supported for RLT Stage 2.")
 
     def _discounted_chunk_rewards(self, rewards: torch.Tensor) -> torch.Tensor:
         rewards = rewards.reshape(rewards.shape[0], -1)
@@ -113,7 +133,6 @@ class RLTSACLossMixin:
     def forward_critic(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
         bootstrap_type = self.cfg.algorithm.get("bootstrap_type", "standard")
-        agg_q = self.cfg.algorithm.get("agg_q", "min")
 
         curr_obs = batch["curr_obs"]
         next_obs = batch["next_obs"]
@@ -136,18 +155,7 @@ class RLTSACLossMixin:
                     obs=next_obs,
                     actions=next_actions,
                 )
-                if self.critic_subsample_size > 0:
-                    sample_idx = torch.randint(
-                        0,
-                        all_qf_next_target.shape[-1],
-                        (self.critic_subsample_size,),
-                        generator=self.critic_sample_generator,
-                        device=self.device,
-                    )
-                    all_qf_next_target = all_qf_next_target.index_select(
-                        dim=-1, index=sample_idx
-                    )
-                q_next = self._aggregate_q(all_qf_next_target, agg_q)
+                q_next = self._min_twin_q(all_qf_next_target)
             else:
                 _, all_qf_next = self.model(
                     forward_type=ForwardType.CROSSQ_Q,
@@ -156,7 +164,7 @@ class RLTSACLossMixin:
                     next_obs=next_obs,
                     next_actions=next_actions,
                 )
-                q_next = self._aggregate_q(all_qf_next.detach(), agg_q)
+                q_next = self._min_twin_q(all_qf_next.detach())
 
             reward_target = self._discounted_chunk_rewards(rewards)
             reward_horizon = int(rewards.reshape(rewards.shape[0], -1).shape[-1])
@@ -192,9 +200,6 @@ class RLTSACLossMixin:
     @Worker.timer("forward_actor")
     def forward_actor(self, batch):
         use_crossq = self.cfg.algorithm.get("q_head_type", "default") == "crossq"
-        agg_q = self.cfg.algorithm.get(
-            "actor_agg_q", self.cfg.algorithm.get("agg_q", "min")
-        )
 
         curr_obs = batch["curr_obs"]
         reference_dropout_prob = float(
@@ -227,11 +232,12 @@ class RLTSACLossMixin:
                 detach_encoder=True,
             )
 
+        num_q_values = all_qf_pi.shape[-1]
         metrics = {
             f"q_value_{q_id}": all_qf_pi[..., q_id].mean().item()
-            for q_id in range(self.cfg.actor.model.get("num_q_heads", 2))
+            for q_id in range(num_q_values)
         }
-        qf_pi = self._aggregate_q(all_qf_pi, agg_q)
+        qf_pi = self._q1(all_qf_pi)
         metrics["q_pi"] = qf_pi.mean().item()
 
         ref_chunk = self._ref_chunk(curr_obs)

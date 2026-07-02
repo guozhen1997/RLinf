@@ -20,7 +20,7 @@ from rlinf.models.embodiment.mlp_policy.mlp_policy import MLPPolicy
 
 
 class RLTMLPPolicy(MLPPolicy):
-    """MLP SAC policy for RLT actor/critic heads.
+    """MLP actor-critic policy for RLT Stage 2 heads.
 
     Actor input follows RLT: reference action chunk, RL token feature, and
     proprioceptive state. Critic input follows RLT: action chunk, RL token
@@ -36,9 +36,12 @@ class RLTMLPPolicy(MLPPolicy):
         ref_num_action_chunks: int | None = None,
         add_q_head: bool = True,
         q_head_type: str = "default",
+        fixed_std: float = 0.002,
     ):
         if not add_q_head:
-            raise ValueError("RLTMLPPolicy requires add_q_head=True for SAC training.")
+            raise ValueError(
+                "RLTMLPPolicy requires add_q_head=True for actor-critic training."
+            )
         z_dim = int(z_dim)
         proprio_dim = int(proprio_dim)
         step_action_dim = int(action_dim)
@@ -71,6 +74,9 @@ class RLTMLPPolicy(MLPPolicy):
         self.chunk_len = chunk_len
         self.ref_chunk_len = ref_chunk_len
         self.flat_action_dim = flat_action_dim
+        self.fixed_std = float(fixed_std)
+        if self.fixed_std <= 0:
+            raise ValueError(f"fixed_std must be positive, got {self.fixed_std}.")
 
     def preprocess_env_obs(self, env_obs):
         device = next(self.parameters()).device
@@ -144,23 +150,10 @@ class RLTMLPPolicy(MLPPolicy):
         )
         feat = self.backbone(actor_state)
         action_mean = self.actor_mean(feat)
-        action_logstd = self.actor_logstd(feat)
-        action_logstd = torch.tanh(action_logstd)
-        action_logstd = self.logstd_range[0] + 0.5 * (
-            self.logstd_range[1] - self.logstd_range[0]
-        ) * (action_logstd + 1)
-
-        action_std = torch.exp(action_logstd)
+        action_std = torch.full_like(action_mean, self.fixed_std)
         probs = Normal(action_mean, action_std)
-        raw_action = action_mean if deterministic else probs.rsample()
-
-        action_normalized = torch.tanh(raw_action)
-        action = action_normalized * self.action_scale + self.action_bias
-
-        chunk_logprobs = probs.log_prob(raw_action)
-        chunk_logprobs = chunk_logprobs - torch.log(
-            self.action_scale * (1 - action_normalized.pow(2)) + 1e-6
-        )
+        action = action_mean if deterministic else probs.rsample()
+        chunk_logprobs = probs.log_prob(action)
 
         return action, chunk_logprobs, None
 

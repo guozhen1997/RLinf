@@ -33,6 +33,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
             ),
             add_q_head=cfg.get("add_q_head", True),
             q_head_type=cfg.get("q_head_type", "default"),
+            fixed_std=cfg.get("fixed_std", 0.002),
         )
     elif iql_config is not None:
         model = IQLMLPPolicy(

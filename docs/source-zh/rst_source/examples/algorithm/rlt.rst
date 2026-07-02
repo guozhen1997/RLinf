@@ -4,7 +4,7 @@ RL Token：借助视觉-语言-动作模型启动在线强化学习
 **RL Token: Bootstrapping Online RL with Vision-Language-Action Models** 在冻结的 VLA 特征模型之上训练一个轻量级强化学习策略。在 RLinf 的配置和代码中，这套流程简称为 **RLT**。整个流程分为两个阶段：
 
 1. 在示范数据上联合训练 VLA 检查点和 RLT token transformer。
-2. 冻结第一阶段得到的特征模型，用提取出的 RLT 状态训练一个轻量级 SAC actor-critic。
+2. 冻结第一阶段得到的特征模型，用提取出的 RLT 状态训练一个轻量级 off-policy actor-critic。
 
 当前仓库中的示例配置面向 Franka peg insertion，但 pipeline 本身并不绑定这个任务。后续如果添加仿真环境，只需要替换环境配置、动作维度、状态选择和数据路径，仍然可以复用相同的两阶段结构。
 
@@ -24,7 +24,7 @@ RLT 将表示学习和在线 RL 控制拆开。
    .. grid-item-card:: Stage 2
       :text-align: center
 
-      轻量级 actor-critic + SAC
+      轻量级 off-policy actor-critic
 
    .. grid-item-card:: 状态
       :text-align: center
@@ -36,7 +36,7 @@ RLT 将表示学习和在线 RL 控制拆开。
 
       当前是真机示例，结构可扩展到仿真
 
-| **你将完成：** 准备示范数据 -> 训练 Stage 1 -> 在 Stage 2 中加载 Stage 1 检查点 -> 启动 SAC -> 观察 replay buffer 与任务成功率指标。
+| **你将完成：** 准备示范数据 -> 训练 Stage 1 -> 在 Stage 2 中加载 Stage 1 检查点 -> 启动 actor-critic 训练 -> 观察 replay buffer 与任务成功率指标。
 | **前置条件：** 安装 OpenPI π₀.₅ checkpoint，并准备 :doc:`Franka 真机环境 <../embodied/franka>`。
 
 提供的配置文件
@@ -54,7 +54,7 @@ RLT 将表示学习和在线 RL 控制拆开。
      - 联合 SFT pi0.5 和 RLT token transformer。
    * - Stage 2
      - ``examples/embodiment/config/rlt_stage2_sac_mlp.yaml``
-     - 使用冻结的 Stage 1 特征模型训练 SAC。
+     - 使用冻结的 Stage 1 特征模型训练 RLT Stage 2 actor-critic。
    * - Stage 2 模型
      - ``examples/embodiment/config/model/rlt_mlp_policy.yaml``
      - 定义 RLT MLP actor 和 Q-head 的输入输出维度。
@@ -120,7 +120,7 @@ Stage 1 的总损失为：
 
    total_loss = rlt_loss + rlt_alpha * vla_loss
 
-OpenPI 模型会暴露 VLA prefix hidden states。RLT token transformer 读取这些 prefix states，并输出紧凑向量 ``z_rl``。Stage 2 使用 ``z_rl`` 作为学习到的 RL 表示，而不是直接在图像观测上训练 SAC。
+OpenPI 模型会暴露 VLA prefix hidden states。RLT token transformer 读取这些 prefix states，并输出紧凑向量 ``z_rl``。Stage 2 使用 ``z_rl`` 作为学习到的 RL 表示，而不是直接在图像观测上训练 actor-critic。
 
 Stage 1 中比较关键的字段：
 
@@ -147,10 +147,14 @@ Stage 1 中比较关键的字段：
 
 ``state_indices`` 表示从环境返回的原始状态向量中抽取哪些维度作为 ``proprio``。它的顺序会决定 Stage 1 和 Stage 2 看到的 proprio 输入顺序，因此需要与数据预处理、动作空间和模型配置保持一致；不同机器人或仿真环境应填写各自状态向量中的对应索引。
 
-Stage 2：训练 SAC 策略
-~~~~~~~~~~~~~~~~~~~~~~
+Stage 2：训练 Actor-Critic 策略
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Stage 2 冻结 Stage 1 特征模型，只训练轻量级 RLT MLP actor 和 critic。
+
+.. note::
+
+   当前 Stage 2 实现不是标准 maximum-entropy SAC。
 
 rollout 时：
 
@@ -185,7 +189,7 @@ Stage 2 中比较关键的字段：
 .. code:: yaml
 
    algorithm:
-     loss_type: rlt_sac
+     loss_type: rlt_ac
      q_weight: 1.0
      bc_weight: 1.0
      gamma: 0.96
@@ -281,8 +285,8 @@ Stage 1：训练 RLT 特征模型
 
 Stage 2 中需要将这个目录填到 ``rlt.stage1_model_path``。
 
-Stage 2：运行 RLT SAC
-~~~~~~~~~~~~~~~~~~~~~
+Stage 2：运行 RLT Actor-Critic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 修改 Stage 2 配置：
 
@@ -331,7 +335,7 @@ Stage 2：运行 RLT SAC
 Replay Buffer 逻辑
 ------------------
 
-当 ``loss_type: rlt_sac`` 时，replay buffer 不会把原始图像观测当作 SAC 状态存储。env worker 会等待 rollout worker 返回 RLT 特征，并把这些特征组装成 transition。
+当 ``loss_type: rlt_ac`` 时，replay buffer 不会把原始图像观测当作 RL 状态存储。env worker 会等待 rollout worker 返回 RLT 特征，并把这些特征组装成 transition。
 
 这意味着：
 
@@ -350,7 +354,7 @@ Replay Buffer 逻辑
   - ``vla_loss``：OpenPI 动作预测损失。
   - ``rlt_loss``：RLT token 重建 / 压缩损失。
 
-- Stage 2 SAC：
+- Stage 2 actor-critic：
 
   - ``train/sac/critic_loss``：Q 函数 TD loss。
   - ``train/sac/actor_loss``：组合后的 ``-Q + BC`` actor 目标。
@@ -363,6 +367,6 @@ Replay Buffer 逻辑
 --------
 
 - Stage 1 和 Stage 2 的维度必须保持一致：``action_dim``、``state_indices``、``ref_num_action_chunks``、``z_dim`` 和 ``num_rl_tokens`` 都要对齐。
-- ``rollout.rlt_feature_model`` 指向 Stage 1 检查点；``actor.model`` 是 SAC 会更新的 Stage 2 MLP 策略。
+- ``rollout.rlt_feature_model`` 指向 Stage 1 检查点；``actor.model`` 是 actor-critic worker 会更新的 Stage 2 MLP 策略。
 - ``keyboard_reward_wrapper: rlt_policy_switch`` 只在需要人工控制关键阶段切换时使用。
-- 添加仿真示例时，可以新建仿真环境配置，保留 ``loss_type: rlt_sac`` 和 ``rollout.rlt_feature_model``，再把真机切换和 reset 设置替换成适合仿真的逻辑。
+- 添加仿真示例时，可以新建仿真环境配置，保留 ``loss_type: rlt_ac`` 和 ``rollout.rlt_feature_model``，再把真机切换和 reset 设置替换成适合仿真的逻辑。
