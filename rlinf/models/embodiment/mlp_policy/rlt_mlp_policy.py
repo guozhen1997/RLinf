@@ -154,7 +154,7 @@ class RLTMLPPolicy(MLPPolicy):
         probs = Normal(action_mean, action_std)
         action = action_mean if deterministic else probs.rsample()
         chunk_logprobs = probs.log_prob(action)
-
+        action = torch.tanh(action)
         return action, chunk_logprobs, None
 
     def sac_q_forward(self, obs, actions, shared_feature=None, detach_encoder=False):
