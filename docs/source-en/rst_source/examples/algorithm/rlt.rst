@@ -68,12 +68,9 @@ Provided Configuration Files
    * - Franka Stage 2
      - ``examples/embodiment/config/rlt_stage2_ac_mlp.yaml``
      - Run real-world RLT actor-critic training with the frozen Stage 1 feature model.
-   * - ManiSkill SFT
-     - ``examples/sft/config/rlt_maniskill_joint_pi05_sft.yaml``
-     - Train the joint-control OpenPI base policy used to initialize ManiSkill RLT Stage 1.
    * - ManiSkill Stage 1
-     - ``examples/sft/config/rlt_stage1_maniskill_joint.yaml``
-     - Train the RLT token transformer on the ManiSkill joint dataset.
+     - ``examples/sft/config/rlt_stage1_maniskill_joint_alpha1.yaml``
+     - Jointly train the ManiSkill OpenPI base policy and RLT token transformer.
    * - ManiSkill Stage 2
      - ``examples/embodiment/config/rlt_stage2_maniskill_joint_ac.yaml``
      - Run simulated RLT actor-critic training with automatic ``rlt_policy_switch`` and transition replay.
@@ -245,7 +242,7 @@ Important Stage 2 fields:
      q_weight: 1.0
      bc_weight: 1.0
      gamma: 0.99
-     actor_agg_q: min
+     actor_agg_q: q1
      entropy_tuning:
        alpha_type: fixed_alpha
        initial_alpha: 0.0
@@ -253,6 +250,10 @@ Important Stage 2 fields:
        enable: True
        warmup_post_collect_updates: 30000
        train_every_transitions: 5
+     rlt_actor_loss:
+       enable: True
+       actor_loss_warmup_updates: 20000
+       actor_loss_ramp_updates: 50000
 
    rollout:
      collect_transitions: True
@@ -428,6 +429,42 @@ least:
    * - ``task``
      - Language instruction. You can also set ``default_prompt`` to ``insert the peg in the hole``.
 
+You can start from the reference dataset
+`RLinf/rlt-maniskill-PegInsertionSide-v1-400-succ
+<https://huggingface.co/datasets/RLinf/rlt-maniskill-PegInsertionSide-v1-400-succ>`__.
+It contains successful ManiSkill ``PegInsertionSideWideClearance-v1``
+demonstrations, uses the ``pd_joint_delta_pos`` action space, and follows the
+joint-control LeRobot fields above.
+
+.. code:: bash
+
+   export HF_LEROBOT_HOME=/path/to/lerobot_root
+   huggingface-cli download RLinf/rlt-maniskill-PegInsertionSide-v1-400-succ \
+       --repo-type dataset \
+       --local-dir ${HF_LEROBOT_HOME}/maniskill_peginsertionside_joint
+
+You can also regenerate the dataset with the collection script in this branch.
+The script first runs ManiSkill's Panda motion-planning solver, converts
+``pd_joint_pos`` solver actions into ``pd_joint_delta_pos`` actions, and saves
+only episodes that replay successfully:
+
+.. code:: bash
+
+   python toolkits/lerobot/collect_maniskill_peg_lerobot_joint.py \
+       --repo-id maniskill_peginsertionside_joint \
+       --num-episodes 400 \
+       --seed 0 \
+       --max-attempts 4000 \
+       --overwrite
+
+.. note::
+
+   The collection script lives under ``toolkits/lerobot`` and is intended for
+   RLT joint data preparation. It depends on ManiSkill's
+   PegInsertionSide Panda motion-planning solver. If importing the solver fails,
+   first check that your ManiSkill installation includes the motion-planning
+   examples.
+
 When you compute normalization statistics, keep ``--config-name`` and
 ``--repo-id`` aligned with the training config:
 
@@ -445,26 +482,11 @@ When you compute normalization statistics, keep ``--config-name`` and
    Stage 2 load stats from different ``repo_id`` directories, the scale of VLA
    reference actions shifts.
 
-Optional: Train the ManiSkill OpenPI SFT Base
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Stage 1: Jointly Train the ManiSkill OpenPI + RLT Feature Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you do not already have a joint-control OpenPI base policy, run the SFT
-config first:
-
-.. code:: bash
-
-   bash examples/sft/run_vla_sft.sh rlt_maniskill_joint_pi05_sft
-
-This config uses the ``pi05_rlt_maniskill_joint`` dataconfig and the
-``rlt_maniskill_joint`` dataset path. After training, use the saved
-``.../checkpoints/global_step_<step>/actor`` directory as
-``actor.model.model_path`` in Stage 1.
-
-Stage 1: Train the ManiSkill RLT Feature Model
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Edit the data path and OpenPI SFT checkpoint in
-``examples/sft/config/rlt_stage1_maniskill_joint.yaml``:
+Edit the data path in
+``examples/sft/config/rlt_stage1_maniskill_joint_alpha1.yaml``:
 
 .. code:: yaml
 
@@ -475,7 +497,7 @@ Edit the data path and OpenPI SFT checkpoint in
 
    actor:
      model:
-       model_path: /path/to/rlt_maniskill_joint_pi05_sft/checkpoints/global_step_<step>/actor
+       model_path: /path/to/pi05_base
        openpi:
          config_name: pi05_rlt_maniskill_joint
      openpi_data:
@@ -486,7 +508,7 @@ Launch training:
 
 .. code:: bash
 
-   bash examples/sft/run_vla_sft.sh rlt_stage1_maniskill_joint
+   bash examples/sft/run_vla_sft.sh rlt_stage1_maniskill_joint_alpha1
 
 Stage 2 uses this Stage 1 actor directory as ``rlt.stage1_model_path``. The
 directory must contain VLA weights, RLT token transformer weights, and matching
@@ -501,9 +523,10 @@ Edit the Stage 1 checkpoint in
 .. code:: yaml
 
    rlt:
-     stage1_model_path: /path/to/rlt_stage1_maniskill_joint/checkpoints/global_step_<step>/actor
+     stage1_model_path: /path/to/rlt_stage1_maniskill_joint_alpha1/checkpoints/global_step_<step>/actor
      openpi_repo_id: maniskill_peginsertionside_joint
      openpi_config_name: pi05_rlt_maniskill_joint
+     expert_model_path: ChikaYokoyama/rlt-maniskill-sft-step-8000
 
    env:
      train:
@@ -519,6 +542,13 @@ Edit the Stage 1 checkpoint in
          task_mode: full_task
          trigger_mode: auto
 
+   rollout:
+     expert_model:
+       model_path: ${rlt.expert_model_path}
+       precision: null
+       openpi:
+         use_rlt: False
+
 Launch training:
 
 .. code:: bash
@@ -531,6 +561,37 @@ actor. Before ``ready_for_online``, the ManiSkill route executes the VLA
 ``ref_chunk``. After ``algorithm.rlt_schedule.warmup_post_collect_updates``,
 the actor can take over in the automatic critical phase.
 
+Optional: Enable ManiSkill Expert Takeover
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ManiSkill expert takeover path is disabled by default. Enable it when you
+want the rollout route to replace actor actions with a stronger SFT expert in
+the critical phase and store those expert actions as intervention targets:
+
+.. code:: yaml
+
+   rlt:
+     expert_model_path: ChikaYokoyama/rlt-maniskill-sft-step-8000
+
+   rollout:
+     expert_model:
+       model_path: ${rlt.expert_model_path}
+       precision: null
+       openpi:
+         use_rlt: False
+
+   env:
+     train:
+       rlt_policy_switch:
+         expert_takeover:
+           enable: True
+           trigger_mode: critical_phase
+
+You can replace ``rlt.expert_model_path`` with a more fully trained
+joint-control SFT checkpoint. Keep the expert's OpenPI dataconfig and norm stats
+aligned with the Stage 2 dataset. The expert is only used for train rollout;
+eval rollout keeps ``allow_expert=False`` and measures the learned actor.
+
 Confirm these ManiSkill Stage 2 fields first:
 
 .. list-table::
@@ -539,16 +600,20 @@ Confirm these ManiSkill Stage 2 fields first:
 
    * - Field
      - Purpose
+   * - ``algorithm.rlt_schedule.enable``
+     - Enables the ManiSkill rollout/update-budget schedule. Set it to ``False`` to use the normal real-robot-style training loop.
    * - ``algorithm.rlt_schedule.warmup_post_collect_updates``
      - Learner updates required before actor rollout is enabled.
    * - ``algorithm.rlt_schedule.train_every_transitions``
      - Adds training budget every N new transitions.
+   * - ``algorithm.rlt_actor_loss.enable``
+     - Enables actor-loss BC/Q warmup and ramp. Set it to ``False`` to use fixed ``algorithm.bc_weight`` and ``algorithm.q_weight`` like the real-robot config.
    * - ``algorithm.replay_buffer.min_buffer_size``
      - Minimum replay transitions before the buffer is ready.
    * - ``algorithm.replay_buffer.max_num_samples``
      - Active replay transition cap.
    * - ``algorithm.actor_agg_q``
-     - Q aggregation used by the actor loss. The current ManiSkill config uses ``min``.
+     - Q aggregation used by the actor loss. The current ManiSkill config uses ``q1``.
    * - ``env.*.rlt_policy_switch``
      - Produces ``rlt_use_actor``, ``in_critical_phase``, and ``record_transition`` automatically.
 

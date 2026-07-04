@@ -224,6 +224,26 @@ class RLTACLossMixin:
     def _actor_loss_weights(self) -> tuple[float, float, float, dict[str, float]]:
         """Resolve RLT BC/Q/delta weights with local warmup and ramp support."""
         rlt_loss_cfg = self.cfg.algorithm.get("rlt_actor_loss", {})
+        actor_loss_schedule_enabled = bool(rlt_loss_cfg.get("enable", True))
+        if not actor_loss_schedule_enabled:
+            bc_weight = float(self.cfg.algorithm.get("bc_weight", 1.0))
+            q_weight = float(self.cfg.algorithm.get("q_weight", 1.0))
+            delta_weight = float(
+                rlt_loss_cfg.get(
+                    "delta_weight",
+                    self.cfg.algorithm.get("delta_weight", 0.0),
+                )
+            )
+            metrics = {
+                "bc_weight": bc_weight,
+                "q_weight": q_weight,
+                "delta_weight": delta_weight,
+                "actor_loss_schedule_enabled": 0.0,
+                "actor_loss_in_warmup": 0.0,
+                "actor_loss_ramp_progress": 1.0,
+            }
+            return bc_weight, q_weight, delta_weight, metrics
+
         loss_warmup_updates = int(
             rlt_loss_cfg.get(
                 "actor_loss_warmup_updates",
@@ -307,6 +327,7 @@ class RLTACLossMixin:
             "bc_weight": bc_weight,
             "q_weight": q_weight,
             "delta_weight": delta_weight,
+            "actor_loss_schedule_enabled": 1.0,
             "actor_loss_in_warmup": float(in_warmup),
             "actor_loss_ramp_progress": ramp_progress,
         }
@@ -510,6 +531,20 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
         if not isinstance(value, torch.Tensor) or value.numel() == 0:
             return None
         return float(value.detach().float().mean().item())
+
+    @staticmethod
+    def _transition_reward_value(traj: Trajectory) -> float | None:
+        rewards = traj.rewards
+        if not isinstance(rewards, torch.Tensor) or rewards.numel() == 0:
+            return None
+        return float(rewards.detach().float().reshape(-1).sum().item())
+
+    @staticmethod
+    def _transition_done_value(traj: Trajectory) -> bool | None:
+        dones = traj.dones
+        if not isinstance(dones, torch.Tensor) or dones.numel() == 0:
+            return None
+        return bool(dones.detach().to(torch.bool).reshape(-1).any().item())
 
     def _use_maniskill_transition_replay(self) -> bool:
         if str(self.cfg.algorithm.get("loss_type", "")) != "rlt_ac":
@@ -738,6 +773,34 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
                 metrics[metric_key] = float(sum(values) / len(values))
         return metrics
 
+    def _transition_replay_metrics(
+        self,
+        replay_trajectories: list[Trajectory],
+    ) -> dict[str, float]:
+        metrics = {"replay/transition_count": float(len(replay_trajectories))}
+        reward_values = [
+            reward
+            for traj in replay_trajectories
+            if (reward := self._transition_reward_value(traj)) is not None
+        ]
+        if reward_values:
+            metrics["replay/reward_mean"] = float(
+                sum(reward_values) / len(reward_values)
+            )
+            metrics["replay/reward_positive_rate"] = float(
+                sum(reward > 0.0 for reward in reward_values) / len(reward_values)
+            )
+        done_values = [
+            done
+            for traj in replay_trajectories
+            if (done := self._transition_done_value(traj)) is not None
+        ]
+        if done_values:
+            metrics["replay/done_rate"] = float(
+                sum(bool(done) for done in done_values) / len(done_values)
+            )
+        return metrics
+
     async def recv_rollout_trajectories(self, input_channel):
         clear_memory(sync=False)
 
@@ -762,6 +825,9 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
                 )
                 replay_list.extend(transition_trajs)
                 completed += completed_count
+            self._last_rollout_route_metrics.update(
+                self._transition_replay_metrics(replay_list)
+            )
             self.replay_buffer.add_trajectories(replay_list)
 
             if self.demo_buffer is not None:

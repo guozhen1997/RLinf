@@ -15,10 +15,11 @@ hydra:
 
 rlt:
   task_name: "maniskill_joint_peg_insertion"
-  stage1_model_path: "/path/to/stage1/actor"
+  stage1_model_path: "/mnt/public2/xiekaizhi/rlt-openpi-sim/tests/RLinf-dev/logs/20260703-16:00:48/rlt_stage1_maniskill_joint_alpha1/checkpoints/global_step_1000/actor"
   openpi_repo_id: "maniskill_peginsertionside_joint"
   openpi_config_name: "pi05_rlt_maniskill_joint"
   default_prompt: "insert the peg in the hole"
+  expert_model_path: "ChikaYokoyama/rlt-maniskill-sft-step-8000"
 
   action_dim: 8
   proprio_dim: 9
@@ -92,12 +93,13 @@ algorithm:
   bc_weight: 1.0
   reference_dropout_prob: 0.0
   rlt_actor_loss:
+    enable: True
     actor_loss_warmup_updates: 20000
     actor_loss_ramp_updates: 50000
     warmup_bc_weight: 7.0
     warmup_q_weight: 0.05
-    online_bc_weight: 2.8
-    online_q_weight: 0.16
+    online_bc_weight: 2.3
+    online_q_weight: 0.5
     delta_weight: 0.0
 
   entropy_tuning:
@@ -270,6 +272,14 @@ rollout:
       rlt_image_only: False
       rlt_use_mask: True
 
+  # Optional ManiSkill expert takeover model. Enable it with
+  # env.train.rlt_policy_switch.expert_takeover.enable=True.
+  expert_model:
+    model_path: ${rlt.expert_model_path}
+    precision: null
+    openpi:
+      use_rlt: False
+
   enable_torch_compile: False
   enable_cuda_graph: False
 
@@ -294,12 +304,12 @@ actor:
 
   optim:
     clip_grad: 10.0
-    lr: 5.0e-5
+    lr: 1.0e-4
     lr_scheduler: torch_constant
 
   critic_optim:
     clip_grad: 10.0
-    lr: 5.0e-5
+    lr: 1.0e-4
     lr_scheduler: torch_constant
 
   fsdp_config:
