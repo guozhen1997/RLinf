@@ -8,6 +8,8 @@ RL Token：借助视觉-语言-动作模型启动在线强化学习
 
 当前仓库中的示例配置面向 Franka peg insertion，但 pipeline 本身并不绑定这个任务。后续如果添加仿真环境，只需要替换环境配置、动作维度、状态选择和数据路径，仍然可以复用相同的两阶段结构。
 
+官方项目页：`Precise Manipulation with Efficient Online RL <https://www.pi.website/research/rlt>`_。
+
 概览
 ----
 

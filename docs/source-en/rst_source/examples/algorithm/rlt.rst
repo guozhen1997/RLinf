@@ -16,6 +16,8 @@ pipeline itself is not tied to that task. A simulator version can reuse the
 same Stage 1 / Stage 2 split once the environment, action shape, state
 selection, and data paths are swapped.
 
+Official project page: `Precise Manipulation with Efficient Online RL <https://www.pi.website/research/rlt>`_.
+
 Overview
 --------
 
