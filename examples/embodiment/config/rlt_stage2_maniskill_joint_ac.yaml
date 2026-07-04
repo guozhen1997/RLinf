@@ -1,0 +1,317 @@
+defaults:
+  - env/maniskill_rlt_joint@env.train
+  - env/maniskill_rlt_joint@env.eval
+  - model/rlt_mlp_policy@actor.model
+  - training_backend/fsdp@actor.fsdp_config
+  - weight_syncer/patch_syncer@weight_syncer
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+rlt:
+  task_name: "maniskill_joint_peg_insertion"
+  stage1_model_path: "/path/to/stage1/actor"
+  openpi_repo_id: "maniskill_peginsertionside_joint"
+  openpi_config_name: "pi05_rlt_maniskill_joint"
+  default_prompt: "insert the peg in the hole"
+
+  action_dim: 8
+  proprio_dim: 9
+  num_action_chunks: 10
+  ref_num_action_chunks: 10
+  vla_num_steps: 5
+
+  z_dim: 2048
+  num_rl_tokens: 1
+  rlt_input_dim: 2048
+  rlt_embed_dim: 2048
+  rlt_prefix_seq_len: 1024
+  rlt_num_layers: 2
+  rlt_num_heads: 8
+  rlt_mlp_ratio: 4.0
+  rlt_encoder_type: "append_self_attention"
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor: 0-0
+    env: all
+    rollout: all
+
+runner:
+  task_type: embodied
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "rlt_stage2_maniskill_joint_ac"
+    logger_backends: ["wandb"]
+
+  max_epochs: 5000
+  max_steps: -1
+  only_eval: False
+  eval_only_after_resume: False
+  weight_sync_interval: 1
+  val_check_interval: 25
+  eval_before_train: False
+  save_interval: 50
+  resume_dir: null
+  ckpt_path: null
+
+algorithm:
+  update_epoch: 5
+  rlt_schedule:
+    enable: True
+    max_updates_per_train_step: 1600
+    warmup_min_size: 1000
+    warmup_post_collect_updates: 30000
+    train_every_episodes: 0
+    train_every_transitions: 5
+  group_size: 1
+  rollout_epoch: 1
+  eval_rollout_epoch: 1
+
+  adv_type: embodied_sac
+  loss_type: rlt_ac
+  loss_agg_func: "token-mean"
+
+  agg_q: min
+  actor_agg_q: q1
+  enable_drq: False
+  q_head_type: ${actor.model.q_head_type}
+  bootstrap_type: standard
+  gamma: 0.96
+  tau: 0.005
+
+  # RLT actor objective: -q_weight * Q + bc_weight * BC.
+  q_weight: 1.0
+  bc_weight: 1.0
+  reference_dropout_prob: 0.0
+  rlt_actor_loss:
+    actor_loss_warmup_updates: 20000
+    actor_loss_ramp_updates: 50000
+    warmup_bc_weight: 7.0
+    warmup_q_weight: 0.05
+    online_bc_weight: 2.8
+    online_q_weight: 0.16
+    delta_weight: 0.0
+
+  entropy_tuning:
+    alpha_type: fixed_alpha
+    initial_alpha: 0.0
+    optim:
+      lr: 3.0e-4
+      lr_scheduler: torch_constant
+      clip_grad: 10.0
+
+  replay_buffer:
+    enable_cache: True
+    cache_size: 10000
+    sample_window_size: 50000
+    max_num_samples: 50000
+    min_buffer_size: 1000
+    auto_save: False
+
+  target_update_freq: 1
+  target_update_type: all
+  train_actor_steps: 1000
+  critic_actor_ratio: 4
+  critic_subsample_size: 0
+  backup_entropy: False
+
+env:
+  group_name: "EnvGroup"
+  train:
+    rollout_epoch: 1
+    total_num_envs: 64
+    seed: 2026
+    auto_reset: False
+    ignore_terminations: False
+    use_fixed_reset_state_ids: False
+    wrap_obs_mode: rlt_openpi_joint
+    reward_mode: only_success
+    rlt_policy_switch:
+      enable: True
+      task_mode: full_task
+      trigger_mode: auto
+      latch_until_done: True
+      auto_gate:
+        require_grasp: True
+        require_not_success: True
+        near_hole_x_min: -0.16
+        near_hole_yz_margin: 1.5
+        fallback_hole_radius: 0.03
+      expert_takeover:
+        enable: False
+        trigger_mode: critical_phase
+    max_episode_steps: 500
+    max_steps_per_rollout_epoch: 500
+    action_dim: ${rlt.action_dim}
+    num_action_chunks: ${rlt.num_action_chunks}
+    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
+    init_params:
+      id: "PegInsertionSideWideClearance-v1"
+      obs_mode: "rgb"
+      control_mode: "pd_joint_delta_pos"
+      reward_mode: "sparse"
+      sim_config:
+        sim_freq: 100
+        control_freq: 10
+      sensor_configs:
+        width: 384
+        height: 384
+  eval:
+    rollout_epoch: 1
+    total_num_envs: 256
+    seed: 2026
+    auto_reset: False
+    ignore_terminations: False
+    use_fixed_reset_state_ids: True
+    wrap_obs_mode: rlt_openpi_joint
+    reward_mode: only_success
+    rlt_policy_switch:
+      enable: True
+      task_mode: full_task
+      trigger_mode: auto
+      latch_until_done: True
+      auto_gate:
+        require_grasp: True
+        require_not_success: True
+        near_hole_x_min: -0.16
+        near_hole_yz_margin: 1.5
+        fallback_hole_radius: 0.03
+      expert_takeover:
+        enable: False
+        trigger_mode: critical_phase
+    max_episode_steps: 500
+    max_steps_per_rollout_epoch: 500
+    policy_mode: eval
+    group_size: 1
+    action_dim: ${rlt.action_dim}
+    num_action_chunks: ${rlt.num_action_chunks}
+    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
+    video_cfg:
+      save_video: False
+      fps: 10
+      record_every: 1
+      video_base_dir: ${runner.logger.log_path}/video/eval
+    init_params:
+      id: "PegInsertionSideWideClearance-v1"
+      obs_mode: "rgb"
+      control_mode: "pd_joint_delta_pos"
+      reward_mode: "sparse"
+      sim_config:
+        sim_freq: 100
+        control_freq: 10
+      sensor_configs:
+        width: 384
+        height: 384
+
+rollout:
+  group_name: "RolloutGroup"
+  backend: "huggingface"
+  enable_offload: False
+  pipeline_stage_num: 1
+  collect_transitions: True
+  collect_prev_infos: True
+
+  model:
+    model_type: ${actor.model.model_type}
+    model_path: ""
+    precision: ${actor.model.precision}
+    policy_setup: ${actor.model.policy_setup}
+    action_dim: ${actor.model.action_dim}
+    num_action_chunks: ${actor.model.num_action_chunks}
+    ref_num_action_chunks: ${actor.model.ref_num_action_chunks}
+    z_dim: ${actor.model.z_dim}
+    proprio_dim: ${actor.model.proprio_dim}
+    add_q_head: ${actor.model.add_q_head}
+    q_head_type: ${actor.model.q_head_type}
+    fixed_std: ${actor.model.fixed_std}
+    is_lora: False
+    lora_rank: 32
+
+  rlt_feature_model:
+    model_type: "openpi"
+    model_path: ${rlt.stage1_model_path}
+    precision: null
+    num_action_chunks: ${rlt.ref_num_action_chunks}
+    action_dim: ${rlt.action_dim}
+    add_value_head: False
+    is_lora: False
+    lora_rank: 32
+    openpi_data:
+      repo_id: ${rlt.openpi_repo_id}
+      default_prompt: ${rlt.default_prompt}
+    openpi:
+      config_name: ${rlt.openpi_config_name}
+      num_images_in_input: 2
+      action_chunk: ${rlt.ref_num_action_chunks}
+      action_horizon: ${rlt.ref_num_action_chunks}
+      action_env_dim: ${rlt.action_dim}
+      num_steps: ${rlt.vla_num_steps}
+      train_expert_only: False
+      add_value_head: False
+      detach_critic_input: True
+      use_rlt: True
+      rlt_alpha: 1.0
+      rlt_input_dim: ${rlt.rlt_input_dim}
+      rlt_embed_dim: ${rlt.rlt_embed_dim}
+      rlt_num_rl_tokens: ${rlt.num_rl_tokens}
+      rlt_prefix_seq_len: ${rlt.rlt_prefix_seq_len}
+      rlt_num_layers: ${rlt.rlt_num_layers}
+      rlt_num_heads: ${rlt.rlt_num_heads}
+      rlt_mlp_ratio: ${rlt.rlt_mlp_ratio}
+      rlt_encoder_type: ${rlt.rlt_encoder_type}
+      rlt_image_only: False
+      rlt_use_mask: True
+
+  enable_torch_compile: False
+  enable_cuda_graph: False
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 128
+  global_batch_size: 512
+  seed: 1234
+  enable_offload: False
+
+  model:
+    policy_setup: "panda-qpos"
+    action_dim: ${rlt.action_dim}
+    num_action_chunks: ${rlt.num_action_chunks}
+    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
+    z_dim: ${rlt.z_dim}
+    proprio_dim: ${rlt.proprio_dim}
+    add_q_head: True
+    q_head_type: "default"
+    fixed_std: 0.002
+
+  optim:
+    clip_grad: 10.0
+    lr: 5.0e-5
+    lr_scheduler: torch_constant
+
+  critic_optim:
+    clip_grad: 10.0
+    lr: 5.0e-5
+    lr_scheduler: torch_constant
+
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "no_shard"
+    mixed_precision:
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}
+
+reward:
+  use_reward_model: False
+
+critic:
+  use_critic_model: False

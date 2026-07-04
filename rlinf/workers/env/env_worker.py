@@ -823,6 +823,7 @@ class EnvWorker(Worker):
                         if "final_observation" in infos
                         else None
                     ),
+                    env_infos=infos if isinstance(infos, dict) else None,
                     intervene_actions=None,
                     intervene_flags=None,
                 )
@@ -858,6 +859,7 @@ class EnvWorker(Worker):
                 data={
                     "obs": env_batch["obs"],
                     "final_obs": env_batch["final_obs"],
+                    "env_infos": env_batch["env_infos"],
                 },
                 mode="train",
                 tag="rollout_results",
@@ -1024,6 +1026,7 @@ class EnvWorker(Worker):
                         data={
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
+                            "env_infos": env_batch["env_infos"],
                         },
                         mode="train",
                         tag="rollout_results",
@@ -1174,6 +1177,7 @@ class EnvWorker(Worker):
                             if "final_observation" in infos
                             else None
                         ),
+                        env_infos=infos if isinstance(infos, dict) else None,
                     )
                     env_batch = env_output.to_dict()
                     self.send_to(
@@ -1182,6 +1186,7 @@ class EnvWorker(Worker):
                         data={
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
+                            "env_infos": env_batch["env_infos"],
                         },
                         mode="eval",
                         tag="rollout_results",
@@ -1232,6 +1237,7 @@ class EnvWorker(Worker):
                         data={
                             "obs": env_batch["obs"],
                             "final_obs": env_batch["final_obs"],
+                            "env_infos": env_batch["env_infos"],
                         },
                         mode="eval",
                         tag="rollout_results",

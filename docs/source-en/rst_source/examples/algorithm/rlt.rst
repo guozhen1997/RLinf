@@ -11,10 +11,11 @@ stages:
 2. Freeze that feature model and train a lightweight off-policy actor-critic
    policy using the extracted RLT state.
 
-The checked-in example currently targets Franka peg insertion, while the
-pipeline itself is not tied to that task. A simulator version can reuse the
-same Stage 1 / Stage 2 split once the environment, action shape, state
-selection, and data paths are swapped.
+The checked-in examples target Franka peg insertion and the ManiSkill
+``PegInsertionSideWideClearance-v1`` joint-control simulation. The pipeline is
+not tied to either task. Reuse the same two-stage structure when the
+demonstrations, environment config, action shape, state semantics, and OpenPI
+dataconfig stay aligned.
 
 Overview
 --------
@@ -42,13 +43,14 @@ RLT separates representation learning from online RL control.
    .. grid-item-card:: Deployment
       :text-align: center
 
-      Real robot now, simulator-ready layout
+      Franka real robot / ManiSkill simulation
 
 | **You'll do:** prepare demonstrations -> train Stage 1 -> point Stage 2 at
   the Stage 1 checkpoint -> launch actor-critic training -> monitor replay-buffer and task
   success metrics.
 | **Prerequisites:** install the OpenPI π₀.₅ checkpoint and prepare the
-  :doc:`Franka real-world setup <../embodied/franka>`.
+  :doc:`Franka real-world setup <../embodied/franka>` or the
+  :doc:`ManiSkill simulator setup <../embodied/maniskill>`.
 
 Provided Configuration Files
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -60,12 +62,21 @@ Provided Configuration Files
    * - Stage
      - Config
      - Purpose
-   * - Stage 1
+   * - Franka Stage 1
      - ``examples/sft/config/rlt_sft_openpi_pi05.yaml``
-     - SFT pi0.5 together with the RLT token transformer.
-   * - Stage 2
+     - SFT π₀.₅ together with the RLT token transformer on Franka demonstrations.
+   * - Franka Stage 2
      - ``examples/embodiment/config/rlt_stage2_ac_mlp.yaml``
-     - Run RLT Stage 2 actor-critic training with the frozen Stage 1 feature model.
+     - Run real-world RLT actor-critic training with the frozen Stage 1 feature model.
+   * - ManiSkill SFT
+     - ``examples/sft/config/rlt_maniskill_joint_pi05_sft.yaml``
+     - Train the joint-control OpenPI base policy used to initialize ManiSkill RLT Stage 1.
+   * - ManiSkill Stage 1
+     - ``examples/sft/config/rlt_stage1_maniskill_joint.yaml``
+     - Train the RLT token transformer on the ManiSkill joint dataset.
+   * - ManiSkill Stage 2
+     - ``examples/embodiment/config/rlt_stage2_maniskill_joint_ac.yaml``
+     - Run simulated RLT actor-critic training with automatic ``rlt_policy_switch`` and transition replay.
    * - Stage 2 model
      - ``examples/embodiment/config/model/rlt_mlp_policy.yaml``
      - Defines the RLT MLP actor and Q-head dimensions.
@@ -166,6 +177,14 @@ Stage 1 and Stage 2, so it must match the dataset preprocessing, action space,
 and model configuration. Different robots or simulators should use the
 corresponding indices from their own state vectors.
 
+.. note::
+
+   The ManiSkill joint example does not rely on manual ``state_indices``
+   slicing. The ``pi05_rlt_maniskill_joint`` dataconfig maps the LeRobot
+   ``state`` field into OpenPI ``observation.state``. Stage 2 rollout also uses
+   the processed OpenPI ``observation.state`` as ``proprio``. Stage 1, Stage 2,
+   and OpenPI normalization therefore see the same state semantics.
+
 Stage 2: Train the Actor-Critic Policy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -198,8 +217,13 @@ During rollout:
 For the provided real-robot config, ``keyboard_reward_wrapper:
 rlt_policy_switch`` adds an ``rlt_use_actor`` flag. Before the operator presses
 ``b``, the executed action is the VLA ``ref_chunk``; after ``b`` is pressed,
-the executed action switches to the Stage 2 actor. Simulator configs can omit
-this wrapper or replace it with an automatic switching rule.
+the executed action switches to the Stage 2 actor.
+
+For the ManiSkill joint config, ``env.*.rlt_policy_switch`` automatically
+produces ``rlt_use_actor``, ``in_critical_phase``, and ``record_transition``
+from task information. The HF rollout worker uses those flags to choose the
+actor action or VLA ``ref_chunk`` at whole-chunk granularity, then writes the
+executed action into replay.
 
 The critic is trained with a TD target over chunked rewards. Rewards inside
 the action chunk are discounted and then bootstrapped with the next-state Q
@@ -220,10 +244,15 @@ Important Stage 2 fields:
      loss_type: rlt_ac
      q_weight: 1.0
      bc_weight: 1.0
-     gamma: 0.96
+     gamma: 0.99
+     actor_agg_q: min
      entropy_tuning:
        alpha_type: fixed_alpha
        initial_alpha: 0.0
+     rlt_schedule:
+       enable: True
+       warmup_post_collect_updates: 30000
+       train_every_transitions: 5
 
    rollout:
      collect_transitions: True
@@ -251,7 +280,8 @@ The Stage 2 actor loss is:
 
 The BC target is the VLA reference action for normal policy steps. If a human
 intervention action is stored for a step, the BC target for that step becomes
-the human action.
+the human action. ManiSkill disables ``expert_takeover`` by default, so the
+default simulated route uses only the VLA reference and actor actions.
 
 Run the Provided Franka Example
 -------------------------------
@@ -366,12 +396,174 @@ During real-robot rollout, use the keyboard policy switch:
      - Clears the switch state, so the next episode starts from the VLA
        reference policy again.
 
+Run the ManiSkill Joint Example
+-------------------------------
+
+The ManiSkill joint example uses ``PegInsertionSideWideClearance-v1``,
+two-view RGB observations, the first 9 Panda qpos dimensions, and 8D
+``pd_joint_delta_pos`` actions. Each Stage 2 action is a 10-step chunk. The
+language instruction is fixed to ``insert the peg in the hole``.
+
+Data: Prepare the Joint-Control LeRobot Dataset
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Stage 1 and Stage 2 OpenPI feature model uses the
+``pi05_rlt_maniskill_joint`` dataconfig. The LeRobot dataset must contain at
+least:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Field
+     - Meaning
+   * - ``image``
+     - Main-view RGB image.
+   * - ``wrist_image``
+     - Wrist RGB image.
+   * - ``state``
+     - Panda joint proprioception. The current example uses a 9D state.
+   * - ``actions``
+     - 8D ``pd_joint_delta_pos`` actions.
+   * - ``task``
+     - Language instruction. You can also set ``default_prompt`` to ``insert the peg in the hole``.
+
+When you compute normalization statistics, keep ``--config-name`` and
+``--repo-id`` aligned with the training config:
+
+.. code:: bash
+
+   export HF_LEROBOT_HOME=/path/to/lerobot_root
+   python toolkits/lerobot/calculate_norm_stats.py \
+       --config-name pi05_rlt_maniskill_joint \
+       --repo-id maniskill_peginsertionside_joint
+
+.. warning::
+
+   The Stage 1 checkpoint, Stage 2 ``rollout.rlt_feature_model``, and OpenPI
+   assets must use the same ``norm_stats.json``. If the SFT base policy and
+   Stage 2 load stats from different ``repo_id`` directories, the scale of VLA
+   reference actions shifts.
+
+Optional: Train the ManiSkill OpenPI SFT Base
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you do not already have a joint-control OpenPI base policy, run the SFT
+config first:
+
+.. code:: bash
+
+   bash examples/sft/run_vla_sft.sh rlt_maniskill_joint_pi05_sft
+
+This config uses the ``pi05_rlt_maniskill_joint`` dataconfig and the
+``rlt_maniskill_joint`` dataset path. After training, use the saved
+``.../checkpoints/global_step_<step>/actor`` directory as
+``actor.model.model_path`` in Stage 1.
+
+Stage 1: Train the ManiSkill RLT Feature Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Edit the data path and OpenPI SFT checkpoint in
+``examples/sft/config/rlt_stage1_maniskill_joint.yaml``:
+
+.. code:: yaml
+
+   data:
+     train_data_paths:
+       - dataset_path: /path/to/maniskill_peginsertionside_joint
+         weight: 1.0
+
+   actor:
+     model:
+       model_path: /path/to/rlt_maniskill_joint_pi05_sft/checkpoints/global_step_<step>/actor
+       openpi:
+         config_name: pi05_rlt_maniskill_joint
+     openpi_data:
+       repo_id: maniskill_peginsertionside_joint
+       default_prompt: insert the peg in the hole
+
+Launch training:
+
+.. code:: bash
+
+   bash examples/sft/run_vla_sft.sh rlt_stage1_maniskill_joint
+
+Stage 2 uses this Stage 1 actor directory as ``rlt.stage1_model_path``. The
+directory must contain VLA weights, RLT token transformer weights, and matching
+OpenPI assets.
+
+Stage 2: Run ManiSkill RLT Actor-Critic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Edit the Stage 1 checkpoint in
+``examples/embodiment/config/rlt_stage2_maniskill_joint_ac.yaml``:
+
+.. code:: yaml
+
+   rlt:
+     stage1_model_path: /path/to/rlt_stage1_maniskill_joint/checkpoints/global_step_<step>/actor
+     openpi_repo_id: maniskill_peginsertionside_joint
+     openpi_config_name: pi05_rlt_maniskill_joint
+
+   env:
+     train:
+       wrap_obs_mode: rlt_openpi_joint
+       rlt_policy_switch:
+         enable: True
+         task_mode: full_task
+         trigger_mode: auto
+     eval:
+       wrap_obs_mode: rlt_openpi_joint
+       rlt_policy_switch:
+         enable: True
+         task_mode: full_task
+         trigger_mode: auto
+
+Launch training:
+
+.. code:: bash
+
+   bash examples/embodiment/run_embodiment.sh rlt_stage2_maniskill_joint_ac
+
+This config starts actor, rollout, and ManiSkill env workers. The rollout side
+freezes ``rollout.rlt_feature_model`` and only synchronizes the Stage 2 MLP
+actor. Before ``ready_for_online``, the ManiSkill route executes the VLA
+``ref_chunk``. After ``algorithm.rlt_schedule.warmup_post_collect_updates``,
+the actor can take over in the automatic critical phase.
+
+Confirm these ManiSkill Stage 2 fields first:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Field
+     - Purpose
+   * - ``algorithm.rlt_schedule.warmup_post_collect_updates``
+     - Learner updates required before actor rollout is enabled.
+   * - ``algorithm.rlt_schedule.train_every_transitions``
+     - Adds training budget every N new transitions.
+   * - ``algorithm.replay_buffer.min_buffer_size``
+     - Minimum replay transitions before the buffer is ready.
+   * - ``algorithm.replay_buffer.max_num_samples``
+     - Active replay transition cap.
+   * - ``algorithm.actor_agg_q``
+     - Q aggregation used by the actor loss. The current ManiSkill config uses ``min``.
+   * - ``env.*.rlt_policy_switch``
+     - Produces ``rlt_use_actor``, ``in_critical_phase``, and ``record_transition`` automatically.
+
 Replay Buffer Behavior
 ----------------------
 
 For ``loss_type: rlt_ac``, the replay buffer does not store raw image
-observations as the RL state. The environment worker waits for the rollout
-worker to return RLT features and stores those features as transitions.
+observations as the RL state. The rollout worker returns RLT features, and the
+learner side stores those features as transitions:
+
+.. code:: text
+
+   curr_obs = {z_rl, proprio, ref_chunk}
+   action   = action chunk actually sent to the environment
+   next_obs = {next_z_rl, next_proprio, next_ref_chunk}
 
 This means:
 
@@ -380,6 +572,10 @@ This means:
   same replay buffer.
 - Steps after the switch use the actor action and are also stored with the
   same RLT observation format.
+- The ManiSkill route chooses actor actions or the VLA ``ref_chunk`` at whole
+  chunk granularity. The replay ``action`` is always the executed action.
+- The ManiSkill learner splits rollout chunks into 1-sample transition
+  trajectories before adding them to RLinf ``TrajectoryReplayBuffer``.
 - ``sample_window_size`` controls the recent transition window sampled from the
   replay buffer. It does not need to match ``max_steps_per_rollout_epoch``.
 - ``max_steps_per_rollout_epoch`` controls how many environment steps are
@@ -398,12 +594,18 @@ Useful RLT signals:
 
 - Stage 2 actor-critic:
 
-  - ``train/sac/critic_loss``: Q-function TD loss.
-  - ``train/sac/actor_loss``: combined ``-Q + BC`` actor objective.
+  - ``critic/critic_loss``: Q-function TD loss.
+  - ``actor/actor_loss``: combined ``-Q + BC`` actor objective.
   - ``q_pi`` and ``q_value_*``: learned Q-values for actor and critic heads.
-  - ``bc_loss``, ``bc_ref_loss``, ``bc_human_loss``: BC regularization terms.
+  - ``actor/bc_loss``, ``actor/bc_ref_loss``, ``actor/bc_human_loss``: BC regularization terms.
   - ``train/replay_buffer/size``: number of stored replay transitions.
   - ``env/success_once`` and ``env/episode_len``: task outcome metrics.
+  - ``eval/success_once``: success rate on fixed eval reset ids.
+  - ``rollout/in_critical_phase_rate`` and ``rollout/student_control_rate``:
+    whether the ManiSkill automatic route lets the actor take over as expected.
+  - ``rlt_stage2/ready_for_online``, ``rlt_stage2/actor_updates_run``, and
+    ``rlt_stage2/pending_update_budget``: warmup, actor-update, and learner
+    backlog status.
 
 Practical Notes
 ---------------
@@ -416,6 +618,10 @@ Practical Notes
   worker.
 - ``keyboard_reward_wrapper: rlt_policy_switch`` is only needed for
   operator-controlled critical-phase switching.
-- To add a simulator example, create a simulator environment config, keep
-  ``loss_type: rlt_ac`` and ``rollout.rlt_feature_model``, and replace the
-  real-robot switching/reset settings with simulator-appropriate ones.
+- The ManiSkill joint example uses ``env.*.rlt_policy_switch``. Do not use the
+  real-robot keyboard wrapper there.
+- ManiSkill ``proprio`` comes from the processed OpenPI ``observation.state``.
+  When you add a new simulator dataconfig, check the dataset ``state``, OpenPI
+  transform, and Stage 2 ``proprio_dim`` together.
+- Stage 1, Stage 2, and checkpoint assets must load ``norm_stats.json`` from
+  the same data semantics and ``repo_id``.
