@@ -19,7 +19,7 @@ rlt:
   openpi_repo_id: "maniskill_peginsertionside_joint"
   openpi_config_name: "pi05_rlt_maniskill_joint"
   default_prompt: "insert the peg in the hole"
-  expert_model_path: "ChikaYokoyama/rlt-maniskill-sft-step-8000"
+  expert_model_path: "/mnt/public2/xiekaizhi/rlt-openpi-sim/RLinf/logs/20260531-16:37:53/rlt_maniskill_joint_pi05_sft/checkpoints/global_step_8000/actor"
 
   action_dim: 8
   proprio_dim: 9
@@ -99,7 +99,7 @@ algorithm:
     warmup_bc_weight: 7.0
     warmup_q_weight: 0.05
     online_bc_weight: 2.5
-    online_q_weight: 0.5
+    online_q_weight: 0.45
     delta_weight: 0.0
 
   entropy_tuning:
@@ -149,7 +149,27 @@ env:
         fallback_hole_radius: 0.03
       expert_takeover:
         enable: True
-        trigger_mode: critical_phase
+        # Simulated real-world takeover: only request expert after the RLT actor
+        # is already in critical phase and has made no measurable insertion
+        # progress for several action chunks. Rollout still masks this during
+        # warmup, and eval disables expert completely.
+        trigger_mode: stalled_progress
+        gate:
+          require_grasp: True
+          require_not_success: True
+          # Do not diagnose "stuck" immediately after critical entry; first
+          # require the peg head to be close enough to the hole for insertion
+          # attempts to be meaningful.
+          near_hole_x_min: -0.10
+          near_hole_yz_margin: 2.0
+          # A chunk is considered improved if x advances, yz alignment improves,
+          # or the combined score x - progress_yz_weight * yz improves enough.
+          stuck_chunks_before_takeover: 3
+          min_x_progress: 0.003
+          min_yz_progress: 0.0015
+          min_score_progress: 0.002
+          progress_yz_weight: 1.0
+          fallback_hole_radius: 0.03
     max_episode_steps: 500
     max_steps_per_rollout_epoch: 500
     action_dim: ${rlt.action_dim}
@@ -188,7 +208,20 @@ env:
         fallback_hole_radius: 0.03
       expert_takeover:
         enable: False
-        trigger_mode: critical_phase
+        # Eval is full-task: base policy before critical phase, actor after
+        # critical phase, and no expert intervention.
+        trigger_mode: stalled_progress
+        gate:
+          require_grasp: True
+          require_not_success: True
+          near_hole_x_min: -0.10
+          near_hole_yz_margin: 2.0
+          stuck_chunks_before_takeover: 3
+          min_x_progress: 0.003
+          min_yz_progress: 0.0015
+          min_score_progress: 0.002
+          progress_yz_weight: 1.0
+          fallback_hole_radius: 0.03
     max_episode_steps: 500
     max_steps_per_rollout_epoch: 500
     policy_mode: eval

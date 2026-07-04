@@ -27,7 +27,21 @@ rlt_policy_switch:
     fallback_hole_radius: 0.03
   expert_takeover:
     enable: False
-    trigger_mode: critical_phase
+    # Disabled by default. When enabled for train, this mirrors real-world
+    # takeover semantics: expert is requested only after several critical-phase
+    # action chunks fail to improve insertion progress.
+    trigger_mode: stalled_progress
+    gate:
+      require_grasp: True
+      require_not_success: True
+      near_hole_x_min: -0.10
+      near_hole_yz_margin: 2.0
+      stuck_chunks_before_takeover: 3
+      min_x_progress: 0.003
+      min_yz_progress: 0.0015
+      min_score_progress: 0.002
+      progress_yz_weight: 1.0
+      fallback_hole_radius: 0.03
 
 video_cfg:
   save_video: False

@@ -60,6 +60,8 @@ class ManiSkillRLTPolicySwitchController:
 
     AUTO_TRIGGER = "auto"
     ALWAYS_ON_TRIGGER = "always_on"
+    INTERVENTION_GATE_TRIGGER = "intervention_gate"
+    STALLED_PROGRESS_TRIGGER = "stalled_progress"
 
     def __init__(
         self,
@@ -88,6 +90,13 @@ class ManiSkillRLTPolicySwitchController:
                 dtype=torch.bool,
             ),
             "actor_switch_step": torch.zeros(batch_size, dtype=torch.float32),
+            "expert_takeover_active": torch.zeros(batch_size, dtype=torch.bool),
+            "expert_progress_guard": torch.zeros(batch_size, dtype=torch.bool),
+            "progress_initialized": torch.zeros(batch_size, dtype=torch.bool),
+            "best_progress_x": torch.zeros(batch_size, dtype=torch.float32),
+            "best_progress_yz": torch.zeros(batch_size, dtype=torch.float32),
+            "best_progress_score": torch.zeros(batch_size, dtype=torch.float32),
+            "stalled_progress_chunks": torch.zeros(batch_size, dtype=torch.float32),
         }
 
     def reset(self, env_idx=None) -> None:
@@ -151,17 +160,19 @@ class ManiSkillRLTPolicySwitchController:
             state["entered_actor_phase_once"] | use_actor | switched_now
         )
         state["rlt_use_actor"] = use_actor
+        self._update_expert_takeover_state(infos=infos, device=device)
 
-        return self.export_info(device=device, chunk_dones=chunk_dones)
+        return self.export_info(device=device, infos=infos, chunk_dones=chunk_dones)
 
     def export_info(
         self,
         *,
         device: torch.device,
+        infos: dict[str, Any] | None = None,
         chunk_dones: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         state = self._state_to(device)
-        expert_takeover = self._expert_takeover_mask(device=device)
+        expert_takeover = self._expert_takeover_mask(infos=infos, device=device)
         record_transition = state["rlt_use_actor"]
         if chunk_dones is not None:
             chunk_done_mask = torch.as_tensor(
@@ -184,14 +195,20 @@ class ManiSkillRLTPolicySwitchController:
             # for Stage2 replay. This must not depend on learner warmup.
             "record_transition": record_transition[:, None],
             "expert_takeover": expert_takeover[:, None],
-            "intervention_phase": torch.zeros(
-                (self.batch_size, 1),
-                dtype=torch.float32,
-                device=device,
-            ),
+            "expert_takeover_active": state["expert_takeover_active"][:, None],
+            "expert_progress_guard": state["expert_progress_guard"][:, None],
+            "expert_stalled_progress_chunks": state["stalled_progress_chunks"][
+                :, None
+            ],
+            "intervention_phase": expert_takeover.to(torch.float32)[:, None],
         }
 
-    def _expert_takeover_mask(self, *, device: torch.device) -> torch.Tensor:
+    def _expert_takeover_mask(
+        self,
+        *,
+        infos: dict[str, Any] | None,
+        device: torch.device,
+    ) -> torch.Tensor:
         expert_cfg = self.cfg.get("expert_takeover", {})
         if not bool(expert_cfg.get("enable", False)):
             return torch.zeros(self.batch_size, dtype=torch.bool, device=device)
@@ -200,12 +217,314 @@ class ManiSkillRLTPolicySwitchController:
         state = self._state_to(device)
         if trigger_mode == "critical_phase":
             return state["rlt_use_actor"].clone()
+        if trigger_mode == self.INTERVENTION_GATE_TRIGGER:
+            return state["rlt_use_actor"] & self._expert_intervention_gate(
+                infos=infos,
+                expert_cfg=expert_cfg,
+                device=device,
+            )
+        if trigger_mode == self.STALLED_PROGRESS_TRIGGER:
+            takeover = state["rlt_use_actor"] & state["expert_takeover_active"]
+            if infos is not None:
+                takeover = takeover & (
+                    ~self._info_bool(infos, "success_current", device)
+                )
+            return takeover
         if trigger_mode == "always_on":
             return torch.ones(self.batch_size, dtype=torch.bool, device=device)
         raise ValueError(
             "rlt_policy_switch.expert_takeover.trigger_mode supports "
-            f"'critical_phase' and 'always_on', got {trigger_mode!r}."
+            "'critical_phase', 'intervention_gate', 'stalled_progress', and "
+            f"'always_on', got {trigger_mode!r}."
         )
+
+    def _update_expert_takeover_state(
+        self,
+        *,
+        infos: dict[str, Any],
+        device: torch.device,
+    ) -> None:
+        expert_cfg = self.cfg.get("expert_takeover", {})
+        state = self._state_to(device)
+        if not bool(expert_cfg.get("enable", False)):
+            state["expert_takeover_active"].zero_()
+            state["expert_progress_guard"].zero_()
+            state["progress_initialized"].zero_()
+            state["stalled_progress_chunks"].zero_()
+            return
+
+        trigger_mode = str(expert_cfg.get("trigger_mode", "critical_phase"))
+        if trigger_mode == self.STALLED_PROGRESS_TRIGGER:
+            self._update_stalled_progress_expert_takeover(
+                infos=infos,
+                expert_cfg=expert_cfg,
+                device=device,
+            )
+            return
+
+        # Non-stateful modes compute their mask directly in _expert_takeover_mask.
+        state["expert_takeover_active"].zero_()
+        state["expert_progress_guard"].zero_()
+        state["progress_initialized"].zero_()
+        state["stalled_progress_chunks"].zero_()
+
+    def _update_stalled_progress_expert_takeover(
+        self,
+        *,
+        infos: dict[str, Any],
+        expert_cfg: DictConfig | dict,
+        device: torch.device,
+    ) -> None:
+        state = self._state_to(device)
+        gate_cfg = expert_cfg.get("gate", {})
+
+        in_critical_phase = state["rlt_use_actor"]
+        success = self._info_bool(infos, "success_current", device)
+        active_before = state["expert_takeover_active"] & in_critical_phase & (
+            ~success
+        )
+        progress_guard = self._stalled_progress_guard(
+            infos=infos,
+            gate_cfg=gate_cfg,
+            device=device,
+        )
+        state["expert_progress_guard"] = progress_guard
+
+        eligible = in_critical_phase & progress_guard & (~success)
+        if bool(gate_cfg.get("require_grasp", False)):
+            eligible = eligible & self._info_bool(
+                infos,
+                "consecutive_grasp_current",
+                device,
+            )
+
+        # Progress is judged once per action chunk. Any meaningful forward x
+        # movement, lateral/vertical alignment improvement, or combined score
+        # improvement resets the stall counter.
+        hole_x = self._info_float(infos, "peg_head_hole_x", device)
+        abs_y = self._info_float(infos, "peg_head_hole_abs_y", device)
+        abs_z = self._info_float(infos, "peg_head_hole_abs_z", device)
+        yz_dist = torch.sqrt(torch.square(abs_y) + torch.square(abs_z))
+        yz_weight = float(gate_cfg.get("progress_yz_weight", 1.0))
+        progress_score = hole_x - yz_weight * yz_dist
+
+        initialized = state["progress_initialized"] & eligible & (~active_before)
+        should_initialize = eligible & (~active_before) & (~initialized)
+        monitor_progress = eligible & (~active_before) & initialized
+
+        min_x_progress = float(gate_cfg.get("min_x_progress", 0.003))
+        min_yz_progress = float(gate_cfg.get("min_yz_progress", 0.0015))
+        min_score_progress = float(gate_cfg.get("min_score_progress", 0.002))
+        x_improved = hole_x > (state["best_progress_x"] + min_x_progress)
+        yz_improved = yz_dist < (state["best_progress_yz"] - min_yz_progress)
+        score_improved = progress_score > (
+            state["best_progress_score"] + min_score_progress
+        )
+        improved = monitor_progress & (x_improved | yz_improved | score_improved)
+
+        no_progress = monitor_progress & (~improved)
+        stalled_chunks = torch.where(
+            no_progress,
+            state["stalled_progress_chunks"] + 1.0,
+            state["stalled_progress_chunks"],
+        )
+        stalled_chunks = torch.where(
+            improved | should_initialize | (~eligible),
+            torch.zeros_like(stalled_chunks),
+            stalled_chunks,
+        )
+
+        stuck_chunks_before_takeover = max(
+            1,
+            int(gate_cfg.get("stuck_chunks_before_takeover", 3)),
+        )
+        trigger_now = no_progress & (
+            stalled_chunks >= float(stuck_chunks_before_takeover)
+        )
+
+        update_best = should_initialize | improved
+        state["best_progress_x"] = torch.where(
+            should_initialize,
+            hole_x,
+            torch.where(
+                update_best,
+                torch.maximum(state["best_progress_x"], hole_x),
+                state["best_progress_x"],
+            ),
+        )
+        state["best_progress_yz"] = torch.where(
+            should_initialize,
+            yz_dist,
+            torch.where(
+                update_best,
+                torch.minimum(state["best_progress_yz"], yz_dist),
+                state["best_progress_yz"],
+            ),
+        )
+        state["best_progress_score"] = torch.where(
+            should_initialize,
+            progress_score,
+            torch.where(
+                update_best,
+                torch.maximum(state["best_progress_score"], progress_score),
+                state["best_progress_score"],
+            ),
+        )
+
+        # Once intervention starts, the expert keeps control until success,
+        # termination/truncation reset, or a full env reset. We do not hand
+        # control back mid-episode because that flickers and makes labels noisy.
+        state["expert_takeover_active"] = active_before | trigger_now
+        state["progress_initialized"] = torch.where(
+            eligible & (~active_before),
+            state["progress_initialized"] | should_initialize,
+            torch.zeros_like(state["progress_initialized"]),
+        )
+        state["stalled_progress_chunks"] = torch.where(
+            active_before,
+            state["stalled_progress_chunks"],
+            stalled_chunks,
+        )
+
+    def _stalled_progress_guard(
+        self,
+        *,
+        infos: dict[str, Any],
+        gate_cfg: DictConfig | dict,
+        device: torch.device,
+    ) -> torch.Tensor:
+        hole_x = self._info_float(infos, "peg_head_hole_x", device)
+        abs_y = self._info_float(infos, "peg_head_hole_abs_y", device)
+        abs_z = self._info_float(infos, "peg_head_hole_abs_z", device)
+        hole_radii = self._hole_radii(abs_y, gate_cfg, device)
+
+        near_hole_x_min = float(gate_cfg.get("near_hole_x_min", -0.10))
+        yz_margin = float(gate_cfg.get("near_hole_yz_margin", 2.0))
+        guard = (
+            (hole_x >= near_hole_x_min)
+            & (abs_y <= yz_margin * hole_radii)
+            & (abs_z <= yz_margin * hole_radii)
+        )
+        if bool(gate_cfg.get("require_prealigned", False)):
+            guard = guard & self._prealigned_mask(
+                infos=infos,
+                gate_cfg=gate_cfg,
+                device=device,
+            )
+        return guard
+
+    def _expert_intervention_gate(
+        self,
+        *,
+        infos: dict[str, Any] | None,
+        expert_cfg: DictConfig | dict,
+        device: torch.device,
+    ) -> torch.Tensor:
+        if infos is None:
+            return torch.zeros(self.batch_size, dtype=torch.bool, device=device)
+
+        gate_cfg = expert_cfg.get("gate", {})
+        if "partial_insert_current" in infos and not gate_cfg:
+            gate = self._info_bool(infos, "partial_insert_current", device)
+        else:
+            gate = self._threshold_gate(
+                infos=infos,
+                gate_cfg=gate_cfg,
+                device=device,
+            )
+
+        if bool(gate_cfg.get("require_grasp", False)):
+            gate = gate & self._info_bool(
+                infos,
+                "consecutive_grasp_current",
+                device,
+            )
+        if bool(gate_cfg.get("require_not_success", True)):
+            gate = gate & (~self._info_bool(infos, "success_current", device))
+        return gate
+
+    def _threshold_gate(
+        self,
+        *,
+        infos: dict[str, Any],
+        gate_cfg: DictConfig | dict,
+        device: torch.device,
+    ) -> torch.Tensor:
+        prealigned = self._prealigned_mask(
+            infos=infos,
+            gate_cfg=gate_cfg,
+            device=device,
+        )
+
+        hole_x = self._info_float(infos, "peg_head_hole_x", device)
+        abs_y = self._info_float(infos, "peg_head_hole_abs_y", device)
+        abs_z = self._info_float(infos, "peg_head_hole_abs_z", device)
+        hole_radii = self._hole_radii(abs_y, gate_cfg, device)
+
+        near_hole_x_min = float(gate_cfg.get("near_hole_x_min", -0.05))
+        yz_margin = float(gate_cfg.get("near_hole_yz_margin", 1.25))
+        return (
+            prealigned
+            & (hole_x >= near_hole_x_min)
+            & (abs_y <= yz_margin * hole_radii)
+            & (abs_z <= yz_margin * hole_radii)
+        )
+
+    def _prealigned_mask(
+        self,
+        *,
+        infos: dict[str, Any],
+        gate_cfg: DictConfig | dict,
+        device: torch.device,
+    ) -> torch.Tensor:
+        if "prealigned_current" in infos:
+            return self._info_bool(infos, "prealigned_current", device)
+
+        yz_threshold = float(gate_cfg.get("prealign_yz_threshold", 0.01))
+        return (
+            self._info_float(infos, "peg_head_goal_yz_dist", device) < yz_threshold
+        ) & (self._info_float(infos, "peg_body_goal_yz_dist", device) < yz_threshold)
+
+    def _info_bool(
+        self,
+        infos: dict[str, Any],
+        key: str,
+        device: torch.device,
+    ) -> torch.Tensor:
+        return self._info_tensor(
+            infos,
+            key,
+            dtype=torch.bool,
+            device=device,
+        )
+
+    def _info_float(
+        self,
+        infos: dict[str, Any],
+        key: str,
+        device: torch.device,
+    ) -> torch.Tensor:
+        return self._info_tensor(
+            infos,
+            key,
+            dtype=torch.float32,
+            device=device,
+        )
+
+    def _info_tensor(
+        self,
+        infos: dict[str, Any],
+        key: str,
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        value = torch.as_tensor(infos[key], device=device).to(dtype=dtype)
+        if value.numel() == 1:
+            return value.reshape(1).repeat(self.batch_size)
+        if value.numel() == self.batch_size:
+            return value.reshape(self.batch_size)
+        return value.reshape(self.batch_size, -1)[:, -1]
 
     @classmethod
     def select_info_source(cls, infos: dict[str, Any]) -> dict[str, Any]:
@@ -229,11 +548,11 @@ class ManiSkillRLTPolicySwitchController:
         device: torch.device,
     ) -> torch.Tensor:
         auto_gate = self.cfg.get("auto_gate", {})
-        grasp = infos["consecutive_grasp_current"].to(torch.bool)
-        success = infos["success_current"].to(torch.bool)
-        hole_x = infos["peg_head_hole_x"].to(torch.float32)
-        abs_y = infos["peg_head_hole_abs_y"].to(torch.float32)
-        abs_z = infos["peg_head_hole_abs_z"].to(torch.float32)
+        grasp = self._info_bool(infos, "consecutive_grasp_current", device)
+        success = self._info_bool(infos, "success_current", device)
+        hole_x = self._info_float(infos, "peg_head_hole_x", device)
+        abs_y = self._info_float(infos, "peg_head_hole_abs_y", device)
+        abs_z = self._info_float(infos, "peg_head_hole_abs_z", device)
         hole_radii = self._hole_radii(abs_y, auto_gate, device)
 
         near_hole_x_min = float(auto_gate.get("near_hole_x_min", -0.16))
