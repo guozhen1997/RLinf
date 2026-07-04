@@ -1125,7 +1125,12 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 param_names_need_sync=self.param_names_need_sync,
             )
 
-        await self.weight_syncer.sync(state_dict, send_func, version=self.version)
+        version = (
+            self.get_rollout_sync_version()
+            if hasattr(self, "get_rollout_sync_version")
+            else self.version
+        )
+        await self.weight_syncer.sync(state_dict, send_func, version=version)
 
         if self.enable_offload:
             assert not self.is_weight_offloaded, (
