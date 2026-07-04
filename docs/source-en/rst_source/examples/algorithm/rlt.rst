@@ -225,8 +225,22 @@ Important Stage 2 fields:
        alpha_type: fixed_alpha
        initial_alpha: 0.0
 
+   runner:
+     # Stage 2 MLP resume/load only; do not point these to Stage 1.
+     resume_dir: null
+     ckpt_path: null
+
    rollout:
      collect_transitions: True
+     # rollout.model is the Stage 2 MLP inference copy on rollout workers.
+     # Keep this null for scratch Stage 2 training; do not set it to Stage 1.
+     model:
+       model_path: null
+       precision: ${actor.model.precision}
+       action_dim: ${actor.model.action_dim}
+       num_action_chunks: ${actor.model.num_action_chunks}
+       ref_num_action_chunks: ${actor.model.ref_num_action_chunks}
+     # Stage 1 is loaded only through rlt_feature_model.
      rlt_feature_model:
        model_type: openpi
        model_path: ${rlt.stage1_model_path}
@@ -234,6 +248,8 @@ Important Stage 2 fields:
          use_rlt: True
 
    actor:
+     # actor.model configures the trainable Stage 2 MLP actor-critic heads.
+     # Do not add actor.model.model_path for Stage 1.
      model:
        model_type: rlt_mlp_policy
        action_dim: ${rlt.action_dim}
@@ -316,6 +332,8 @@ The saved checkpoint directory should look like:
    logs/<run-name>/checkpoints/global_step_<step>
 
 Use this directory as ``rlt.stage1_model_path`` in Stage 2.
+Do not put the Stage 1 checkpoint under ``rollout.model.model_path`` or
+``actor.model.model_path``; those fields do not load the Stage 1 feature model.
 
 Stage 2: Run RLT Actor-Critic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -327,6 +345,10 @@ Edit the Stage 2 config:
    rlt:
      stage1_model_path: /path/to/stage1/checkpoint
      stage1_openpi_repo_id: <stage1_openpi_repo_id>
+
+   rollout:
+     model:
+       model_path: null
 
    cluster:
      node_groups:
@@ -414,6 +436,12 @@ Practical Notes
 - ``rollout.rlt_feature_model`` should point to the Stage 1 checkpoint, while
   ``actor.model`` is the Stage 2 MLP policy updated by the actor-critic
   worker.
+- ``rollout.model`` is the synced Stage 2 MLP copy on rollout workers. Keep
+  ``rollout.model.model_path: null`` for scratch Stage 2 training; use
+  ``runner.resume_dir`` to resume a Stage 2 run or ``runner.ckpt_path`` to load
+  a single Stage 2 weight file.
+- Do not configure ``actor.model.model_path`` for Stage 1. ``actor.model`` only
+  describes the Stage 2 MLP input/output shape and Q-head settings.
 - ``keyboard_reward_wrapper: rlt_policy_switch`` is only needed for
   operator-controlled critical-phase switching.
 - To add a simulator example, create a simulator environment config, keep

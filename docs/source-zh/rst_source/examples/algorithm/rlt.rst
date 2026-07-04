@@ -197,8 +197,22 @@ Stage 2 中比较关键的字段：
        alpha_type: fixed_alpha
        initial_alpha: 0.0
 
+   runner:
+     # 仅用于恢复 / 加载 Stage 2 MLP，不要填 Stage 1 checkpoint。
+     resume_dir: null
+     ckpt_path: null
+
    rollout:
      collect_transitions: True
+     # rollout.model 是 Stage 2 MLP 的 rollout 推理副本。
+     # 从头训练 Stage 2 时保持 null；不要把 Stage 1 checkpoint 填在这里。
+     model:
+       model_path: null
+       precision: ${actor.model.precision}
+       action_dim: ${actor.model.action_dim}
+       num_action_chunks: ${actor.model.num_action_chunks}
+       ref_num_action_chunks: ${actor.model.ref_num_action_chunks}
+     # Stage 1 checkpoint 只通过 rlt_feature_model 加载。
      rlt_feature_model:
        model_type: openpi
        model_path: ${rlt.stage1_model_path}
@@ -206,6 +220,8 @@ Stage 2 中比较关键的字段：
          use_rlt: True
 
    actor:
+     # actor.model 是可训练的 Stage 2 MLP actor-critic 头部配置。
+     # 不要新增 actor.model.model_path 来填写 Stage 1。
      model:
        model_type: rlt_mlp_policy
        action_dim: ${rlt.action_dim}
@@ -284,6 +300,8 @@ Stage 1：训练 RLT 特征模型
    logs/<run-name>/checkpoints/global_step_<step>
 
 Stage 2 中需要将这个目录填到 ``rlt.stage1_model_path``。
+不要把 Stage 1 checkpoint 填到 ``rollout.model.model_path`` 或
+``actor.model.model_path``；这两个位置不负责加载 Stage 1 特征模型。
 
 Stage 2：运行 RLT Actor-Critic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -295,6 +313,10 @@ Stage 2：运行 RLT Actor-Critic
    rlt:
      stage1_model_path: /path/to/stage1/checkpoint
      stage1_openpi_repo_id: <stage1_openpi_repo_id>
+
+   rollout:
+     model:
+       model_path: null
 
    cluster:
      node_groups:
@@ -368,5 +390,7 @@ Replay Buffer 逻辑
 
 - Stage 1 和 Stage 2 的维度必须保持一致：``action_dim``、``state_indices``、``ref_num_action_chunks``、``z_dim`` 和 ``num_rl_tokens`` 都要对齐。
 - ``rollout.rlt_feature_model`` 指向 Stage 1 检查点；``actor.model`` 是 actor-critic worker 会更新的 Stage 2 MLP 策略。
+- ``rollout.model`` 是 Stage 2 MLP 在 rollout worker 上的同步副本。Stage 2 从头训练时保持 ``rollout.model.model_path: null``；恢复 Stage 2 训练使用 ``runner.resume_dir``，加载单个 Stage 2 权重文件使用 ``runner.ckpt_path``。
+- 不要配置 ``actor.model.model_path`` 来加载 Stage 1；``actor.model`` 只描述 Stage 2 MLP 的输入输出维度和 Q-head 设置。
 - ``keyboard_reward_wrapper: rlt_policy_switch`` 只在需要人工控制关键阶段切换时使用。
 - 添加仿真示例时，可以新建仿真环境配置，保留 ``loss_type: rlt_ac`` 和 ``rollout.rlt_feature_model``，再把真机切换和 reset 设置替换成适合仿真的逻辑。
