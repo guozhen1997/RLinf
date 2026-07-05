@@ -30,7 +30,7 @@ runner:
 
 data:
   train_data_paths:
-    - dataset_path: "/mnt/public2/xiekaizhi/rlt-openpi-sim/maniskill_peginsertionside_joint"
+    - dataset_path: "/path/to/maniskill_peginsertionside_joint"
       weight: 1.0
 
 algorithm:
@@ -45,7 +45,7 @@ actor:
 
   model:
     precision: null
-    model_path: "/mnt/public2/xiekaizhi/rlt-openpi-sim/pi05_base"
+    model_path: "/path/to/pi05_base"
     model_type: "openpi"
     num_action_chunks: 10
     action_dim: 8

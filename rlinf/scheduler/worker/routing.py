@@ -542,12 +542,6 @@ def decoupled_build_recv_plan(
         entries=entries,
     )
 
-
-# Backward-compatible aliases for older env-decoupled call sites.
-env_decoupled_build_send_plan = decoupled_build_send_plan
-env_decoupled_build_recv_plan = decoupled_build_recv_plan
-
-
 def infer_batch_size(data: Any) -> int:
     """Infer a batch size from common routed payloads."""
     if isinstance(data, torch.Tensor) or isinstance(data, np.ndarray):
