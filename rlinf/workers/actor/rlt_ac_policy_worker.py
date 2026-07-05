@@ -734,13 +734,6 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
                     next_obs = curr_obs
                 else:
                     next_obs = self._rlt_obs_from_flat_dict(flat, "next_obs", idx)
-                if next_obs is None:
-                    # Fallback for legacy trajectories without explicit
-                    # transition obs. The final rollout pass may not be present.
-                    next_obs = self._rlt_obs_from_flat_forward_inputs(
-                        flat,
-                        done_flat_idx,
-                    )
                 if next_obs is not None:
                     transition.next_obs = next_obs
 
