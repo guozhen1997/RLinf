@@ -114,7 +114,6 @@ env:
     auto_reset: True
     ignore_terminations: False
     keyboard_reward_wrapper: rlt_policy_switch
-    use_fixed_reset_state_ids: False
     max_episode_steps: 300
     max_steps_per_rollout_epoch: 300
     use_spacemouse: True
@@ -180,6 +179,8 @@ rollout:
   # observations into the Stage2 obs dict: z_rl, proprio, ref_chunk.
   rlt_feature_model:
     model_type: "openpi"
+    precision: null
+    is_lora: False
     # Checkpoint produced by examples/sft/config/rlt_stage1_sft_openpi_pi05.yaml.
     model_path: "/path/to/stage1/checkpoint"
     openpi_data:
@@ -223,7 +224,6 @@ actor:
     add_q_head: True
     q_head_type: "default"
     fixed_std: 0.002
-
     is_lora: False
 
     # RLT Stage2 MLP input/output shape.

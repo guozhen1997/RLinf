@@ -443,6 +443,9 @@ class EnvWorker(Worker):
             infos["intervene_action"] if "intervene_action" in infos else None
         )
         intervene_flags = infos["intervene_flag"] if "intervene_flag" in infos else None
+        rlt_switch_flags = (
+            infos["rlt_switch_flags"] if "rlt_switch_flags" in infos else None
+        )
         if self.cfg.env.train.auto_reset and chunk_dones.any():
             if "intervene_action" in infos["final_info"]:
                 intervene_actions = infos["final_info"]["intervene_action"]
@@ -458,6 +461,7 @@ class EnvWorker(Worker):
             truncations=chunk_truncations,
             intervene_actions=intervene_actions,
             intervene_flags=intervene_flags,
+            rlt_switch_flags=rlt_switch_flags,
         )
         return env_output, env_info
 
@@ -513,9 +517,14 @@ class EnvWorker(Worker):
                 for key in infos["episode"]:
                     env_info[key] = infos["episode"][key][newly_done].cpu()
 
+        rlt_switch_flags = (
+            infos["rlt_switch_flags"] if "rlt_switch_flags" in infos else None
+        )
+
         env_output = EnvOutput(
             obs=extracted_obs,
             final_obs=final_obs,
+            rlt_switch_flags=rlt_switch_flags,
         )
         return env_output, env_info
 
@@ -849,16 +858,20 @@ class EnvWorker(Worker):
     def _send_train_bootstrap(
         self, rollout_channel: Channel, env_outputs: list[EnvOutput]
     ) -> None:
+        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
         for stage_id in range(self.stage_num):
             env_output: EnvOutput = env_outputs[stage_id]
             env_batch = env_output.to_dict()
+            data = {
+                "obs": env_batch["obs"],
+                "final_obs": env_batch["final_obs"],
+            }
+            if use_rlt_stage2:
+                data["rlt_switch_flags"] = env_batch.get("rlt_switch_flags", None)
             self.send_to(
                 group_name=self.cfg.rollout.group_name,
                 channel=rollout_channel,
-                data={
-                    "obs": env_batch["obs"],
-                    "final_obs": env_batch["final_obs"],
-                },
+                data=data,
                 mode="train",
                 tag="rollout_results",
                 decoupled_mode=self.env_decoupled_mode,
@@ -1018,13 +1031,18 @@ class EnvWorker(Worker):
                         rollout_result.actions, stage_id
                     )
                     env_batch = env_output.to_dict()
+                    data = {
+                        "obs": env_batch["obs"],
+                        "final_obs": env_batch["final_obs"],
+                    }
+                    if use_rlt_stage2:
+                        data["rlt_switch_flags"] = env_batch.get(
+                            "rlt_switch_flags", None
+                        )
                     self.send_to(
                         group_name=self.cfg.rollout.group_name,
                         channel=rollout_channel,
-                        data={
-                            "obs": env_batch["obs"],
-                            "final_obs": env_batch["final_obs"],
-                        },
+                        data=data,
                         mode="train",
                         tag="rollout_results",
                         decoupled_mode=self.env_decoupled_mode,
@@ -1158,6 +1176,7 @@ class EnvWorker(Worker):
 
     def evaluate(self, input_channel: Channel, rollout_channel: Channel):
         eval_metrics = defaultdict(list)
+        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
 
         for eval_rollout_epoch in range(self.eval_rollout_epoch):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
@@ -1176,13 +1195,18 @@ class EnvWorker(Worker):
                         ),
                     )
                     env_batch = env_output.to_dict()
+                    data = {
+                        "obs": env_batch["obs"],
+                        "final_obs": env_batch["final_obs"],
+                    }
+                    if use_rlt_stage2:
+                        data["rlt_switch_flags"] = env_batch.get(
+                            "rlt_switch_flags", None
+                        )
                     self.send_to(
                         group_name=self.cfg.rollout.group_name,
                         channel=rollout_channel,
-                        data={
-                            "obs": env_batch["obs"],
-                            "final_obs": env_batch["final_obs"],
-                        },
+                        data=data,
                         mode="eval",
                         tag="rollout_results",
                         decoupled_mode=self.env_decoupled_mode,
@@ -1226,13 +1250,18 @@ class EnvWorker(Worker):
                         if eval_step == self.n_eval_chunk_steps - 1:
                             continue
                     env_batch = env_output.to_dict()
+                    data = {
+                        "obs": env_batch["obs"],
+                        "final_obs": env_batch["final_obs"],
+                    }
+                    if use_rlt_stage2:
+                        data["rlt_switch_flags"] = env_batch.get(
+                            "rlt_switch_flags", None
+                        )
                     self.send_to(
                         group_name=self.cfg.rollout.group_name,
                         channel=rollout_channel,
-                        data={
-                            "obs": env_batch["obs"],
-                            "final_obs": env_batch["final_obs"],
-                        },
+                        data=data,
                         mode="eval",
                         tag="rollout_results",
                         decoupled_mode=self.env_decoupled_mode,
