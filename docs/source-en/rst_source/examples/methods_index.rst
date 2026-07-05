@@ -87,10 +87,10 @@ Use this section when you are choosing *how* to train (PPO vs SAC vs IQL vs DAgg
      </div>
 
      <div style="flex: 1 1 30%; max-width: 300px; text-align: center;">
-       <a href="algorithm/rlt.html" style="display: block;"><img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/pi0_icon.jpg"
+       <a href="embodied/rlt.html" style="display: block;"><img src=""
             style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" /></a>
        <p style="margin-top: 8px; font-size: 14px; line-height: 1.4;">
-         <a href="algorithm/rlt.html" style="text-decoration: underline; color: blue;">
+         <a href="embodied/rlt.html" style="text-decoration: underline; color: blue;">
            <b>RL Token</b>
          </a><br>
          Bootstrap online RL with VLA prefix features and a compact actor-critic
@@ -110,4 +110,4 @@ Use this section when you are choosing *how* to train (PPO vs SAC vs IQL vs DAgg
    STEAM <embodied/steam>
    Co-Training <embodied/co_training>
    IQL (D4RL) <embodied/iql_d4rl>
-   RL Token <algorithm/rlt>
+   RL Token <embodied/rlt>
