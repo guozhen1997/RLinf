@@ -17,6 +17,8 @@ not tied to either task. Reuse the same two-stage structure when the
 demonstrations, environment config, action shape, state semantics, and OpenPI
 dataconfig stay aligned.
 
+Official project page: `Precise Manipulation with Efficient Online RL <https://www.pi.website/research/rlt>`_.
+
 Overview
 --------
 
@@ -63,7 +65,7 @@ Provided Configuration Files
      - Config
      - Purpose
    * - Franka Stage 1
-     - ``examples/sft/config/rlt_sft_openpi_pi05.yaml``
+     - ``examples/sft/config/rlt_stage1_sft_openpi_pi05.yaml``
      - SFT π₀.₅ together with the RLT token transformer on Franka demonstrations.
    * - Franka Stage 2
      - ``examples/embodiment/config/rlt_stage2_ac_mlp.yaml``
@@ -74,9 +76,6 @@ Provided Configuration Files
    * - ManiSkill Stage 2
      - ``examples/embodiment/config/rlt_stage2_maniskill_joint_ac.yaml``
      - Run simulated RLT actor-critic training with automatic ``rlt_policy_switch`` and transition replay.
-   * - Stage 2 model
-     - ``examples/embodiment/config/model/rlt_mlp_policy.yaml``
-     - Defines the RLT MLP actor and Q-head dimensions.
 
 Installation
 ------------
@@ -149,30 +148,29 @@ Important Stage 1 fields:
 
 .. code:: yaml
 
-   rlt:
-     train_data_path: /path/to/lerobot_dataset
-     base_model_path: /path/to/model
-     openpi_repo_id: <openpi_repo_id>
-     openpi_config_name: <openpi_config_name>
-     action_dim: <action_dim>
-     state_indices: [<state_index_0>, <state_index_1>, ...]
-     ref_num_action_chunks: <ref_num_action_chunks>
-     z_dim: <z_dim>
-     num_rl_tokens: <num_rl_tokens>
+   # examples/sft/config/rlt_stage1_sft_openpi_pi05.yaml
+   data:
+     train_data_paths: "/path/to/data"
 
    actor:
+     openpi_data:
+       repo_id: "realworld_peg_insertion_rlt_stage1"
      model:
+       model_type: "openpi"
+       is_lora: False
+       model_path: "/path/to/model"
+       num_action_chunks: 20
        openpi:
+         config_name: "pi05_franka_state"
+         num_images_in_input: 1
          use_rlt: True
          rlt_alpha: 1.0
+         rlt_prefix_seq_len: 1024
          rlt_image_only: False
          rlt_use_mask: True
 
-``state_indices`` selects which dimensions of the raw environment state vector
-become ``proprio``. Its order defines the proprio input order seen by both
-Stage 1 and Stage 2, so it must match the dataset preprocessing, action space,
-and model configuration. Different robots or simulators should use the
-corresponding indices from their own state vectors.
+Keep ``repo_id`` and ``config_name`` consistent with the normalization stats and
+the Stage 2 feature-model config.
 
 .. note::
 
@@ -237,12 +235,13 @@ Important Stage 2 fields:
 
 .. code:: yaml
 
+   # examples/embodiment/config/rlt_stage2_ac_mlp.yaml
    algorithm:
      loss_type: rlt_ac
-     q_weight: 1.0
-     bc_weight: 1.0
-     gamma: 0.99
-     actor_agg_q: q1
+     q_weight: 0.5
+     bc_weight: 10
+     reference_dropout_prob: 0.5
+     gamma: 0.96
      entropy_tuning:
        alpha_type: fixed_alpha
        initial_alpha: 0.0
@@ -257,21 +256,45 @@ Important Stage 2 fields:
 
    rollout:
      collect_transitions: True
+     model:
+       model_path: null
+       precision: ${actor.model.precision}
+       action_dim: ${actor.model.action_dim}
+       num_action_chunks: ${actor.model.num_action_chunks}
+       ref_num_action_chunks: ${actor.model.ref_num_action_chunks}
      rlt_feature_model:
-       model_type: openpi
-       model_path: ${rlt.stage1_model_path}
+       model_type: "openpi"
+       model_path: "/path/to/stage1/checkpoint"
+       openpi_data:
+         repo_id: "realworld_peg_insertion_rlt_stage1"
        openpi:
+         config_name: "pi05_franka_state"
+         num_images_in_input: 1
+         action_chunk: ${actor.model.ref_num_action_chunks}
+         state_indices: []      # keep the full raw state, e.g. 19D
          use_rlt: True
+         rlt_prefix_seq_len: 1024
+         rlt_image_only: False
+         rlt_use_mask: True
 
    actor:
      model:
-       model_type: rlt_mlp_policy
-       action_dim: ${rlt.action_dim}
-       num_action_chunks: ${rlt.num_action_chunks}
-       ref_num_action_chunks: ${rlt.ref_num_action_chunks}
-       z_dim: ${rlt.z_dim}
-       proprio_dim: ${rlt.proprio_dim}
+       model_type: "rlt_mlp_policy"
+       precision: fp32
+       add_value_head: False
        add_q_head: True
+       q_head_type: "default"
+       fixed_std: 0.002
+       is_lora: False
+       z_dim: 2048
+       proprio_dim: 19
+       action_dim: 7
+       num_action_chunks: 10
+       ref_num_action_chunks: 20
+
+   env:
+     train:
+       keyboard_reward_wrapper: rlt_policy_switch
 
 The Stage 2 actor loss is:
 
@@ -311,16 +334,18 @@ Then launch collection:
 
 After collection, place the LeRobot dataset on the training node and compute
 normalization statistics for the RLT OpenPI dataconfig. ``repo_id`` should
-match ``rlt.openpi_repo_id`` in the Stage 1 / Stage 2 configs:
+match ``actor.openpi_data.repo_id`` and
+``rollout.rlt_feature_model.openpi_data.repo_id`` in the Stage 1 / Stage 2
+configs:
 
 .. code:: bash
 
    export HF_LEROBOT_HOME=/path/to/lerobot_root
    python toolkits/lerobot/calculate_norm_stats.py \
-       --config-name pi05_franka_state7d \
-       --repo-id realworld_peg_insertion_rlt_stage1_7d
+       --config-name pi05_franka_state \
+       --repo-id realworld_peg_insertion_rlt_stage1
 
-Then point ``rlt.train_data_path`` in the Stage 1 config at that LeRobot
+Then point ``data.train_data_paths`` in the Stage 1 config at that LeRobot
 dataset directory.
 
 Stage 1: Train the RLT Feature Model
@@ -330,15 +355,24 @@ Edit the Stage 1 config paths before launch:
 
 .. code:: yaml
 
-   rlt:
-     train_data_path: /path/to/lerobot_dataset
-     base_model_path: /path/to/model
+   data:
+     train_data_paths: /path/to/lerobot_dataset
+
+   actor:
+     openpi_data:
+       repo_id: "realworld_peg_insertion_rlt_stage1"
+     model:
+       model_path: /path/to/model
+       openpi:
+         config_name: "pi05_franka_state"
+         num_images_in_input: 1
+         rlt_prefix_seq_len: 1024
 
 Launch SFT:
 
 .. code:: bash
 
-   bash examples/sft/run_vla_sft.sh rlt_sft_openpi_pi05
+   bash examples/sft/run_vla_sft.sh rlt_stage1_sft_openpi_pi05
 
 The saved checkpoint directory should look like:
 
@@ -346,7 +380,9 @@ The saved checkpoint directory should look like:
 
    logs/<run-name>/checkpoints/global_step_<step>
 
-Use this directory as ``rlt.stage1_model_path`` in Stage 2.
+Use this directory as ``rollout.rlt_feature_model.model_path`` in Stage 2.
+Do not put the Stage 1 checkpoint under ``rollout.model.model_path`` or
+``actor.model.model_path``; those fields do not load the Stage 1 feature model.
 
 Stage 2: Run RLT Actor-Critic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -355,9 +391,18 @@ Edit the Stage 2 config:
 
 .. code:: yaml
 
-   rlt:
-     stage1_model_path: /path/to/stage1/checkpoint
-     stage1_openpi_repo_id: <stage1_openpi_repo_id>
+   rollout:
+     model:
+       model_path: null
+     rlt_feature_model:
+       model_path: /path/to/stage1/checkpoint
+       openpi_data:
+         repo_id: "realworld_peg_insertion_rlt_stage1"
+       openpi:
+         config_name: "pi05_franka_state"
+         num_images_in_input: 1
+         state_indices: []
+         rlt_prefix_seq_len: 1024
 
    cluster:
      node_groups:
@@ -382,20 +427,10 @@ Launch the async run from the master node:
 
    bash examples/embodiment/run_realworld_async.sh rlt_stage2_ac_mlp
 
-During real-robot rollout, use the keyboard policy switch:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Key
-     - Behavior
-   * - ``b``
-     - Switch from VLA reference actions to the Stage 2 RLT actor for the
-       current episode.
-   * - reset
-     - Clears the switch state, so the next episode starts from the VLA
-       reference policy again.
+The default keyboard module implements the key phase switch used by RLT: press
+``b`` to enter the Stage 2 actor-controlled phase. Other behavior can be
+customized for the task in
+``rlinf/envs/realworld/common/wrappers/keyboard_rlt_policy_switch_wrapper.py``.
 
 Run the ManiSkill Joint Example
 -------------------------------
@@ -672,15 +707,38 @@ Useful RLT signals:
     ``rlt_stage2/pending_update_budget``: warmup, actor-update, and learner
     backlog status.
 
+Experimental Results
+--------------------
+
+The RL Token training result on the peg_insertion task in RLinf is shown below.
+
+.. raw:: html
+
+   <div style="display: flex; justify-content: center; margin: 20px 0;">
+     <div style="flex: 0.5; text-align: center;">
+       <img src="" style="width: 100%;"/>
+       <p><em>RL Token training result on the RLinf peg_insertion task</em></p>
+     </div>
+   </div>
+
 Practical Notes
 ---------------
 
-- Keep Stage 1 and Stage 2 dimensions consistent: ``action_dim``,
-  ``state_indices``, ``ref_num_action_chunks``, ``z_dim``, and
-  ``num_rl_tokens`` must agree.
+- Keep Stage 1 and Stage 2 data settings consistent: ``repo_id``,
+  ``config_name``, ``action_dim``, ``proprio_dim``, ``ref_num_action_chunks``,
+  and ``z_dim`` must agree. To keep the full raw state, use
+  ``state_indices: []``.
 - ``rollout.rlt_feature_model`` should point to the Stage 1 checkpoint, while
   ``actor.model`` is the Stage 2 MLP policy updated by the actor-critic
   worker.
+- ``rollout.model`` is the synced Stage 2 MLP copy on rollout workers. Keep
+  ``rollout.model.model_path: null`` for scratch Stage 2 training; use
+  ``runner.resume_dir`` to resume a Stage 2 run or ``runner.ckpt_path`` to load
+  a single Stage 2 weight file.
+- Do not configure ``actor.model.model_path`` for Stage 1. ``actor.model`` only
+  describes the Stage 2 MLP input/output shape and Q-head settings.
+- Stage 2 MLP settings are defined inline under ``actor.model`` in each Stage 2
+  YAML, not in a separate model defaults file.
 - ``keyboard_reward_wrapper: rlt_policy_switch`` is only needed for
   operator-controlled critical-phase switching.
 - The ManiSkill joint example uses ``env.*.rlt_policy_switch``. Do not use the
@@ -690,3 +748,6 @@ Practical Notes
   transform, and Stage 2 ``proprio_dim`` together.
 - Stage 1, Stage 2, and checkpoint assets must load ``norm_stats.json`` from
   the same data semantics and ``repo_id``.
+- To add a simulator example, create a simulator environment config, keep
+  ``loss_type: rlt_ac`` and ``rollout.rlt_feature_model``, and replace the
+  real-robot phase-switching logic with simulator-appropriate behavior.

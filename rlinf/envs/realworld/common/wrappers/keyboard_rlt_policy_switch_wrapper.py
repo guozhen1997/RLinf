@@ -34,7 +34,7 @@ class KeyboardRLTPolicySwitchWrapper(gym.Wrapper):
         self._last_press_ts: dict[str, float] = {}
 
     @property
-    def rlt_use_actor(self) -> bool:
+    def rlt_switch_flags(self) -> bool:
         return self._use_actor
 
     def reset(self, *, seed=None, options=None):
@@ -65,7 +65,7 @@ class KeyboardRLTPolicySwitchWrapper(gym.Wrapper):
                 else:
                     event = "actor_already_active"
 
-        info["rlt_use_actor"] = self._use_actor
+        info["rlt_switch_flags"] = self._use_actor
         info["rlt_policy_switch_event"] = event
         return obs, reward, terminated, truncated, info
 

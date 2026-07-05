@@ -1,7 +1,6 @@
 defaults:
   - env/maniskill_rlt_joint@env.train
   - env/maniskill_rlt_joint@env.eval
-  - model/rlt_mlp_policy@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
@@ -325,15 +324,21 @@ actor:
   enable_offload: False
 
   model:
+    model_type: "rlt_mlp_policy"
+    # RLT AC keeps the small Stage2 head in fp32 for Q-learning stability.
+    precision: fp32
     policy_setup: "panda-qpos"
     action_dim: ${rlt.action_dim}
     num_action_chunks: ${rlt.num_action_chunks}
     ref_num_action_chunks: ${rlt.ref_num_action_chunks}
     z_dim: ${rlt.z_dim}
     proprio_dim: ${rlt.proprio_dim}
+    add_value_head: False
     add_q_head: True
     q_head_type: "default"
     fixed_std: 0.002
+    is_lora: False
+    lora_rank: 32
 
   optim:
     clip_grad: 10.0

@@ -210,7 +210,7 @@ _CONFIGS = [
         save_interval=250,
     ),
     TrainConfig(
-        name="pi05_franka_state7d",
+        name="pi05_franka_state",
         model=pi0_config.Pi0Config(
             pi05=True, action_horizon=20, discrete_state_input=True
         ),

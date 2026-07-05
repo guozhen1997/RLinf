@@ -1,7 +1,6 @@
 defaults:
   - env/realworld_peg_insertion@env.train
   - env/realworld_peg_insertion@env.eval
-  - model/rlt_mlp_policy@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
@@ -43,7 +42,7 @@ runner:
   logger:
     log_path: "../results"
     project_name: rlinf-rlt
-    experiment_name: "rlt_stage2_ac_mlp_${rlt.task_name}"
+    experiment_name: "rlt_stage2_ac_mlp_realworld_peg_insertion"
     logger_backends: ["tensorboard"]
 
   max_epochs: 8000
@@ -53,7 +52,11 @@ runner:
   val_check_interval: -1
   save_interval: -1
 
+  # Resume a saved Stage2 training run from a full RLinf checkpoint directory.
+  # Do not point this to the Stage1 OpenPI checkpoint.
   resume_dir: null
+  # Optional single Stage2 weight file, e.g. actor/model_state_dict/full_weights.pt.
+  # For normal Stage2 training from scratch, keep this null.
   ckpt_path: null
 
 algorithm:
@@ -69,11 +72,11 @@ algorithm:
   loss_agg_func: "token-mean"
 
   # RLT Stage2 actor loss: -q_weight * Q + bc_weight * BC.
-  q_weight: 1.0
-  bc_weight: 1.0
+  q_weight: 0.5
+  bc_weight: 10
 
   # Reference-action dropout on the actor input, as in RLT Stage2.
-  reference_dropout_prob: 0.0
+  reference_dropout_prob: 0.5
 
   bootstrap_type: standard
   gamma: 0.96
@@ -102,40 +105,6 @@ algorithm:
   critic_subsample_size: 0
   backup_entropy: False
 
-# RLT Stage2 = freeze Stage1 pi0.5 + RLT token transformer, then train only the
-# RLT MLP actor-critic heads.
-rlt:
-  task_name: "realworld_peg_insertion"
-
-  # Stage1 checkpoint produced by examples/sft/config/rlt_sft_openpi_pi05.yaml.
-  # Point this to the saved Stage1 checkpoint directory.
-  stage1_model_path: "/path/to/stage1/checkpoint"
-  stage1_openpi_repo_id: "realworld_peg_insertion_rlt_stage1_7d"
-  openpi_config_name: "pi05_franka_state7d"
-
-  # Stage2 action shape. ref_num_action_chunks is the VLA reference horizon;
-  # num_action_chunks is the shorter chunk consumed/output by the Stage2 head.
-  action_dim: 7
-  # Use tcp_pose(euler) + gripper_position from the collected 19D raw state.
-  state_indices: [4, 5, 6, 7, 8, 9, 0]
-  proprio_dim: 7
-  num_action_chunks: 10
-  ref_num_action_chunks: 20
-  vla_num_steps: 4
-  noise_method: "flow_noise"
-  noise_params: [0.16, 0.12, 200]
-  joint_logprob: True
-
-  # Must match Stage1 RLT token transformer output.
-  z_dim: 2048
-  num_rl_tokens: 1
-  rlt_input_dim: 2048
-  rlt_embed_dim: 2048
-  rlt_prefix_seq_len: 1024
-  rlt_num_layers: 2
-  rlt_num_heads: 8
-  rlt_mlp_ratio: 4.0
-
 env:
   group_name: "EnvGroup"
 
@@ -145,7 +114,6 @@ env:
     auto_reset: True
     ignore_terminations: False
     keyboard_reward_wrapper: rlt_policy_switch
-    use_fixed_reset_state_ids: False
     max_episode_steps: 300
     max_steps_per_rollout_epoch: 300
     use_spacemouse: True
@@ -159,11 +127,6 @@ env:
       max_num_steps: 300
       target_ee_pose: TARGET_EE_POSE
       success_hold_steps: 1
-      gripper_type: none
-
-    action_dim: ${rlt.action_dim}
-    num_action_chunks: ${rlt.num_action_chunks}
-    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
 
   eval:
     rollout_epoch: 1
@@ -186,7 +149,6 @@ env:
       max_num_steps: 300
       target_ee_pose: TARGET_EE_POSE
       success_hold_steps: 1
-      gripper_type: none
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
@@ -200,52 +162,42 @@ rollout:
   collect_transitions: True
   collect_prev_infos: False
 
-  # Synced Stage2 policy. This is initialized from actor.model and then kept in
-  # sync by RLinf weight_syncer; model_path can stay empty for scratch training.
+  # Synced Stage2 MLP policy used by rollout inference.
+  # During training (runner.only_eval=False), rollout builds this from actor.model
+  # and then receives fresh weights from the actor via RLinf weight_syncer.
+  # Keep model_path null for scratch Stage2 training; do not set it to Stage1.
+  # To resume/load Stage2 weights, use runner.resume_dir or runner.ckpt_path.
   model:
-    model_path: "/path/to/stage2/model"
+    model_path: null
     precision: ${actor.model.precision}
     action_dim: ${actor.model.action_dim}
     num_action_chunks: ${actor.model.num_action_chunks}
     ref_num_action_chunks: ${actor.model.ref_num_action_chunks}
 
-  # Frozen Stage1 pi0.5 + RLT token transformer. Rollout uses it to convert raw
-  # env observations into the Stage2 obs dict: z_rl, proprio, ref_chunk.
+  # Frozen Stage1 pi0.5 + RLT token transformer.
+  # This is the actual Stage1 model path. Rollout uses it to convert raw env
+  # observations into the Stage2 obs dict: z_rl, proprio, ref_chunk.
   rlt_feature_model:
     model_type: "openpi"
-    model_path: ${rlt.stage1_model_path}
     precision: null
-    num_action_chunks: ${rlt.ref_num_action_chunks}
-    action_dim: ${rlt.action_dim}
-    add_value_head: False
     is_lora: False
-    lora_rank: 32
+    # Checkpoint produced by examples/sft/config/rlt_stage1_sft_openpi_pi05.yaml.
+    model_path: "/path/to/stage1/checkpoint"
     openpi_data:
-      repo_id: ${rlt.stage1_openpi_repo_id}
+      # Must match the repo_id/config_name used to compute Stage1 OpenPI norm stats.
+      repo_id: "realworld_peg_insertion_rlt_stage1"
     openpi:
-      config_name: ${rlt.openpi_config_name}
+      config_name: "pi05_franka_state"
       num_images_in_input: 1
-      action_chunk: ${rlt.ref_num_action_chunks}
-      action_horizon: ${rlt.ref_num_action_chunks}
-      action_env_dim: ${rlt.action_dim}
-      num_steps: ${rlt.vla_num_steps}
-      state_indices: ${rlt.state_indices}
-      train_expert_only: False
-      noise_method: ${rlt.noise_method}
-      noise_params: ${rlt.noise_params}
-      joint_logprob: ${rlt.joint_logprob}
-      add_value_head: False
-      value_after_vlm: False
-      value_vlm_mode: "mean_token"
-      detach_critic_input: True
+      action_chunk: ${actor.model.ref_num_action_chunks}
+      num_steps: 4
+      # Keep the collected 19D raw state as Stage2 proprio.
+      state_indices: []
+      noise_method: "flow_noise"
+      noise_params: [0.16, 0.12, 200]
+      joint_logprob: True
       use_rlt: True
-      rlt_input_dim: ${rlt.rlt_input_dim}
-      rlt_embed_dim: ${rlt.rlt_embed_dim}
-      rlt_num_rl_tokens: ${rlt.num_rl_tokens}
-      rlt_prefix_seq_len: ${rlt.rlt_prefix_seq_len}
-      rlt_num_layers: ${rlt.rlt_num_layers}
-      rlt_num_heads: ${rlt.rlt_num_heads}
-      rlt_mlp_ratio: ${rlt.rlt_mlp_ratio}
+      rlt_prefix_seq_len: 1024
       rlt_image_only: False
       rlt_use_mask: True
 
@@ -261,15 +213,25 @@ actor:
   seed: 1234
   enable_offload: False
 
+  # Do not add actor.model.model_path for Stage1; this block only defines the
+  # Stage2 head. Stage2 resume/load is controlled by runner.resume_dir/ckpt_path.
   model:
-    action_dim: ${rlt.action_dim}
-    num_action_chunks: ${rlt.num_action_chunks}
-    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
-    z_dim: ${rlt.z_dim}
-    proprio_dim: ${rlt.proprio_dim}
+    model_type: "rlt_mlp_policy"
+
+    # RLT AC defaults to fp32 for Q-learning and target-update stability.
+    precision: fp32
+    add_value_head: False
     add_q_head: True
     q_head_type: "default"
     fixed_std: 0.002
+    is_lora: False
+
+    # RLT Stage2 MLP input/output shape.
+    z_dim: 2048
+    proprio_dim: 19
+    action_dim: 7
+    num_action_chunks: 10
+    ref_num_action_chunks: 20
 
   optim:
     clip_grad: 10.0

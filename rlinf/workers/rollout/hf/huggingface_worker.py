@@ -593,6 +593,7 @@ class MultiStepRolloutWorker(Worker):
         final_obs: dict[str, Any] | None = None,
         env_infos: dict[str, Any] | None = None,
         allow_expert: bool = True,
+        rlt_switch_flags: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         if self.rlt_feature_model is not None:
             return self._predict_with_rlt_features(
@@ -601,6 +602,7 @@ class MultiStepRolloutWorker(Worker):
                 mode,
                 env_infos=env_infos,
                 allow_expert=allow_expert,
+                rlt_switch_flags=rlt_switch_flags,
             )
         return self.predict(env_obs, mode=mode)
 
@@ -913,6 +915,7 @@ class MultiStepRolloutWorker(Worker):
         *,
         env_infos: dict[str, Any] | None = None,
         allow_expert: bool = True,
+        rlt_switch_flags: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         with torch.no_grad():
             rlt_obs = self.rlt_feature_model.extract_rlt_stage2_obs(env_obs)
@@ -935,31 +938,45 @@ class MultiStepRolloutWorker(Worker):
                     allow_expert=allow_expert,
                 )
             else:
-                use_actor = env_obs.get("rlt_use_actor", None)
-                if use_actor is None and self._use_rlt_schedule():
-                    use_actor = torch.full(
-                        (actions.shape[0],),
+                if rlt_switch_flags is None:
+                    rlt_switch_flags = env_obs.get("rlt_use_actor", None)
+                if rlt_switch_flags is None and self._use_rlt_schedule():
+                    rlt_switch_flags = torch.full(
+                        (actions.shape[0], actions.shape[1]),
                         self._rlt_ready_for_online(),
                         dtype=torch.bool,
                         device=actions.device,
                     )
-                if use_actor is not None:
-                    use_actor = (
-                        torch.as_tensor(use_actor, device=actions.device)
-                        .bool()
-                        .reshape(actions.shape[0], 1, 1)
+                if rlt_switch_flags is None:
+                    rlt_switch_flags = torch.zeros(
+                        (actions.shape[0], actions.shape[1]),
+                        dtype=torch.bool,
+                        device=actions.device,
                     )
-                    ref_actions = result["forward_inputs"]["ref_chunk"].to(
-                        device=actions.device, dtype=actions.dtype
-                    )
-                    actions = torch.where(
-                        use_actor,
-                        actions,
-                        ref_actions[:, : actions.shape[1], : actions.shape[2]],
-                    ).contiguous()
-                    result["forward_inputs"]["action"] = actions.reshape(
-                        actions.shape[0], -1
-                    ).contiguous()
+                else:
+                    rlt_switch_flags = torch.as_tensor(
+                        rlt_switch_flags, device=actions.device
+                    ).bool()
+                if rlt_switch_flags.dim() == 1:
+                    rlt_switch_flags = rlt_switch_flags[:, None]
+                if rlt_switch_flags.shape[1] > 1:
+                    rlt_switch_flags = rlt_switch_flags[:, -1:]
+                if actions.shape[1] > 1:
+                    rlt_switch_flags = rlt_switch_flags.expand(-1, actions.shape[1])
+                rlt_switch_flags = rlt_switch_flags.reshape(
+                    actions.shape[0], actions.shape[1], 1
+                )
+                ref_actions = result["forward_inputs"]["ref_chunk"].to(
+                    device=actions.device, dtype=actions.dtype
+                )
+                actions = torch.where(
+                    rlt_switch_flags,
+                    actions,
+                    ref_actions[:, : actions.shape[1], : actions.shape[2]],
+                ).contiguous()
+                result["forward_inputs"]["action"] = actions.reshape(
+                    actions.shape[0], -1
+                ).contiguous()
 
             transition_obs = rlt_obs
             if final_obs is not None:
@@ -1053,6 +1070,7 @@ class MultiStepRolloutWorker(Worker):
                     env_output["obs"],
                     final_obs=env_output.get("final_obs", None),
                     env_infos=env_output.get("env_infos", None),
+                    rlt_switch_flags=env_output.get("rlt_switch_flags", None),
                 )
 
                 save_flags = result.get("forward_inputs", {}).get(
@@ -1102,6 +1120,7 @@ class MultiStepRolloutWorker(Worker):
                 final_obs=env_output.get("final_obs", None),
                 env_infos=env_output.get("env_infos", None),
                 allow_expert=False,
+                rlt_switch_flags=env_output.get("rlt_switch_flags", None),
             )
 
             rollout_result = RolloutResult(
@@ -1167,6 +1186,7 @@ class MultiStepRolloutWorker(Worker):
                     final_obs=env_output.get("final_obs", None),
                     env_infos=env_output.get("env_infos", None),
                     allow_expert=False,
+                    rlt_switch_flags=env_output.get("rlt_switch_flags", None),
                 )
                 if isinstance(actions, torch.Tensor):
                     actions = actions.detach().cpu().contiguous()
@@ -1196,6 +1216,7 @@ class MultiStepRolloutWorker(Worker):
                             final_obs=env_output.get("final_obs", None),
                             env_infos=env_output.get("env_infos", None),
                             allow_expert=False,
+                            rlt_switch_flags=env_output.get("rlt_switch_flags", None),
                         )
                         if isinstance(actions, torch.Tensor):
                             actions = actions.detach().cpu().contiguous()
@@ -1252,6 +1273,9 @@ class MultiStepRolloutWorker(Worker):
         ]
         final_obs_list = [obs_batch.get("final_obs", None) for obs_batch in obs_batches]
         env_infos_list = [obs_batch.get("env_infos", None) for obs_batch in obs_batches]
+        rlt_switch_flags_list = [
+            obs_batch.get("rlt_switch_flags", None) for obs_batch in obs_batches
+        ]
 
         def _merge_obs_dicts(dicts: list[dict[str, Any]]) -> dict[str, Any]:
             merged: dict[str, Any] = {}
@@ -1302,10 +1326,26 @@ class MultiStepRolloutWorker(Worker):
                 else:
                     merged_env_infos[key] = values
 
+        merged_rlt_switch_flags = None
+        if any(flags is not None for flags in rlt_switch_flags_list):
+            ref_flags = next(
+                flags for flags in rlt_switch_flags_list if flags is not None
+            )
+            filled_flags = []
+            for obs_dict, flags in zip(obs_dicts, rlt_switch_flags_list):
+                if flags is None:
+                    batch_size = MultiStepRolloutWorker._infer_env_batch_size(obs_dict)
+                    fill_shape = (batch_size, *ref_flags.shape[1:])
+                    filled_flags.append(torch.zeros(fill_shape, dtype=ref_flags.dtype))
+                else:
+                    filled_flags.append(flags)
+            merged_rlt_switch_flags = torch.cat(filled_flags, dim=0)
+
         return {
             "obs": merged_obs,
             "final_obs": merged_final_obs,
             "env_infos": merged_env_infos,
+            "rlt_switch_flags": merged_rlt_switch_flags,
         }
 
     def _split_rollout_result(
