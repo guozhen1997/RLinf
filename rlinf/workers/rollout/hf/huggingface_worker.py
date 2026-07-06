@@ -23,6 +23,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
+from rlinf.algorithms.rlt.rollout import predict_rlt_stage2_actions
 from rlinf.config import SupportedModel
 from rlinf.data.embodied_io_struct import (
     RolloutResult,
@@ -551,69 +552,15 @@ class MultiStepRolloutWorker(Worker):
         rlt_switch_flags: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         if self.rlt_feature_model is not None:
-            return self._predict_with_rlt_features(
-                env_obs, final_obs, mode, rlt_switch_flags
+            return predict_rlt_stage2_actions(
+                policy_model=self.hf_model,
+                feature_model=self.rlt_feature_model,
+                env_obs=env_obs,
+                final_obs=final_obs,
+                mode=mode,
+                rlt_switch_flags=rlt_switch_flags,
             )
         return self.predict(env_obs, mode=mode)
-
-    def _predict_with_rlt_features(
-        self,
-        env_obs: dict[str, Any],
-        final_obs: dict[str, Any] | None,
-        mode: Literal["train", "eval"],
-        rlt_switch_flags: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        with torch.no_grad():
-            rlt_obs = self.rlt_feature_model.extract_rlt_stage2_obs(env_obs)
-            actions, result = self.hf_model.predict_action_batch(
-                env_obs=rlt_obs,
-                mode=mode,
-                return_obs=True,
-            )
-            if isinstance(actions, np.ndarray):
-                actions = torch.from_numpy(actions)
-
-            if rlt_switch_flags is None:
-                rlt_switch_flags = torch.zeros(
-                    (actions.shape[0], actions.shape[1]),
-                    dtype=torch.bool,
-                    device=actions.device,
-                )
-            else:
-                rlt_switch_flags = torch.as_tensor(
-                    rlt_switch_flags, device=actions.device
-                ).bool()
-            if rlt_switch_flags.dim() == 1:
-                rlt_switch_flags = rlt_switch_flags[:, None]
-            if rlt_switch_flags.shape[1] > 1:
-                rlt_switch_flags = rlt_switch_flags[:, -1:]
-            if actions.shape[1] > 1:
-                rlt_switch_flags = rlt_switch_flags.expand(-1, actions.shape[1])
-            rlt_switch_flags = rlt_switch_flags.reshape(
-                actions.shape[0], actions.shape[1], 1
-            )
-            ref_actions = result["forward_inputs"]["ref_chunk"].to(
-                device=actions.device, dtype=actions.dtype
-            )
-            actions = torch.where(
-                rlt_switch_flags,
-                actions,
-                ref_actions[:, : actions.shape[1], : actions.shape[2]],
-            ).contiguous()
-            result["forward_inputs"]["action"] = actions.reshape(
-                actions.shape[0], -1
-            ).contiguous()
-
-            transition_obs = rlt_obs
-            if final_obs is not None:
-                transition_obs = self.rlt_feature_model.extract_rlt_stage2_obs(
-                    final_obs
-                )
-            for key in ("z_rl", "proprio", "ref_chunk"):
-                result["forward_inputs"][f"rlt_transition_{key}"] = transition_obs[key]
-
-        result["expert_label_flag"] = False
-        return actions, result
 
     def get_bootstrap_values(
         self, final_obs: dict[str, Any] | None
