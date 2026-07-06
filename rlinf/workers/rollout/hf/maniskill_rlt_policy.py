@@ -129,7 +129,7 @@ class ManiSkillRLTPolicyMixin:
         rlt_switch_flags: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         with torch.no_grad():
-            rlt_obs = self.rlt_feature_model.extract_rlt_stage2_obs(env_obs)
+            rlt_obs = self.rlt_feature_model.extract_rlt_obs(env_obs)
             actions, result = self.hf_model.predict_action_batch(
                 env_obs=rlt_obs,
                 mode=mode,
@@ -158,9 +158,7 @@ class ManiSkillRLTPolicyMixin:
 
             transition_obs = rlt_obs
             if final_obs is not None:
-                transition_obs = self.rlt_feature_model.extract_rlt_stage2_obs(
-                    final_obs
-                )
+                transition_obs = self.rlt_feature_model.extract_rlt_obs(final_obs)
             for key in ("z_rl", "proprio", "ref_chunk"):
                 result["forward_inputs"][f"rlt_transition_{key}"] = transition_obs[key]
 
