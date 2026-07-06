@@ -409,8 +409,8 @@ Replay Buffer 逻辑
 .. raw:: html
 
    <div style="display: flex; justify-content: center; margin: 20px 0;">
-     <div style="flex: 0.5; text-align: center;">
-       <img src="" style="width: 100%;"/>
+      <div style="flex: 0.5; text-align: center;">
+        <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/RLT_real.png" style="width: 100%;"/>
        <p><em>RLinf peg_insertion 任务中的 RL Token 训练结果</em></p>
      </div>
    </div>

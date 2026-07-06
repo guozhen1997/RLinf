@@ -450,7 +450,7 @@ The RL Token training result on the peg_insertion task in RLinf is shown below.
 
    <div style="display: flex; justify-content: center; margin: 20px 0;">
      <div style="flex: 0.5; text-align: center;">
-       <img src="" style="width: 100%;"/>
+       <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/RLT_real.png" style="width: 100%;"/>
        <p><em>RL Token training result on the RLinf peg_insertion task</em></p>
      </div>
    </div>
