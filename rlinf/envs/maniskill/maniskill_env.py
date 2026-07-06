@@ -717,11 +717,14 @@ class ManiskillEnv(gym.Env):
             )
         elif past_dones.any():
             self._update_persistent_done_state(past_dones, obs_list[-1], infos_list[-1])
+
+        chunk_terminations = raw_chunk_terminations
+        chunk_truncations = raw_chunk_truncations
         return (
             obs_list,
             chunk_rewards,
-            raw_chunk_terminations,
-            raw_chunk_truncations,
+            chunk_terminations,
+            chunk_truncations,
             infos_list,
         )
 
