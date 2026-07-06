@@ -1,0 +1,10 @@
+# SGLang server/router runtime for embodied Qwen3-VL API reward workers.
+sglang[all]==0.5.4
+sglang-router
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
+qwen-vl-utils
+transformers==4.57.1
+tokenizers>=0.22,<0.23
+xgrammar==0.1.25
