@@ -23,6 +23,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
+from rlinf.algorithms.rlt.rollout import predict_rlt_stage2_actions
 from rlinf.config import SupportedModel
 from rlinf.data.embodied_io_struct import (
     RolloutResult,
@@ -545,6 +546,35 @@ class MultiStepRolloutWorker(ManiSkillRLTPolicyMixin, Worker):
 
         result["expert_label_flag"] = bool(expert_label_flag)
         return actions, result
+
+    def _predict_rollout_actions(
+        self,
+        env_obs: dict[str, Any],
+        mode: Literal["train", "eval"] = "train",
+        final_obs: dict[str, Any] | None = None,
+        env_infos: dict[str, Any] | None = None,
+        allow_expert: bool = True,
+        rlt_switch_flags: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
+        if self.rlt_feature_model is not None:
+            if self._use_rlt_maniskill_route():
+                return self._predict_with_rlt_features(
+                    env_obs,
+                    final_obs,
+                    mode,
+                    env_infos=env_infos,
+                    allow_expert=allow_expert,
+                    rlt_switch_flags=rlt_switch_flags,
+                )
+            return predict_rlt_stage2_actions(
+                policy_model=self.hf_model,
+                feature_model=self.rlt_feature_model,
+                env_obs=env_obs,
+                final_obs=final_obs,
+                mode=mode,
+                rlt_switch_flags=rlt_switch_flags,
+            )
+        return self.predict(env_obs, mode=mode)
 
     def get_bootstrap_values(
         self, final_obs: dict[str, Any] | None

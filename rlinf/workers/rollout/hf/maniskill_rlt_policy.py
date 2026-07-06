@@ -118,26 +118,6 @@ class ManiSkillRLTPolicyMixin:
             self._rlt_schedule_value("warmup_post_collect_updates", 0)
         )
 
-    def _predict_rollout_actions(
-        self,
-        env_obs: dict[str, Any],
-        mode: Literal["train", "eval"] = "train",
-        final_obs: dict[str, Any] | None = None,
-        env_infos: dict[str, Any] | None = None,
-        allow_expert: bool = True,
-        rlt_switch_flags: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        if self.rlt_feature_model is not None:
-            return self._predict_with_rlt_features(
-                env_obs,
-                final_obs,
-                mode,
-                env_infos=env_infos,
-                allow_expert=allow_expert,
-                rlt_switch_flags=rlt_switch_flags,
-            )
-        return self.predict(env_obs, mode=mode)
-
     def _predict_with_rlt_features(
         self,
         env_obs: dict[str, Any],
