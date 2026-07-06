@@ -99,7 +99,6 @@ algorithm:
     warmup_q_weight: 0.05
     online_bc_weight: 2.5
     online_q_weight: 0.45
-    delta_weight: 0.0
 
   entropy_tuning:
     alpha_type: fixed_alpha

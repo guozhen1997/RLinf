@@ -109,7 +109,7 @@ class RLTACLossMixin:
         if not self._use_maniskill_rlt_actor_critic_isolation():
             return super()._should_update_actor(train_actor)
         return bool(train_actor) and (
-            (int(self.update_step) + 1) % int(self.critic_actor_ratio) == 0
+            int(self.update_step) % int(self.critic_actor_ratio) == 0
         )
 
     def get_rollout_sync_version(self) -> int:
@@ -162,7 +162,7 @@ class RLTACLossMixin:
         actions: torch.Tensor,
         ref_chunk: torch.Tensor,
         intervene_flags: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
+    ) -> tuple[torch.Tensor, dict[str, float]]:
         chunk_len, action_dim = self._chunk_shape()
         pi_chunk = self._flatten_chunk(pi).reshape(-1, chunk_len, action_dim)
         action_chunk = self._flatten_chunk(actions).reshape(-1, chunk_len, action_dim)
@@ -205,44 +205,23 @@ class RLTACLossMixin:
             "human_mask_ratio": human_ratio,
             "policy_mask_ratio": 1.0 - human_ratio,
         }
-        return bc_loss, bc_target, metrics
+        return bc_loss, metrics
 
-    def _chunk_delta_loss(
-        self,
-        pi: torch.Tensor,
-        target: torch.Tensor,
-    ) -> torch.Tensor:
-        chunk_len, action_dim = self._chunk_shape()
-        pi_chunk = self._flatten_chunk(pi).reshape(-1, chunk_len, action_dim)
-        target_chunk = self._flatten_chunk(target).reshape(-1, chunk_len, action_dim)
-        if chunk_len <= 1:
-            return torch.zeros((), device=pi.device, dtype=pi.dtype)
-        pred_delta = pi_chunk[:, 1:, :] - pi_chunk[:, :-1, :]
-        target_delta = target_chunk[:, 1:, :] - target_chunk[:, :-1, :]
-        return F.mse_loss(pred_delta, target_delta)
-
-    def _actor_loss_weights(self) -> tuple[float, float, float, dict[str, float]]:
-        """Resolve RLT BC/Q/delta weights with local warmup and ramp support."""
+    def _actor_loss_weights(self) -> tuple[float, float, dict[str, float]]:
+        """Resolve RLT BC/Q weights with local warmup and ramp support."""
         rlt_loss_cfg = self.cfg.algorithm.get("rlt_actor_loss", {})
         actor_loss_schedule_enabled = bool(rlt_loss_cfg.get("enable", True))
         if not actor_loss_schedule_enabled:
             bc_weight = float(self.cfg.algorithm.get("bc_weight", 1.0))
             q_weight = float(self.cfg.algorithm.get("q_weight", 1.0))
-            delta_weight = float(
-                rlt_loss_cfg.get(
-                    "delta_weight",
-                    self.cfg.algorithm.get("delta_weight", 0.0),
-                )
-            )
             metrics = {
                 "bc_weight": bc_weight,
                 "q_weight": q_weight,
-                "delta_weight": delta_weight,
                 "actor_loss_schedule_enabled": 0.0,
                 "actor_loss_in_warmup": 0.0,
                 "actor_loss_ramp_progress": 1.0,
             }
-            return bc_weight, q_weight, delta_weight, metrics
+            return bc_weight, q_weight, metrics
 
         loss_warmup_updates = int(
             rlt_loss_cfg.get(
@@ -317,21 +296,14 @@ class RLTACLossMixin:
             q_weight = online_q_weight
             ramp_progress = 1.0
 
-        delta_weight = float(
-            rlt_loss_cfg.get(
-                "delta_weight",
-                self.cfg.algorithm.get("delta_weight", 0.0),
-            )
-        )
         metrics = {
             "bc_weight": bc_weight,
             "q_weight": q_weight,
-            "delta_weight": delta_weight,
             "actor_loss_schedule_enabled": 1.0,
             "actor_loss_in_warmup": float(in_warmup),
             "actor_loss_ramp_progress": ramp_progress,
         }
-        return bc_weight, q_weight, delta_weight, metrics
+        return bc_weight, q_weight, metrics
 
     def _ready_for_online(self) -> bool:
         return int(self.update_step) >= int(
@@ -454,7 +426,7 @@ class RLTACLossMixin:
         metrics["q_pi"] = qf_pi.mean().item()
 
         ref_chunk = self._ref_chunk(curr_obs)
-        bc_loss, bc_target, rlt_metrics = self._bc_metrics(
+        bc_loss, rlt_metrics = self._bc_metrics(
             pi=pi,
             actions=batch["actions"],
             ref_chunk=ref_chunk,
@@ -463,21 +435,14 @@ class RLTACLossMixin:
         metrics.update(rlt_metrics)
 
         entropy = -log_pi.mean()
-        delta_loss = self._chunk_delta_loss(pi, bc_target)
-        bc_weight, q_weight, delta_weight, weight_metrics = self._actor_loss_weights()
-        actor_loss = (
-            -q_weight * qf_pi.mean()
-            + bc_weight * bc_loss
-            + delta_weight * delta_loss
-        )
+        bc_weight, q_weight, weight_metrics = self._actor_loss_weights()
+        actor_loss = -q_weight * qf_pi.mean() + bc_weight * bc_loss
         metrics.update(weight_metrics)
-        metrics["delta_loss"] = delta_loss.detach().item()
         metrics["action_ref_abs_mean"] = (
             self._flatten_chunk(pi) - self._flatten_chunk(ref_chunk)
         ).abs().mean().detach().item()
         metrics["weighted_q"] = (q_weight * qf_pi.mean()).detach().item()
         metrics["weighted_bc"] = (bc_weight * bc_loss).detach().item()
-        metrics["weighted_delta"] = (delta_weight * delta_loss).detach().item()
         metrics["reference_dropout_prob"] = reference_dropout_prob
         if self._use_rlt_schedule():
             metrics["ready_for_online"] = float(self._ready_for_online())
@@ -712,7 +677,6 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
                     if isinstance(trajectory.dones, torch.Tensor)
                     else traj_len - 1,
                 )
-                done_flat_idx = done_idx * bsz + env_idx
                 for done_field in ("dones", "terminations", "truncations"):
                     done_value = getattr(trajectory, done_field, None)
                     if (
@@ -883,9 +847,9 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
     def _rlt_updates_to_run(self) -> tuple[int, dict[str, float]]:
         replay_cfg = self.cfg.algorithm.replay_buffer
         min_buffer_size = int(
-            replay_cfg.get(
-                "min_buffer_size",
-                self._rlt_schedule_value("warmup_min_size", 1),
+            self._rlt_schedule_value(
+                "warmup_min_size",
+                replay_cfg.get("min_buffer_size", 1),
             )
         )
         counters = self._global_rlt_counters()
