@@ -153,7 +153,7 @@ class MultiStepRolloutWorker(ManiSkillRLTPolicyMixin, Worker):
 
         if self.cfg.rollout.get(
             "expert_model", None
-        ) and not self._defer_maniskill_rlt_expert_model():
+        ) and not self._defer_rlt_expert_model():
             expert_model_config = copy.deepcopy(self.model_cfg)
             with open_dict(expert_model_config):
                 expert_model_config.precision = self.cfg.rollout.expert_model.precision
@@ -484,7 +484,7 @@ class MultiStepRolloutWorker(ManiSkillRLTPolicyMixin, Worker):
         ).async_wait()
 
     def update_dagger_beta(self):
-        if self.expert_model is None or not hasattr(self, "_dagger_sampling_params"):
+        if self.expert_model is None:
             return
 
         if self._dagger_sampling_params["beta_schedule"] == "exponential":
@@ -580,136 +580,6 @@ class MultiStepRolloutWorker(ManiSkillRLTPolicyMixin, Worker):
             actions = torch.from_numpy(actions)
 
         result["expert_label_flag"] = bool(expert_label_flag)
-        return actions, result
-
-    def _predict_rollout_actions(
-        self,
-        env_obs: dict[str, Any],
-        mode: Literal["train", "eval"] = "train",
-        final_obs: dict[str, Any] | None = None,
-        env_infos: dict[str, Any] | None = None,
-        allow_expert: bool = True,
-        rlt_switch_flags: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        if self.rlt_feature_model is not None:
-            return self._predict_with_rlt_features(
-                env_obs,
-                final_obs,
-                mode,
-                env_infos=env_infos,
-                allow_expert=allow_expert,
-                rlt_switch_flags=rlt_switch_flags,
-            )
-        return self.predict(env_obs, mode=mode)
-
-    def _rlt_schedule_cfg(self):
-        return self.cfg.algorithm.get("rlt_schedule", {})
-
-    def _rlt_schedule_value(self, key: str, default):
-        schedule_cfg = self._rlt_schedule_cfg()
-        return (
-            schedule_cfg.get(key, default)
-            if schedule_cfg is not None and key in schedule_cfg
-            else self.cfg.algorithm.get(key, default)
-        )
-
-    def _use_rlt_schedule(self) -> bool:
-        if str(self.cfg.algorithm.get("loss_type", "")) != "rlt_ac":
-            return False
-        schedule_cfg = self._rlt_schedule_cfg()
-        if schedule_cfg is not None and "enable" in schedule_cfg:
-            return bool(schedule_cfg.get("enable", False))
-        return any(
-            key in self.cfg.algorithm
-            for key in (
-            "warmup_post_collect_updates",
-            "train_every_transitions",
-            "train_every_episodes",
-            "max_updates_per_train_step",
-            )
-        )
-
-    def _rlt_ready_for_online(self) -> bool:
-        return not self._use_rlt_schedule() or int(self.version) >= int(
-            self._rlt_schedule_value("warmup_post_collect_updates", 0)
-        )
-
-    def _predict_with_rlt_features(
-        self,
-        env_obs: dict[str, Any],
-        final_obs: dict[str, Any] | None,
-        mode: Literal["train", "eval"],
-        *,
-        env_infos: dict[str, Any] | None = None,
-        allow_expert: bool = True,
-        rlt_switch_flags: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        with torch.no_grad():
-            rlt_obs = self.rlt_feature_model.extract_rlt_stage2_obs(env_obs)
-            actions, result = self.hf_model.predict_action_batch(
-                env_obs=rlt_obs,
-                mode=mode,
-                return_obs=True,
-            )
-            if isinstance(actions, np.ndarray):
-                actions = torch.from_numpy(actions)
-
-            if self._use_rlt_maniskill_route():
-                actions, result = self._route_rlt_maniskill_actions(
-                    env_obs=env_obs,
-                    rlt_obs=rlt_obs,
-                    student_actions=actions,
-                    result=result,
-                    mode=mode,
-                    env_infos=env_infos,
-                    allow_expert=allow_expert,
-                )
-            else:
-                if rlt_switch_flags is None:
-                    rlt_switch_flags = env_obs.get("rlt_use_actor", None)
-                if rlt_switch_flags is None:
-                    rlt_switch_flags = torch.full(
-                        (actions.shape[0], actions.shape[1]),
-                        self._rlt_ready_for_online()
-                        if self._use_rlt_schedule()
-                        else False,
-                        dtype=torch.bool,
-                        device=actions.device,
-                    )
-                else:
-                    rlt_switch_flags = torch.as_tensor(
-                        rlt_switch_flags, device=actions.device
-                    ).bool()
-                if rlt_switch_flags.dim() == 1:
-                    rlt_switch_flags = rlt_switch_flags[:, None]
-                if rlt_switch_flags.shape[1] > 1:
-                    rlt_switch_flags = rlt_switch_flags[:, -1:]
-                if actions.shape[1] > 1:
-                    rlt_switch_flags = rlt_switch_flags.expand(-1, actions.shape[1])
-                rlt_switch_flags = rlt_switch_flags.reshape(
-                    actions.shape[0], actions.shape[1], 1
-                )
-                ref_actions = result["forward_inputs"]["ref_chunk"].to(
-                    device=actions.device, dtype=actions.dtype
-                )
-                actions = torch.where(
-                    rlt_switch_flags,
-                    actions,
-                    ref_actions[:, : actions.shape[1], : actions.shape[2]],
-                ).contiguous()
-                result["forward_inputs"]["action"] = actions.reshape(
-                    actions.shape[0], -1
-                ).contiguous()
-
-            transition_obs = rlt_obs
-            if final_obs is not None:
-                transition_obs = self.rlt_feature_model.extract_rlt_stage2_obs(
-                    final_obs
-                )
-            for key in ("z_rl", "proprio", "ref_chunk"):
-                result["forward_inputs"][f"rlt_transition_{key}"] = transition_obs[key]
-
-        result["expert_label_flag"] = bool(result.get("expert_label_flag", False))
         return actions, result
 
     def get_bootstrap_values(
@@ -961,6 +831,7 @@ class MultiStepRolloutWorker(ManiSkillRLTPolicyMixin, Worker):
             self.rlt_feature_model.to("cpu")
         if self.expert_model is not None:
             self.expert_model.to("cpu")
+        self._offload_rlt_models()
         self.torch_platform.empty_cache()
 
     def reload_model(self):
@@ -969,6 +840,7 @@ class MultiStepRolloutWorker(ManiSkillRLTPolicyMixin, Worker):
             self.rlt_feature_model.to(self.device)
         if self.expert_model is not None:
             self.expert_model.to(self.device)
+        self._reload_rlt_models()
         if self.enable_cuda_graph:
             self.hf_model.capture_cuda_graph(
                 train_batch_size=self.per_node_train_batch_size,

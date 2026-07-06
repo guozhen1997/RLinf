@@ -249,10 +249,8 @@ Important Stage 2 fields:
        enable: True
        warmup_post_collect_updates: 30000
        train_every_transitions: 5
-     rlt_actor_loss:
-       enable: True
-       actor_loss_warmup_updates: 20000
-       actor_loss_ramp_updates: 50000
+     actor_loss_warmup_updates: 20000
+     actor_loss_ramp_updates: 50000
 
    rollout:
      collect_transitions: True
@@ -641,8 +639,10 @@ Confirm these ManiSkill Stage 2 fields first:
      - Learner updates required before actor rollout is enabled.
    * - ``algorithm.rlt_schedule.train_every_transitions``
      - Adds training budget every N new transitions.
-   * - ``algorithm.rlt_actor_loss.enable``
-     - Enables actor-loss BC/Q warmup and ramp. Set it to ``False`` to use fixed ``algorithm.bc_weight`` and ``algorithm.q_weight`` like the real-robot config.
+   * - ``algorithm.actor_loss_warmup_updates``
+     - Number of learner updates for actor-loss BC/Q weight warmup. Set it to ``0`` to disable warmup.
+   * - ``algorithm.actor_loss_ramp_updates``
+     - Number of learner updates used to ramp from warmup weights to online weights. Set it to ``0`` to switch directly.
    * - ``algorithm.replay_buffer.min_buffer_size``
      - Minimum replay transitions before the buffer is ready.
    * - ``algorithm.replay_buffer.max_num_samples``

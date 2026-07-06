@@ -182,10 +182,13 @@ class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):
             actions, result = self._predict_rollout_actions(
                 env_output["obs"],
                 final_obs=env_output.get("final_obs", None),
+                env_infos=env_output.get("env_infos", None),
                 rlt_switch_flags=env_output.get("rlt_switch_flags", None),
             )
-            save_flags = None
-            if result.get("expert_label_flag", False):
+            save_flags = result.get("forward_inputs", {}).get(
+                "intervention_flags", None
+            )
+            if save_flags is None and result.get("expert_label_flag", False):
                 save_flags = torch.full(
                     (actions.shape[0], self.cfg.actor.model.num_action_chunks),
                     True,

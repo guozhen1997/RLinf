@@ -466,11 +466,7 @@ class EnvWorker(Worker):
         return env_output, env_info
 
     def env_evaluate_step(
-        self,
-        raw_actions: torch.Tensor,
-        stage_id: int,
-        *,
-        record_all_active_episodes: bool = False,
+        self, raw_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any]]:
         """
         This function is used to evaluate the environment.
@@ -504,25 +500,22 @@ class EnvWorker(Worker):
             )
         )
 
-        chunk_done_any = chunk_dones.any(dim=1)  # [num_envs] bool
+        current_dones = chunk_dones.any(dim=1)  # [num_envs] bool
         if self.cfg.env.eval.auto_reset:
-            record_mask = chunk_done_any
+            newly_done = current_dones
         else:
-            prev = self.eval_prev_done[stage_id].to(chunk_done_any.device)
-            newly_done = chunk_done_any & ~prev
-            record_mask = (
-                ~prev if record_all_active_episodes else newly_done
-            )
-            self.eval_prev_done[stage_id] = prev | chunk_done_any | record_mask
+            prev = self.eval_prev_done[stage_id].to(current_dones.device)
+            newly_done = current_dones & ~prev
+            self.eval_prev_done[stage_id] = prev | current_dones
 
-        if record_mask.any():
+        if newly_done.any():
             if "final_info" in infos:
                 final_info = infos["final_info"]
                 for key in final_info["episode"]:
-                    env_info[key] = final_info["episode"][key][record_mask].cpu()
+                    env_info[key] = final_info["episode"][key][newly_done].cpu()
             elif "episode" in infos:
                 for key in infos["episode"]:
-                    env_info[key] = infos["episode"][key][record_mask].cpu()
+                    env_info[key] = infos["episode"][key][newly_done].cpu()
 
         rlt_switch_flags = (
             infos["rlt_switch_flags"] if "rlt_switch_flags" in infos else None
@@ -1246,12 +1239,7 @@ class EnvWorker(Worker):
                     else:
                         raw_chunk_actions = np.asarray(raw_chunk_actions)
                     env_output, env_info = self.env_evaluate_step(
-                        raw_chunk_actions,
-                        stage_id,
-                        record_all_active_episodes=(
-                            not self.cfg.env.eval.auto_reset
-                            and eval_step == self.n_eval_chunk_steps - 1
-                        ),
+                        raw_chunk_actions, stage_id
                     )
 
                     for key, value in env_info.items():
