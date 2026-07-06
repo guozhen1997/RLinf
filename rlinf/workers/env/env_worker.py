@@ -859,7 +859,7 @@ class EnvWorker(Worker):
     def _send_train_bootstrap(
         self, rollout_channel: Channel, env_outputs: list[EnvOutput]
     ) -> None:
-        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
+        use_rlt_stage2 = self._use_rlt_stage2()
         for stage_id in range(self.stage_num):
             env_output: EnvOutput = env_outputs[stage_id]
             env_batch = env_output.to_dict()
@@ -876,6 +876,7 @@ class EnvWorker(Worker):
                 data=data,
                 mode="train",
                 tag="rollout_results",
+                route_key=stage_id if not self.env_decoupled_mode else None,
                 decoupled_mode=self.env_decoupled_mode,
             )
 
@@ -940,17 +941,15 @@ class EnvWorker(Worker):
             for _ in range(self.stage_num)
         ]
         env_metrics = defaultdict(list)
-        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
+        use_rlt_stage2 = self._use_rlt_stage2()
         rlt_pending_obs: list[dict[str, Any] | None] = [None] * self.stage_num
 
         for epoch in range(self.rollout_epoch):
-            env_outputs = self.bootstrap_step()
-            for stage_id in range(self.stage_num):
-                if epoch == 0 and self._prefetched_train_bootstrap is not None:
-                    env_outputs = self._prefetched_train_bootstrap
-                    self._prefetched_train_bootstrap = None
-                else:
-                    env_outputs = self._bootstrap_and_send_train(rollout_channel)
+            if epoch == 0 and self._prefetched_train_bootstrap is not None:
+                env_outputs = self._prefetched_train_bootstrap
+                self._prefetched_train_bootstrap = None
+            else:
+                env_outputs = self._bootstrap_and_send_train(rollout_channel)
 
             for chunk_step_idx in range(self.n_train_chunk_steps):
                 for stage_id in range(self.stage_num):
@@ -982,6 +981,7 @@ class EnvWorker(Worker):
                         group_name=self.cfg.rollout.group_name,
                         channel=input_channel,
                         tag="train_rollout_results",
+                        route_key=stage_id if not self.env_decoupled_mode else None,
                         batch_size=self.train_batch_size,
                         merge_fn=RolloutResult.merge_rollout_results,
                         infer_batch_size_fn=self._infer_rollout_batch_size,
@@ -1048,6 +1048,7 @@ class EnvWorker(Worker):
                         data=data,
                         mode="train",
                         tag="rollout_results",
+                        route_key=stage_id if not self.env_decoupled_mode else None,
                         decoupled_mode=self.env_decoupled_mode,
                     )
                     if self.collect_transitions and not use_rlt_stage2:
@@ -1094,6 +1095,7 @@ class EnvWorker(Worker):
                     group_name=self.cfg.rollout.group_name,
                     channel=input_channel,
                     tag="train_rollout_results",
+                    route_key=stage_id if not self.env_decoupled_mode else None,
                     batch_size=self.train_batch_size,
                     merge_fn=RolloutResult.merge_rollout_results,
                     infer_batch_size_fn=self._infer_rollout_batch_size,
@@ -1179,7 +1181,7 @@ class EnvWorker(Worker):
 
     def evaluate(self, input_channel: Channel, rollout_channel: Channel):
         eval_metrics = defaultdict(list)
-        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
+        use_rlt_stage2 = self._use_rlt_stage2()
 
         for eval_rollout_epoch in range(self.eval_rollout_epoch):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
@@ -1214,6 +1216,7 @@ class EnvWorker(Worker):
                         data=data,
                         mode="eval",
                         tag="rollout_results",
+                        route_key=stage_id if not self.env_decoupled_mode else None,
                         decoupled_mode=self.env_decoupled_mode,
                     )
 
@@ -1223,6 +1226,7 @@ class EnvWorker(Worker):
                         group_name=self.cfg.rollout.group_name,
                         channel=input_channel,
                         tag="eval_rollout_results",
+                        route_key=stage_id if not self.env_decoupled_mode else None,
                         batch_size=self.eval_batch_size,
                         infer_batch_size_fn=self._infer_rollout_batch_size
                         if self.env_decoupled_mode
@@ -1270,6 +1274,7 @@ class EnvWorker(Worker):
                         data=data,
                         mode="eval",
                         tag="rollout_results",
+                        route_key=stage_id if not self.env_decoupled_mode else None,
                         decoupled_mode=self.env_decoupled_mode,
                     )
 
@@ -1282,6 +1287,9 @@ class EnvWorker(Worker):
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
 
         return eval_metrics
+
+    def _use_rlt_stage2(self) -> bool:
+        return OmegaConf.select(self.cfg, "algorithm.loss_type", default="") == "rlt_ac"
 
     def get_actor_split_num(self):
         send_num = self._component_placement.get_world_size("env") * self.stage_num
