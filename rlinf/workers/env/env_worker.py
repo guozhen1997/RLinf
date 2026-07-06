@@ -858,7 +858,7 @@ class EnvWorker(Worker):
     def _send_train_bootstrap(
         self, rollout_channel: Channel, env_outputs: list[EnvOutput]
     ) -> None:
-        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
+        use_rlt_stage2 = self._use_rlt_stage2()
         for stage_id in range(self.stage_num):
             env_output: EnvOutput = env_outputs[stage_id]
             env_batch = env_output.to_dict()
@@ -939,7 +939,7 @@ class EnvWorker(Worker):
             for _ in range(self.stage_num)
         ]
         env_metrics = defaultdict(list)
-        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
+        use_rlt_stage2 = self._use_rlt_stage2()
         rlt_pending_obs: list[dict[str, Any] | None] = [None] * self.stage_num
 
         for epoch in range(self.rollout_epoch):
@@ -1178,7 +1178,7 @@ class EnvWorker(Worker):
 
     def evaluate(self, input_channel: Channel, rollout_channel: Channel):
         eval_metrics = defaultdict(list)
-        use_rlt_stage2 = self.cfg.algorithm.get("loss_type", "") == "rlt_ac"
+        use_rlt_stage2 = self._use_rlt_stage2()
 
         for eval_rollout_epoch in range(self.eval_rollout_epoch):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
@@ -1281,6 +1281,9 @@ class EnvWorker(Worker):
             eval_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
 
         return eval_metrics
+
+    def _use_rlt_stage2(self) -> bool:
+        return OmegaConf.select(self.cfg, "algorithm.loss_type", default="") == "rlt_ac"
 
     def get_actor_split_num(self):
         send_num = self._component_placement.get_world_size("env") * self.stage_num
