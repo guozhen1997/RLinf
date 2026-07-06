@@ -69,49 +69,6 @@ class RLTACLossMixin:
         }
         return any(key in self.cfg.algorithm for key in schedule_keys)
 
-    def _use_maniskill_rlt_actor_critic_isolation(self) -> bool:
-        if str(self.cfg.algorithm.get("loss_type", "")) != "rlt_ac":
-            return False
-        train_env_cfg = self.cfg.env.get("train", None)
-        eval_env_cfg = self.cfg.env.get("eval", None)
-        train_env_type = (
-            str(train_env_cfg.get("env_type", "")) if train_env_cfg is not None else ""
-        )
-        eval_env_type = (
-            str(eval_env_cfg.get("env_type", "")) if eval_env_cfg is not None else ""
-        )
-        return train_env_type == "maniskill" or eval_env_type == "maniskill"
-
-    def _before_actor_update(self) -> None:
-        if not self._use_maniskill_rlt_actor_critic_isolation():
-            return
-        qf_optimizer = getattr(self, "qf_optimizer", None)
-        if qf_optimizer is not None:
-            qf_optimizer.zero_grad(set_to_none=True)
-
-    def _after_actor_update(self) -> None:
-        if not self._use_maniskill_rlt_actor_critic_isolation():
-            return
-        qf_optimizer = getattr(self, "qf_optimizer", None)
-        if qf_optimizer is not None:
-            qf_optimizer.zero_grad(set_to_none=True)
-
-    def _clear_qf_grad_before_actor_clip(self) -> bool:
-        if not self._use_maniskill_rlt_actor_critic_isolation():
-            return False
-        qf_optimizer = getattr(self, "qf_optimizer", None)
-        if qf_optimizer is None:
-            return False
-        qf_optimizer.zero_grad(set_to_none=True)
-        return True
-
-    def _should_update_actor(self, train_actor: bool) -> bool:
-        if not self._use_maniskill_rlt_actor_critic_isolation():
-            return super()._should_update_actor(train_actor)
-        return bool(train_actor) and (
-            int(self.update_step) % int(self.critic_actor_ratio) == 0
-        )
-
     def get_rollout_sync_version(self) -> int:
         """Expose learner update count when RLT warmup gates actor rollout."""
         if not self._use_rlt_schedule():
@@ -959,7 +916,7 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
         critic_updates_run = 0
         actor_updates_run = 0
         for _ in range(updates_to_run):
-            update_actor = self._should_update_actor(True)
+            update_actor = int(self.update_step) % int(self.critic_actor_ratio) == 0
             metrics_data = self.update_one_epoch(train_actor=True)
             append_to_dict(metrics, metrics_data)
             self.update_step += 1

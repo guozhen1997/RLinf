@@ -249,18 +249,6 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             f"{self.target_update_type=} is not suppported!"
         )
 
-    def _should_update_actor(self, train_actor: bool) -> bool:
-        return bool(train_actor) and self.update_step % self.critic_actor_ratio == 0
-
-    def _before_actor_update(self) -> None:
-        pass
-
-    def _after_actor_update(self) -> None:
-        pass
-
-    def _clear_qf_grad_before_actor_clip(self) -> bool:
-        return False
-
     def _init_target_shadow(self):
         """Create persistent float32 shadow of target model parameters.
 
@@ -608,8 +596,7 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
             **all_critic_metrics,
         }
 
-        if self._should_update_actor(train_actor):
-            self._before_actor_update()
+        if self.update_step % self.critic_actor_ratio == 0 and train_actor:
             self.optimizer.zero_grad()
             gbs_actor_loss = []
             gbs_entropy = []
@@ -625,13 +612,11 @@ class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):
                 f"actor/{key}": np.mean(value)
                 for key, value in all_actor_metrics.items()
             }
-            self._clear_qf_grad_before_actor_clip()
             actor_grad_norm = self.model.clip_grad_norm_(
                 max_norm=self.cfg.actor.optim.clip_grad
             )
             self.optimizer.step()
             self.lr_scheduler.step()
-            self._after_actor_update()
 
             # Update temperature parameter if using automatic entropy tuning
             gbs_alpha_loss = [0]
