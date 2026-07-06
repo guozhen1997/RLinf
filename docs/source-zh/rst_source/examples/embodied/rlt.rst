@@ -226,8 +226,10 @@ Stage 2 中比较关键的字段：
        enable: True
        warmup_post_collect_updates: 30000
        train_every_transitions: 5
-     actor_loss_warmup_updates: 20000
-     actor_loss_ramp_updates: 50000
+     actor_weight_schedule:
+       enable: True
+       warmup_updates: 20000
+       ramp_updates: 50000
 
    rollout:
      collect_transitions: True
@@ -600,10 +602,12 @@ ManiSkill Stage 2 中最需要确认的字段：
      - actor 上线前需要完成的 learner update 数。
    * - ``algorithm.rlt_schedule.train_every_transitions``
      - 每新增多少条 transition 增加一次训练预算。
-   * - ``algorithm.actor_loss_warmup_updates``
-     - actor loss 的 BC/Q 权重 warmup update 数；设为 ``0`` 时不使用 warmup。
-   * - ``algorithm.actor_loss_ramp_updates``
-     - actor loss 从 warmup 权重过渡到 online 权重的 update 数；设为 ``0`` 时直接切换。
+   * - ``algorithm.actor_weight_schedule.enable``
+     - 是否启用 actor 目标中 BC/Q 权重的 warmup 和 ramp。设为 ``False`` 时全程使用固定的 ``algorithm.bc_weight`` 和 ``algorithm.q_weight``。
+   * - ``algorithm.actor_weight_schedule.warmup_updates``
+     - BC/Q 权重 warmup update 数。
+   * - ``algorithm.actor_weight_schedule.ramp_updates``
+     - 从 warmup 权重过渡到 online 权重的 update 数。
    * - ``algorithm.replay_buffer.min_buffer_size``
      - replay buffer ready 的最小 transition 数。
    * - ``algorithm.replay_buffer.max_num_samples``

@@ -207,35 +207,46 @@ class RLTACLossMixin:
         }
         return bc_loss, metrics
 
-    def _actor_loss_weights(self) -> tuple[float, float, dict[str, float]]:
-        """Resolve RLT BC/Q weights with local warmup and ramp support."""
-        loss_warmup_updates = int(
-            self.cfg.algorithm.get("actor_loss_warmup_updates", 0)
+    def _actor_objective_weights(self) -> tuple[float, float, dict[str, float]]:
+        """Resolve RLT actor-objective BC/Q weights."""
+        schedule_cfg = self.cfg.algorithm.get("actor_weight_schedule", {})
+        schedule_enabled = bool(schedule_cfg.get("enable", False))
+        if not schedule_enabled:
+            bc_weight = float(self.cfg.algorithm.get("bc_weight", 1.0))
+            q_weight = float(self.cfg.algorithm.get("q_weight", 1.0))
+            return bc_weight, q_weight, {
+                "bc_weight": bc_weight,
+                "q_weight": q_weight,
+                "actor_weight_schedule_enabled": 0.0,
+                "actor_weight_in_warmup": 0.0,
+                "actor_weight_ramp_progress": 1.0,
+            }
+
+        weight_warmup_updates = int(
+            schedule_cfg.get("warmup_updates", 0)
         )
-        ramp_updates = int(
-            self.cfg.algorithm.get("actor_loss_ramp_updates", 0)
-        )
-        in_warmup = int(self.update_step) < loss_warmup_updates
+        ramp_updates = int(schedule_cfg.get("ramp_updates", 0))
+        in_warmup = int(self.update_step) < weight_warmup_updates
         warmup_bc_weight = float(
-            self.cfg.algorithm.get(
+            schedule_cfg.get(
                 "warmup_bc_weight",
                 self.cfg.algorithm.get("bc_weight", 1.0),
             )
         )
         warmup_q_weight = float(
-            self.cfg.algorithm.get(
+            schedule_cfg.get(
                 "warmup_q_weight",
                 self.cfg.algorithm.get("q_weight", 1.0),
             )
         )
         online_bc_weight = float(
-            self.cfg.algorithm.get(
+            schedule_cfg.get(
                 "online_bc_weight",
                 self.cfg.algorithm.get("bc_weight", 1.0),
             )
         )
         online_q_weight = float(
-            self.cfg.algorithm.get(
+            schedule_cfg.get(
                 "online_q_weight",
                 self.cfg.algorithm.get("q_weight", 1.0),
             )
@@ -249,7 +260,7 @@ class RLTACLossMixin:
                 1.0,
                 max(
                     0.0,
-                    float(int(self.update_step) - loss_warmup_updates + 1)
+                    float(int(self.update_step) - weight_warmup_updates + 1)
                     / float(ramp_updates),
                 ),
             )
@@ -267,8 +278,9 @@ class RLTACLossMixin:
         metrics = {
             "bc_weight": bc_weight,
             "q_weight": q_weight,
-            "actor_loss_in_warmup": float(in_warmup),
-            "actor_loss_ramp_progress": ramp_progress,
+            "actor_weight_schedule_enabled": 1.0,
+            "actor_weight_in_warmup": float(in_warmup),
+            "actor_weight_ramp_progress": ramp_progress,
         }
         return bc_weight, q_weight, metrics
 
@@ -402,7 +414,7 @@ class RLTACLossMixin:
         metrics.update(rlt_metrics)
 
         entropy = -log_pi.mean()
-        bc_weight, q_weight, weight_metrics = self._actor_loss_weights()
+        bc_weight, q_weight, weight_metrics = self._actor_objective_weights()
         actor_loss = -q_weight * qf_pi.mean() + bc_weight * bc_loss
         metrics.update(weight_metrics)
         metrics["action_ref_abs_mean"] = (
