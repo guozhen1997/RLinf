@@ -185,14 +185,8 @@ class ManiSkillRLTPolicySwitchWrapper:
         for key, value in policy_info.items():
             infos[key] = value
 
-    def chunk_step(self, chunk_actions):
+    def begin_chunk_step(self) -> dict[str, Any]:
         owner = self.owner
-        chunk_size = chunk_actions.shape[1]
-        obs_list = []
-        infos_list = []
-        chunk_rewards = []
-        raw_chunk_terminations = []
-        raw_chunk_truncations = []
         if not hasattr(self, "_persistent_done_mask"):
             self._init_persistent_done_state()
         frozen_dones = (
@@ -211,68 +205,76 @@ class ManiSkillRLTPolicySwitchWrapper:
             if frozen_dones.any() and self._persistent_done_infos is not None
             else None
         )
-        for i in range(chunk_size):
-            actions = chunk_actions[:, i]
-            if (
-                frozen_dones.all()
-                and last_extracted_obs is not None
-                and last_infos is not None
-            ):
-                extracted_obs = torch_clone_dict(last_extracted_obs)
-                infos = torch_clone_dict(last_infos)
-                step_reward = torch.zeros(
-                    owner.num_envs, device=owner.device, dtype=torch.float32
-                )
-                terminations = torch.zeros(
-                    owner.num_envs, device=owner.device, dtype=torch.bool
-                )
-                truncations = torch.zeros(
-                    owner.num_envs, device=owner.device, dtype=torch.bool
-                )
-            else:
-                state_before_step = self._snapshot_episode_state()
-                actions = self._zero_frozen_actions(actions, frozen_dones)
-                extracted_obs, step_reward, terminations, truncations, infos = (
-                    owner.step(actions, auto_reset=False)
-                )
-                if frozen_dones.any():
-                    self._restore_episode_state(state_before_step, frozen_dones)
-                    if last_extracted_obs is not None:
-                        extracted_obs = self._restore_frozen_values(
-                            extracted_obs, last_extracted_obs, frozen_dones
-                        )
-                    step_reward = step_reward.clone()
-                    step_reward[frozen_dones] = 0.0
-                    terminations = terminations.clone()
-                    truncations = truncations.clone()
-                    terminations[frozen_dones] = False
-                    truncations[frozen_dones] = False
-                    if last_infos is not None:
-                        infos = self._restore_frozen_info_values(
-                            infos, last_infos, frozen_dones
-                        )
-            obs_list.append(extracted_obs)
-            infos_list.append(infos)
+        return {
+            "frozen_dones": frozen_dones,
+            "initially_frozen_dones": initially_frozen_dones,
+            "last_extracted_obs": last_extracted_obs,
+            "last_infos": last_infos,
+        }
 
-            chunk_rewards.append(step_reward)
-            raw_chunk_terminations.append(terminations)
-            raw_chunk_truncations.append(truncations)
-            frozen_dones |= torch.logical_or(terminations, truncations)
-            last_extracted_obs = torch_clone_dict(extracted_obs)
-            last_infos = torch_clone_dict(infos)
+    def step_chunk_action(self, actions, chunk_state: dict[str, Any]):
+        owner = self.owner
+        frozen_dones = chunk_state["frozen_dones"]
+        last_extracted_obs = chunk_state["last_extracted_obs"]
+        last_infos = chunk_state["last_infos"]
 
-        chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
-        raw_chunk_terminations = torch.stack(
-            raw_chunk_terminations, dim=1
-        )  # [num_envs, chunk_steps]
-        raw_chunk_truncations = torch.stack(
-            raw_chunk_truncations, dim=1
-        )  # [num_envs, chunk_steps]
+        if (
+            frozen_dones.all()
+            and last_extracted_obs is not None
+            and last_infos is not None
+        ):
+            extracted_obs = torch_clone_dict(last_extracted_obs)
+            infos = torch_clone_dict(last_infos)
+            step_reward = torch.zeros(
+                owner.num_envs, device=owner.device, dtype=torch.float32
+            )
+            terminations = torch.zeros(
+                owner.num_envs, device=owner.device, dtype=torch.bool
+            )
+            truncations = torch.zeros(
+                owner.num_envs, device=owner.device, dtype=torch.bool
+            )
+        else:
+            state_before_step = self._snapshot_episode_state()
+            actions = self._zero_frozen_actions(actions, frozen_dones)
+            extracted_obs, step_reward, terminations, truncations, infos = owner.step(
+                actions, auto_reset=False
+            )
+            if frozen_dones.any():
+                self._restore_episode_state(state_before_step, frozen_dones)
+                if last_extracted_obs is not None:
+                    extracted_obs = self._restore_frozen_values(
+                        extracted_obs, last_extracted_obs, frozen_dones
+                    )
+                step_reward = step_reward.clone()
+                step_reward[frozen_dones] = 0.0
+                terminations = terminations.clone()
+                truncations = truncations.clone()
+                terminations[frozen_dones] = False
+                truncations[frozen_dones] = False
+                if last_infos is not None:
+                    infos = self._restore_frozen_info_values(
+                        infos, last_infos, frozen_dones
+                    )
 
-        past_terminations = raw_chunk_terminations.any(dim=1)
-        past_truncations = raw_chunk_truncations.any(dim=1)
-        past_dones = torch.logical_or(past_terminations, past_truncations)
+        frozen_dones |= torch.logical_or(terminations, truncations)
+        chunk_state["last_extracted_obs"] = torch_clone_dict(extracted_obs)
+        chunk_state["last_infos"] = torch_clone_dict(infos)
+        return extracted_obs, step_reward, terminations, truncations, infos
 
+    def finalize_chunk_step(
+        self,
+        *,
+        chunk_state: dict[str, Any],
+        obs_list: list[dict[str, Any]],
+        infos_list: list[dict[str, Any]],
+        raw_chunk_terminations: torch.Tensor,
+        raw_chunk_truncations: torch.Tensor,
+    ) -> None:
+        if not obs_list or not infos_list:
+            return
+
+        initially_frozen_dones = chunk_state["initially_frozen_dones"]
         policy_switch_chunk_dones = torch.logical_or(
             raw_chunk_terminations,
             raw_chunk_truncations,
@@ -288,22 +290,13 @@ class ManiSkillRLTPolicySwitchWrapper:
         self.sync_episode_info(infos_list[-1])
         obs_list[-1] = self.attach_obs(obs_list[-1])
 
-        if past_dones.any() and owner.auto_reset:
-            obs_list[-1], infos_list[-1] = owner._handle_auto_reset(
-                past_dones, obs_list[-1], infos_list[-1]
-            )
-        elif past_dones.any():
-            self._update_persistent_done_state(past_dones, obs_list[-1], infos_list[-1])
-
-        chunk_terminations = raw_chunk_terminations
-        chunk_truncations = raw_chunk_truncations
-        return (
-            obs_list,
-            chunk_rewards,
-            chunk_terminations,
-            chunk_truncations,
-            infos_list,
-        )
+    def update_persistent_done_state(
+        self,
+        dones: torch.Tensor,
+        extracted_obs: dict[str, Any],
+        infos: dict[str, Any],
+    ) -> None:
+        self._update_persistent_done_state(dones, extracted_obs, infos)
 
     def apply_policy_switch_info(
         self,

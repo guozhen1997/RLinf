@@ -114,6 +114,7 @@ class ManiskillEnv(gym.Env):
         self.record_metrics = record_metrics
         self._is_start = True
         self._init_reset_state_ids()
+        self.info_logging_keys = ["is_src_obj_grasped", "consecutive_grasp", "success"]
         self.rlt_policy_switch_wrapper = ManiSkillRLTPolicySwitchWrapper(
             owner=self,
             switch_cfg=getattr(cfg, "rlt_policy_switch", None),
@@ -336,10 +337,15 @@ class ManiskillEnv(gym.Env):
         if seed is not None:
             self._has_seeded_reset = True
         raw_obs, infos = self.env.reset(seed=seed, options=options)
-        env_idx = options.get("env_idx")
-        self.rlt_policy_switch_wrapper.reset_episode_event_state(env_idx)
-        self._reset_metrics(env_idx)
-        self.rlt_policy_switch_wrapper.reset_rollout_state(env_idx)
+        if "env_idx" in options:
+            env_idx = options["env_idx"]
+            self.rlt_policy_switch_wrapper.reset_episode_event_state(env_idx)
+            self._reset_metrics(env_idx)
+            self.rlt_policy_switch_wrapper.reset_rollout_state(env_idx)
+        else:
+            self.rlt_policy_switch_wrapper.reset_episode_event_state()
+            self._reset_metrics()
+            self.rlt_policy_switch_wrapper.reset_rollout_state()
         self._show_goal_site_visual()
         extracted_obs = self._wrap_obs(raw_obs, infos=infos)
         return extracted_obs, infos
@@ -358,9 +364,10 @@ class ManiskillEnv(gym.Env):
         extracted_obs = self._wrap_obs(raw_obs, infos=infos)
         step_reward = self._calc_step_reward(_reward, infos)
 
-        if self.record_metrics:
-            infos = self._record_metrics(step_reward, infos)
+        infos = self._record_metrics(step_reward, infos)
         self.rlt_policy_switch_wrapper.attach_step_info(infos)
+        if isinstance(terminations, bool):
+            terminations = torch.tensor([terminations], device=self.device)
         if isinstance(truncations, bool):
             truncations = torch.tensor([truncations], device=self.device)
             truncations = truncations.repeat(self.num_envs)
@@ -411,7 +418,73 @@ class ManiskillEnv(gym.Env):
     def chunk_step(self, chunk_actions):
         # chunk_actions: [num_envs, chunk_step, action_dim]
         self._validate_chunk_actions(chunk_actions)
-        return self.rlt_policy_switch_wrapper.chunk_step(chunk_actions)
+        chunk_size = chunk_actions.shape[1]
+        obs_list = []
+        infos_list = []
+
+        chunk_rewards = []
+
+        raw_chunk_terminations = []
+        raw_chunk_truncations = []
+        chunk_state = self.rlt_policy_switch_wrapper.begin_chunk_step()
+        for i in range(chunk_size):
+            actions = chunk_actions[:, i]
+            extracted_obs, step_reward, terminations, truncations, infos = (
+                self.rlt_policy_switch_wrapper.step_chunk_action(
+                    actions,
+                    chunk_state,
+                )
+            )
+            obs_list.append(extracted_obs)
+            infos_list.append(infos)
+
+            chunk_rewards.append(step_reward)
+            raw_chunk_terminations.append(terminations)
+            raw_chunk_truncations.append(truncations)
+
+        chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
+        raw_chunk_terminations = torch.stack(
+            raw_chunk_terminations, dim=1
+        )  # [num_envs, chunk_steps]
+        raw_chunk_truncations = torch.stack(
+            raw_chunk_truncations, dim=1
+        )  # [num_envs, chunk_steps]
+
+        past_terminations = raw_chunk_terminations.any(dim=1)
+        past_truncations = raw_chunk_truncations.any(dim=1)
+        past_dones = torch.logical_or(past_terminations, past_truncations)
+
+        self.rlt_policy_switch_wrapper.finalize_chunk_step(
+            chunk_state=chunk_state,
+            obs_list=obs_list,
+            infos_list=infos_list,
+            raw_chunk_terminations=raw_chunk_terminations,
+            raw_chunk_truncations=raw_chunk_truncations,
+        )
+
+        if past_dones.any() and self.auto_reset:
+            obs_list[-1], infos_list[-1] = self._handle_auto_reset(
+                past_dones, obs_list[-1], infos_list[-1]
+            )
+        elif past_dones.any():
+            self.rlt_policy_switch_wrapper.update_persistent_done_state(
+                past_dones,
+                obs_list[-1],
+                infos_list[-1],
+            )
+
+        chunk_terminations = torch.zeros_like(raw_chunk_terminations)
+        chunk_terminations[:, -1] = past_terminations
+
+        chunk_truncations = torch.zeros_like(raw_chunk_truncations)
+        chunk_truncations[:, -1] = past_truncations
+        return (
+            obs_list,
+            chunk_rewards,
+            chunk_terminations,
+            chunk_truncations,
+            infos_list,
+        )
 
     def _handle_auto_reset(self, dones, extracted_obs, infos):
         final_obs = torch_clone_dict(extracted_obs)
