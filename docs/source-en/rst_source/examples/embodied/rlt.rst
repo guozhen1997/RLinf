@@ -50,8 +50,9 @@ RLT separates representation learning from online RL control.
 | **You'll do:** prepare demonstrations -> train Stage 1 -> point Stage 2 at
   the Stage 1 checkpoint -> launch actor-critic training -> monitor replay-buffer and task
   success metrics.
-| **Prerequisites:** install the OpenPI π₀.₅ checkpoint and prepare the
-  :doc:`Franka real-world setup <../embodied/franka>` or the
+| **Prerequisites:** download or prepare the
+  `OpenPI π₀.₅ checkpoint <https://huggingface.co/lerobot/pi05_base>`__, and
+  prepare the :doc:`Franka real-world setup <../embodied/franka>` or the
   :doc:`ManiSkill simulator setup <../embodied/maniskill>`.
 
 Provided Configuration Files
@@ -210,12 +211,12 @@ During rollout:
    next_obs = {next_z_rl, next_proprio, next_ref_chunk}
 
 For the provided real-robot config, ``keyboard_reward_wrapper:
-rlt_policy_switch`` adds an ``rlt_use_actor`` flag. Before the operator presses
+rlt_policy_switch`` adds an ``rlt_switch_flags`` flag. Before the operator presses
 ``b``, the executed action is the VLA ``ref_chunk``; after ``b`` is pressed,
 the executed action switches to the Stage 2 actor.
 
 For the ManiSkill joint config, ``env.*.rlt_policy_switch`` automatically
-produces ``rlt_use_actor``, ``in_critical_phase``, and ``record_transition``
+produces ``rlt_switch_flags``, ``in_critical_phase``, and ``record_transition``
 from task information. The HF rollout worker uses those flags to choose the
 actor action or VLA ``ref_chunk`` at whole-chunk granularity, then writes the
 executed action into replay.
@@ -238,8 +239,8 @@ Important Stage 2 fields:
    # examples/embodiment/config/rlt_stage2_ac_mlp.yaml
    algorithm:
      loss_type: rlt_ac
-     q_weight: 0.5
-     bc_weight: 10
+     q_weight: 0.1
+     bc_weight: 5
      reference_dropout_prob: 0.5
      gamma: 0.96
      entropy_tuning:
@@ -545,9 +546,9 @@ Launch training:
 
    bash examples/sft/run_vla_sft.sh rlt_stage1_maniskill_joint_alpha1
 
-Stage 2 uses this Stage 1 actor directory as ``rlt.stage1_model_path``. The
-directory must contain VLA weights, RLT token transformer weights, and matching
-OpenPI assets.
+Stage 2 uses this Stage 1 actor directory as
+``rollout.rlt_feature_model.model_path``. The directory must contain VLA
+weights, RLT token transformer weights, and matching OpenPI assets.
 
 Stage 2: Run ManiSkill RLT Actor-Critic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -556,12 +557,6 @@ Edit the Stage 1 checkpoint in
 ``examples/embodiment/config/rlt_stage2_maniskill_joint_ac.yaml``:
 
 .. code:: yaml
-
-   rlt:
-     stage1_model_path: /path/to/rlt_stage1_maniskill_joint_alpha1/checkpoints/global_step_<step>/actor
-     openpi_repo_id: maniskill_peginsertionside_joint
-     openpi_config_name: pi05_rlt_maniskill_joint
-     expert_model_path: ChikaYokoyama/rlt-maniskill-sft-step-8000
 
    env:
      train:
@@ -578,8 +573,14 @@ Edit the Stage 1 checkpoint in
          trigger_mode: auto
 
    rollout:
+     rlt_feature_model:
+       model_path: /path/to/rlt_stage1_maniskill_joint_alpha1/checkpoints/global_step_<step>/actor
+       openpi_data:
+         repo_id: maniskill_peginsertionside_joint
+       openpi:
+         config_name: pi05_rlt_maniskill_joint
      expert_model:
-       model_path: ${rlt.expert_model_path}
+       model_path: /path/to/rlt_maniskill_joint_pi05_sft/checkpoints/global_step_<step>/actor
        precision: null
        openpi:
          use_rlt: False
@@ -605,12 +606,9 @@ the critical phase and store those expert actions as intervention targets:
 
 .. code:: yaml
 
-   rlt:
-     expert_model_path: ChikaYokoyama/rlt-maniskill-sft-step-8000
-
    rollout:
      expert_model:
-       model_path: ${rlt.expert_model_path}
+       model_path: /path/to/rlt_maniskill_joint_pi05_sft/checkpoints/global_step_<step>/actor
        precision: null
        openpi:
          use_rlt: False
@@ -622,10 +620,11 @@ the critical phase and store those expert actions as intervention targets:
            enable: True
            trigger_mode: critical_phase
 
-You can replace ``rlt.expert_model_path`` with a more fully trained
-joint-control SFT checkpoint. Keep the expert's OpenPI dataconfig and norm stats
-aligned with the Stage 2 dataset. The expert is only used for train rollout;
-eval rollout keeps ``allow_expert=False`` and measures the learned actor.
+You can replace ``rollout.expert_model.model_path`` with a more fully trained
+joint-control SFT checkpoint. Keep the expert's OpenPI dataconfig and norm
+stats aligned with the Stage 2 dataset. The expert is only used for train
+rollout; eval rollout keeps ``allow_expert=False`` and measures the learned
+actor.
 
 Confirm these ManiSkill Stage 2 fields first:
 
@@ -654,7 +653,7 @@ Confirm these ManiSkill Stage 2 fields first:
    * - ``algorithm.actor_agg_q``
      - Q aggregation used by the actor loss. The current ManiSkill config uses ``q1``.
    * - ``env.*.rlt_policy_switch``
-     - Produces ``rlt_use_actor``, ``in_critical_phase``, and ``record_transition`` automatically.
+     - Produces ``rlt_switch_flags``, ``in_critical_phase``, and ``record_transition`` automatically.
 
 Replay Buffer Behavior
 ----------------------

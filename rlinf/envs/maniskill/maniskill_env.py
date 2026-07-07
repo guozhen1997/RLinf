@@ -398,7 +398,7 @@ class ManiskillEnv(gym.Env):
             self.fail_once = self.fail_once | infos["fail"]
             episode_info["fail_once"] = self.fail_once.clone()
         for key in (
-            "rlt_use_actor",
+            "rlt_switch_flags",
             "entered_actor_phase_once",
             "actor_switch_step",
             "actor_switch_step_nonzero",
@@ -732,7 +732,7 @@ class ManiskillEnv(gym.Env):
         if not isinstance(infos, dict) or "episode" not in infos:
             return
         for key in (
-            "rlt_use_actor",
+            "rlt_switch_flags",
             "entered_actor_phase_once",
             "actor_switch_step",
             "actor_switch_step_nonzero",

@@ -79,7 +79,7 @@ class ManiSkillRLTPolicySwitchController:
         task_mode = str(self.cfg.get("task_mode", self.FULL_TASK))
         start_active = task_mode == self.CRITICAL_PHASE
         return {
-            "rlt_use_actor": torch.full(
+            "rlt_switch_flags": torch.full(
                 (batch_size,),
                 start_active,
                 dtype=torch.bool,
@@ -115,7 +115,7 @@ class ManiSkillRLTPolicySwitchController:
     def export_obs(self, *, device: torch.device) -> dict[str, torch.Tensor]:
         state = self._state_to(device)
         return {
-            "rlt_use_actor": state["rlt_use_actor"][:, None],
+            "rlt_switch_flags": state["rlt_switch_flags"][:, None],
         }
 
     def update(
@@ -142,14 +142,14 @@ class ManiSkillRLTPolicySwitchController:
                 f"{task_mode=} {trigger_mode=}."
             )
 
-        previous_use_actor = state["rlt_use_actor"]
+        previous_switch_flags = state["rlt_switch_flags"]
         latch_until_done = bool(self.cfg.get("latch_until_done", True))
         if latch_until_done:
-            use_actor = previous_use_actor | enter_actor
+            switch_flags = previous_switch_flags | enter_actor
         else:
-            use_actor = enter_actor
+            switch_flags = enter_actor
 
-        switched_now = (~previous_use_actor) & use_actor
+        switched_now = (~previous_switch_flags) & switch_flags
         elapsed_steps = self._elapsed_steps(infos, device)
         state["actor_switch_step"] = torch.where(
             switched_now,
@@ -157,9 +157,9 @@ class ManiSkillRLTPolicySwitchController:
             state["actor_switch_step"],
         )
         state["entered_actor_phase_once"] = (
-            state["entered_actor_phase_once"] | use_actor | switched_now
+            state["entered_actor_phase_once"] | switch_flags | switched_now
         )
-        state["rlt_use_actor"] = use_actor
+        state["rlt_switch_flags"] = switch_flags
         self._update_expert_takeover_state(infos=infos, device=device)
 
         return self.export_info(device=device, infos=infos, chunk_dones=chunk_dones)
@@ -173,7 +173,7 @@ class ManiSkillRLTPolicySwitchController:
     ) -> dict[str, torch.Tensor]:
         state = self._state_to(device)
         expert_takeover = self._expert_takeover_mask(infos=infos, device=device)
-        record_transition = state["rlt_use_actor"]
+        record_transition = state["rlt_switch_flags"]
         if chunk_dones is not None:
             chunk_done_mask = torch.as_tensor(
                 chunk_dones,
@@ -182,7 +182,7 @@ class ManiSkillRLTPolicySwitchController:
             ).reshape(self.batch_size, -1)
             record_transition = record_transition & (~chunk_done_mask.any(dim=1))
         return {
-            "rlt_use_actor": state["rlt_use_actor"][:, None],
+            "rlt_switch_flags": state["rlt_switch_flags"][:, None],
             "entered_actor_phase_once": state["entered_actor_phase_once"][:, None],
             "actor_switch_step": state["actor_switch_step"][:, None],
             "actor_switch_step_nonzero": torch.where(
@@ -190,7 +190,7 @@ class ManiSkillRLTPolicySwitchController:
                 state["actor_switch_step"],
                 torch.zeros_like(state["actor_switch_step"]),
             )[:, None],
-            "in_critical_phase": state["rlt_use_actor"][:, None],
+            "in_critical_phase": state["rlt_switch_flags"][:, None],
             # Match real-world RLT: only the latched critical phase is stored
             # for Stage2 replay. This must not depend on learner warmup.
             "record_transition": record_transition[:, None],
@@ -216,15 +216,15 @@ class ManiSkillRLTPolicySwitchController:
         trigger_mode = str(expert_cfg.get("trigger_mode", "critical_phase"))
         state = self._state_to(device)
         if trigger_mode == "critical_phase":
-            return state["rlt_use_actor"].clone()
+            return state["rlt_switch_flags"].clone()
         if trigger_mode == self.INTERVENTION_GATE_TRIGGER:
-            return state["rlt_use_actor"] & self._expert_intervention_gate(
+            return state["rlt_switch_flags"] & self._expert_intervention_gate(
                 infos=infos,
                 expert_cfg=expert_cfg,
                 device=device,
             )
         if trigger_mode == self.STALLED_PROGRESS_TRIGGER:
-            takeover = state["rlt_use_actor"] & state["expert_takeover_active"]
+            takeover = state["rlt_switch_flags"] & state["expert_takeover_active"]
             if infos is not None:
                 takeover = takeover & (
                     ~self._info_bool(infos, "success_current", device)
@@ -278,7 +278,7 @@ class ManiSkillRLTPolicySwitchController:
         state = self._state_to(device)
         gate_cfg = expert_cfg.get("gate", {})
 
-        in_critical_phase = state["rlt_use_actor"]
+        in_critical_phase = state["rlt_switch_flags"]
         success = self._info_bool(infos, "success_current", device)
         active_before = state["expert_takeover_active"] & in_critical_phase & (
             ~success

@@ -12,30 +12,6 @@ hydra:
   searchpath:
     - file://${oc.env:EMBODIED_PATH}/config/
 
-rlt:
-  task_name: "maniskill_joint_peg_insertion"
-  stage1_model_path: "/path/to/rlt_stage1_maniskill_joint_alpha1/checkpoints/global_step_<step>/actor"
-  openpi_repo_id: "maniskill_peginsertionside_joint"
-  openpi_config_name: "pi05_rlt_maniskill_joint"
-  default_prompt: "insert the peg in the hole"
-  expert_model_path: "/path/to/rlt_maniskill_joint_pi05_sft/checkpoints/global_step_<step>/actor"
-
-  action_dim: 8
-  proprio_dim: 9
-  num_action_chunks: 10
-  ref_num_action_chunks: 10
-  vla_num_steps: 5
-
-  z_dim: 2048
-  num_rl_tokens: 1
-  rlt_input_dim: 2048
-  rlt_embed_dim: 2048
-  rlt_prefix_seq_len: 1024
-  rlt_num_layers: 2
-  rlt_num_heads: 8
-  rlt_mlp_ratio: 4.0
-  rlt_encoder_type: "append_self_attention"
-
 cluster:
   num_nodes: 1
   component_placement:
@@ -54,7 +30,6 @@ runner:
   max_epochs: 5000
   max_steps: -1
   only_eval: False
-  eval_only_after_resume: False
   weight_sync_interval: 1
   val_check_interval: 25
   eval_before_train: False
@@ -72,8 +47,6 @@ algorithm:
     train_every_episodes: 0
     train_every_transitions: 5
   group_size: 1
-  rollout_epoch: 1
-  eval_rollout_epoch: 1
 
   adv_type: embodied_sac
   loss_type: rlt_ac
@@ -172,9 +145,9 @@ env:
           fallback_hole_radius: 0.03
     max_episode_steps: 500
     max_steps_per_rollout_epoch: 500
-    action_dim: ${rlt.action_dim}
-    num_action_chunks: ${rlt.num_action_chunks}
-    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
+    action_dim: 8
+    num_action_chunks: 10
+    ref_num_action_chunks: 10
     init_params:
       id: "PegInsertionSideWideClearance-v1"
       obs_mode: "rgb"
@@ -226,9 +199,9 @@ env:
     max_steps_per_rollout_epoch: 500
     policy_mode: eval
     group_size: 1
-    action_dim: ${rlt.action_dim}
-    num_action_chunks: ${rlt.num_action_chunks}
-    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
+    action_dim: 8
+    num_action_chunks: 10
+    ref_num_action_chunks: 10
     video_cfg:
       save_video: False
       fps: 10
@@ -272,43 +245,43 @@ rollout:
 
   rlt_feature_model:
     model_type: "openpi"
-    model_path: ${rlt.stage1_model_path}
+    model_path: "/path/to/rlt_stage1_maniskill_joint_alpha1/checkpoints/global_step_<step>/actor"
     precision: null
-    num_action_chunks: ${rlt.ref_num_action_chunks}
-    action_dim: ${rlt.action_dim}
+    num_action_chunks: 10
+    action_dim: 8
     add_value_head: False
     is_lora: False
     lora_rank: 32
     openpi_data:
-      repo_id: ${rlt.openpi_repo_id}
-      default_prompt: ${rlt.default_prompt}
+      repo_id: "maniskill_peginsertionside_joint"
+      default_prompt: "insert the peg in the hole"
     openpi:
-      config_name: ${rlt.openpi_config_name}
+      config_name: "pi05_rlt_maniskill_joint"
       num_images_in_input: 2
-      action_chunk: ${rlt.ref_num_action_chunks}
-      action_horizon: ${rlt.ref_num_action_chunks}
-      action_env_dim: ${rlt.action_dim}
-      num_steps: ${rlt.vla_num_steps}
+      action_chunk: 10
+      action_horizon: 10
+      action_env_dim: 8
+      num_steps: 5
       train_expert_only: False
       add_value_head: False
       detach_critic_input: True
       use_rlt: True
       rlt_alpha: 1.0
-      rlt_input_dim: ${rlt.rlt_input_dim}
-      rlt_embed_dim: ${rlt.rlt_embed_dim}
-      rlt_num_rl_tokens: ${rlt.num_rl_tokens}
-      rlt_prefix_seq_len: ${rlt.rlt_prefix_seq_len}
-      rlt_num_layers: ${rlt.rlt_num_layers}
-      rlt_num_heads: ${rlt.rlt_num_heads}
-      rlt_mlp_ratio: ${rlt.rlt_mlp_ratio}
-      rlt_encoder_type: ${rlt.rlt_encoder_type}
+      rlt_input_dim: 2048
+      rlt_embed_dim: 2048
+      rlt_num_rl_tokens: 1
+      rlt_prefix_seq_len: 1024
+      rlt_num_layers: 2
+      rlt_num_heads: 8
+      rlt_mlp_ratio: 4.0
+      rlt_encoder_type: "append_self_attention"
       rlt_image_only: False
       rlt_use_mask: True
 
   # Optional ManiSkill expert takeover model. Enable it with
   # env.train.rlt_policy_switch.expert_takeover.enable=True.
   expert_model:
-    model_path: ${rlt.expert_model_path}
+    model_path: "/path/to/rlt_maniskill_joint_pi05_sft/checkpoints/global_step_<step>/actor"
     precision: null
     openpi:
       use_rlt: False
@@ -329,11 +302,11 @@ actor:
     # RLT AC keeps the small Stage2 head in fp32 for Q-learning stability.
     precision: fp32
     policy_setup: "panda-qpos"
-    action_dim: ${rlt.action_dim}
-    num_action_chunks: ${rlt.num_action_chunks}
-    ref_num_action_chunks: ${rlt.ref_num_action_chunks}
-    z_dim: ${rlt.z_dim}
-    proprio_dim: ${rlt.proprio_dim}
+    action_dim: 8
+    num_action_chunks: 10
+    ref_num_action_chunks: 10
+    z_dim: 2048
+    proprio_dim: 9
     add_value_head: False
     add_q_head: True
     q_head_type: "default"

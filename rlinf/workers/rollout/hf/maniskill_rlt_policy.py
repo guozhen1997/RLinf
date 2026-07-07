@@ -268,7 +268,7 @@ class ManiSkillRLTPolicyMixin:
         rlt_switch_flags: torch.Tensor | None,
     ) -> torch.Tensor:
         if rlt_switch_flags is None:
-            rlt_switch_flags = env_obs.get("rlt_use_actor", None)
+            rlt_switch_flags = env_obs.get("rlt_switch_flags", None)
         if rlt_switch_flags is None:
             rlt_switch_flags = torch.full(
                 (actions.shape[0], actions.shape[1]),
@@ -349,8 +349,8 @@ class ManiSkillRLTPolicyMixin:
             policy_info = env_infos["policy_info"]
 
         ready_for_online = self._rlt_ready_for_online()
-        use_actor = env_obs.get("rlt_use_actor", None)
-        if use_actor is None:
+        switch_flags = env_obs.get("rlt_switch_flags", None)
+        if switch_flags is None:
             fallback_critical_phase = torch.zeros(
                 (batch_size,),
                 dtype=torch.bool,
@@ -358,7 +358,7 @@ class ManiSkillRLTPolicyMixin:
             )
         else:
             fallback_critical_phase = torch.as_tensor(
-                use_actor,
+                switch_flags,
                 device=actions.device,
             ).bool().reshape(batch_size, -1).any(dim=1)
         in_critical_phase = self._policy_info_bool(
@@ -383,7 +383,7 @@ class ManiSkillRLTPolicyMixin:
             & bool(allow_expert)
             & (mode == "train")
         )
-        if use_actor is None:
+        if switch_flags is None:
             actor_control = (
                 torch.full(
                     (batch_size,),
@@ -395,7 +395,7 @@ class ManiSkillRLTPolicyMixin:
             )
         else:
             actor_control = torch.as_tensor(
-                use_actor, device=actions.device
+                switch_flags, device=actions.device
             ).bool().reshape(batch_size, -1).any(dim=1)
             if self._use_rlt_schedule():
                 actor_control = actor_control & torch.full(
