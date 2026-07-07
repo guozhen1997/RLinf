@@ -12,36 +12,450 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Automatic RLT policy switch controller for ManiSkill peg insertion."""
+"""ManiSkill-specific RLT policy switch integration.
+
+This is intentionally a composition helper for ``ManiskillEnv`` instead of a
+``gym.Wrapper``. The switch touches chunk-level rollout state, metrics, reset
+bookkeeping, and RLT OpenPI observations that live in RLinf's ManiSkill adapter.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import torch
+from mani_skill.utils.common import torch_clone_dict
 from omegaconf import DictConfig
+from rlinf.envs.maniskill.peg_insertion_side_variants import (
+    RLT_OPENPI_JOINT_WRAP_MODE,
+    init_peg_insertion_event_state,
+    is_peg_insertion_side_env_id,
+    maybe_augment_peg_insertion_info,
+    patch_rlt_openpi_joint_env_args,
+    reset_peg_insertion_event_state,
+    resolve_maniskill_task_descriptions,
+    restore_peg_insertion_event_state,
+    snapshot_peg_insertion_event_state,
+    wrap_rlt_openpi_joint_obs,
+)
 
 
-def build_maniskill_rlt_policy_switch_controller(
-    *,
-    switch_cfg: DictConfig | None,
-    is_peg_insertion_side: bool,
-    env,
-    batch_size: int,
-) -> "ManiSkillRLTPolicySwitchController | None":
-    if switch_cfg is None:
-        return None
-    if not bool(switch_cfg.get("enable", False)):
-        return None
-    if not is_peg_insertion_side:
-        raise ValueError(
-            "ManiSkill RLT policy switch is only supported for peg-insertion tasks."
-        )
-    return ManiSkillRLTPolicySwitchController(
-        cfg=switch_cfg,
-        batch_size=batch_size,
-        hole_radii=getattr(env, "box_hole_radii", None),
+class ManiSkillRLTPolicySwitchWrapper:
+    """RLT policy switch helper owned by ``ManiskillEnv``."""
+
+    POLICY_INFO_KEYS = (
+        "rlt_switch_flags",
+        "entered_actor_phase_once",
+        "actor_switch_step",
+        "actor_switch_step_nonzero",
     )
+
+    def __init__(
+        self,
+        *,
+        owner,
+        switch_cfg: DictConfig | None,
+        is_peg_insertion_side: bool,
+    ) -> None:
+        self.owner = owner
+        self.switch_cfg = switch_cfg
+        self.is_peg_insertion_side = is_peg_insertion_side
+        self.peg_event_state = (
+            init_peg_insertion_event_state(
+                num_envs=self.owner.num_envs,
+                device=self.owner.device,
+            )
+            if self.is_peg_insertion_side
+            else None
+        )
+        self.controller = self._build_controller()
+        self._init_persistent_done_state()
+
+    @staticmethod
+    def is_peg_insertion_side_env_id(env_id: str | None) -> bool:
+        return is_peg_insertion_side_env_id(env_id)
+
+    @staticmethod
+    def patch_env_args(
+        env_args: dict[str, Any],
+        *,
+        wrap_obs_mode: str,
+    ) -> dict[str, Any]:
+        return patch_rlt_openpi_joint_env_args(
+            env_args,
+            wrap_obs_mode=wrap_obs_mode,
+        )
+
+    def _build_controller(self) -> "ManiSkillRLTPolicySwitchController | None":
+        if self.switch_cfg is None:
+            return None
+        if not bool(self.switch_cfg.get("enable", False)):
+            return None
+        if not self.is_peg_insertion_side:
+            raise ValueError(
+                "ManiSkill RLT policy switch is only supported for peg-insertion "
+                "tasks."
+            )
+        return ManiSkillRLTPolicySwitchController(
+            cfg=self.switch_cfg,
+            batch_size=self.owner.num_envs,
+            hole_radii=getattr(self.owner.env.unwrapped, "box_hole_radii", None),
+        )
+
+    def resolve_task_descriptions(self, env):
+        return resolve_maniskill_task_descriptions(
+            env,
+            num_envs=self.owner.num_envs,
+            is_peg_insertion_side=self.is_peg_insertion_side,
+        )
+
+    def handles_obs_mode(self, wrap_obs_mode: str) -> bool:
+        return wrap_obs_mode == RLT_OPENPI_JOINT_WRAP_MODE
+
+    def wrap_obs(
+        self,
+        raw_obs: dict[str, Any],
+        *,
+        infos: dict[str, Any] | None,
+        task_descriptions,
+    ) -> dict[str, Any]:
+        if self.owner.env.unwrapped.obs_mode != "rgb":
+            raise ValueError(
+                "wrap_obs_mode='rlt_openpi_joint' requires ManiSkill obs_mode='rgb'."
+            )
+        obs = wrap_rlt_openpi_joint_obs(
+            raw_obs,
+            infos=infos,
+            task_descriptions=task_descriptions,
+            num_envs=self.owner.num_envs,
+            device=self.owner.device,
+            is_peg_insertion_side=self.is_peg_insertion_side,
+        )
+        return self.attach_obs(obs)
+
+    def attach_obs(self, obs: dict[str, Any]) -> dict[str, Any]:
+        if self.controller is None:
+            return obs
+        obs.update(self.controller.export_obs(device=self.owner.device))
+        return obs
+
+    def reset_episode_event_state(self, env_idx=None) -> None:
+        if self.peg_event_state is None:
+            return
+        reset_peg_insertion_event_state(
+            self.peg_event_state,
+            env_idx=env_idx,
+        )
+
+    def reset_rollout_state(self, env_idx=None) -> None:
+        self._reset_persistent_done_state(env_idx)
+        if self.controller is not None:
+            self.controller.reset(env_idx=env_idx)
+
+    def augment_step_info(self, infos: dict[str, Any]) -> dict[str, Any]:
+        infos = maybe_augment_peg_insertion_info(
+            env=self.owner.env.unwrapped,
+            infos=infos,
+            event_state=self.peg_event_state,
+            device=self.owner.device,
+            is_peg_insertion_side=self.is_peg_insertion_side,
+        )
+        infos["elapsed_steps"] = self.owner.elapsed_steps.clone()
+        return infos
+
+    def record_metrics(
+        self,
+        episode_info: dict[str, torch.Tensor],
+        infos: dict[str, Any],
+    ) -> None:
+        for key in self.POLICY_INFO_KEYS:
+            if key in infos:
+                value = infos[key]
+                if isinstance(value, torch.Tensor):
+                    episode_info[key] = value.reshape(self.owner.num_envs, -1)[
+                        :, -1
+                    ].clone()
+
+    def attach_step_info(self, infos: dict[str, Any]) -> None:
+        if self.controller is None:
+            return
+        policy_info = self.controller.export_info(device=self.owner.device)
+        infos["policy_info"] = policy_info
+        for key, value in policy_info.items():
+            infos[key] = value
+
+    def chunk_step(self, chunk_actions):
+        owner = self.owner
+        chunk_size = chunk_actions.shape[1]
+        obs_list = []
+        infos_list = []
+        chunk_rewards = []
+        raw_chunk_terminations = []
+        raw_chunk_truncations = []
+        if not hasattr(self, "_persistent_done_mask"):
+            self._init_persistent_done_state()
+        frozen_dones = (
+            self._persistent_done_mask.clone()
+            if not owner.auto_reset
+            else torch.zeros(owner.num_envs, device=owner.device, dtype=torch.bool)
+        )
+        initially_frozen_dones = frozen_dones.clone()
+        last_extracted_obs = (
+            torch_clone_dict(self._persistent_done_obs)
+            if frozen_dones.any() and self._persistent_done_obs is not None
+            else None
+        )
+        last_infos = (
+            torch_clone_dict(self._persistent_done_infos)
+            if frozen_dones.any() and self._persistent_done_infos is not None
+            else None
+        )
+        for i in range(chunk_size):
+            actions = chunk_actions[:, i]
+            if (
+                frozen_dones.all()
+                and last_extracted_obs is not None
+                and last_infos is not None
+            ):
+                extracted_obs = torch_clone_dict(last_extracted_obs)
+                infos = torch_clone_dict(last_infos)
+                step_reward = torch.zeros(
+                    owner.num_envs, device=owner.device, dtype=torch.float32
+                )
+                terminations = torch.zeros(
+                    owner.num_envs, device=owner.device, dtype=torch.bool
+                )
+                truncations = torch.zeros(
+                    owner.num_envs, device=owner.device, dtype=torch.bool
+                )
+            else:
+                state_before_step = self._snapshot_episode_state()
+                actions = self._zero_frozen_actions(actions, frozen_dones)
+                extracted_obs, step_reward, terminations, truncations, infos = (
+                    owner.step(actions, auto_reset=False)
+                )
+                if frozen_dones.any():
+                    self._restore_episode_state(state_before_step, frozen_dones)
+                    if last_extracted_obs is not None:
+                        extracted_obs = self._restore_frozen_values(
+                            extracted_obs, last_extracted_obs, frozen_dones
+                        )
+                    step_reward = step_reward.clone()
+                    step_reward[frozen_dones] = 0.0
+                    terminations = terminations.clone()
+                    truncations = truncations.clone()
+                    terminations[frozen_dones] = False
+                    truncations[frozen_dones] = False
+                    if last_infos is not None:
+                        infos = self._restore_frozen_info_values(
+                            infos, last_infos, frozen_dones
+                        )
+            obs_list.append(extracted_obs)
+            infos_list.append(infos)
+
+            chunk_rewards.append(step_reward)
+            raw_chunk_terminations.append(terminations)
+            raw_chunk_truncations.append(truncations)
+            frozen_dones |= torch.logical_or(terminations, truncations)
+            last_extracted_obs = torch_clone_dict(extracted_obs)
+            last_infos = torch_clone_dict(infos)
+
+        chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
+        raw_chunk_terminations = torch.stack(
+            raw_chunk_terminations, dim=1
+        )  # [num_envs, chunk_steps]
+        raw_chunk_truncations = torch.stack(
+            raw_chunk_truncations, dim=1
+        )  # [num_envs, chunk_steps]
+
+        past_terminations = raw_chunk_terminations.any(dim=1)
+        past_truncations = raw_chunk_truncations.any(dim=1)
+        past_dones = torch.logical_or(past_terminations, past_truncations)
+
+        policy_switch_chunk_dones = torch.logical_or(
+            raw_chunk_terminations,
+            raw_chunk_truncations,
+        )
+        if initially_frozen_dones.any():
+            policy_switch_chunk_dones = policy_switch_chunk_dones | (
+                initially_frozen_dones[:, None].expand_as(policy_switch_chunk_dones)
+            )
+        self.apply_policy_switch_info(
+            infos_list=infos_list,
+            chunk_dones=policy_switch_chunk_dones,
+        )
+        self.sync_episode_info(infos_list[-1])
+        obs_list[-1] = self.attach_obs(obs_list[-1])
+
+        if past_dones.any() and owner.auto_reset:
+            obs_list[-1], infos_list[-1] = owner._handle_auto_reset(
+                past_dones, obs_list[-1], infos_list[-1]
+            )
+        elif past_dones.any():
+            self._update_persistent_done_state(past_dones, obs_list[-1], infos_list[-1])
+
+        chunk_terminations = raw_chunk_terminations
+        chunk_truncations = raw_chunk_truncations
+        return (
+            obs_list,
+            chunk_rewards,
+            chunk_terminations,
+            chunk_truncations,
+            infos_list,
+        )
+
+    def apply_policy_switch_info(
+        self,
+        *,
+        infos_list: list[dict[str, Any]],
+        chunk_dones: torch.Tensor,
+    ) -> None:
+        if self.controller is None:
+            return
+        infos_last = infos_list[-1]
+        policy_info = self.controller.update(
+            infos=infos_last,
+            chunk_dones=chunk_dones,
+        )
+        infos_last["policy_info"] = policy_info
+        for key, value in policy_info.items():
+            infos_last[key] = value
+        infos_list[-1] = infos_last
+
+    def sync_episode_info(self, infos: dict[str, Any]) -> None:
+        if not isinstance(infos, dict) or "episode" not in infos:
+            return
+        for key in self.POLICY_INFO_KEYS:
+            if key in infos:
+                infos["episode"][key] = infos[key].reshape(self.owner.num_envs, -1)[
+                    :, -1
+                ].clone()
+
+    def _init_persistent_done_state(self) -> None:
+        self._persistent_done_mask = torch.zeros(
+            self.owner.num_envs, device=self.owner.device, dtype=torch.bool
+        )
+        self._persistent_done_obs = None
+        self._persistent_done_infos = None
+
+    def _reset_persistent_done_state(self, env_idx=None) -> None:
+        if not hasattr(self, "_persistent_done_mask"):
+            self._init_persistent_done_state()
+            return
+
+        if env_idx is None:
+            self._persistent_done_mask.zero_()
+            self._persistent_done_obs = None
+            self._persistent_done_infos = None
+            return
+
+        self._persistent_done_mask[env_idx] = False
+
+    def _update_persistent_done_state(
+        self,
+        dones: torch.Tensor,
+        extracted_obs: dict[str, Any],
+        infos: dict[str, Any],
+    ) -> None:
+        if self.owner.auto_reset or not dones.any():
+            return
+
+        newly_done = dones & (~self._persistent_done_mask)
+        if not newly_done.any():
+            return
+
+        if self._persistent_done_obs is None:
+            self._persistent_done_obs = torch_clone_dict(extracted_obs)
+        else:
+            self._persistent_done_obs = self._restore_frozen_values(
+                self._persistent_done_obs, extracted_obs, newly_done
+            )
+
+        if self._persistent_done_infos is None:
+            self._persistent_done_infos = torch_clone_dict(infos)
+        else:
+            self._persistent_done_infos = self._restore_frozen_values(
+                self._persistent_done_infos, infos, newly_done
+            )
+
+        self._persistent_done_mask |= newly_done
+
+    def _snapshot_episode_state(self) -> dict[str, Any]:
+        state = {
+            "prev_step_reward": self.owner.prev_step_reward.clone(),
+        }
+        if self.owner.record_metrics:
+            state.update(
+                {
+                    "success_once": self.owner.success_once.clone(),
+                    "fail_once": self.owner.fail_once.clone(),
+                    "returns": self.owner.returns.clone(),
+                }
+            )
+        if self.peg_event_state is not None:
+            state["peg_event_state"] = snapshot_peg_insertion_event_state(
+                self.peg_event_state
+            )
+        return state
+
+    def _restore_episode_state(self, state: dict[str, Any], mask: torch.Tensor) -> None:
+        self.owner.prev_step_reward[mask] = state["prev_step_reward"][mask]
+        if self.owner.record_metrics:
+            self.owner.success_once[mask] = state["success_once"][mask]
+            self.owner.fail_once[mask] = state["fail_once"][mask]
+            self.owner.returns[mask] = state["returns"][mask]
+        if self.peg_event_state is not None:
+            restore_peg_insertion_event_state(
+                self.peg_event_state,
+                state["peg_event_state"],
+                mask,
+            )
+
+    def _zero_frozen_actions(self, actions, mask):
+        if not mask.any():
+            return actions
+        if isinstance(actions, torch.Tensor):
+            frozen_mask = mask.to(device=actions.device)
+            actions = actions.clone()
+            actions[frozen_mask] = 0.0
+            return actions
+
+        frozen_mask = mask.detach().cpu().numpy()
+        actions = np.asarray(actions).copy()
+        actions[frozen_mask] = 0.0
+        return actions
+
+    def _restore_frozen_values(self, values, previous_values, mask):
+        if not isinstance(values, dict) or not isinstance(previous_values, dict):
+            return values
+
+        restored = torch_clone_dict(values)
+        for key, prev_value in previous_values.items():
+            if key not in restored:
+                continue
+            value = restored[key]
+            if isinstance(value, torch.Tensor) and isinstance(prev_value, torch.Tensor):
+                if value.ndim > 0 and value.shape[0] == self.owner.num_envs:
+                    value_mask = mask.to(device=value.device)
+                    value[value_mask] = prev_value.to(value.device)[value_mask]
+            elif isinstance(value, dict) and isinstance(prev_value, dict):
+                restored[key] = self._restore_frozen_values(
+                    value, prev_value, mask
+                )
+            elif isinstance(value, list) and isinstance(prev_value, list):
+                mask_cpu = mask.detach().cpu().numpy()
+                for env_idx, should_restore in enumerate(mask_cpu):
+                    if (
+                        should_restore
+                        and env_idx < len(value)
+                        and env_idx < len(prev_value)
+                    ):
+                        value[env_idx] = prev_value[env_idx]
+        return restored
+
+    def _restore_frozen_info_values(self, infos, previous_infos, mask):
+        return self._restore_frozen_values(infos, previous_infos, mask)
 
 
 class ManiSkillRLTPolicySwitchController:
@@ -600,34 +1014,3 @@ class ManiSkillRLTPolicySwitchController:
         for key, value in self.state.items():
             self.state[key] = value.to(device)
         return self.state
-
-
-def attach_rlt_policy_switch_obs(
-    *,
-    controller: ManiSkillRLTPolicySwitchController | None,
-    obs: dict[str, Any],
-    device: torch.device,
-) -> dict[str, Any]:
-    if controller is None:
-        return obs
-    obs.update(controller.export_obs(device=device))
-    return obs
-
-
-def apply_rlt_policy_switch_info(
-    *,
-    controller: ManiSkillRLTPolicySwitchController | None,
-    infos_list: list[dict[str, Any]],
-    chunk_dones: torch.Tensor,
-) -> None:
-    if controller is None:
-        return
-    infos_last = infos_list[-1]
-    policy_info = controller.update(
-        infos=infos_last,
-        chunk_dones=chunk_dones,
-    )
-    infos_last["policy_info"] = policy_info
-    for key, value in policy_info.items():
-        infos_last[key] = value
-    infos_list[-1] = infos_last

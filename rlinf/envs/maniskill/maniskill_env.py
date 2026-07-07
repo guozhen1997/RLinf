@@ -24,25 +24,12 @@ from mani_skill.utils.structs.types import Array
 from mani_skill.utils.visualization.misc import put_info_on_image, tile_images
 from omegaconf import open_dict
 from omegaconf.omegaconf import OmegaConf
-from rlinf.envs.maniskill.peg_insertion_side_variants import (
-    RLT_OPENPI_JOINT_WRAP_MODE,
-    init_peg_insertion_event_state,
-    is_peg_insertion_side_env_id,
-    maybe_augment_peg_insertion_info,
-    patch_rlt_openpi_joint_env_args,
-    reset_peg_insertion_event_state,
-    resolve_maniskill_task_descriptions,
-    restore_peg_insertion_event_state,
-    snapshot_peg_insertion_event_state,
-    wrap_rlt_openpi_joint_obs,
-)
-from rlinf.envs.maniskill.rlt_policy_switch import (
-    apply_rlt_policy_switch_info,
-    attach_rlt_policy_switch_obs,
-    build_maniskill_rlt_policy_switch_controller,
+from rlinf.envs.maniskill.rlt_policy_switch_wrapper import (
+    ManiSkillRLTPolicySwitchWrapper,
 )
 
 __all__ = ["ManiskillEnv"]
+
 
 def _to_bool_tensor(value, *, num_envs, device):
     if isinstance(value, bool):
@@ -108,14 +95,14 @@ class ManiskillEnv(gym.Env):
         self.cfg = cfg
         self._has_seeded_reset = False
         self.task_id = getattr(cfg.init_params, "id", None)
-        self._is_peg_insertion_side = is_peg_insertion_side_env_id(self.task_id)
-        self.rlt_policy_switch_cfg = getattr(cfg, "rlt_policy_switch", None)
-        self.rlt_policy_switch_controller = None
+        self._is_peg_insertion_side = (
+            ManiSkillRLTPolicySwitchWrapper.is_peg_insertion_side_env_id(self.task_id)
+        )
 
         with open_dict(cfg):
             cfg.init_params.num_envs = num_envs
         env_args = OmegaConf.to_container(cfg.init_params, resolve=True)
-        env_args = patch_rlt_openpi_joint_env_args(
+        env_args = ManiSkillRLTPolicySwitchWrapper.patch_env_args(
             env_args,
             wrap_obs_mode=getattr(cfg, "wrap_obs_mode", "default"),
         )
@@ -126,16 +113,14 @@ class ManiskillEnv(gym.Env):
         self.record_metrics = record_metrics
         self._is_start = True
         self._init_reset_state_ids()
-        if self._is_peg_insertion_side:
-            self.peg_event_state = init_peg_insertion_event_state(
-                num_envs=self.num_envs,
-                device=self.device,
-            )
+        self.rlt_policy_switch_wrapper = ManiSkillRLTPolicySwitchWrapper(
+            owner=self,
+            switch_cfg=getattr(cfg, "rlt_policy_switch", None),
+            is_peg_insertion_side=self._is_peg_insertion_side,
+        )
         self._show_goal_site_visual()
         if self.record_metrics:
             self._init_metrics()
-        self._init_persistent_done_state()
-        self._init_rlt_policy_switch_controller()
 
     @property
     def total_num_group_envs(self):
@@ -167,10 +152,8 @@ class ManiskillEnv(gym.Env):
 
     @property
     def instruction(self):
-        return resolve_maniskill_task_descriptions(
-            self.env.unwrapped,
-            num_envs=self.num_envs,
-            is_peg_insertion_side=self._is_peg_insertion_side,
+        return self.rlt_policy_switch_wrapper.resolve_task_descriptions(
+            self.env.unwrapped
         )
 
     def _init_reset_state_ids(self):
@@ -234,23 +217,11 @@ class ManiskillEnv(gym.Env):
                     "states": state,
                 }
 
-        if wrap_obs_mode == RLT_OPENPI_JOINT_WRAP_MODE:
-            if self.env.unwrapped.obs_mode != "rgb":
-                raise ValueError(
-                    "wrap_obs_mode='rlt_openpi_joint' requires ManiSkill obs_mode='rgb'."
-                )
-            obs = wrap_rlt_openpi_joint_obs(
+        if self.rlt_policy_switch_wrapper.handles_obs_mode(wrap_obs_mode):
+            return self.rlt_policy_switch_wrapper.wrap_obs(
                 raw_obs,
                 infos=infos,
                 task_descriptions=self.instruction,
-                num_envs=self.num_envs,
-                device=self.device,
-                is_peg_insertion_side=self._is_peg_insertion_side,
-            )
-            return attach_rlt_policy_switch_obs(
-                controller=self.rlt_policy_switch_controller,
-                obs=obs,
-                device=self.device,
             )
 
         # Default
@@ -281,20 +252,6 @@ class ManiskillEnv(gym.Env):
                 state_obs, use_torch=True, device=self.device
             )
         return state_obs
-
-    def _init_rlt_policy_switch_controller(self):
-        self.rlt_policy_switch_controller = (
-            build_maniskill_rlt_policy_switch_controller(
-                switch_cfg=self.rlt_policy_switch_cfg,
-                is_peg_insertion_side=self._is_peg_insertion_side,
-                env=self.env.unwrapped,
-                batch_size=self.num_envs,
-            )
-        )
-
-    def _reset_rlt_policy_switch_controller(self, env_idx=None):
-        if self.rlt_policy_switch_controller is not None:
-            self.rlt_policy_switch_controller.reset(env_idx=env_idx)
 
     def _calc_step_reward(self, reward, info):
         if getattr(self.cfg, "reward_mode", "default") == "raw":
@@ -344,50 +301,6 @@ class ManiskillEnv(gym.Env):
                 self.fail_once[:] = False
                 self.returns[:] = 0.0
 
-    def _init_persistent_done_state(self):
-        self._persistent_done_mask = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.bool
-        )
-        self._persistent_done_obs = None
-        self._persistent_done_infos = None
-
-    def _reset_persistent_done_state(self, env_idx=None):
-        if not hasattr(self, "_persistent_done_mask"):
-            self._init_persistent_done_state()
-            return
-
-        if env_idx is None:
-            self._persistent_done_mask.zero_()
-            self._persistent_done_obs = None
-            self._persistent_done_infos = None
-            return
-
-        self._persistent_done_mask[env_idx] = False
-
-    def _update_persistent_done_state(self, dones, extracted_obs, infos):
-        if self.auto_reset or not dones.any():
-            return
-
-        newly_done = dones & (~self._persistent_done_mask)
-        if not newly_done.any():
-            return
-
-        if self._persistent_done_obs is None:
-            self._persistent_done_obs = torch_clone_dict(extracted_obs)
-        else:
-            self._persistent_done_obs = self._restore_frozen_values(
-                self._persistent_done_obs, extracted_obs, newly_done
-            )
-
-        if self._persistent_done_infos is None:
-            self._persistent_done_infos = torch_clone_dict(infos)
-        else:
-            self._persistent_done_infos = self._restore_frozen_values(
-                self._persistent_done_infos, infos, newly_done
-            )
-
-        self._persistent_done_mask |= newly_done
-
     def _record_metrics(self, step_reward, infos):
         episode_info = {}
         self.returns += step_reward
@@ -397,16 +310,7 @@ class ManiskillEnv(gym.Env):
         if "fail" in infos:
             self.fail_once = self.fail_once | infos["fail"]
             episode_info["fail_once"] = self.fail_once.clone()
-        for key in (
-            "rlt_switch_flags",
-            "entered_actor_phase_once",
-            "actor_switch_step",
-            "actor_switch_step_nonzero",
-        ):
-            if key in infos:
-                value = infos[key]
-                if isinstance(value, torch.Tensor):
-                    episode_info[key] = value.reshape(self.num_envs, -1)[:, -1].clone()
+        self.rlt_policy_switch_wrapper.record_metrics(episode_info, infos)
         episode_info["return"] = self.returns.clone()
         episode_info["episode_len"] = self.elapsed_steps.clone()
         episode_info["reward"] = episode_info["return"] / episode_info["episode_len"]
@@ -431,20 +335,10 @@ class ManiskillEnv(gym.Env):
         if seed is not None:
             self._has_seeded_reset = True
         raw_obs, infos = self.env.reset(seed=seed, options=options)
-        if "env_idx" in options:
-            env_idx = options["env_idx"]
-            if self._is_peg_insertion_side:
-                reset_peg_insertion_event_state(
-                    self.peg_event_state,
-                    env_idx=env_idx,
-                )
-            self._reset_metrics(env_idx)
-        else:
-            if self._is_peg_insertion_side:
-                reset_peg_insertion_event_state(self.peg_event_state)
-            self._reset_metrics()
-        self._reset_persistent_done_state(options.get("env_idx"))
-        self._reset_rlt_policy_switch_controller(options.get("env_idx"))
+        env_idx = options.get("env_idx")
+        self.rlt_policy_switch_wrapper.reset_episode_event_state(env_idx)
+        self._reset_metrics(env_idx)
+        self.rlt_policy_switch_wrapper.reset_rollout_state(env_idx)
         self._show_goal_site_visual()
         extracted_obs = self._wrap_obs(raw_obs, infos=infos)
         return extracted_obs, infos
@@ -453,14 +347,7 @@ class ManiskillEnv(gym.Env):
         self, actions: Union[Array, dict] = None, auto_reset=True
     ) -> tuple[Array, Array, Array, Array, dict]:
         raw_obs, _reward, terminations, truncations, infos = self.env.step(actions)
-        infos = maybe_augment_peg_insertion_info(
-            env=self.env.unwrapped,
-            infos=infos,
-            event_state=getattr(self, "peg_event_state", None),
-            device=self.device,
-            is_peg_insertion_side=self._is_peg_insertion_side,
-        )
-        infos["elapsed_steps"] = self.elapsed_steps.clone()
+        infos = self.rlt_policy_switch_wrapper.augment_step_info(infos)
         terminations = extract_termination_from_info(
             infos,
             num_envs=self.num_envs,
@@ -472,7 +359,7 @@ class ManiskillEnv(gym.Env):
 
         if self.record_metrics:
             infos = self._record_metrics(step_reward, infos)
-        self._attach_rlt_policy_switch_info(infos)
+        self.rlt_policy_switch_wrapper.attach_step_info(infos)
         if isinstance(truncations, bool):
             truncations = torch.tensor([truncations], device=self.device)
             truncations = truncations.repeat(self.num_envs)
@@ -490,90 +377,6 @@ class ManiskillEnv(gym.Env):
         if dones.any() and _auto_reset:
             extracted_obs, infos = self._handle_auto_reset(dones, extracted_obs, infos)
         return extracted_obs, step_reward, terminations, truncations, infos
-
-    def _attach_rlt_policy_switch_info(self, infos):
-        if self.rlt_policy_switch_controller is None:
-            return
-        policy_info = self.rlt_policy_switch_controller.export_info(device=self.device)
-        infos["policy_info"] = policy_info
-        for key, value in policy_info.items():
-            infos[key] = value
-
-    def _snapshot_episode_state(self):
-        state = {
-            "prev_step_reward": self.prev_step_reward.clone(),
-        }
-        if self.record_metrics:
-            state.update(
-                {
-                    "success_once": self.success_once.clone(),
-                    "fail_once": self.fail_once.clone(),
-                    "returns": self.returns.clone(),
-                }
-            )
-        if self._is_peg_insertion_side:
-            state["peg_event_state"] = snapshot_peg_insertion_event_state(
-                self.peg_event_state
-            )
-        return state
-
-    def _restore_episode_state(self, state, mask):
-        self.prev_step_reward[mask] = state["prev_step_reward"][mask]
-        if self.record_metrics:
-            self.success_once[mask] = state["success_once"][mask]
-            self.fail_once[mask] = state["fail_once"][mask]
-            self.returns[mask] = state["returns"][mask]
-        if self._is_peg_insertion_side:
-            restore_peg_insertion_event_state(
-                self.peg_event_state,
-                state["peg_event_state"],
-                mask,
-            )
-
-    def _zero_frozen_actions(self, actions, mask):
-        if not mask.any():
-            return actions
-        if isinstance(actions, torch.Tensor):
-            frozen_mask = mask.to(device=actions.device)
-            actions = actions.clone()
-            actions[frozen_mask] = 0.0
-            return actions
-
-        frozen_mask = mask.detach().cpu().numpy()
-        actions = np.asarray(actions).copy()
-        actions[frozen_mask] = 0.0
-        return actions
-
-    def _restore_frozen_values(self, values, previous_values, mask):
-        if not isinstance(values, dict) or not isinstance(previous_values, dict):
-            return values
-
-        restored = torch_clone_dict(values)
-        for key, prev_value in previous_values.items():
-            if key not in restored:
-                continue
-            value = restored[key]
-            if isinstance(value, torch.Tensor) and isinstance(prev_value, torch.Tensor):
-                if value.ndim > 0 and value.shape[0] == self.num_envs:
-                    value_mask = mask.to(device=value.device)
-                    value[value_mask] = prev_value.to(value.device)[value_mask]
-            elif isinstance(value, dict) and isinstance(prev_value, dict):
-                restored[key] = self._restore_frozen_values(
-                    value, prev_value, mask
-                )
-            elif isinstance(value, list) and isinstance(prev_value, list):
-                mask_cpu = mask.detach().cpu().numpy()
-                for env_idx, should_restore in enumerate(mask_cpu):
-                    if (
-                        should_restore
-                        and env_idx < len(value)
-                        and env_idx < len(prev_value)
-                    ):
-                        value[env_idx] = prev_value[env_idx]
-        return restored
-
-    def _restore_frozen_info_values(self, infos, previous_infos, mask):
-        return self._restore_frozen_values(infos, previous_infos, mask)
 
     def _validate_chunk_actions(self, chunk_actions) -> None:
         if not hasattr(chunk_actions, "shape") or len(chunk_actions.shape) != 3:
@@ -605,142 +408,7 @@ class ManiskillEnv(gym.Env):
     def chunk_step(self, chunk_actions):
         # chunk_actions: [num_envs, chunk_step, action_dim]
         self._validate_chunk_actions(chunk_actions)
-        chunk_size = chunk_actions.shape[1]
-        obs_list = []
-        infos_list = []
-        chunk_rewards = []
-        raw_chunk_terminations = []
-        raw_chunk_truncations = []
-        if not hasattr(self, "_persistent_done_mask"):
-            self._init_persistent_done_state()
-        frozen_dones = (
-            self._persistent_done_mask.clone()
-            if not self.auto_reset
-            else torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        )
-        initially_frozen_dones = frozen_dones.clone()
-        last_extracted_obs = (
-            torch_clone_dict(self._persistent_done_obs)
-            if frozen_dones.any() and self._persistent_done_obs is not None
-            else None
-        )
-        last_infos = (
-            torch_clone_dict(self._persistent_done_infos)
-            if frozen_dones.any() and self._persistent_done_infos is not None
-            else None
-        )
-        for i in range(chunk_size):
-            actions = chunk_actions[:, i]
-            if (
-                frozen_dones.all()
-                and last_extracted_obs is not None
-                and last_infos is not None
-            ):
-                extracted_obs = torch_clone_dict(last_extracted_obs)
-                infos = torch_clone_dict(last_infos)
-                step_reward = torch.zeros(
-                    self.num_envs, device=self.device, dtype=torch.float32
-                )
-                terminations = torch.zeros(
-                    self.num_envs, device=self.device, dtype=torch.bool
-                )
-                truncations = torch.zeros(
-                    self.num_envs, device=self.device, dtype=torch.bool
-                )
-            else:
-                state_before_step = self._snapshot_episode_state()
-                actions = self._zero_frozen_actions(actions, frozen_dones)
-                extracted_obs, step_reward, terminations, truncations, infos = self.step(
-                    actions, auto_reset=False
-                )
-                if frozen_dones.any():
-                    self._restore_episode_state(state_before_step, frozen_dones)
-                    if last_extracted_obs is not None:
-                        extracted_obs = self._restore_frozen_values(
-                            extracted_obs, last_extracted_obs, frozen_dones
-                        )
-                    step_reward = step_reward.clone()
-                    step_reward[frozen_dones] = 0.0
-                    terminations = terminations.clone()
-                    truncations = truncations.clone()
-                    terminations[frozen_dones] = False
-                    truncations[frozen_dones] = False
-                    if last_infos is not None:
-                        infos = self._restore_frozen_info_values(
-                            infos, last_infos, frozen_dones
-                        )
-            obs_list.append(extracted_obs)
-            infos_list.append(infos)
-
-            chunk_rewards.append(step_reward)
-            raw_chunk_terminations.append(terminations)
-            raw_chunk_truncations.append(truncations)
-            frozen_dones |= torch.logical_or(terminations, truncations)
-            last_extracted_obs = torch_clone_dict(extracted_obs)
-            last_infos = torch_clone_dict(infos)
-
-        chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
-        raw_chunk_terminations = torch.stack(
-            raw_chunk_terminations, dim=1
-        )  # [num_envs, chunk_steps]
-        raw_chunk_truncations = torch.stack(
-            raw_chunk_truncations, dim=1
-        )  # [num_envs, chunk_steps]
-
-        past_terminations = raw_chunk_terminations.any(dim=1)
-        past_truncations = raw_chunk_truncations.any(dim=1)
-        past_dones = torch.logical_or(past_terminations, past_truncations)
-
-        policy_switch_chunk_dones = torch.logical_or(
-            raw_chunk_terminations,
-            raw_chunk_truncations,
-        )
-        if initially_frozen_dones.any():
-            policy_switch_chunk_dones = policy_switch_chunk_dones | (
-                initially_frozen_dones[:, None].expand_as(policy_switch_chunk_dones)
-            )
-        apply_rlt_policy_switch_info(
-            controller=self.rlt_policy_switch_controller,
-            infos_list=infos_list,
-            chunk_dones=policy_switch_chunk_dones,
-        )
-        self._sync_rlt_policy_switch_episode_info(infos_list[-1])
-        obs_list[-1] = attach_rlt_policy_switch_obs(
-            controller=self.rlt_policy_switch_controller,
-            obs=obs_list[-1],
-            device=self.device,
-        )
-
-        if past_dones.any() and self.auto_reset:
-            obs_list[-1], infos_list[-1] = self._handle_auto_reset(
-                past_dones, obs_list[-1], infos_list[-1]
-            )
-        elif past_dones.any():
-            self._update_persistent_done_state(past_dones, obs_list[-1], infos_list[-1])
-
-        chunk_terminations = raw_chunk_terminations
-        chunk_truncations = raw_chunk_truncations
-        return (
-            obs_list,
-            chunk_rewards,
-            chunk_terminations,
-            chunk_truncations,
-            infos_list,
-        )
-
-    def _sync_rlt_policy_switch_episode_info(self, infos):
-        if not isinstance(infos, dict) or "episode" not in infos:
-            return
-        for key in (
-            "rlt_switch_flags",
-            "entered_actor_phase_once",
-            "actor_switch_step",
-            "actor_switch_step_nonzero",
-        ):
-            if key in infos:
-                infos["episode"][key] = infos[key].reshape(self.num_envs, -1)[
-                    :, -1
-                ].clone()
+        return self.rlt_policy_switch_wrapper.chunk_step(chunk_actions)
 
     def _handle_auto_reset(self, dones, extracted_obs, infos):
         final_obs = torch_clone_dict(extracted_obs)
