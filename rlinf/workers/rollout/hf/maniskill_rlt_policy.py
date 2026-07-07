@@ -357,10 +357,15 @@ class ManiSkillRLTPolicyMixin:
                 device=actions.device,
             )
         else:
-            fallback_critical_phase = torch.as_tensor(
-                switch_flags,
-                device=actions.device,
-            ).bool().reshape(batch_size, -1).any(dim=1)
+            fallback_critical_phase = (
+                torch.as_tensor(
+                    switch_flags,
+                    device=actions.device,
+                )
+                .bool()
+                .reshape(batch_size, -1)
+                .any(dim=1)
+            )
         in_critical_phase = self._policy_info_bool(
             policy_info,
             "in_critical_phase",
@@ -394,9 +399,12 @@ class ManiSkillRLTPolicyMixin:
                 & in_critical_phase
             )
         else:
-            actor_control = torch.as_tensor(
-                switch_flags, device=actions.device
-            ).bool().reshape(batch_size, -1).any(dim=1)
+            actor_control = (
+                torch.as_tensor(switch_flags, device=actions.device)
+                .bool()
+                .reshape(batch_size, -1)
+                .any(dim=1)
+            )
             if self._use_rlt_schedule():
                 actor_control = actor_control & torch.full(
                     (batch_size,),

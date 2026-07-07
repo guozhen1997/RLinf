@@ -24,6 +24,7 @@ from mani_skill.utils.structs.types import Array
 from mani_skill.utils.visualization.misc import put_info_on_image, tile_images
 from omegaconf import open_dict
 from omegaconf.omegaconf import OmegaConf
+
 from rlinf.envs.maniskill.rlt_policy_switch_wrapper import (
     ManiSkillRLTPolicySwitchWrapper,
 )
@@ -393,7 +394,9 @@ class ManiskillEnv(gym.Env):
                 "Refuse to execute actions for the wrong env batch."
             )
 
-        expected_action_dim = getattr(self.env.unwrapped.single_action_space, "shape", None)
+        expected_action_dim = getattr(
+            self.env.unwrapped.single_action_space, "shape", None
+        )
         expected_action_dim = expected_action_dim[-1] if expected_action_dim else None
         if expected_action_dim is not None and int(chunk_actions.shape[2]) != int(
             expected_action_dim

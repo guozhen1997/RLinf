@@ -152,9 +152,10 @@ class MultiStepRolloutWorker(ManiSkillRLTPolicyMixin, Worker):
             self.rlt_feature_model.eval()
             self.rlt_feature_model.requires_grad_(False)
 
-        if self.cfg.rollout.get(
-            "expert_model", None
-        ) and not self._defer_rlt_expert_model():
+        if (
+            self.cfg.rollout.get("expert_model", None)
+            and not self._defer_rlt_expert_model()
+        ):
             expert_model_config = copy.deepcopy(self.model_cfg)
             with open_dict(expert_model_config):
                 expert_model_config.precision = self.cfg.rollout.expert_model.precision

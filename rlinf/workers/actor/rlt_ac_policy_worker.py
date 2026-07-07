@@ -171,17 +171,19 @@ class RLTACLossMixin:
         if not schedule_enabled:
             bc_weight = float(self.cfg.algorithm.get("bc_weight", 1.0))
             q_weight = float(self.cfg.algorithm.get("q_weight", 1.0))
-            return bc_weight, q_weight, {
-                "bc_weight": bc_weight,
-                "q_weight": q_weight,
-                "actor_weight_schedule_enabled": 0.0,
-                "actor_weight_in_warmup": 0.0,
-                "actor_weight_ramp_progress": 1.0,
-            }
+            return (
+                bc_weight,
+                q_weight,
+                {
+                    "bc_weight": bc_weight,
+                    "q_weight": q_weight,
+                    "actor_weight_schedule_enabled": 0.0,
+                    "actor_weight_in_warmup": 0.0,
+                    "actor_weight_ramp_progress": 1.0,
+                },
+            )
 
-        weight_warmup_updates = int(
-            schedule_cfg.get("warmup_updates", 0)
-        )
+        weight_warmup_updates = int(schedule_cfg.get("warmup_updates", 0))
         ramp_updates = int(schedule_cfg.get("ramp_updates", 0))
         in_warmup = int(self.update_step) < weight_warmup_updates
         warmup_bc_weight = float(
@@ -375,8 +377,12 @@ class RLTACLossMixin:
         actor_loss = -q_weight * qf_pi.mean() + bc_weight * bc_loss
         metrics.update(weight_metrics)
         metrics["action_ref_abs_mean"] = (
-            self._flatten_chunk(pi) - self._flatten_chunk(ref_chunk)
-        ).abs().mean().detach().item()
+            (self._flatten_chunk(pi) - self._flatten_chunk(ref_chunk))
+            .abs()
+            .mean()
+            .detach()
+            .item()
+        )
         metrics["weighted_q"] = (q_weight * qf_pi.mean()).detach().item()
         metrics["weighted_bc"] = (bc_weight * bc_loss).detach().item()
         metrics["reference_dropout_prob"] = reference_dropout_prob
@@ -461,7 +467,9 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
         return tensor[idx].detach().clone().unsqueeze(0).unsqueeze(0).cpu().contiguous()
 
     @staticmethod
-    def _step_env_tensor(tensor: torch.Tensor, step_idx: int, env_idx: int) -> torch.Tensor:
+    def _step_env_tensor(
+        tensor: torch.Tensor, step_idx: int, env_idx: int
+    ) -> torch.Tensor:
         return (
             tensor[step_idx, env_idx]
             .detach()
@@ -645,7 +653,9 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
 
         return replay_trajectories, completed_episodes
 
-    def _rollout_route_metrics(self, trajectories: list[Trajectory]) -> dict[str, float]:
+    def _rollout_route_metrics(
+        self, trajectories: list[Trajectory]
+    ) -> dict[str, float]:
         metric_keys = {
             "student_control": "rollout/student_control_rate",
             "intervention_flags": "rollout/intervention_rate",
@@ -802,9 +812,7 @@ class RLTACFSDPPolicy(RLTACLossMixin, EmbodiedSACFSDPPolicy):
         train_every_transitions = int(
             self._rlt_schedule_value("train_every_transitions", 0)
         )
-        train_every_episodes = int(
-            self._rlt_schedule_value("train_every_episodes", 0)
-        )
+        train_every_episodes = int(self._rlt_schedule_value("train_every_episodes", 0))
         update_epoch = int(self._rlt_schedule_value("update_epoch", 1))
         max_updates = int(self._rlt_schedule_value("max_updates_per_train_step", 0))
 

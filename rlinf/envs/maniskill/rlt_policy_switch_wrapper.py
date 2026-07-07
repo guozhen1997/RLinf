@@ -27,6 +27,7 @@ import numpy as np
 import torch
 from mani_skill.utils.common import torch_clone_dict
 from omegaconf import DictConfig
+
 from rlinf.envs.maniskill.peg_insertion_side_variants import (
     RLT_OPENPI_JOINT_WRAP_MODE,
     init_peg_insertion_event_state,
@@ -94,8 +95,7 @@ class ManiSkillRLTPolicySwitchWrapper:
             return None
         if not self.is_peg_insertion_side:
             raise ValueError(
-                "ManiSkill RLT policy switch is only supported for peg-insertion "
-                "tasks."
+                "ManiSkill RLT policy switch is only supported for peg-insertion tasks."
             )
         return ManiSkillRLTPolicySwitchController(
             cfg=self.switch_cfg,
@@ -328,9 +328,9 @@ class ManiSkillRLTPolicySwitchWrapper:
             return
         for key in self.POLICY_INFO_KEYS:
             if key in infos:
-                infos["episode"][key] = infos[key].reshape(self.owner.num_envs, -1)[
-                    :, -1
-                ].clone()
+                infos["episode"][key] = (
+                    infos[key].reshape(self.owner.num_envs, -1)[:, -1].clone()
+                )
 
     def _init_persistent_done_state(self) -> None:
         self._persistent_done_mask = torch.zeros(
@@ -440,9 +440,7 @@ class ManiSkillRLTPolicySwitchWrapper:
                     value_mask = mask.to(device=value.device)
                     value[value_mask] = prev_value.to(value.device)[value_mask]
             elif isinstance(value, dict) and isinstance(prev_value, dict):
-                restored[key] = self._restore_frozen_values(
-                    value, prev_value, mask
-                )
+                restored[key] = self._restore_frozen_values(value, prev_value, mask)
             elif isinstance(value, list) and isinstance(prev_value, list):
                 mask_cpu = mask.detach().cpu().numpy()
                 for env_idx, should_restore in enumerate(mask_cpu):
@@ -611,9 +609,7 @@ class ManiSkillRLTPolicySwitchController:
             "expert_takeover": expert_takeover[:, None],
             "expert_takeover_active": state["expert_takeover_active"][:, None],
             "expert_progress_guard": state["expert_progress_guard"][:, None],
-            "expert_stalled_progress_chunks": state["stalled_progress_chunks"][
-                :, None
-            ],
+            "expert_stalled_progress_chunks": state["stalled_progress_chunks"][:, None],
             "intervention_phase": expert_takeover.to(torch.float32)[:, None],
         }
 
@@ -694,9 +690,7 @@ class ManiSkillRLTPolicySwitchController:
 
         in_critical_phase = state["rlt_switch_flags"]
         success = self._info_bool(infos, "success_current", device)
-        active_before = state["expert_takeover_active"] & in_critical_phase & (
-            ~success
-        )
+        active_before = state["expert_takeover_active"] & in_critical_phase & (~success)
         progress_guard = self._stalled_progress_guard(
             infos=infos,
             gate_cfg=gate_cfg,
@@ -971,9 +965,11 @@ class ManiSkillRLTPolicySwitchController:
 
         near_hole_x_min = float(auto_gate.get("near_hole_x_min", -0.16))
         yz_margin = float(auto_gate.get("near_hole_yz_margin", 1.5))
-        near_hole = (hole_x >= near_hole_x_min) & (
-            abs_y <= yz_margin * hole_radii
-        ) & (abs_z <= yz_margin * hole_radii)
+        near_hole = (
+            (hole_x >= near_hole_x_min)
+            & (abs_y <= yz_margin * hole_radii)
+            & (abs_z <= yz_margin * hole_radii)
+        )
 
         enter_actor = near_hole
         if bool(auto_gate.get("require_grasp", True)):

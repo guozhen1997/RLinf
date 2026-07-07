@@ -542,6 +542,7 @@ def decoupled_build_recv_plan(
         entries=entries,
     )
 
+
 def infer_batch_size(data: Any) -> int:
     """Infer a batch size from common routed payloads."""
     if isinstance(data, torch.Tensor) or isinstance(data, np.ndarray):

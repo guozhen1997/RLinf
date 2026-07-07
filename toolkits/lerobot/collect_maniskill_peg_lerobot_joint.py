@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Copyright 2026 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Collect replayable PegInsertionSide-v1 demos for ``rlt_maniskill_joint``.
 
 This collector keeps the joint-space pipeline end to end:
@@ -34,6 +48,7 @@ import numpy as np
 try:
     from tqdm import tqdm
 except ImportError:  # pragma: no cover
+
     class tqdm:  # type: ignore[no-redef]
         def __init__(self, total: int, desc: str = ""):
             self.total = total
@@ -66,6 +81,8 @@ RLINF_ROOT = _bootstrap_repo_paths()
 
 from rlinf.envs.maniskill.peg_insertion_side_variants import (  # noqa: E402
     PANDA_WIDE_WRISTCAM_UID as SHARED_PANDA_WIDE_WRISTCAM_UID,
+)
+from rlinf.envs.maniskill.peg_insertion_side_variants import (  # noqa: E402
     PEG_INSERTION_SIDE_WIDE_ENV_ID,
     PEG_INSERTION_SIDE_WIDE_OBSERVER_WIDE_WRIST_ENV_ID,
     register_rlinf_peg_insertion_side_variants,
@@ -89,6 +106,7 @@ SOLVER_MODULE_CANDIDATES = (
     "mani_skill.examples.motionplanning.panda.solutions.peg_insertion_side",
     "mani_skill.examples.motionplanning.panda.peg_insertion_side",
 )
+
 
 @dataclasses.dataclass(frozen=True)
 class FrameRecord:
@@ -164,7 +182,9 @@ def _register_camera_collection_env() -> None:
 def _extract_record(obs: dict[str, Any]) -> FrameRecord:
     qpos = _to_numpy(obs["agent"]["qpos"]).astype(np.float32)
     if qpos.shape[0] < 9:
-        raise ValueError(f"Expected Panda qpos with at least 9 values, got {qpos.shape}")
+        raise ValueError(
+            f"Expected Panda qpos with at least 9 values, got {qpos.shape}"
+        )
     state = qpos[:STATE_DIM].astype(np.float32)
     return FrameRecord(obs=obs, state=state, qpos=qpos.astype(np.float32))
 
@@ -250,7 +270,9 @@ def _camera_image(obs: dict[str, Any], camera_name: str) -> np.ndarray | None:
         return None
     image = _to_numpy(sensor["rgb"]).astype(np.uint8)
     if image.ndim != 3 or image.shape[-1] != 3:
-        raise ValueError(f"Camera {camera_name} produced invalid RGB shape {image.shape}")
+        raise ValueError(
+            f"Camera {camera_name} produced invalid RGB shape {image.shape}"
+        )
     return image
 
 
@@ -642,7 +664,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
     args = parse_args()
 
     output_path = _resolve_output_path(args.repo_id)
@@ -780,7 +804,12 @@ def main() -> None:
             f"replay_failures={replay_failures}."
         )
 
-    LOG.info("Saved %d successful episodes after %d attempts to %s", saved, attempts, output_path)
+    LOG.info(
+        "Saved %d successful episodes after %d attempts to %s",
+        saved,
+        attempts,
+        output_path,
+    )
 
 
 if __name__ == "__main__":

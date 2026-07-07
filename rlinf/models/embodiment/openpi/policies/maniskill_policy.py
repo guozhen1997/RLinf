@@ -72,7 +72,9 @@ class ManiSkillInputs(transforms.DataTransformFn):
             if self.use_wrist_image and data.get("observation/wrist_image") is not None
             else np.zeros_like(base_image)
         )
-        has_wrist_image = self.use_wrist_image and data.get("observation/wrist_image") is not None
+        has_wrist_image = (
+            self.use_wrist_image and data.get("observation/wrist_image") is not None
+        )
 
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {

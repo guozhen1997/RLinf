@@ -52,9 +52,7 @@ class LeRobotRLTManiSkillJointDataConfig(DataConfigFactory):
         if self.task_key is not None:
             repack_structure["task"] = self.task_key
         if self.extra_view_image_key is not None:
-            repack_structure["observation/extra_view_image"] = (
-                self.extra_view_image_key
-            )
+            repack_structure["observation/extra_view_image"] = self.extra_view_image_key
 
         repack_transform = _transforms.Group(
             inputs=[_transforms.RepackTransform(repack_structure)]

@@ -188,10 +188,7 @@ def wrap_rlt_openpi_joint_obs(
 def extract_rlt_joint_states(raw_obs: dict[str, Any], *, batch_size: int, device):
     qpos = raw_obs["agent"]["qpos"]
     return torch.stack(
-        [
-            _extract_rlt_joint_state(qpos[index], device)
-            for index in range(batch_size)
-        ],
+        [_extract_rlt_joint_state(qpos[index], device) for index in range(batch_size)],
         dim=0,
     )
 
@@ -273,9 +270,7 @@ def augment_peg_insertion_info(
     )
     consecutive_grasp_current = event_state["grasp_count"] >= 5
 
-    prealigned_current = (peg_head_goal_yz_dist < 0.01) & (
-        peg_body_goal_yz_dist < 0.01
-    )
+    prealigned_current = (peg_head_goal_yz_dist < 0.01) & (peg_body_goal_yz_dist < 0.01)
 
     hole_radii = env.box_hole_radii.to(device, dtype=torch.float32)
     peg_head_hole_x = peg_head_pos_at_hole[:, 0]
@@ -297,12 +292,12 @@ def augment_peg_insertion_info(
         )
     success_current = success_current.to(device, dtype=torch.bool)
 
-    consecutive_grasp_event = (
-        consecutive_grasp_current & (~event_state["consecutive_grasp_once"])
+    consecutive_grasp_event = consecutive_grasp_current & (
+        ~event_state["consecutive_grasp_once"]
     )
     prealign_event = prealigned_current & (~event_state["prealign_once"])
-    partial_insert_event = (
-        partial_insert_current & (~event_state["partial_insert_once"])
+    partial_insert_event = partial_insert_current & (
+        ~event_state["partial_insert_once"]
     )
     success_event = success_current & (~event_state["success_once"])
 
@@ -330,9 +325,7 @@ def augment_peg_insertion_info(
             "prealign_event": prealign_event,
             "partial_insert_event": partial_insert_event,
             "success_event": success_event,
-            "consecutive_grasp_once": event_state[
-                "consecutive_grasp_once"
-            ].clone(),
+            "consecutive_grasp_once": event_state["consecutive_grasp_once"].clone(),
             "prealign_once": event_state["prealign_once"].clone(),
             "partial_insert_once": event_state["partial_insert_once"].clone(),
             "success_once": event_state["success_once"].clone(),
@@ -494,7 +487,9 @@ def register_rlinf_peg_insertion_side_variants() -> None:
                 lengths = self._batched_episode_rng.uniform(0.085, 0.125)
                 radii = self._batched_episode_rng.uniform(0.015, 0.025)
                 centers = np.zeros((self.num_envs, 2), dtype=np.float32)
-                self.peg_half_sizes = common.to_tensor(np.vstack([lengths, radii, radii])).T
+                self.peg_half_sizes = common.to_tensor(
+                    np.vstack([lengths, radii, radii])
+                ).T
                 peg_head_offsets = torch.zeros((self.num_envs, 3))
                 peg_head_offsets[:, 0] = self.peg_half_sizes[:, 0]
                 self.peg_head_offsets = Pose.create_from_pq(p=peg_head_offsets)
