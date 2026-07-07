@@ -554,7 +554,7 @@ Stage 1 checkpoint：
 critical phase 中接管。
 
 调节 ManiSkill Critical Phase 和 Intervention
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ManiSkill 的切换逻辑是仿真专用的。它读取 peg insertion 任务信息来打开
 ``rlt_switch_flags`` / ``in_critical_phase``；如果启用 expert takeover，它还会在
