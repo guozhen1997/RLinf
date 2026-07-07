@@ -246,14 +246,6 @@ Important Stage 2 fields:
      entropy_tuning:
        alpha_type: fixed_alpha
        initial_alpha: 0.0
-     rlt_schedule:
-       enable: True
-       warmup_post_collect_updates: 30000
-       train_every_transitions: 5
-     actor_weight_schedule:
-       enable: True
-       warmup_updates: 20000
-       ramp_updates: 50000
 
    rollout:
      collect_transitions: True
@@ -597,6 +589,54 @@ actor. Before ``ready_for_online``, the ManiSkill route executes the VLA
 ``ref_chunk``. After ``algorithm.rlt_schedule.warmup_post_collect_updates``,
 the actor can take over in the automatic critical phase.
 
+Tune ManiSkill Critical Phase and Intervention
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ManiSkill switch is simulator-specific. It uses peg-insertion task info to
+turn on ``rlt_switch_flags`` / ``in_critical_phase`` and, if enabled, to request
+expert takeover after repeated no-progress actor chunks. The comments below are
+documentation-only annotations; keep the checked-in YAML clean.
+
+.. code:: yaml
+
+   algorithm:
+     rlt_schedule:
+       enable: True                    # Use the ManiSkill rollout/update budget.
+       warmup_post_collect_updates: 30000  # Updates before actor rollout starts.
+       train_every_transitions: 5       # Add update budget per N recorded transitions.
+     actor_weight_schedule:
+       enable: True                    # Ramp BC/Q weights instead of fixed weights.
+       warmup_updates: 20000           # Keep warmup BC/Q weights for this many updates.
+       ramp_updates: 50000             # Smoothly move to online BC/Q weights.
+
+   env:
+     train:
+       rlt_policy_switch:
+         task_mode: full_task          # VLA before critical phase, actor inside it.
+         trigger_mode: auto            # Compute critical phase from task info.
+         latch_until_done: True        # Keep actor control after entering critical phase.
+         auto_gate:
+           require_grasp: True         # Enter only after the peg is grasped.
+           require_not_success: True   # Do not switch after task success.
+           near_hole_x_min: -0.16      # Larger value narrows the x entry gate.
+           near_hole_yz_margin: 1.5    # Larger value widens the y/z entry gate.
+         expert_takeover:
+           enable: True                # Train-only simulated expert intervention.
+           trigger_mode: stalled_progress  # Wait for repeated no-progress chunks.
+           gate:
+             near_hole_x_min: -0.10    # Start stall checks only near the hole.
+             near_hole_yz_margin: 2.0  # Start stall checks only when y/z is close.
+             stuck_chunks_before_takeover: 3  # No-progress chunks before takeover.
+             min_x_progress: 0.003     # Forward progress that resets stall count.
+             min_yz_progress: 0.0015   # Alignment progress that resets stall count.
+             min_score_progress: 0.002 # Combined-score progress that resets stalls.
+             progress_yz_weight: 1.0   # y/z penalty in the combined progress score.
+
+     eval:
+       rlt_policy_switch:
+         expert_takeover:
+           enable: False               # Eval uses base policy + actor, never expert.
+
 Optional: Enable ManiSkill Expert Takeover
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -618,42 +658,19 @@ the critical phase and store those expert actions as intervention targets:
        rlt_policy_switch:
          expert_takeover:
            enable: True
-           trigger_mode: critical_phase
+           trigger_mode: stalled_progress
+           gate:
+             stuck_chunks_before_takeover: 3
+             min_x_progress: 0.003
+             min_yz_progress: 0.0015
+             min_score_progress: 0.002
+             progress_yz_weight: 1.0
 
 You can replace ``rollout.expert_model.model_path`` with a more fully trained
 joint-control SFT checkpoint. Keep the expert's OpenPI dataconfig and norm
 stats aligned with the Stage 2 dataset. The expert is only used for train
 rollout; eval rollout keeps ``allow_expert=False`` and measures the learned
 actor.
-
-Confirm these ManiSkill Stage 2 fields first:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Field
-     - Purpose
-   * - ``algorithm.rlt_schedule.enable``
-     - Enables the ManiSkill rollout/update-budget schedule. Set it to ``False`` to use the normal real-robot-style training loop.
-   * - ``algorithm.rlt_schedule.warmup_post_collect_updates``
-     - Learner updates required before actor rollout is enabled.
-   * - ``algorithm.rlt_schedule.train_every_transitions``
-     - Adds training budget every N new transitions.
-   * - ``algorithm.actor_weight_schedule.enable``
-     - Enables BC/Q weight warmup and ramp in the actor objective. Set it to ``False`` to use fixed ``algorithm.bc_weight`` and ``algorithm.q_weight`` for the full run.
-   * - ``algorithm.actor_weight_schedule.warmup_updates``
-     - Number of learner updates for BC/Q weight warmup.
-   * - ``algorithm.actor_weight_schedule.ramp_updates``
-     - Number of learner updates used to ramp from warmup weights to online weights.
-   * - ``algorithm.replay_buffer.min_buffer_size``
-     - Minimum replay transitions before the buffer is ready.
-   * - ``algorithm.replay_buffer.max_num_samples``
-     - Active replay transition cap.
-   * - ``algorithm.actor_agg_q``
-     - Q aggregation used by the actor loss. The current ManiSkill config uses ``q1``.
-   * - ``env.*.rlt_policy_switch``
-     - Produces ``rlt_switch_flags``, ``in_critical_phase``, and ``record_transition`` automatically.
 
 Replay Buffer Behavior
 ----------------------
