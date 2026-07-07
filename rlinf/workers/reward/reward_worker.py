@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from rlinf.data.datasets.reward_model import RewardBinaryDataset
 from rlinf.data.io_struct import RolloutResult
 from rlinf.data.tokenizers import hf_tokenizer
+from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
 from rlinf.models.embodiment.reward import (
     get_reward_model_class,
 )
@@ -41,20 +42,6 @@ from rlinf.utils.placement import (
     HybridComponentPlacement,
 )
 from rlinf.utils.utils import clear_memory
-
-try:
-    from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
-except ImportError as exc:
-    _FSDP_MODEL_MANAGER_IMPORT_ERROR = exc
-
-    class FSDPModelManager:  # type: ignore[no-redef]
-        """Placeholder when reward inference env lacks FSDP training deps."""
-
-        def __init__(self, *args, **kwargs):
-            raise ImportError(
-                "FSDPRewardWorker requires FSDPModelManager dependencies to be "
-                "available in the active Python environment."
-            ) from _FSDP_MODEL_MANAGER_IMPORT_ERROR
 
 
 class RewardWorker(Worker):

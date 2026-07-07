@@ -28,39 +28,9 @@ from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 mp.set_start_method("spawn", force=True)
 
 _REWARD_SERVER_COMPONENT_NAME = "reward_server"
-_REMOVED_REWARD_MODEL_SGLANG_KEYS = (
-    "sglang_server_args",
-    "sglang_router_args",
-    "sglang_engine_args",
-)
-
-
-def _launch_sglang_router_and_server(*args, **kwargs):
-    from rlinf.workers.rollout.sglang_server import launch_sglang_router_and_server
-
-    return launch_sglang_router_and_server(*args, **kwargs)
-
-
-def _validate_reward_model_has_no_sglang_serving_fields(cfg) -> None:
-    reward_model_cfg = cfg.get("reward", {}).get("model", {})
-    removed_keys = [
-        key for key in _REMOVED_REWARD_MODEL_SGLANG_KEYS if key in reward_model_cfg
-    ]
-    if removed_keys:
-        raise ValueError(
-            "SGLang reward serving config must not live under reward.model. "
-            f"Move {removed_keys} to the standard top-level router_server_args "
-            "block."
-        )
-    if str(reward_model_cfg.get("inference_backend", "")).lower() == "sglang":
-        raise ValueError(
-            "reward.model.inference_backend='sglang' is no longer supported. "
-            "Use reward.worker_type='api' with an OpenAI-compatible reward.api."
-        )
 
 
 def should_launch_managed_sglang_reward_api(cfg) -> bool:
-    _validate_reward_model_has_no_sglang_serving_fields(cfg)
     reward_cfg = cfg.get("reward", {})
     if not reward_cfg.get("use_reward_model", False):
         return False
@@ -96,11 +66,12 @@ def _resolve_reward_api_base_url(server_group, router_group) -> str:
 def launch_managed_sglang_reward_api(cfg, cluster, component_placement):
     if not should_launch_managed_sglang_reward_api(cfg):
         return None
+    from rlinf.workers.rollout.sglang_server import launch_sglang_router_and_server
 
     server_group = None
     router_group = None
     try:
-        server_group, router_group = _launch_sglang_router_and_server(
+        server_group, router_group = launch_sglang_router_and_server(
             config=cfg,
             cluster=cluster,
             rollout_hardware_ranks=None,

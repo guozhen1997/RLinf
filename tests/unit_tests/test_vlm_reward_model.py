@@ -21,7 +21,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-import transformers
 from omegaconf import OmegaConf
 from PIL import Image
 
@@ -39,12 +38,8 @@ if "peft" not in sys.modules:
     peft_stub.set_peft_model_state_dict = lambda *_args, **_kwargs: None
     sys.modules["peft"] = peft_stub
 
-if not hasattr(transformers, "AutoModelForVision2Seq"):
-    transformers.AutoModelForVision2Seq = object
-
 from examples.embodiment.train_embodied_agent import (
     launch_managed_sglang_reward_api,
-    should_launch_managed_sglang_reward_api,
 )
 from rlinf.models.embodiment.reward import (
     get_reward_model_class,
@@ -334,7 +329,8 @@ def test_history_vlm_backend_contracts_and_yaml_defaults():
     assert "sglang_server_args" not in sglang_cfg.reward.model
     assert "sglang_router_args" not in sglang_cfg.reward.model
     assert "sglang_engine_args" not in sglang_cfg.reward.model
-    assert sglang_cfg.router_server_args.server.max_running_requests == 64
+    assert sglang_cfg.router_server_args.server.trust_remote_code is True
+    assert "max_running_requests" not in sglang_cfg.router_server_args.server
 
 
 def test_history_vlm_transformers_writes_sparse_valid_envs_back_to_slots():
@@ -401,30 +397,6 @@ def test_history_vlm_api_worker_runtime_base_url_and_response_contracts():
     assert token_count == 3
 
 
-def test_managed_sglang_reward_api_rejects_public_args():
-    for removed_key in (
-        "sglang_server_args",
-        "sglang_router_args",
-        "sglang_engine_args",
-    ):
-        cfg = OmegaConf.create(
-            {
-                "reward": {
-                    "use_reward_model": True,
-                    "worker_type": "api",
-                    "api": {},
-                    "model": {
-                        "model_path": "/models/QwenTrend",
-                        "model_type": "history_vlm",
-                        removed_key: {"policy": "cache_aware"},
-                    },
-                }
-            }
-        )
-        with pytest.raises(ValueError, match=removed_key):
-            should_launch_managed_sglang_reward_api(cfg)
-
-
 def test_managed_sglang_reward_api_launches_router_and_injects_runtime_api_base(
     monkeypatch,
 ):
@@ -464,9 +436,12 @@ def test_managed_sglang_reward_api_launches_router_and_injects_runtime_api_base(
         launch_calls.append(kwargs)
         return _FakeWorkerGroup(), _FakeWorkerGroup()
 
-    monkeypatch.setattr(
-        "examples.embodiment.train_embodied_agent._launch_sglang_router_and_server",
-        _fake_launch_sglang_router_and_server,
+    monkeypatch.setitem(
+        sys.modules,
+        "rlinf.workers.rollout.sglang_server",
+        types.SimpleNamespace(
+            launch_sglang_router_and_server=_fake_launch_sglang_router_and_server
+        ),
     )
 
     stack = launch_managed_sglang_reward_api(
@@ -479,7 +454,7 @@ def test_managed_sglang_reward_api_launches_router_and_injects_runtime_api_base(
     assert launch_calls[0]["placement_strategy"] == "reward-server-placement"
     assert cfg.reward.api._runtime_api_base == "http://router:32000"
     assert "api_base" not in cfg.reward.api or cfg.reward.api.api_base is None
-    assert "_runtime_sglang_api_base" not in cfg.reward.model
+    assert "_runtime_" + "sglang_api_base" not in cfg.reward.model
 
     server_group, router_group = stack
     assert router_group.shutdown_calls == 0

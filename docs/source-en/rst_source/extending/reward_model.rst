@@ -339,8 +339,8 @@ environment collects the image history window before the reward worker scores it
      reward_weight: 1.0
      env_reward_weight: 0.0
      api:
-       api_base: ${oc.env:REWARD_API_BASE,null}
-       model: ${oc.env:REWARD_API_MODEL,Qwen3-VL-4B-Instruct}
+       api_base: null
+       model: Qwen3-VL-4B-Instruct
        sampling_params:
          max_tokens: 16
          temperature: 0.0
@@ -368,11 +368,6 @@ environment collects the image history window before the reward worker scores it
              - extra_view_images
            input_on_done: false
        interval_reward: 0.0
-       infer_micro_batch_size: 64
-       max_new_tokens: 16
-       do_sample: false
-       temperature: 0.0
-       use_chat_template: true
 
 Important fields:
 

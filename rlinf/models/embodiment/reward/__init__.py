@@ -14,7 +14,6 @@
 
 """Reward models for embodied RL."""
 
-from importlib import import_module
 from typing import TYPE_CHECKING
 
 from rlinf.models.embodiment.reward.base_reward_model import BaseRewardModel
@@ -35,25 +34,10 @@ __all__ = [
     "resolve_reward_model_backend",
 ]
 
-_REWARD_MODEL_CLASS_SPECS = {
-    "ResNetRewardModel": (
-        "rlinf.models.embodiment.reward.resnet_reward_model",
-        "ResNetRewardModel",
-    ),
-    "VLMRewardModel": (
-        "rlinf.models.embodiment.reward.vlm_reward_model",
-        "VLMRewardModel",
-    ),
-    "HistoryVLMRewardModel": (
-        "rlinf.models.embodiment.reward.vlm_reward_model",
-        "HistoryVLMRewardModel",
-    ),
-}
-
 reward_model_registry = {
-    "resnet": "ResNetRewardModel",
-    "vlm": "VLMRewardModel",
-    "history_vlm": "HistoryVLMRewardModel",
+    "resnet": "resnet",
+    "vlm": "vlm",
+    "history_vlm": "history_vlm",
 }
 
 _HISTORY_VLM_MODEL_TYPE = "history_vlm"
@@ -62,15 +46,33 @@ _HISTORY_VLM_TRANSFORMERS_BACKEND_ALIASES = {"hf", "transformers"}
 _HISTORY_VLM_SUPPORTED_BACKENDS = _HISTORY_VLM_TRANSFORMERS_BACKEND_ALIASES
 
 
-def _load_reward_model_class(class_name: str):
-    module_name, attr_name = _REWARD_MODEL_CLASS_SPECS[class_name]
-    module = import_module(module_name)
-    return getattr(module, attr_name)
+def _load_reward_model_class(reward_model_type: str):
+    if reward_model_type == "resnet":
+        from rlinf.models.embodiment.reward.resnet_reward_model import (
+            ResNetRewardModel,
+        )
+
+        return ResNetRewardModel
+    if reward_model_type == "vlm":
+        from rlinf.models.embodiment.reward.vlm_reward_model import VLMRewardModel
+
+        return VLMRewardModel
+    if reward_model_type == "history_vlm":
+        from rlinf.models.embodiment.reward.vlm_reward_model import (
+            HistoryVLMRewardModel,
+        )
+
+        return HistoryVLMRewardModel
+    raise ValueError(f"Unsupported reward model type: {reward_model_type}")
 
 
 def __getattr__(name: str):
-    if name in _REWARD_MODEL_CLASS_SPECS:
-        return _load_reward_model_class(name)
+    if name == "ResNetRewardModel":
+        return _load_reward_model_class("resnet")
+    if name == "VLMRewardModel":
+        return _load_reward_model_class("vlm")
+    if name == "HistoryVLMRewardModel":
+        return _load_reward_model_class("history_vlm")
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -937,25 +937,11 @@ def validate_embodied_cfg(cfg):
         assert stage_num == 1, (
             "use_reward_model requires rollout.pipeline_stage_num to be 1"
         )
-        reward_model_cfg = cfg.reward.get("model", {})
-        for removed_key in (
-            "sglang_server_args",
-            "sglang_router_args",
-            "sglang_engine_args",
-        ):
-            assert removed_key not in reward_model_cfg, (
-                f"reward.model.{removed_key} is no longer supported. Move "
-                "SGLang serving configuration to the standard top-level "
-                "router_server_args block."
-            )
-        assert str(reward_model_cfg.get("inference_backend", "")).lower() != "sglang", (
-            "reward.model.inference_backend='sglang' is no longer supported. "
-            "Use reward.worker_type='api' with an OpenAI-compatible reward.api."
-        )
         reward_worker_type = str(cfg.reward.get("worker_type", "model")).lower()
         assert reward_worker_type in {"model", "api"}, (
             "reward.worker_type must be either 'model' or 'api'."
         )
+        reward_model_cfg = cfg.reward.get("model", {})
         if reward_worker_type == "api":
             assert reward_model_cfg.get("model_type") == "history_vlm", (
                 "reward.worker_type='api' currently requires "

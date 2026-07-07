@@ -2,7 +2,8 @@ defaults:
   - env/maniskill_pick_cube@env.train
   - env/maniskill_pick_cube@env.eval
   - model/mlp_policy@actor.model
-  - training_backend/fsdp@actor.fsdp_config
+  - hybrid_engines/fsdp@actor.fsdp_config
+  - hybrid_engines/sglang_router_server@router_server_args
   - weight_syncer/patch_syncer@weight_syncer
   - override hydra/job_logging: stdout
 
@@ -26,12 +27,7 @@ router_server_args:
   model_path: ${reward.model.model_path}
   tensor_parallel_size: 2
   pipeline_parallel_size: 1
-  group_name: SGLangRewardServerGroup
-  launch_server: true
   server:
-    model_path: ${..model_path}
-    tp_size: ${..tensor_parallel_size}
-    pp_size: ${..pipeline_parallel_size}
     trust_remote_code: true
     enable_multimodal: true
     dtype: bfloat16
@@ -39,14 +35,6 @@ router_server_args:
     attention_backend: triton
     sampling_backend: pytorch
     grammar_backend: none
-    max_running_requests: 64
-  router_group_name: SGLangRewardRouterGroup
-  launch_router: true
-  router:
-    policy: cache_aware
-    log_level: warn
-    worker_startup_timeout_secs: 1800
-    request_timeout_secs: 1800
 
 runner:
   task_type: embodied
@@ -212,8 +200,8 @@ reward:
   reward_weight: 1.0
   env_reward_weight: 0.0
   api:
-    api_base: ${oc.env:REWARD_API_BASE,null}
-    model: ${oc.env:REWARD_API_MODEL,Qwen3-VL-4B-Instruct}
+    api_base: null
+    model: Qwen3-VL-4B-Instruct
     sampling_params:
       max_tokens: 16
       temperature: 0.0
@@ -231,7 +219,6 @@ reward:
       negative_reward: -0.2
       unclear_reward: 0.0
       invalid_reward: 0.0
-    inference_mode: generate
     history_buffers:
       history_window:
         history_size: 5
@@ -243,14 +230,9 @@ reward:
         input_on_done: false
     interval_reward: 0.0
     enable_history_offload: true
-    infer_micro_batch_size: 64
     subprocessor_kwargs:
       video_processor:
         do_sample_frames: true
-    max_new_tokens: 16
-    do_sample: false
-    temperature: 0.0
-    use_chat_template: true
 
 critic:
   use_critic_model: false

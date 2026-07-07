@@ -34,7 +34,7 @@ from rlinf.models.embodiment.reward.vlm_reward_utils.input_builder import (
 from rlinf.models.embodiment.reward.vlm_reward_utils.reward_parser import (
     get_reward_parser,
 )
-from rlinf.utils import internal_http
+from rlinf.utils.http_client import InferenceHTTPClient
 from rlinf.utils.logging import get_logger
 from rlinf.workers.reward.reward_worker import EmbodiedRewardWorker
 
@@ -98,7 +98,7 @@ def _derive_model_name(model_path: Any) -> str:
     return name or "history_vlm_reward"
 
 
-class APIRewardWorker(EmbodiedRewardWorker):
+class EmbodiedAPIRewardWorker(EmbodiedRewardWorker):
     """Embodied reward worker that calls an OpenAI-compatible reward API."""
 
     def init_worker(self):
@@ -119,13 +119,17 @@ class APIRewardWorker(EmbodiedRewardWorker):
         self.api_cfg = self.cfg.reward.get("api", {})
         if self.model_cfg.get("model_type") != "history_vlm":
             raise ValueError(
-                "APIRewardWorker currently supports only "
+                "EmbodiedAPIRewardWorker currently supports only "
                 "reward.model.model_type='history_vlm'."
             )
 
         self.setup_api_reward()
 
     def setup_api_reward(self) -> None:
+        self.request_timeout = _DEFAULT_REQUEST_TIMEOUT
+        self.image_format = _IMAGE_FORMAT
+        self.jpeg_quality = _JPEG_QUALITY
+
         self.model_path = self.model_cfg.get("model_path")
         if not self.model_path:
             raise ValueError(
@@ -141,6 +145,13 @@ class APIRewardWorker(EmbodiedRewardWorker):
                 "When using Ray-managed SGLang serving, the entrypoint injects "
                 "reward.api._runtime_api_base at runtime."
             )
+        client_base_url = (
+            self.api_base[:-3] if self.api_base.endswith("/v1") else self.api_base
+        )
+        self.http_client = InferenceHTTPClient(
+            client_base_url,
+            connect_timeout=self.request_timeout,
+        )
 
         self.history_buffer_names = list(self.model_cfg.history_buffers.keys())
         self.interval_reward = float(self.model_cfg.get("interval_reward", 0.0))
@@ -148,11 +159,7 @@ class APIRewardWorker(EmbodiedRewardWorker):
         self.model_name = str(
             self.api_cfg.get("model") or _derive_model_name(self.model_path)
         )
-        self.request_timeout = _DEFAULT_REQUEST_TIMEOUT
-        self.image_format = _IMAGE_FORMAT
-        self.jpeg_quality = _JPEG_QUALITY
         self.sampling_params = self._build_sampling_params(
-            self.model_cfg,
             self.api_cfg,
         )
 
@@ -186,7 +193,7 @@ class APIRewardWorker(EmbodiedRewardWorker):
             history_buffer_names=self.history_buffer_names,
         )
         assert isinstance(self.input_builder, HistoryVLMInputBuilder), (
-            "APIRewardWorker only supports HistoryVLMInputBuilder."
+            "EmbodiedAPIRewardWorker only supports HistoryVLMInputBuilder."
         )
 
     def setup_reward_parser(self) -> None:
@@ -196,25 +203,9 @@ class APIRewardWorker(EmbodiedRewardWorker):
 
     def _build_sampling_params(
         self,
-        model_cfg: DictConfig,
         api_cfg: DictConfig,
     ) -> dict[str, Any]:
-        sampling_params = _to_plain_dict(api_cfg.get("sampling_params", {}))
-        sampling_params.setdefault(
-            "max_tokens",
-            int(model_cfg.get("max_new_tokens", 32)),
-        )
-        if model_cfg.get("min_new_tokens", None) is not None:
-            sampling_params.setdefault(
-                "min_tokens",
-                int(model_cfg.get("min_new_tokens")),
-            )
-        if model_cfg.get("ignore_eos", None) is not None:
-            sampling_params.setdefault(
-                "ignore_eos",
-                bool(model_cfg.get("ignore_eos")),
-            )
-        return sampling_params
+        return _to_plain_dict(api_cfg.get("sampling_params", {}))
 
     def _frame_to_numpy(self, frame: Any) -> np.ndarray:
         if isinstance(frame, torch.Tensor):
@@ -320,13 +311,14 @@ class APIRewardWorker(EmbodiedRewardWorker):
         }
 
     def _chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.api_base.endswith("/v1"):
-            url = f"{self.api_base}/chat/completions"
-        else:
-            url = f"{self.api_base}/v1/chat/completions"
-        response = internal_http.post(url, json=payload, timeout=self.request_timeout)
-        response.raise_for_status()
-        return response.json()
+        payload = dict(payload)
+        messages = payload.pop("messages")
+        model = payload.pop("model")
+        return self.http_client.chat_completion(
+            messages=messages,
+            model=model,
+            **payload,
+        )
 
     def _generate(self, payloads: list[dict[str, Any]]) -> tuple[list[str], list[int]]:
         if not payloads:
@@ -468,6 +460,3 @@ class APIRewardWorker(EmbodiedRewardWorker):
         if rewards is not None and rewards.dim() == 1:
             rewards = rewards.unsqueeze(-1)
         return rewards.detach().cpu()
-
-
-EmbodiedAPIRewardWorker = APIRewardWorker

@@ -1102,17 +1102,20 @@ EOF
 }
 
 install_qwen3_vl_sglang_deps() {
-    uv pip install --no-config -r "$SCRIPT_DIR/embodied/models/qwen3_vl_sglang.txt"
+    uv pip install --no-config --prerelease=allow -r "$SCRIPT_DIR/embodied/models/qwen3_vl_sglang.txt"
     assert_transformers_version "4.57.1"
     python - <<'EOF'
 from importlib.metadata import version
 
 from packaging.version import Version
+import sglang_router
 
 expected = Version("0.5.4")
 actual = Version(version("sglang"))
 if actual != expected:
     raise SystemExit(f"Expected sglang=={expected}, found {actual}.")
+version("sglang-router")
+assert sglang_router is not None
 EOF
 }
 

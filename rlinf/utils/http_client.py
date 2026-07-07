@@ -34,16 +34,7 @@ _PROXY_ENV_VARS = (
 
 @contextmanager
 def no_proxy_env() -> Iterator[None]:
-    """Temporarily unset HTTP proxy env vars.
-
-    Removes ``http_proxy`` / ``https_proxy`` / ``all_proxy`` (both cases)
-    from ``os.environ`` for the duration of the block, and restores the
-    original values on exit. Any subprocess spawned inside the block
-    inherits the stripped env, which is useful when the child's HTTP
-    client (e.g. sglang-router's Rust reqwest, or sglang server's
-    tokenizer-manager IPC) would otherwise tunnel intra-cluster traffic
-    through a user-configured proxy.
-    """
+    """Temporarily unset HTTP proxy env vars."""
     saved = {var: os.environ.pop(var, None) for var in _PROXY_ENV_VARS}
     try:
         yield
@@ -115,11 +106,12 @@ class InferenceHTTPClient:
 
     def health(self) -> bool:
         try:
-            r = requests.get(
-                f"{self.base_url}/health",
-                timeout=5,
-                proxies={"http": None, "https": None},
-            )
+            with no_proxy_env():
+                r = requests.get(
+                    f"{self.base_url}/health",
+                    timeout=5,
+                    proxies={"http": None, "https": None},
+                )
             return r.status_code == 200
         except requests.exceptions.RequestException:
             return False
@@ -210,12 +202,13 @@ class InferenceHTTPClient:
     def _post(self, path: str, body: dict) -> dict:
         # (connect, read) tuple: bound the TCP connect phase only;
         # let the response take as long as it needs.
-        resp = requests.post(
-            f"{self.base_url}{path}",
-            json=body,
-            timeout=(self.connect_timeout, None),
-            proxies={"http": None, "https": None},
-        )
+        with no_proxy_env():
+            resp = requests.post(
+                f"{self.base_url}{path}",
+                json=body,
+                timeout=(self.connect_timeout, None),
+                proxies={"http": None, "https": None},
+            )
         resp.raise_for_status()
         return resp.json()
 
