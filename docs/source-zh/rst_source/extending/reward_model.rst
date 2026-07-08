@@ -312,7 +312,8 @@ RLinf 提供了多个 reward model 接入 RL 的示例配置：
 
 .. code-block:: bash
 
-   bash requirements/install.sh embodied --env maniskill_libero --model qwen3_vl
+   bash requirements/install.sh embodied --env maniskill_libero --model qwen3_vl \
+     --torch 2.8.0 --sglang 0.5.4 --transformers 4.57.1
 
 随后在 reward 配置中使用 ``history_vlm``。本地 Hugging Face 推理时不需要设置
 ``reward.worker_type``；如果要调用 OpenAI-compatible API，则设置

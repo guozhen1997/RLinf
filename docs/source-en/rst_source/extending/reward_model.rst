@@ -316,7 +316,8 @@ For VLM reward inference, install embodied dependencies with VLM reward support:
 
 .. code-block:: bash
 
-   bash requirements/install.sh embodied --env maniskill_libero --model qwen3_vl
+   bash requirements/install.sh embodied --env maniskill_libero --model qwen3_vl \
+     --torch 2.8.0 --sglang 0.5.4 --transformers 4.57.1
 
 Then configure the reward section to use ``history_vlm``.
 For local Hugging Face inference, leave ``reward.worker_type`` unset.
