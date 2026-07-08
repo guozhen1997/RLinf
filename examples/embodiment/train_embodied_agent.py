@@ -23,6 +23,8 @@ from rlinf.config import validate_cfg
 from rlinf.runners.embodied_runner import EmbodiedRunner
 from rlinf.scheduler import Cluster
 from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.workers.env.env_worker import EnvWorker
+from rlinf.workers.reward import EmbodiedAPIRewardWorker, EmbodiedRewardWorker
 from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 mp.set_start_method("spawn", force=True)
@@ -108,9 +110,6 @@ def stop_managed_sglang_reward_api(managed_reward_api) -> None:
     version_base="1.1", config_path="config", config_name="maniskill_ppo_openvlaoft"
 )
 def main(cfg) -> None:
-    from rlinf.workers.env.env_worker import EnvWorker
-    from rlinf.workers.reward import EmbodiedAPIRewardWorker, EmbodiedRewardWorker
-
     cfg = validate_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 

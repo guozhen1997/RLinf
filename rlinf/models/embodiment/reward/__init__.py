@@ -42,8 +42,7 @@ reward_model_registry = {
 
 _HISTORY_VLM_MODEL_TYPE = "history_vlm"
 _HISTORY_VLM_TRANSFORMERS_BACKEND = "hf"
-_HISTORY_VLM_TRANSFORMERS_BACKEND_ALIASES = {"hf", "transformers"}
-_HISTORY_VLM_SUPPORTED_BACKENDS = _HISTORY_VLM_TRANSFORMERS_BACKEND_ALIASES
+_HISTORY_VLM_SUPPORTED_BACKENDS = {_HISTORY_VLM_TRANSFORMERS_BACKEND}
 
 
 def _load_reward_model_class(reward_model_type: str):
@@ -80,7 +79,7 @@ def _normalize_backend(inference_backend: str | None) -> str | None:
     if inference_backend is None or inference_backend == "":
         return None
     backend = str(inference_backend).lower()
-    if backend in _HISTORY_VLM_TRANSFORMERS_BACKEND_ALIASES:
+    if backend == _HISTORY_VLM_TRANSFORMERS_BACKEND:
         return _HISTORY_VLM_TRANSFORMERS_BACKEND
     return backend
 
@@ -106,7 +105,7 @@ def resolve_reward_model_backend(
         raise ValueError(
             "Unsupported reward.model.inference_backend for history_vlm: "
             f"{inference_backend!r}. Supported backend values are 'hf' "
-            "(alias 'transformers') or unset. Use reward.worker_type='api' "
+            "or unset. Use reward.worker_type='api' "
             "with an OpenAI-compatible reward.api for API reward inference."
         )
     return reward_model_type, backend

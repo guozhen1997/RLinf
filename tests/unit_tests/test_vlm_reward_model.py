@@ -38,6 +38,15 @@ if "peft" not in sys.modules:
     peft_stub.set_peft_model_state_dict = lambda *_args, **_kwargs: None
     sys.modules["peft"] = peft_stub
 
+if "rlinf.workers.env.env_worker" not in sys.modules:
+    env_worker_stub = types.ModuleType("rlinf.workers.env.env_worker")
+
+    class _FakeEnvWorker:
+        pass
+
+    env_worker_stub.EnvWorker = _FakeEnvWorker
+    sys.modules["rlinf.workers.env.env_worker"] = env_worker_stub
+
 from examples.embodiment.train_embodied_agent import (
     launch_managed_sglang_reward_api,
 )
@@ -311,11 +320,9 @@ def test_history_vlm_backend_contracts_and_yaml_defaults():
     assert "history_vlm_sglang" not in reward_model_registry
     assert resolve_reward_model_backend("history_vlm") == ("history_vlm", None)
     assert resolve_reward_model_backend("history_vlm", "hf") == ("history_vlm", "hf")
-    assert resolve_reward_model_backend("history_vlm", "transformers") == (
-        "history_vlm",
-        "hf",
-    )
     assert get_reward_model_class("history_vlm").__name__ == "HistoryVLMRewardModel"
+    with pytest.raises(ValueError, match="Unsupported reward.model.inference_backend"):
+        resolve_reward_model_backend("history_vlm", "transformers")
     with pytest.raises(ValueError, match="Unsupported reward.model.inference_backend"):
         resolve_reward_model_backend("history_vlm", "sglang")
     with pytest.raises(ValueError, match="Unsupported reward.model.inference_backend"):
