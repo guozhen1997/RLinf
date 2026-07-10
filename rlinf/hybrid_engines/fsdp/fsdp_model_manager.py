@@ -23,7 +23,7 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
 
 from rlinf.config import SupportedModel, torch_dtype_from_precision
 from rlinf.data.tokenizers import hf_tokenizer
@@ -48,17 +48,6 @@ warnings.filterwarnings(
     message=".*NO_SHARD.*full_state_dict.*",
     category=UserWarning,
 )
-
-
-def _get_auto_model_for_multimodal_generation():
-    try:
-        from transformers import AutoModelForImageTextToText
-
-        return AutoModelForImageTextToText
-    except ImportError:
-        from transformers import AutoModelForVision2Seq
-
-        return AutoModelForVision2Seq
 
 
 class FSDPModelManager:
@@ -184,19 +173,10 @@ class FSDPModelManager:
                 load_in_8bit=True,
             )
         else:
-            auto_model_class = AutoModelForCausalLM
-            try:
-                auto_multimodal_model_class = (
-                    _get_auto_model_for_multimodal_generation()
-                )
-            except ImportError:
-                auto_multimodal_model_class = None
-            if (
-                auto_multimodal_model_class is not None
-                and type(model_config)
-                in auto_multimodal_model_class._model_mapping.keys()
-            ):
-                auto_model_class = auto_multimodal_model_class
+            if type(model_config) in AutoModelForVision2Seq._model_mapping.keys():
+                auto_model_class = AutoModelForVision2Seq
+            else:
+                auto_model_class = AutoModelForCausalLM
 
             model = auto_model_class.from_pretrained(
                 cfg.model.model_path,

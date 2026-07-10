@@ -38,7 +38,9 @@ from rlinf.utils.metric_utils import append_to_dict
 from rlinf.utils.placement import (
     HybridComponentPlacement,
 )
-from rlinf.utils.utils import clear_memory
+from rlinf.utils.utils import (
+    clear_memory,
+)
 
 
 class RewardWorker(Worker):
@@ -251,12 +253,9 @@ class EmbodiedRewardWorker(Worker):
     def model_provider_func(self):
         from rlinf.models.embodiment.reward import get_reward_model_class
 
-        model_cfg = self.cfg.reward.model
-        reward_cls = get_reward_model_class(
-            model_cfg.model_type,
-            model_cfg.get("inference_backend", None),
-        )
+        reward_cls = get_reward_model_class(self.cfg.reward.model.model_type)
 
+        model_cfg = self.cfg.reward.model
         with open_dict(model_cfg):
             model_cfg.num_envs = self.local_num_train_envs
         model = reward_cls(model_cfg)

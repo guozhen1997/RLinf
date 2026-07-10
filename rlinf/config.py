@@ -948,9 +948,7 @@ def validate_embodied_cfg(cfg):
                 "reward.model.model_type='history_vlm'."
             )
             api_cfg = cfg.reward.get("api", {})
-            api_base = str(
-                api_cfg.get("api_base") or api_cfg.get("_runtime_api_base") or ""
-            ).strip()
+            api_base = str(api_cfg.get("api_base") or "").strip()
             assert api_base or "router_server_args" in cfg, (
                 "reward.worker_type='api' requires either reward.api.api_base or "
                 "the standard top-level router_server_args block for "

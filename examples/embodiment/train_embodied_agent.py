@@ -40,9 +40,7 @@ def should_launch_managed_sglang_reward_api(cfg) -> bool:
         return False
 
     api_cfg = reward_cfg.get("api", {})
-    api_base = str(
-        api_cfg.get("api_base") or api_cfg.get("_runtime_api_base") or ""
-    ).strip()
+    api_base = str(api_cfg.get("api_base") or "").strip()
     if api_base:
         return False
     if "router_server_args" not in cfg:
@@ -60,9 +58,7 @@ def _resolve_reward_api_base_url(server_group, router_group) -> str:
         server_urls = server_group.get_server_url().wait()
         if server_urls:
             return str(server_urls[0]).rstrip("/")
-    raise RuntimeError(
-        "Unable to resolve reward.api._runtime_api_base from managed SGLang reward API."
-    )
+    raise RuntimeError("Unable to resolve reward.api.api_base from managed SGLang API.")
 
 
 def launch_managed_sglang_reward_api(cfg, cluster, component_placement):
@@ -87,7 +83,7 @@ def launch_managed_sglang_reward_api(cfg, cluster, component_placement):
             if "api" not in cfg.reward:
                 cfg.reward.api = {}
         with open_dict(cfg.reward.api):
-            cfg.reward.api._runtime_api_base = api_base
+            cfg.reward.api.api_base = api_base
         return server_group, router_group
     except Exception:
         stop_managed_sglang_reward_api((server_group, router_group))

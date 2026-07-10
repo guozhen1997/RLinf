@@ -12,11 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ruff: noqa: E402
-
 import sys
 import types
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,69 +21,15 @@ import torch
 from omegaconf import OmegaConf
 from PIL import Image
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-if "peft" not in sys.modules:
-    peft_stub = types.ModuleType("peft")
-
-    class _FakeLoraConfig:
-        def __init__(self, *args, **kwargs):
-            del args, kwargs
-
-    peft_stub.LoraConfig = _FakeLoraConfig
-    peft_stub.get_peft_model = lambda model, *_args, **_kwargs: model
-    peft_stub.set_peft_model_state_dict = lambda *_args, **_kwargs: None
-    sys.modules["peft"] = peft_stub
-
-if "rlinf.workers.env.env_worker" not in sys.modules:
-    env_worker_stub = types.ModuleType("rlinf.workers.env.env_worker")
-
-    class _FakeEnvWorker:
-        pass
-
-    env_worker_stub.EnvWorker = _FakeEnvWorker
-    sys.modules["rlinf.workers.env.env_worker"] = env_worker_stub
-
-from examples.embodiment.train_embodied_agent import (
-    launch_managed_sglang_reward_api,
-)
-from rlinf.models.embodiment.reward import (
-    get_reward_model_class,
-    resolve_reward_model_backend,
-    reward_model_registry,
-)
-from rlinf.models.embodiment.reward.vlm_reward_model import HistoryVLMRewardModel
-from rlinf.models.embodiment.reward.vlm_reward_utils.input_builder import (
-    HistoryVLMInputBuilder,
-)
+from examples.embodiment import train_embodied_agent
 from rlinf.workers.reward.api_reward_worker import EmbodiedAPIRewardWorker
 
 
-class _FakeModel:
-    def __init__(self):
-        self.device = torch.device("cpu")
-
-    def eval(self):
-        return self
-
-    def generate(
-        self, input_ids: torch.Tensor, reward_ids: torch.Tensor, **kwargs
-    ) -> torch.Tensor:
-        del kwargs
-        return torch.cat([input_ids, reward_ids.unsqueeze(-1)], dim=-1)
-
-
 class _FakeProcessor:
-    def batch_decode(self, output_ids: torch.Tensor, skip_special_tokens: bool = True):
-        del skip_special_tokens
-        return [str(int(token.item())) for token in output_ids[:, 0]]
-
-
-class _FakeSGLangProcessor:
     video_token = "<video>"
 
     def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
-        del tokenize, add_generation_prompt
+        del messages, tokenize, add_generation_prompt
         return "rendered"
 
 
@@ -95,46 +38,7 @@ class _FakeRewardParser:
         return torch.tensor([float(output) if output else 0.0 for output in outputs])
 
 
-class _FakeHistoryInputBuilder(HistoryVLMInputBuilder):
-    def __init__(self, history_buffer_names: list[str]):
-        super().__init__(
-            _processor=None,
-            history_buffer_names=history_buffer_names,
-        )
-        self.calls: list[list[int]] = []
-
-    def get_valid_input_ids(
-        self,
-        observations: dict[str, object],
-        history_input: dict[str, dict[str, list[list[object]]]],
-    ) -> list[int]:
-        del observations
-        history_window = history_input["history_window"]["main_images"]
-        return [
-            env_idx for env_idx, frames in enumerate(history_window) if len(frames) > 0
-        ]
-
-    def prepare_inputs(
-        self,
-        observations: dict[str, object],
-        history_input: dict[str, dict[str, list[list[object]]]],
-        valid_input_ids: list[int],
-    ) -> dict[str, torch.Tensor]:
-        del history_input
-        reward_ids = observations["slot_ids"][valid_input_ids].to(dtype=torch.long)
-        self.calls.append(reward_ids.tolist())
-        return {
-            "input_ids": torch.zeros((len(valid_input_ids), 1), dtype=torch.long),
-            "reward_ids": reward_ids,
-        }
-
-    def process_inputs(
-        self, prepared_inputs: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
-        return prepared_inputs
-
-
-class _FakeSGLangHistoryInputBuilder:
+class _FakeHistoryInputBuilder:
     def __init__(self):
         self.calls: list[list[int]] = []
 
@@ -170,22 +74,6 @@ class _FakeSGLangHistoryInputBuilder:
         }
 
 
-class _TestHistoryVLMRewardModel(HistoryVLMRewardModel):
-    def setup_processor(self) -> None:
-        self._processor = _FakeProcessor()
-
-    def setup_model(self) -> None:
-        self._model = _FakeModel()
-
-    def setup_input_builder(self) -> None:
-        self.input_builder = _FakeHistoryInputBuilder(
-            history_buffer_names=self.history_buffer_names
-        )
-
-    def setup_reward_parser(self) -> None:
-        self.reward_parser = _FakeRewardParser()
-
-
 class _TestEmbodiedAPIRewardWorker(EmbodiedAPIRewardWorker):
     def __init__(self, cfg, api_cfg=None):
         self.model_cfg = cfg
@@ -201,10 +89,10 @@ class _TestEmbodiedAPIRewardWorker(EmbodiedAPIRewardWorker):
         self.setup_api_reward()
 
     def setup_processor(self) -> None:
-        self._processor = _FakeSGLangProcessor()
+        self._processor = _FakeProcessor()
 
     def setup_input_builder(self) -> None:
-        self.input_builder = _FakeSGLangHistoryInputBuilder()
+        self.input_builder = _FakeHistoryInputBuilder()
 
     def setup_reward_parser(self) -> None:
         self.reward_parser = _FakeRewardParser()
@@ -229,15 +117,7 @@ class _FakeHandle:
 
 class _FakeWorkerGroup:
     def __init__(self):
-        self.registered_urls = []
-        self.registration_kwargs = []
         self.shutdown_calls = 0
-
-    def init_server(self):
-        return _FakeHandle()
-
-    def init_router(self):
-        return _FakeHandle()
 
     def get_server_url(self):
         return _FakeHandle(["http://server-0:31000"])
@@ -245,25 +125,12 @@ class _FakeWorkerGroup:
     def get_router_url(self):
         return _FakeHandle(["http://router:32000"])
 
-    def register_server(self, server_url, **kwargs):
-        self.registered_urls.append(server_url)
-        self.registration_kwargs.append(kwargs)
-        return _FakeHandle()
-
     def shutdown(self):
         self.shutdown_calls += 1
         return _FakeHandle()
 
 
 class _FakeComponentPlacement:
-    def get_hardware_ranks(self, component_name):
-        assert component_name == "reward_server"
-        return [0, 1]
-
-    def get_world_size(self, component_name):
-        assert component_name == "reward_server"
-        return 1
-
     def get_strategy(self, component_name):
         assert component_name == "reward_server"
         return "reward-server-placement"
@@ -274,7 +141,6 @@ def _make_cfg() -> OmegaConf:
         {
             "model_path": "dummy",
             "precision": "bf16",
-            "infer_micro_batch_size": 2,
             "input_builder_name": "history_vlm_input_builder",
             "reward_parser_name": "base_reward_parser",
             "history_buffers": {
@@ -306,49 +172,6 @@ def _make_reward_input(
             }
         },
     }
-
-
-def test_history_vlm_backend_contracts_and_yaml_defaults():
-    hf_cfg = OmegaConf.load(
-        REPO_ROOT / "examples/embodiment/config/maniskill_ppo_mlp_qwentrend_reward.yaml"
-    )
-    sglang_cfg = OmegaConf.load(
-        REPO_ROOT
-        / "examples/embodiment/config/maniskill_ppo_mlp_qwentrend_sglang_reward.yaml"
-    )
-
-    assert "history_vlm_sglang" not in reward_model_registry
-    assert resolve_reward_model_backend("history_vlm") == ("history_vlm", None)
-    assert resolve_reward_model_backend("history_vlm", "hf") == ("history_vlm", "hf")
-    assert get_reward_model_class("history_vlm").__name__ == "HistoryVLMRewardModel"
-    with pytest.raises(ValueError, match="Unsupported reward.model.inference_backend"):
-        resolve_reward_model_backend("history_vlm", "transformers")
-    with pytest.raises(ValueError, match="Unsupported reward.model.inference_backend"):
-        resolve_reward_model_backend("history_vlm", "sglang")
-    with pytest.raises(ValueError, match="Unsupported reward.model.inference_backend"):
-        resolve_reward_model_backend("history_vlm", "vllm")
-
-    assert hf_cfg.reward.model.get("inference_backend") in (None, "hf")
-    assert sglang_cfg.reward.worker_type == "api"
-    assert sglang_cfg.reward.api.model == "Qwen3-VL-4B-Instruct"
-    assert sglang_cfg.cluster.component_placement.reward_server == "0-1:0"
-    assert "inference_backend" not in sglang_cfg.reward.model
-    assert "sglang_server_args" not in sglang_cfg.reward.model
-    assert "sglang_router_args" not in sglang_cfg.reward.model
-    assert "sglang_engine_args" not in sglang_cfg.reward.model
-    assert sglang_cfg.router_server_args.server.trust_remote_code is True
-    assert "max_running_requests" not in sglang_cfg.router_server_args.server
-
-
-def test_history_vlm_transformers_writes_sparse_valid_envs_back_to_slots():
-    model = _TestHistoryVLMRewardModel(_make_cfg())
-
-    rewards = model.compute_reward(
-        _make_reward_input([20, 21, 22, 23], valid_env_ids=[1, 3])
-    )
-
-    assert torch.equal(rewards, torch.tensor([0.0, 21.0, 0.0, 23.0]))
-    assert model.input_builder.calls == [[21], [23]]
 
 
 def test_history_vlm_api_worker_writes_sparse_valid_envs_back_to_slots():
@@ -386,7 +209,7 @@ def test_history_vlm_api_worker_builds_openai_payload_with_images():
     assert content[-1] == {"type": "text", "text": "judge progress"}
 
 
-def test_history_vlm_api_worker_runtime_base_url_and_response_contracts():
+def test_history_vlm_api_worker_base_url_and_response_contracts():
     with pytest.raises(ValueError, match="reward.api.api_base must be set"):
         _TestEmbodiedAPIRewardWorker(
             _make_cfg(),
@@ -404,9 +227,7 @@ def test_history_vlm_api_worker_runtime_base_url_and_response_contracts():
     assert token_count == 3
 
 
-def test_managed_sglang_reward_api_launches_router_and_injects_runtime_api_base(
-    monkeypatch,
-):
+def test_managed_sglang_reward_api_launches_router_and_sets_api_base(monkeypatch):
     cfg = OmegaConf.create(
         {
             "reward": {
@@ -422,17 +243,12 @@ def test_managed_sglang_reward_api_launches_router_and_injects_runtime_api_base(
                 "model_path": "/models/QwenTrend",
                 "tensor_parallel_size": 2,
                 "pipeline_parallel_size": 1,
-                "group_name": "SGLangRewardServerGroup",
-                "launch_server": True,
                 "server": {
                     "model_path": "/models/QwenTrend",
                     "tp_size": 2,
                     "pp_size": 1,
                     "enable_multimodal": True,
-                    "max_running_requests": 16,
                 },
-                "router_group_name": "SGLangRewardRouterGroup",
-                "launch_router": True,
                 "router": {"policy": "cache_aware"},
             },
         }
@@ -451,7 +267,7 @@ def test_managed_sglang_reward_api_launches_router_and_injects_runtime_api_base(
         ),
     )
 
-    stack = launch_managed_sglang_reward_api(
+    stack = train_embodied_agent.launch_managed_sglang_reward_api(
         cfg,
         cluster=object(),
         component_placement=_FakeComponentPlacement(),
@@ -459,9 +275,7 @@ def test_managed_sglang_reward_api_launches_router_and_injects_runtime_api_base(
 
     assert launch_calls[0]["router_server_args"] is cfg.router_server_args
     assert launch_calls[0]["placement_strategy"] == "reward-server-placement"
-    assert cfg.reward.api._runtime_api_base == "http://router:32000"
-    assert "api_base" not in cfg.reward.api or cfg.reward.api.api_base is None
-    assert "_runtime_" + "sglang_api_base" not in cfg.reward.model
+    assert cfg.reward.api.api_base == "http://router:32000"
 
     server_group, router_group = stack
     assert router_group.shutdown_calls == 0

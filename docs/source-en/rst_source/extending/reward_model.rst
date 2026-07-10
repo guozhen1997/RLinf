@@ -383,8 +383,8 @@ Important fields:
 
 When ``reward.api.api_base`` is empty and ``router_server_args`` is present,
 ``train_embodied_agent.py`` launches the Ray-managed SGLang server/router,
-registers the servers with the router, and injects the runtime API endpoint into
-``reward.api`` before the reward worker is created.
+registers the servers with the router, and writes the resolved endpoint to
+``reward.api.api_base`` before the reward worker is created.
 
 Launch the MLP RL run with:
 

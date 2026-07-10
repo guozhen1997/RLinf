@@ -136,14 +136,12 @@ class EmbodiedAPIRewardWorker(EmbodiedRewardWorker):
                 "reward.model.model_path must be set for API reward inference."
             )
 
-        self.api_base = str(
-            self.api_cfg.get("_runtime_api_base") or self.api_cfg.get("api_base") or ""
-        ).rstrip("/")
+        self.api_base = str(self.api_cfg.get("api_base") or "").rstrip("/")
         if not self.api_base:
             raise ValueError(
                 "reward.api.api_base must be set for API reward inference. "
                 "When using Ray-managed SGLang serving, the entrypoint injects "
-                "reward.api._runtime_api_base at runtime."
+                "reward.api.api_base at runtime."
             )
         client_base_url = (
             self.api_base[:-3] if self.api_base.endswith("/v1") else self.api_base

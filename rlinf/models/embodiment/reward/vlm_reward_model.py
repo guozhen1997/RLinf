@@ -26,7 +26,7 @@ from peft import (
     get_peft_model,
     set_peft_model_state_dict,
 )
-from transformers import AutoProcessor
+from transformers import AutoModelForVision2Seq, AutoProcessor
 
 from rlinf.config import torch_dtype_from_precision
 from rlinf.models.embodiment.reward.base_reward_model import BaseRewardModel
@@ -37,17 +37,6 @@ from rlinf.models.embodiment.reward.vlm_reward_utils.input_builder import (
 from rlinf.models.embodiment.reward.vlm_reward_utils.reward_parser import (
     get_reward_parser,
 )
-
-
-def _get_auto_model_for_multimodal_generation():
-    try:
-        from transformers import AutoModelForImageTextToText
-
-        return AutoModelForImageTextToText
-    except ImportError:
-        from transformers import AutoModelForVision2Seq
-
-        return AutoModelForVision2Seq
 
 
 class VLMRewardModel(BaseRewardModel):
@@ -161,8 +150,7 @@ class VLMRewardModel(BaseRewardModel):
         return rewards
 
     def setup_model(self) -> None:
-        auto_model_class = _get_auto_model_for_multimodal_generation()
-        self._model = auto_model_class.from_pretrained(
+        self._model = AutoModelForVision2Seq.from_pretrained(
             self.model_path,
             trust_remote_code=True,
             torch_dtype=self.dtype,
