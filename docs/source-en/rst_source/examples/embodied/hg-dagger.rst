@@ -312,6 +312,7 @@ your cluster, cameras, target pose, and checkpoints:
 
    env:
      train:
+       smooth_intervene: True
        use_spacemouse: True
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
@@ -332,6 +333,8 @@ your cluster, cameras, target pose, and checkpoints:
          config_name: "pi0_realworld"
 
 ``online_lerobot.enabled: True`` enables the online LeRobot data path. The env worker collects rollouts by episode and sends episodes that satisfy the configured filters to the actor; the actor adds them to ``RollingLeRobotDataset`` for training, so online training no longer uses the trajectory replay buffer.
+
+``smooth_intervene: True`` bypasses policy inference when human intervention continues through the last frame of an action chunk. The env worker uses a dummy chunk to keep stepping the teleoperation wrapper and resumes normal inference after intervention is released or the episode ends. It requires one environment per env-worker pipeline stage.
 
 ``only_success: True`` discards failed episodes, while ``only_save_expert: False`` allows every frame in each successful episode to participate in training. Within a successful episode:
 

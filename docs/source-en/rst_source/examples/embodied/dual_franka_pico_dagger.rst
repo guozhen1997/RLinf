@@ -294,6 +294,7 @@ and right PICO controllers bind to the left and right robot arms.
 
    env:
      train:
+       smooth_intervene: True
        use_pico: True
        pico:
          zmq_addr: "tcp://<vr_publisher_ip>:<port>"
@@ -482,6 +483,8 @@ Before launch, confirm these fields:
        use_pico: False
 
 ``online_lerobot.enabled: True`` enables the online LeRobot data path. The env worker collects rollouts by episode and sends episodes that satisfy the configured filters to the actor; the actor adds them to ``RollingLeRobotDataset`` for training, so online training no longer uses the trajectory replay buffer.
+
+``smooth_intervene: True`` removes action-chunk boundary stalls while PICO is active. If the final frame of a chunk is human-controlled, the env worker skips the next policy inference and executes a shape-compatible dummy chunk instead. PICO actions still override active arms, while inactive frames hold the measured TCP pose. Normal model inference resumes after the final chunk frame is no longer intervened or the episode ends. This mode currently requires one environment per env-worker pipeline stage.
 
 ``only_success: True`` discards failed rollouts and keeps only successful episodes. ``only_save_expert: False`` trains on the complete successful episode rather than only PICO intervention frames. Every successful episode is archived immediately under ``${runner.logger.log_path}/online_lerobot/rank_0/id_<N>/``. ``env.eval.use_pico: False`` means evaluation uses the policy alone, without human intervention.
 

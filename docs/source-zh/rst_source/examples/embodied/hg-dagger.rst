@@ -311,6 +311,7 @@ SFT 导出的 checkpoint 会作为在线阶段的学生模型初始化。更多 
 
    env:
      train:
+       smooth_intervene: True
        use_spacemouse: True
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
@@ -331,6 +332,8 @@ SFT 导出的 checkpoint 会作为在线阶段的学生模型初始化。更多 
          config_name: "pi0_realworld"
 
 ``online_lerobot.enabled: True`` 表示启用在线 LeRobot 数据链路。env worker 按 episode 收集 rollout，并将满足过滤条件的 episode 发送给 actor；actor 将其加入 ``RollingLeRobotDataset`` 进行训练，因此在线训练不再使用 trajectory replay buffer。
+
+``smooth_intervene: True`` 会在人类接管持续到 action chunk 最后一帧时绕过下一次 策略推理。env worker 使用 dummy chunk 持续驱动遥操 wrapper，并在接管释放或 episode 结束后恢复正常推理。该模式要求每个 env worker pipeline stage 只运行一个环境。
 
 ``only_success: True`` 会丢弃失败 episode；``only_save_expert: False`` 则允许成功
 episode 中的所有帧参与训练。每个成功 episode 内：
