@@ -82,6 +82,7 @@ env:
 
   train:
     rollout_epoch: 1
+    smooth_intervene: True
     auto_reset: True
     ignore_terminations: False
     total_num_envs: 1

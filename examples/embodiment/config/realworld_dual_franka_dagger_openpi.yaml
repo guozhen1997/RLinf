@@ -100,6 +100,7 @@ env:
   train:
     rollout_epoch: 1
     total_num_envs: 1
+    smooth_intervene: True
     ignore_terminations: False
     auto_reset: False
     no_gripper: False

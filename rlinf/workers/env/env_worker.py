@@ -173,6 +173,23 @@ class EnvWorker(Worker):
             ]
         self.env_decoupled_mode = self.cfg.runner.get("enable_decoupled_mode", False)
 
+        self.smooth_intervene = bool(
+            self.enable_train
+            and OmegaConf.select(
+                self.cfg,
+                "env.train.smooth_intervene",
+                default=False,
+            )
+        )
+        if self.smooth_intervene:
+            assert self.train_num_envs_per_stage == 1, (
+                "smooth_intervene requires exactly one env per EnvWorker stage"
+            )
+        self.next_intervene_flags = [False for _ in range(self.stage_num)]
+        self.last_train_rollout_results: list[RolloutResult | None] = [
+            None for _ in range(self.stage_num)
+        ]
+
         if self.env_decoupled_mode:
             # Init the batch_router for env decoupled mode
             # The batch_router is a dictionary that maps the tag to the list of batch_index.
@@ -433,7 +450,10 @@ class EnvWorker(Worker):
 
     @Worker.timer("env_interact_step")
     def env_interact_step(
-        self, chunk_actions: torch.Tensor, stage_id: int
+        self,
+        chunk_actions: torch.Tensor,
+        stage_id: int,
+        smooth_intervene_mode: bool = False,
     ) -> tuple[EnvOutput, dict[str, Any], dict[str, Any]]:
         """
         This function is used to interact with the environment.
@@ -456,7 +476,9 @@ class EnvWorker(Worker):
         env_info = {}
 
         obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = (
-            self.env_list[stage_id].chunk_step(chunk_actions)
+            self.env_list[stage_id].chunk_step(
+                chunk_actions, smooth_intervene_mode=smooth_intervene_mode
+            )
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None
@@ -521,6 +543,90 @@ class EnvWorker(Worker):
             "infos_list": infos_list,
         }
         return env_output, env_info, chunk_step_payload
+
+    # Maps forward_inputs observation keys → env_obs keys (from obs_processor).
+    _OBS_KEY_FROM_ENV_OBS: dict[str, str] = {
+        "observation/image": "main_images",
+        "observation/state": "states",
+        "observation/extra_view_image": "extra_view_images",
+        "observation/wrist_image": "wrist_images",
+    }
+
+    def _build_smooth_intervene_rollout_result(
+        self,
+        rollout_result: RolloutResult | None,
+        curr_obs: dict[str, Any] | None,
+    ) -> RolloutResult:
+        """Build a shape-compatible rollout result without running inference.
+
+        Smooth-intervention chunks are controlled by the human expert, so policy
+        actions and policy statistics are zeroed. Current observation tensors and
+        prompt tokens are retained to keep trajectory/collector inputs valid.
+        """
+        if rollout_result is None:
+            raise ValueError(
+                "smooth_intervene requires one real rollout result before dummy chunks"
+            )
+        if curr_obs is None:
+            raise ValueError("smooth_intervene requires the current observation")
+
+        def _zero_tensor(tensor: torch.Tensor | None) -> torch.Tensor | None:
+            return torch.zeros_like(tensor) if tensor is not None else None
+
+        def _dummy_forward_input(
+            key: str, value: torch.Tensor
+        ) -> torch.Tensor | None:
+            if key.startswith("observation/"):
+                env_obs_key = self._OBS_KEY_FROM_ENV_OBS.get(key)
+                if env_obs_key is None or env_obs_key not in curr_obs:
+                    raise KeyError(
+                        f"Cannot map smooth-intervene forward input {key!r} "
+                        "to the current environment observation"
+                    )
+                env_value = curr_obs[env_obs_key]
+                if not isinstance(env_value, torch.Tensor):
+                    raise TypeError(
+                        f"Expected curr_obs[{env_obs_key!r}] to be a tensor, "
+                        f"got {type(env_value).__name__}"
+                    )
+                return env_value.cpu().contiguous()
+            if key in ("tokenized_prompt", "tokenized_prompt_mask"):
+                return value.clone()
+            return _zero_tensor(value)
+
+        dummy_actions = _zero_tensor(rollout_result.actions)
+        dummy_forward_inputs = {
+            key: _dummy_forward_input(key, value)
+            for key, value in rollout_result.forward_inputs.items()
+            if value is not None
+        }
+        if "action" not in dummy_forward_inputs and dummy_actions is not None:
+            dummy_forward_inputs["action"] = dummy_actions.reshape(
+                dummy_actions.shape[0], -1
+            ).contiguous()
+        if dummy_actions is None or "action" not in dummy_forward_inputs:
+            raise ValueError(
+                "smooth_intervene requires action tensors from a real rollout result"
+            )
+
+        return RolloutResult(
+            actions=dummy_actions,
+            prev_logprobs=_zero_tensor(rollout_result.prev_logprobs),
+            prev_values=_zero_tensor(rollout_result.prev_values),
+            bootstrap_values=_zero_tensor(rollout_result.bootstrap_values),
+            intervene_flags=_zero_tensor(rollout_result.intervene_flags),
+            forward_inputs=dummy_forward_inputs,
+            versions=_zero_tensor(rollout_result.versions),
+        )
+
+    @staticmethod
+    def _should_continue_smooth_intervene(
+        intervene_flags: torch.Tensor | None, dones: torch.Tensor
+    ) -> bool:
+        if intervene_flags is None:
+            return False
+        continue_smooth_intervene = bool(intervene_flags[:, -1].any().item()) and not bool(dones.any().item())
+        return continue_smooth_intervene
 
     def env_evaluate_step(
         self, raw_actions: torch.Tensor, stage_id: int
@@ -929,9 +1035,15 @@ class EnvWorker(Worker):
         return data
 
     def _send_train_bootstrap(
-        self, rollout_channel: Channel, env_outputs: list[EnvOutput]
+        self,
+        rollout_channel: Channel,
+        env_outputs: list[EnvOutput],
+        skip_stage_ids: set[int] | None = None,
     ) -> None:
+        skip_stage_ids = skip_stage_ids or set()
         for stage_id in range(self.stage_num):
+            if stage_id in skip_stage_ids:
+                continue
             env_output: EnvOutput = env_outputs[stage_id]
             env_batch = env_output.to_dict()
             self.send_to(
@@ -944,10 +1056,27 @@ class EnvWorker(Worker):
                 decoupled_mode=self.env_decoupled_mode,
             )
 
-    def _bootstrap_and_send_train(self, rollout_channel: Channel) -> list[EnvOutput]:
+    def _bootstrap_and_send_train(
+        self,
+        rollout_channel: Channel,
+        skip_stage_ids: set[int] | None = None,
+    ) -> list[EnvOutput]:
         env_outputs = self.bootstrap_step()
-        self._send_train_bootstrap(rollout_channel, env_outputs)
+        self._send_train_bootstrap(
+            rollout_channel,
+            env_outputs,
+            skip_stage_ids=skip_stage_ids,
+        )
         return env_outputs
+
+    def _smooth_intervene_stage_ids(self) -> set[int]:
+        if not getattr(self, "smooth_intervene", False):
+            return set()
+        return {
+            stage_id
+            for stage_id, intervene in enumerate(self.next_intervene_flags)
+            if intervene
+        }
 
     def prefetch_train_bootstrap(self, rollout_channel: Channel) -> None:
         """Prepare and send the first env batch for the next training rollout."""
@@ -957,7 +1086,8 @@ class EnvWorker(Worker):
                 "Call interact() to consume it before prefetching again."
             )
         self._prefetched_train_bootstrap = self._bootstrap_and_send_train(
-            rollout_channel
+            rollout_channel,
+            skip_stage_ids=self._smooth_intervene_stage_ids(),
         )
 
     def record_env_metrics(
@@ -1028,7 +1158,10 @@ class EnvWorker(Worker):
                 env_outputs = self._prefetched_train_bootstrap
                 self._prefetched_train_bootstrap = None
             else:
-                env_outputs = self._bootstrap_and_send_train(rollout_channel)
+                env_outputs = self._bootstrap_and_send_train(
+                    rollout_channel,
+                    skip_stage_ids=self._smooth_intervene_stage_ids(),
+                )
 
             for chunk_step_idx in range(self.n_train_chunk_steps):
                 for stage_id in range(self.stage_num):
@@ -1056,16 +1189,23 @@ class EnvWorker(Worker):
                                 reward_model_output.detach().float().reshape(-1).cpu()
                             )
 
-                    rollout_result = self.recv_from(
-                        group_name=self.cfg.rollout.group_name,
-                        channel=input_channel,
-                        tag="train_rollout_results",
-                        route_key=stage_id if not self.env_decoupled_mode else None,
-                        batch_size=self.train_batch_size,
-                        merge_fn=RolloutResult.merge_rollout_results,
-                        infer_batch_size_fn=self._infer_rollout_batch_size,
-                        decoupled_mode=self.env_decoupled_mode,
-                    )
+                    if self.smooth_intervene and self.next_intervene_flags[stage_id]:
+                        rollout_result = self._build_smooth_intervene_rollout_result(
+                            self.last_train_rollout_results[stage_id],
+                            curr_obs=env_output.obs,
+                        )
+                    else:
+                        rollout_result = self.recv_from(
+                            group_name=self.cfg.rollout.group_name,
+                            channel=input_channel,
+                            tag="train_rollout_results",
+                            route_key=stage_id if not self.env_decoupled_mode else None,
+                            batch_size=self.train_batch_size,
+                            merge_fn=RolloutResult.merge_rollout_results,
+                            infer_batch_size_fn=self._infer_rollout_batch_size,
+                            decoupled_mode=self.env_decoupled_mode,
+                        )
+                        self.last_train_rollout_results[stage_id] = rollout_result
                     rewards = self.compute_bootstrap_rewards(
                         env_output, rollout_result.bootstrap_values, reward_model_output
                     )
@@ -1112,7 +1252,9 @@ class EnvWorker(Worker):
                         )
 
                     env_output, env_info, chunk_step_payload = self.env_interact_step(
-                        rollout_result.actions, stage_id
+                        rollout_result.actions,
+                        stage_id,
+                        smooth_intervene_mode=self.next_intervene_flags[stage_id],
                     )
                     stage_rollout = self.rollout_results[stage_id]
                     if isinstance(stage_rollout, EmbodiedLerobotRolloutResult):
@@ -1121,15 +1263,23 @@ class EnvWorker(Worker):
                             **chunk_step_payload,
                         )
                     env_batch = env_output.to_dict()
-                    self.send_to(
-                        group_name=self.cfg.rollout.group_name,
-                        channel=rollout_channel,
-                        data=self._build_rollout_input_data(env_batch),
-                        mode="train",
-                        tag="rollout_results",
-                        route_key=stage_id if not self.env_decoupled_mode else None,
-                        decoupled_mode=self.env_decoupled_mode,
+                    self.next_intervene_flags[stage_id] = (
+                        self.smooth_intervene
+                        and self._should_continue_smooth_intervene(
+                            env_output.intervene_flags,
+                            env_output.dones,
+                        )
                     )
+                    if not self.next_intervene_flags[stage_id]:
+                        self.send_to(
+                            group_name=self.cfg.rollout.group_name,
+                            channel=rollout_channel,
+                            data=self._build_rollout_input_data(env_batch),
+                            mode="train",
+                            tag="rollout_results",
+                            route_key=stage_id if not self.env_decoupled_mode else None,
+                            decoupled_mode=self.env_decoupled_mode,
+                        )
                     if self.collect_transitions and not self.enable_rlt:
                         next_obs = (
                             env_output.final_obs
@@ -1171,16 +1321,23 @@ class EnvWorker(Worker):
                         env_metrics["reward_model_output"].append(
                             reward_model_output.detach().float().reshape(-1).cpu()
                         )
-                rollout_result = self.recv_from(
-                    group_name=self.cfg.rollout.group_name,
-                    channel=input_channel,
-                    tag="train_rollout_results",
-                    route_key=stage_id if not self.env_decoupled_mode else None,
-                    batch_size=self.train_batch_size,
-                    merge_fn=RolloutResult.merge_rollout_results,
-                    infer_batch_size_fn=self._infer_rollout_batch_size,
-                    decoupled_mode=self.env_decoupled_mode,
-                )
+                if self.smooth_intervene and self.next_intervene_flags[stage_id]:
+                    rollout_result = self._build_smooth_intervene_rollout_result(
+                        self.last_train_rollout_results[stage_id],
+                        curr_obs=env_output.obs,
+                    )
+                else:
+                    rollout_result = self.recv_from(
+                        group_name=self.cfg.rollout.group_name,
+                        channel=input_channel,
+                        tag="train_rollout_results",
+                        route_key=stage_id if not self.env_decoupled_mode else None,
+                        batch_size=self.train_batch_size,
+                        merge_fn=RolloutResult.merge_rollout_results,
+                        infer_batch_size_fn=self._infer_rollout_batch_size,
+                        decoupled_mode=self.env_decoupled_mode,
+                    )
+                    self.last_train_rollout_results[stage_id] = rollout_result
                 rewards = self.compute_bootstrap_rewards(
                     env_output, rollout_result.bootstrap_values, reward_model_output
                 )

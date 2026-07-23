@@ -115,6 +115,17 @@ class RealWorldEnv(gym.Env):
             self.env.call("get_wrapper_attr", "task_description")
         )
 
+    @staticmethod
+    def _set_wrapper_smooth_intervene_mode(
+        env: gym.Env, smooth_intervene_mode: bool
+    ) -> None:
+        current_env = env
+        while current_env is not None:
+            if hasattr(current_env, "set_smooth_intervene_mode"):
+                current_env.set_smooth_intervene_mode(smooth_intervene_mode)
+                return
+            current_env = getattr(current_env, "env", None)
+
     @property
     def action_space(self):
         return self.env.action_space
@@ -290,7 +301,7 @@ class RealWorldEnv(gym.Env):
             infos,
         )
 
-    def chunk_step(self, chunk_actions):
+    def chunk_step(self, chunk_actions, smooth_intervene_mode: bool = False):
         # chunk_actions: [num_envs, chunk_step, action_dim]
         chunk_size = chunk_actions.shape[1]
         obs_list = []
@@ -304,6 +315,8 @@ class RealWorldEnv(gym.Env):
         raw_chunk_intervene_actions = []
         raw_chunk_intervene_flag = []
         raw_chunk_rlt_switch_flags = []
+        for env in self.env.envs:
+            self._set_wrapper_smooth_intervene_mode(env, smooth_intervene_mode)
         for i in range(chunk_size):
             actions = chunk_actions[:, i]
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
