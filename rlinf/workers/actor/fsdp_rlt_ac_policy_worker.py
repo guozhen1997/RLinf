@@ -18,7 +18,7 @@ import torch
 import torch.nn.functional as F
 
 from rlinf.algorithms.rlt.transition import use_simulator_transition_replay
-from rlinf.data.embodied_io_struct import Trajectory
+from rlinf.data.schema.embodied_types import Trajectory
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.scheduler import Worker
 from rlinf.utils.distributed import all_reduce_dict

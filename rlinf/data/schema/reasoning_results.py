@@ -12,19 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import uuid
+"""Reasoning rollout result structures and post-processing helpers."""
+
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING, Callable, Optional, Union
 
 import torch
 from omegaconf import DictConfig
 
-if TYPE_CHECKING:
-    from vllm.outputs import CompletionOutput
-    from vllm.outputs import RequestOutput as VllmRequestOutput
-
-from rlinf.data.utils import batch_pad_to_fixed_len
 from rlinf.scheduler import Worker
 from rlinf.utils.data_iter_utils import (
     get_iterator_k_split,
@@ -32,193 +27,17 @@ from rlinf.utils.data_iter_utils import (
     merge_tensor,
     split_list,
 )
+from rlinf.utils.torch_functionals import batch_pad_to_fixed_len
 
+if TYPE_CHECKING:
+    from vllm.outputs import CompletionOutput
+    from vllm.outputs import RequestOutput as VllmRequestOutput
 
-def get_batch_size(
-    batch: dict[str, torch.Tensor], batch_tensor_key: str = "input_ids"
-) -> int:
-    """Get the batch size from the batch dictionary."""
-    return batch[batch_tensor_key].size(0)
-
-
-def get_seq_length(
-    batch: dict[str, torch.Tensor], batch_tensor_key: str = "input_ids"
-) -> int:
-    """Get the sequence length from the batch dictionary."""
-    return batch[batch_tensor_key].size(1)
-
-
-@dataclass
-class RolloutRequest:
-    """
-    Attr
-    input_ids: list of input token IDs for rollout
-    n: Number of completions to generate for each input
-    image_data: list of image data (bytes or URLs) for multimodal inputs
-    answers: list of answers for the requests, where each answer can be either a list of strings (for typical tasks) or a dict (for VQA tasks), if available.
-    multi_modal_inputs: list of multi-modal inputs for the requests
-    """
-
-    n: int
-    input_ids: list[list[int]]
-    image_data: Union[list[list[bytes]], list[list[str]]]
-    answers: list[Union[list[str], dict]]
-    multi_modal_inputs: list[Optional[dict]]
-
-    def to_seq_group_infos(self) -> list["SeqGroupInfo"]:
-        """Convert the RolloutRequest into a list of SeqGroupInfo objects.
-
-        Returns:
-            list[SeqGroupInfo]: A list of SeqGroupInfo objects.
-        """
-        return [
-            SeqGroupInfo(
-                id=uuid.uuid4().int,
-                input_ids=input_ids,
-                answer=answer,
-                group_size=self.n,
-                image_data=image_data,
-                multi_modal_inputs=multi_modal_inputs,
-            )
-            for input_ids, answer, image_data, multi_modal_inputs in zip(
-                self.input_ids,
-                self.answers,
-                self.image_data,
-                self.multi_modal_inputs,
-                strict=True,
-            )
-        ]
-
-
-class FinishReasonEnum(str, Enum):
-    ABORT = "abort"
-    STOP = "stop"
-    LENGTH = "length"
-
-
-@dataclass
-class SeqGroupInfo:
-    """
-    SeqGroupInfo represents a group of sequences and tracks their processing status and results.
-
-    Each SeqGroupInfo instance corresponds to a single input sequence that is expanded into `group_size` sequences
-
-    Attributes:
-        id (int): Unique identifier for the sequence group.
-        input_ids (list[int]): list of input IDs of the original sequence.
-        answer (Union[list[str], dict]): list of answers of the original sequence.(One sequence can have multiple equivalent answers), or a dict in case of vqa task.
-        group_size (int): Number of sequences in the group.
-        idx_completed (set[int]): Set of indices for sequences that have completed rollout and are ready for evaluation.
-        idx_aborted (set[int]): Set of indices for sequences that have been aborted. These sequences need to be re-rolled out before they can be evaluated.
-        results (list[Optional[dict]]): list storing result for each sequence, or None if not yet available.
-    """
-
-    id: int
-    input_ids: list[int]
-    answer: Union[list[str], dict]
-    group_size: int
-    idx_completed: set[int] = field(init=False, compare=False)
-    idx_aborted: set[int] = field(init=False, compare=False)
-    results: list[Optional[Union[dict, "VllmRequestOutput"]]] = field(
-        init=False, compare=False
-    )
-    image_data: Optional[list] = None
-    multi_modal_inputs: Optional[dict] = None
-
-    def __post_init__(self):
-        assert self.group_size > 0, "group_size must be greater than 0"
-        self.idx_completed = set()
-        self.idx_aborted = set()
-        self.results = [None for _ in range(self.group_size)]
-
-    def record_vllm_result(self, idx: int, result: "VllmRequestOutput", logger=None):
-        finish_reason = result.outputs[0].finish_reason
-        if finish_reason is None or finish_reason == "abort":
-            self.idx_aborted.add(idx)
-        else:
-            self.idx_completed.add(idx)
-
-        if self.results[idx] is None:
-            self.results[idx] = result
-        else:
-            self.results[idx].add(next_output=result, aggregate=True)
-
-    def record_sglang_result(self, idx: int, result: dict, logger=None):
-        """Record a single sglang execution result and update internal tracking.
-
-        This method is responsible for updating the internal state of the SeqGroupInfo
-        instance based on the result of a single sglang execution. It accepts the index of the
-        sequence within the group and the result dictionary returned by sglang. Then it updates
-        the sets of completed and aborted indices based on the finish reason provided in the result.
-        If the result for the given index already exists, indicating that this is a re-rollout
-        sequence, this method will merge the new result with the previous one by concatenating the output IDs.
-
-        Args:
-            idx: int
-                The index of the sequence within the group (0 <= idx < group_size).
-            result: dict
-                Result of SGLang. Expected to contain at least:
-                - "meta_info": {"finish_reason": {"type": FinishReasonEnum}}
-                - "output_ids": a list (or list-like) of output identifier elements
-            logger: optional
-                Optional logger for diagnostic messages.
-        """
-
-        finished_reason = result["meta_info"]["finish_reason"]["type"]
-        match finished_reason:
-            case FinishReasonEnum.ABORT:
-                self.idx_aborted.add(idx)
-            case FinishReasonEnum.STOP | FinishReasonEnum.LENGTH:
-                self.idx_completed.add(idx)
-            case _:
-                raise ValueError(f"Unknown finish reason: {finished_reason}")
-        if self.results[idx] is None:
-            self.results[idx] = result
-        else:
-            prev_output_ids = self.results[idx]["output_ids"]
-            self.results[idx] = result
-            self.results[idx]["output_ids"] = prev_output_ids + result["output_ids"]
-
-    def __hash__(self):
-        return self.id
-
-    @property
-    def num_completed(self) -> int:
-        """Returns the number of completed sequences."""
-        return len(self.idx_completed)
-
-    @property
-    def num_aborted(self) -> int:
-        """Returns the number of aborted sequences."""
-        return len(self.idx_aborted)
-
-    @property
-    def num_returned(self) -> int:
-        """Returns the total number of sequences that have either completed or aborted."""
-        return self.num_completed + self.num_aborted
-
-    @property
-    def num_running(self) -> int:
-        """Returns the number of sequences still running."""
-        return self.group_size - self.num_returned
-
-    @property
-    def all_returned(self) -> bool:
-        """Returns True if all sequences have either completed or aborted."""
-        return self.num_returned == self.group_size
-
-    @property
-    def all_completed(self) -> bool:
-        """Returns True if all sequences have completed."""
-        return self.num_completed == self.group_size
+from rlinf.data.schema.reasoning_requests import SeqGroupInfo, get_batch_size
 
 
 @dataclass(kw_only=True)
 class RolloutResult:
-    """
-    Rollout Result
-    """
-
     num_sequence: int
     group_size: int
     prompt_lengths: list[int]
@@ -234,17 +53,10 @@ class RolloutResult:
     image_data: Optional[Union[list[list[bytes]], list[list[str]]]] = None
     multi_modal_inputs: Optional[list[dict]] = None
     response_mask: Optional[list[list[int]]] = None
-    # Inference
-    # Logprobs returned by rollout engines
     rollout_logprobs: Optional[list[list[float]]] = None
-    # Logprobs recomputed by the actor model's inference forward,
-    # used as old_logprobs in policy loss when available.
     recomputed_logprobs: Optional[torch.Tensor] = None
-    # Reference logprobs for comparison
     ref_logprobs: Optional[torch.Tensor] = None
-    # values generated by critic model in actor-critic algorithm
     values: Optional[torch.Tensor] = None
-    # returns
     returns: Optional[torch.Tensor] = None
 
     @property
@@ -259,31 +71,19 @@ class RolloutResult:
         total_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B = prompt_lengths.size(0)
+        arange_ids = torch.arange(total_len).unsqueeze(0).expand(B, -1)
 
-        # =========================
-        # Attention Mask
-        # =========================
-        arange_ids = (
-            torch.arange(total_len).unsqueeze(0).expand(B, -1)
-        )  # [B, total_len]
+        prompt_start = max_prompt_len - prompt_lengths
+        prompt_end = torch.full_like(prompt_start, max_prompt_len)
+        response_end = max_prompt_len + response_lengths
 
-        # Compute the start and end positions of the prompt and response tokens
-        prompt_start = max_prompt_len - prompt_lengths  # [B]
-        prompt_end = torch.full_like(prompt_start, max_prompt_len)  # [B]
-        response_end = max_prompt_len + response_lengths  # [B]
-
-        # Broadcast [B, total_len]
         prompt_start = prompt_start.unsqueeze(1)
         prompt_end = prompt_end.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
         attention_mask = (arange_ids >= prompt_start) & (arange_ids < response_end)
         response_mask = (arange_ids >= prompt_end) & (arange_ids < response_end)
 
-        # =========================
-        # Position IDs
-        # =========================
         position_ids = torch.zeros_like(arange_ids)
-
         for i in range(B):
             ps = prompt_start[i].item()
             position_ids[i, ps:] = torch.arange(total_len - ps)
@@ -292,10 +92,10 @@ class RolloutResult:
 
     @staticmethod
     def _get_response_masks(
-        response_mask: list[list[int]],  # [[0 / 1] * response len] * group size
+        response_mask: list[list[int]],
         max_prompt_len: int,
         total_len: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         response_mask = batch_pad_to_fixed_len(
             [
                 torch.as_tensor([0] * max_prompt_len + ids, dtype=torch.long)
@@ -304,7 +104,6 @@ class RolloutResult:
             max_batch_len=total_len,
             pad_token=0,
         ).bool()
-
         return response_mask
 
     @staticmethod
@@ -315,21 +114,6 @@ class RolloutResult:
         multi_modal_inputs: Optional[list[dict]] = None,
         return_logprobs: bool = False,
     ) -> "RolloutResult":
-        """
-        Create a RolloutResult from the given vLLM results. every result is generated with n=1,
-        so its outputs len is 1
-
-        Args:
-            group_size (int): The group size used during rollout.
-            results (list[VllmRequestOutput]): The rollout results from vLLM.
-            answers (Optional[Union[list[str], dict]]): The answers corresponding to the inputs, notably, if task type is vqa, answers is a dict.
-            multi_modal_inputs (Optional[list[dict]]): The multi-modal inputs corresponding to the inputs.
-            return_logprobs (bool): Whether to return log probabilities.
-
-        Returns:
-            RolloutResult: The constructed RolloutResult object.
-        """
-
         def get_logprobs(
             response_ids: list[int], output: "CompletionOutput"
         ) -> list[float]:
@@ -342,11 +126,9 @@ class RolloutResult:
                 logprobs.append(logprob[response_ids[i]].logprob)
             return logprobs
 
-        # for VQA task, answers is a dict
         if isinstance(answers, dict):
             answers = [answers]
 
-        # here vllm must return prompt ids because we pass input_ids as input
         prompt_ids = [vllm_result.prompt_token_ids for vllm_result in results]
         prompt_lengths = [len(vllm_result.prompt_token_ids) for vllm_result in results]
         response_ids = [vllm_result.outputs[0].token_ids for vllm_result in results]
@@ -388,13 +170,6 @@ class RolloutResult:
         multi_modal_inputs: Optional[list[dict]] = None,
         return_logprobs: bool = False,
     ) -> "RolloutResult":
-        """Create a MathRolloutResult from the given results and input IDs.
-
-        Args:
-            results (list[dict]): The rollout results from the model.
-            input_ids (list[list[int]]): The input IDs for the prompts.
-            return_logprobs (bool): Whether to return log probabilities.
-        """
         assert len(results) == len(input_ids), (
             f"Results length {len(results)} does not match input_ids length {len(input_ids)}"
         )
@@ -515,12 +290,10 @@ class RolloutResult:
                 merged_result.ref_logprobs = merge_tensor(
                     merged_result.ref_logprobs, res.ref_logprobs
                 )
-
             if res.multi_modal_inputs is not None:
                 merged_result.multi_modal_inputs = merge_list(
                     merged_result.multi_modal_inputs, res.multi_modal_inputs
                 )
-
             if res.values is not None:
                 merged_result.values = merge_tensor(merged_result.values, res.values)
             if res.returns is not None:
@@ -532,41 +305,18 @@ class RolloutResult:
     def split_result_list_by_group(
         rollout_results: list["RolloutResult"],
     ) -> list["RolloutResult"]:
-        """
-        Split RolloutResult objects by group_size.
-
-        If input has only one RolloutResult, split it into multiple RolloutResult objects by group_size.
-        If input has multiple RolloutResult objects, split each one and merge the results.
-
-        Args:
-            rollout_results: list of input RolloutResult objects
-
-        Returns:
-            list of RolloutResult objects grouped by group_size
-        """
         assert len(rollout_results) > 0, "No rollout results to split."
 
         all_split_results = []
-
         for rollout_result in rollout_results:
             split_results = RolloutResult._split_single_result_by_group(rollout_result)
             all_split_results.extend(split_results)
-
         return all_split_results
 
     @staticmethod
     def _split_single_result_by_group(
         rollout_result: "RolloutResult",
     ) -> list["RolloutResult"]:
-        """
-        Split a single RolloutResult into multiple RolloutResult objects by group_size.
-
-        Args:
-            rollout_result: The RolloutResult to be split
-
-        Returns:
-            list of split RolloutResult objects
-        """
         group_size = rollout_result.group_size
         num_sequence = rollout_result.num_sequence
 
@@ -577,14 +327,12 @@ class RolloutResult:
         num_groups = num_sequence // group_size
         split_results = []
 
-        # Split list fields
         prompt_lengths_split = split_list(rollout_result.prompt_lengths, num_groups)
         prompt_ids_split = split_list(rollout_result.prompt_ids, num_groups)
         response_lengths_split = split_list(rollout_result.response_lengths, num_groups)
         response_ids_split = split_list(rollout_result.response_ids, num_groups)
         is_end_split = split_list(rollout_result.is_end, num_groups)
 
-        # Handle optional fields
         answers_split = None
         if rollout_result.answers is not None:
             answers_split = split_list(rollout_result.answers, num_groups)
@@ -613,7 +361,6 @@ class RolloutResult:
                 rollout_result.rollout_logprobs, num_groups
             )
 
-        # Handle tensor fields
         rewards_split = None
         if rollout_result.rewards is not None:
             if isinstance(rollout_result.rewards, torch.Tensor):
@@ -650,7 +397,6 @@ class RolloutResult:
         if rollout_result.returns is not None:
             returns_split = torch.chunk(rollout_result.returns, num_groups, dim=0)
 
-        # Create split RolloutResult objects
         for i in range(num_groups):
             split_result = RolloutResult(
                 num_sequence=group_size,
@@ -699,73 +445,8 @@ class RolloutResult:
         training_seq_length: int,
         pad_token: int,
     ) -> dict[str, torch.Tensor]:
-        """
-        Transform the rollout result into a format suitable for the actor.
-
-        Args:
-            data_seq_length (int): Maximum prompt length, e.g., 1024.
-            training_seq_length (int): Total sequence length for training, e.g., 8192.
-                The maximum response length is calculated as `training_seq_length - data_seq_length`.
-            pad_token (int): Token used for padding, e.g., `tokenizer.pad_token_id`.
-
-        Returns:
-            dict[str, torch.Tensor]: A dictionary with keys:
-
-            input_ids (torch.Tensor):
-                Concatenated prompt and response token IDs,
-                shape ``[batch_size, training_seq_length]``.
-
-            attention_mask (torch.Tensor):
-                Attention mask for the whole input sequence,
-                Value: True for or prompt_ids and response_ids, False for others
-                shape ``[batch_size, training_seq_length]``.
-
-            response_mask (torch.Tensor):
-                Mask participate in adv and loss calculation for the whole input sequence,
-                To filter ids not generated by llm,
-                Value: True for or response_ids generated by llm, False for others
-                shape ``[batch_size, training_seq_length]``.
-
-            is_end (torch.Tensor):
-                Boolean tensor indicating whether the sequence ends,
-                shape ``[batch_size]``.
-
-            position_ids (torch.Tensor):
-                Position IDs for the input sequence,
-                shape ``[batch_size, training_seq_length]``.
-
-            prompt_lengths (torch.Tensor):
-                Lengths of the prompt sequences,
-                shape ``[batch_size]``.
-
-            response_lengths (torch.Tensor):
-                Lengths of the response sequences,
-                shape ``[batch_size]``.
-
-            advantages (torch.Tensor), optional:
-                Advantage values for the responses,
-                shape ``[batch_size, training_seq_length - data_seq_length]``.
-        """
-
-        # len = training_seq_length: input_ids, attention_mask, position_ids, response_mask
-        # each row: [prompt_padding, prompt_ids,    response_ids, ... ,response_padding]
-        #           |<-- padding -->|<-- pmp len -->|<-- resp len --->|<-- padding --->|
-        #           |<---- cfg.data.seq_length ---->|
-        #           |<------------------ cfg.runner.seq_length --------------------->|
-        # each row: [response_mask]
-        #           |<------- padding ------->|<- llm resp ->|<- tool resp ->|<- llm resp ->|<- padding ->|
-        #           |<-------- False -------->|<--- True --->|<--- False --->|<--- True --->|<-- False -->|
-        #           |<- cfg.data.seq_length ->|<------ cfg.runner.seq_length - cfg.data.seq_length ------>|
-        #           |<------------------------------ cfg.runner.seq_length ------------------------------>|
-
-        # len = training_seq_length - data_seq_length: advantage, recomputed_logprobs/rollout_logprobs, ref_logprobs
-        # each row: [response_ids, ...,                , response_padding]
-        #           |<----- true response length ----->|<--- padding --->|
-        #           |<-- cfg.runner.seq_length - cfg.data.seq_length ->|
-
         max_response_len = training_seq_length - data_seq_length
 
-        # when do_down_sample is enabled, there might be no valid rewards
         if self.rewards is not None and self.rewards.numel() == 0:
             batch = {
                 "input_ids": torch.zeros(0, dtype=torch.long).cuda(),
@@ -821,9 +502,7 @@ class RolloutResult:
             max_batch_len=max_response_len,
             pad_token=pad_token,
         )
-        input_ids = torch.cat(
-            [prompt_ids, response_ids], dim=1
-        )  # [B, training_seq_length]
+        input_ids = torch.cat([prompt_ids, response_ids], dim=1)
 
         batch = {
             "input_ids": input_ids.to(Worker.torch_device_type),
@@ -845,12 +524,10 @@ class RolloutResult:
             if isinstance(self.advantages, torch.Tensor):
                 batch["advantages"] = self.advantages.to(Worker.torch_device_type)
             else:
-                response_attention_mask = attention_mask[
-                    :, -max_response_len:
-                ]  # [B, max_response_len]
+                response_attention_mask = attention_mask[:, -max_response_len:]
                 advantages = torch.tensor(self.advantages, dtype=torch.float32).reshape(
                     -1, 1
-                )  # [B, 1]
+                )
                 advantages = response_attention_mask.float().to(
                     Worker.torch_device_type
                 ) * advantages.to(Worker.torch_device_type)
@@ -858,13 +535,10 @@ class RolloutResult:
 
         if self.rewards is not None:
             batch["rewards"] = self.rewards.to(Worker.torch_device_type)
-
         if self.values is not None:
             batch["values"] = self.values.to(Worker.torch_device_type)
-
         if self.returns is not None:
             batch["returns"] = self.returns.to(Worker.torch_device_type)
-
         if self.rollout_logprobs is not None:
             logprobs = batch_pad_to_fixed_len(
                 [
@@ -875,28 +549,23 @@ class RolloutResult:
                 pad_token=0,
             )
             batch["rollout_logprobs"] = logprobs.to(Worker.torch_device_type)
-
         if self.recomputed_logprobs is not None:
             batch["recomputed_logprobs"] = self.recomputed_logprobs.to(
                 Worker.torch_device_type
             )
-
         if self.ref_logprobs is not None:
             batch["ref_logprobs"] = self.ref_logprobs.to(Worker.torch_device_type)
-
         return batch
 
     @staticmethod
     def merge_batches(
         batches: list[dict[str, torch.Tensor]],
     ) -> dict[str, torch.Tensor]:
-        """Merge two batches into one."""
         merged_batch = {}
         if len(batches) == 0:
             return merged_batch
         if len(batches) == 1:
             return batches[0]
-
         assert all(batch.keys() == batches[0].keys() for batch in batches[1:]), (
             "All batches must have the same keys"
         )
@@ -916,25 +585,14 @@ class RolloutResult:
         rollout_result: "RolloutResult",
         split_num: int,
     ) -> list["RolloutResult"]:
-        """
-        Split a single RolloutResult into multiple RolloutResult objects by group_size.
-
-        Args:
-            rollout_result: The RolloutResult to be split
-
-        Returns:
-            list of split RolloutResult objects
-        """
         group_size = rollout_result.group_size
         num_sequence = rollout_result.num_sequence
-
         assert num_sequence % (rollout_result.group_size * split_num) == 0, (
             f"num_sequence ({num_sequence}) must be divisible by split_num ({split_num}) and group_size ({rollout_result.group_size})"
         )
 
         list_none = [None for _ in range(split_num)]
         fields_split = {}
-        # Split list fields
         list_fields = [
             "prompt_lengths",
             "prompt_ids",
@@ -946,7 +604,6 @@ class RolloutResult:
             v = getattr(rollout_result, k)
             fields_split[k] = split_list(v, split_num)
 
-        # Split optional list fields
         list_fields = [
             "answers",
             "image_data",
@@ -963,7 +620,6 @@ class RolloutResult:
             else:
                 fields_split[k] = list_none
 
-        # Split optional tensor or list fields
         optional_tensor_fields = [
             "recomputed_logprobs",
             "ref_logprobs",
@@ -977,7 +633,6 @@ class RolloutResult:
             else:
                 fields_split[k] = list_none
 
-        # Split optional tensor or list fields
         optional_tensor_list_fields = [
             "rewards",
             "advantages",
@@ -992,7 +647,6 @@ class RolloutResult:
             else:
                 fields_split[k] = list_none
 
-        # Create split RolloutResult objects
         split_results = []
         for i in range(split_num):
             split_result = RolloutResult(
@@ -1018,27 +672,14 @@ class RolloutResult:
                 returns=fields_split["returns"][i],
             )
             split_results.append(split_result)
-
         return split_results
 
 
 @dataclass(kw_only=True)
 class DynamicRolloutResult:
-    """
-    Dynamic Rollout Result
-    For dynamic batch size of one trajectory. Used in multi-turn agent.
-    Only supports right padding
-    """
-
     num_sequence: int
     group_size: int
-
-    # index to trajectory.
-    # idx_to_traj[i] = j means the i-th sequence is in the j-th trajectory.
-    # 0 <= j < group_size.
     idx_to_traj: list[int]
-
-    # size of belows are num_sequence
     input_ids: list[list[int]]
     rollout_logprobs: Optional[list[list[float]]] = None
     recomputed_logprobs: Optional[torch.Tensor] = None
@@ -1048,14 +689,10 @@ class DynamicRolloutResult:
     is_end: list[bool]
     rewards: Optional[torch.Tensor | list[float]] = None
     advantages: Optional[torch.Tensor] = None
-
-    # extra fields used in training for custom process
-    extra_fields_train: dict[str, list] = field(default_factory=dict)  # [num_sequence]
-
-    # extra fields used in reward / eval. not used in training
-    extra_fields_turn: Optional[dict] = None  # [num_sequence]
-    extra_fields_traj: Optional[dict] = None  # [group_size]
-    extra_fields_group: Optional[dict] = None  # [1]
+    extra_fields_train: dict[str, list] = field(default_factory=dict)
+    extra_fields_turn: Optional[dict] = None
+    extra_fields_traj: Optional[dict] = None
+    extra_fields_group: Optional[dict] = None
 
     @staticmethod
     def _get_attention_masks_and_position_ids(
@@ -1064,30 +701,17 @@ class DynamicRolloutResult:
         total_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B = prompt_lengths.size(0)
+        arange_ids = torch.arange(total_len).unsqueeze(0).expand(B, -1)
 
-        # =========================
-        # Attention Mask
-        # Response Mask
-        # =========================
-        arange_ids = (
-            torch.arange(total_len).unsqueeze(0).expand(B, -1)
-        )  # [B, total_len]
+        prompt_end = prompt_lengths
+        response_end = prompt_lengths + response_lengths
 
-        # Compute the start and end positions of the prompt and response tokens
-        prompt_end = prompt_lengths  # [B]
-        response_end = prompt_lengths + response_lengths  # [B]
-
-        # Broadcast [B, total_len]
         prompt_end = prompt_end.unsqueeze(1)
         response_end = response_end.unsqueeze(1)
         attention_mask = arange_ids < response_end
         response_mask = (arange_ids >= prompt_end) & (arange_ids < response_end)
 
-        # =========================
-        # Position IDs
-        # =========================
         position_ids = torch.zeros_like(arange_ids)
-
         for i in range(B):
             position_ids[i, 0:] = torch.arange(total_len)
 
@@ -1098,55 +722,6 @@ class DynamicRolloutResult:
         seq_length: int,
         pad_token: int,
     ) -> dict[str, torch.Tensor]:
-        """
-        Transform the rollout result into a format suitable for the actor.
-
-        Args:
-            seq_length (int): Total sequence length for training, e.g., 8192.
-            pad_token (int): Token used for padding, e.g., `tokenizer.pad_token_id`.
-
-        Returns:
-            Dict[str, torch.Tensor]: A dictionary with keys:
-
-            input_ids (torch.Tensor):
-                Concatenated prompt and response token IDs,
-                shape ``[num_sequence, seq_length]``.
-
-            attention_mask (torch.Tensor):
-                Attention mask for the input sequence,
-                shape ``[num_sequence, seq_length]``.
-
-            is_end (torch.Tensor):
-                Boolean tensor indicating whether the sequence ends,
-                shape ``[num_sequence]``.
-
-            position_ids (torch.Tensor):
-                Position IDs for the input sequence,
-                shape ``[num_sequence, seq_length]``.
-
-            prompt_lengths (torch.Tensor):
-                Lengths of the prompt sequences,
-                shape ``[num_sequence]``.
-
-            response_lengths (torch.Tensor):
-                Lengths of the response sequences,
-                shape ``[num_sequence]``.
-
-            advantages (torch.Tensor), optional:
-                Advantage values for the responses,
-                shape ``[num_sequence, seq_length]``.
-        """
-
-        # len = seq_length: input_ids, attention_mask, position_ids
-        #           [prompt_ids,    response_ids, ..., response_padding]
-        #           |<-- pmp len -->|<-- resp len --->|<-- padding --->|
-        #           |<------------------ cfg.runner.seq_length ------->|
-
-        # len = seq_length: advantage, recomputed_logprobs/rollout_logprobs, ref_logprobs
-        #           [mask or response_ids, ...,        , response_padding]
-        #           |<----- true response length ----->|<--- padding --->|
-        #           |<------------------ cfg.runner.seq_length --------->|
-
         prompt_lengths = torch.tensor(self.prompt_lengths, dtype=torch.int32)
         response_lengths = torch.tensor(self.response_lengths, dtype=torch.int32)
         is_end = torch.tensor(self.is_end, dtype=torch.bool)
@@ -1206,7 +781,6 @@ class DynamicRolloutResult:
 
         if self.recomputed_logprobs is not None:
             batch["recomputed_logprobs"] = self.recomputed_logprobs.cuda()
-
         if self.ref_logprobs is not None:
             batch["ref_logprobs"] = self.ref_logprobs.cuda()
 
@@ -1216,7 +790,6 @@ class DynamicRolloutResult:
         seq_length: int,
         available_keys: list[str],
     ) -> dict[str, torch.Tensor]:
-        """Get the batch pad for the dynamic rollout result."""
         pad_seq_shape = (1, seq_length)
         attention_mask = torch.zeros(
             *pad_seq_shape, dtype=torch.bool, device=torch.cuda.current_device()
@@ -1271,21 +844,6 @@ class DynamicRolloutResult:
         adjust_traj_indices: bool = True,
         return_num_sequence_per_group: bool = False,
     ) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], list[int]]:
-        """
-        Merge multiple batches into one batch.
-
-        Args:
-            batches: List of batch dictionaries to merge
-            group_size: The group_size for adjusting trajectory indices.Required if adjust_traj_indices is True.
-            adjust_traj_indices: If True, adjusts idx_to_traj with trajectory offset (for training).
-                            If False, keeps original indices (for inference).
-            return_num_sequence_per_group: If True, returns tuple (merged_batch, num_sequence_per_group).
-                                        If False, returns only merged_batch.
-
-        Returns:
-            If return_num_sequence_per_group is False: merged_batch
-            If return_num_sequence_per_group is True: (merged_batch, num_sequence_per_group)
-        """
         merged_batch = {}
         if len(batches) == 0:
             if return_num_sequence_per_group:
@@ -1298,14 +856,12 @@ class DynamicRolloutResult:
                 return batches[0], num_sequence_per_group
             return batches[0]
 
-        # Compute num_sequence_per_group if needed
         num_sequence_per_group = None
         if return_num_sequence_per_group:
             num_sequence_per_group = [
                 batch["response_lengths"].shape[0] for batch in batches
             ]
 
-        # Validate group_size if adjusting indices
         if adjust_traj_indices and group_size is None:
             raise ValueError(
                 "group_size must be provided when adjust_traj_indices is True"
@@ -1313,7 +869,6 @@ class DynamicRolloutResult:
 
         for key in batches[0].keys():
             if key == "idx_to_traj" and adjust_traj_indices:
-                # Special handling for idx_to_traj: adjust with trajectory offset
                 merged_batch[key] = []
                 for i, batch in enumerate(batches):
                     merged_batch[key].extend([j + i * group_size for j in batch[key]])
@@ -1324,7 +879,6 @@ class DynamicRolloutResult:
                 for batch in batches:
                     merged_batch[key].extend(batch[key])
             elif isinstance(batches[0][key], (int, float)):
-                # Sum scalar values (e.g., num_valid_planner_turns, num_valid_worker_turns)
                 merged_batch[key] = sum(batch[key] for batch in batches)
             else:
                 raise ValueError(f"Unsupported batch key type: {type(batches[0][key])}")
@@ -1338,20 +892,6 @@ class DynamicRolloutResult:
         context: dict,
         batch: dict[str, torch.Tensor],
     ) -> dict:
-        """Pack multi-turn samples from the same trajectory into fewer sequences.
-
-        This function detects prefix/suffix relationships among turns that belong
-        to the same trajectory, then folds compatible turns into a single packed
-        sequence while merging token-level fields such as advantages/logprobs.
-
-        Args:
-            context: Runtime context containing packing options (e.g. folding_scale).
-            batch: Dynamic rollout actor batch before packing.
-
-        Returns:
-            Packed batch with updated tensors and `idx_to_traj` mapping.
-        """
-        # calculate pack map
         traj_to_idx = {}
         for idx, traj in enumerate(batch["idx_to_traj"]):
             if traj not in traj_to_idx:
@@ -1368,7 +908,6 @@ class DynamicRolloutResult:
                 for right in idxes[i + 1 :]:
                     if right in passed_as_suffix:
                         continue
-                    # Skip overlapping response spans to avoid mixing turns.
                     mask_overlap = torch.logical_and(
                         batch["response_mask"][left],
                         batch["response_mask"][right],
@@ -1414,13 +953,11 @@ class DynamicRolloutResult:
             else:
                 assert k in custom_keys, f"bad key {k}"
 
-        # fit values after pack
         for suffix, prefixes in pack_map.items():
             idxes = [*prefixes, suffix]
             assert len(idxes) >= 2
             assert len({split_params["rewards"][idx].item() for idx in idxes}) == 1
 
-            # Merge additive token-level stats over response tokens only.
             for key in ["recomputed_logprobs", "rollout_logprobs", "advantages"]:
                 if key not in split_params:
                     continue
@@ -1432,7 +969,6 @@ class DynamicRolloutResult:
                 ]
                 split_params[key][suffix] = torch.stack(value).sum(dim=0)
 
-            # Re-scale loss_scales to preserve total per-turn contribution.
             masked_counts = [
                 split_params["response_mask"][idx].sum().item() for idx in idxes
             ]
@@ -1446,13 +982,11 @@ class DynamicRolloutResult:
             ]
             split_params["loss_scales"][suffix] = torch.stack(value).sum(dim=0)
 
-            # response_mask
             response_mask = [split_params["response_mask"][idx] for idx in idxes]
             split_params["response_mask"][suffix] = (
                 torch.stack(response_mask).sum(dim=0).bool()
             )
 
-            # prompt_lengths, response_lengths
             all_length = (
                 split_params["prompt_lengths"][suffix]
                 + split_params["response_lengths"][suffix]
@@ -1481,7 +1015,6 @@ class DynamicRolloutResult:
         num_sequence_after = len(new_idx_to_traj)
         folding_scale = context["folding_scale"]
         if "group_level" in folding_scale:
-            # Keep group-level total loss scale stable after folding.
             packed_batch["loss_scales"] *= num_sequence_after / num_sequence
 
         return packed_batch
@@ -1490,15 +1023,6 @@ class DynamicRolloutResult:
     def merge_result_list(
         rollout_results: list["DynamicRolloutResult"],
     ) -> "DynamicRolloutResult":
-        """
-        Merge a list of DynamicRolloutResult objects into a single DynamicRolloutResult.
-
-        Args:
-            rollout_results: List of DynamicRolloutResult objects to merge
-
-        Returns:
-            A single merged DynamicRolloutResult
-        """
         assert len(rollout_results) > 0, "No rollout results to merge."
         if len(rollout_results) == 1:
             return rollout_results[0]
@@ -1518,7 +1042,6 @@ class DynamicRolloutResult:
         )
 
         for res in rollout_results:
-            # Merge required list fields (size: num_sequence)
             merged_result.idx_to_traj.extend(res.idx_to_traj)
             merged_result.input_ids.extend(res.input_ids)
             merged_result.prompt_lengths.extend(res.prompt_lengths)
@@ -1529,18 +1052,15 @@ class DynamicRolloutResult:
                     merged_result.rollout_logprobs or []
                 ) + list(res.rollout_logprobs)
 
-            # Merge tensor fields (size: num_sequence)
             if res.recomputed_logprobs is not None:
                 merged_result.recomputed_logprobs = merge_tensor(
                     merged_result.recomputed_logprobs, res.recomputed_logprobs
                 )
-
             if res.ref_logprobs is not None:
                 merged_result.ref_logprobs = merge_tensor(
                     merged_result.ref_logprobs, res.ref_logprobs
                 )
 
-            # Merge tensor/list fields (size: num_sequence)
             if res.rewards is not None:
                 if isinstance(res.rewards, list):
                     merged_result.rewards = merge_list(
@@ -1561,7 +1081,6 @@ class DynamicRolloutResult:
                 else:
                     raise ValueError(f"Wrong type of advantages {type(res.advantages)}")
 
-            # Merge extra_fields_train (list fields, size: num_sequence)
             for k, v in res.extra_fields_train.items():
                 if v is not None:
                     if merged_result.extra_fields_train[k] is None:
@@ -1575,16 +1094,6 @@ class DynamicRolloutResult:
         rollout_result: "DynamicRolloutResult",
         num_sequence_per_group: list[int],
     ) -> list["DynamicRolloutResult"]:
-        """
-        split the DynamicRolloutResult into multiple smaller DynamicRolloutResult objects.
-
-        Args:
-            rollout_result: The DynamicRolloutResult to split
-            num_sequence_per_group: The number of sequences in each group
-
-        Returns:
-            A list of split DynamicRolloutResult objects
-        """
         num_sequence = rollout_result.num_sequence
         if sum(num_sequence_per_group) != num_sequence:
             raise ValueError("sum(num_sequence_per_group) != num_sequence")
@@ -1622,7 +1131,6 @@ class DynamicRolloutResult:
             if rollout_result.ref_logprobs is not None:
                 split_ref_logprobs = rollout_result.ref_logprobs[start_idx:end_idx]
 
-            # construct the split DynamicRolloutResult
             split_result = DynamicRolloutResult(
                 num_sequence=split_size,
                 group_size=rollout_result.group_size,
@@ -1643,8 +1151,11 @@ class DynamicRolloutResult:
         return split_results
 
 
+ReasoningRolloutResult = RolloutResult
+
+
 class BatchResizingIterator:
-    """The iterator for handling getting a batch and split it as a batch iterator with optional dynamic batch size."""
+    """Handle batch fetching and split into micro-batches."""
 
     def __init__(
         self,
@@ -1656,17 +1167,6 @@ class BatchResizingIterator:
         forward_only: bool,
         batch_tensor_key: str = "input_ids",
     ):
-        """Initialize the BatchResizingIterator.
-
-        Args:
-            cfg (DictConfig): The configuration object.
-            get_batch_fn (Callable): The function to get the batch.
-            micro_batch_size (int): The size of the micro batch.
-            total_batch_size (int): The total batch size.
-            num_global_batches (int): The number of global batches.
-            forward_only (bool): Whether to run in forward-only mode.
-            batch_tensor_key (str): The key for retrieving a sample batch tensor, which will be used to measure the batch size and sequence length. By default, this is "input_ids", which means the input_ids tensor's shape will be used to determine batch size and sequence length.
-        """
         self.cfg = cfg
         self.get_batch_fn = get_batch_fn
         self.micro_batch_size = micro_batch_size
@@ -1676,22 +1176,16 @@ class BatchResizingIterator:
         self.forward_only = forward_only
         self.batch_tensor_key = batch_tensor_key
 
-        # Iterator states
         self.consumed_batch_size = 0
         self.micro_batch_iter = iter([])
         self.global_batch_iter = iter([])
-        self.prefetch_micro_batch = None  # Used for computing batch info
+        self.prefetch_micro_batch = None
         self.global_batch_done = False
         self.batches = []
         self.get_batch_fn_handler = None
         self.global_batch_handler: Optional[Callable] = None
 
     def register_get_batch_handler(self, handler: Callable):
-        """This enables processing a batch after calling self.get_batch_fn.
-
-        Args:
-            handler (Callable): The handler function to process the return value of self.get_batch_fn.
-        """
         self.get_batch_fn_handler = handler
 
     def reset_total_batch_size(self, total_batch_size: int):
@@ -1704,23 +1198,17 @@ class BatchResizingIterator:
         )
 
     def get_all_batches(self):
-        """Retrieve all the batches (merged) iterated after the last call to get_all_batches."""
         batch = RolloutResult.merge_batches(self.batches)
         self.batches = []
         return batch
 
     def prefetch_one_batch(self):
-        """Get the total sequence length, number of microbatches, and indices based on the batch information and dynamic batch sizing."""
         if self.prefetch_micro_batch is None:
             self.prefetch_micro_batch = next(self)
-
         return self.prefetch_micro_batch
 
     def _get_next_micro_batch(self):
-        """Retrieve the next micro batch from the current microbatch iterator."""
         if self.prefetch_micro_batch is not None:
-            # If a microbatch has already been prefetched for batch info computation
-            # Return the prefetched microbatch
             micro_batch = self.prefetch_micro_batch
             self.prefetch_micro_batch = None
         else:
@@ -1729,7 +1217,6 @@ class BatchResizingIterator:
             self.consumed_batch_size += micro_batch[self.batch_tensor_key].shape[0]
             self.batches.append(micro_batch)
             if self.consumed_batch_size == self.global_batch_size:
-                # A global batch has been consumed, store the global batch step history
                 self.consumed_batch_size = 0
                 self.global_batch_done = True
             else:
@@ -1739,15 +1226,9 @@ class BatchResizingIterator:
         return micro_batch
 
     def register_global_batch_handler(self, handler: Callable):
-        """This enables processing a global batch before it's splitting into microbatches and consumed.
-
-        Args:
-            handler (Callable): The handler function to process the global batch. This function will receive a single argument, which is the global batch to process, and returns the processed global batch.
-        """
         self.global_batch_handler = handler
 
     def _fill_global_batches(self, current_batch: dict[str, torch.Tensor]):
-        """Keep getting batches until the batch size is multiple of a global batch if requires_global_batch."""
         current_batch_size = current_batch[self.batch_tensor_key].shape[0]
         while (
             current_batch_size < self.global_batch_size
@@ -1761,19 +1242,15 @@ class BatchResizingIterator:
         return current_batch
 
     def _get_global_batches(self):
-        """Split a batch into multiple global batches, each of which will be used for one step of inference/training."""
         batch, result = self.get_batch_fn()
         if self.get_batch_fn_handler is not None:
             batch = self.get_batch_fn_handler(batch)
         batch_size = result.num_sequence
         if batch_size % self.global_batch_size != 0:
             if self.global_batch_handler is not None:
-                # No need to fill global batches if it's already filled by full batches
                 batch = self._fill_global_batches(batch)
                 batch_size = get_batch_size(batch, self.batch_tensor_key)
             else:
-                # If the batch size is smaller than the global batch size per data parallel group,
-                # we can return the batch as is
                 return iter([batch])
         num_splits = batch_size // self.global_batch_size
         return get_iterator_k_split(
@@ -1784,18 +1261,15 @@ class BatchResizingIterator:
         )
 
     def __iter__(self):
-        """Return the iterator object itself."""
         return self
 
     def __next__(self):
-        """Retrieve the next micro batch from the current microbatch iterator."""
         try:
             return self._get_next_micro_batch()
         except StopIteration:
             try:
                 global_batch = next(self.global_batch_iter)
             except StopIteration:
-                # If both the current micro and global batch iterators are exhausted, fetch a new batch
                 self.global_batch_iter = self._get_global_batches()
                 global_batch = next(self.global_batch_iter)
 

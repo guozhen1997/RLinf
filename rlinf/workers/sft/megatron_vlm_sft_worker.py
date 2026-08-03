@@ -32,7 +32,7 @@ except (ImportError, ModuleNotFoundError):
 from omegaconf import DictConfig
 
 from rlinf.config import SupportedModel
-from rlinf.data.io_struct import get_seq_length
+from rlinf.data.schema.reasoning_requests import get_seq_length
 from rlinf.hybrid_engines.megatron.megatron_model_manager import MegatronModelManager
 from rlinf.scheduler import Cluster, Worker
 from rlinf.utils.data_iter_utils import get_iterator_k_split
@@ -300,7 +300,7 @@ class MegatronVlmSftWorker(MegatronSftWorker):
         ]:
             from torch.utils.data import DataLoader, DistributedSampler
 
-            from rlinf.data.datasets import sft_collate_fn
+            from rlinf.data.datasets.reasoning import sft_collate_fn
             from rlinf.data.datasets.vlm import VLMDatasetRegistry
 
             if not hasattr(self, "tokenizer"):

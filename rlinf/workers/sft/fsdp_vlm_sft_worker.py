@@ -95,7 +95,7 @@ class FSDPVlmSftWorker(FSDPSftWorker):
         ]:
             from torch.utils.data import DataLoader, DistributedSampler
 
-            from rlinf.data.datasets import sft_collate_fn
+            from rlinf.data.datasets.reasoning import sft_collate_fn
             from rlinf.data.datasets.vlm import VLMDatasetRegistry
 
             # vlm sft before load dataloader should build the tokenizer

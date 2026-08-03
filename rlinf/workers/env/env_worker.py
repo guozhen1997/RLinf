@@ -23,10 +23,12 @@ from omegaconf import DictConfig, OmegaConf
 
 from rlinf.algorithms.registry import calculate_adv_and_returns
 from rlinf.algorithms.rlt.transition import update_rlt_transitions
-from rlinf.data.embodied_io_struct import (
-    ChunkStepResult,
+from rlinf.data.schema.embodied_trajectory_builder import (
     EmbodiedLerobotRolloutResult,
     EmbodiedRolloutResult,
+)
+from rlinf.data.schema.embodied_types import (
+    ChunkStepResult,
     EnvOutput,
     RolloutResult,
     Trajectory,

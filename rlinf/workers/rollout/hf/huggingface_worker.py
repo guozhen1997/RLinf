@@ -29,9 +29,7 @@ from rlinf.algorithms.rlt import (
     predict_rlt_actions,
 )
 from rlinf.config import SupportedModel
-from rlinf.data.embodied_io_struct import (
-    RolloutResult,
-)
+from rlinf.data.schema.embodied_types import RolloutResult
 from rlinf.hybrid_engines.weight_syncer import WeightSyncer
 from rlinf.models import get_model
 from rlinf.models.embodiment.base_policy import BasePolicy

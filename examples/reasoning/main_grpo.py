@@ -19,8 +19,8 @@ import torch.multiprocessing as mp
 from omegaconf.omegaconf import OmegaConf
 
 from rlinf.config import validate_cfg
-from rlinf.data.datasets import create_rl_dataset
-from rlinf.data.tokenizers import hf_tokenizer
+from rlinf.data.datasets.reasoning import create_rl_dataset
+from rlinf.models.tokenization.hf import hf_tokenizer
 from rlinf.runners.reasoning_runner import ReasoningRunner
 from rlinf.scheduler import Cluster, NodePlacementStrategy
 from rlinf.scheduler.dynamic_scheduler.scheduler_worker import SchedulerWorker

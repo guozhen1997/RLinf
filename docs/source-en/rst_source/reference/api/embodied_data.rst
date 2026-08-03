@@ -24,7 +24,7 @@ EnvOutput
 episode-termination signals. During initialization, tensors are moved to CPU
 and made contiguous.
 
-.. autoclass:: rlinf.data.embodied_io_struct.EnvOutput
+.. autoclass:: rlinf.data.schema.embodied_types.EnvOutput
    :members:
    :member-order: bysource
 
@@ -35,7 +35,7 @@ ChunkStepResult
 including actions, log-probabilities, value estimates, and extra forward inputs.
 Tensors are moved to CPU on initialization.
 
-.. autoclass:: rlinf.data.embodied_io_struct.ChunkStepResult
+.. autoclass:: rlinf.data.schema.embodied_types.ChunkStepResult
    :members:
    :member-order: bysource
 
@@ -50,7 +50,7 @@ rollout, and provides conversion utilities:
 - `to_trajectory()`: concatenate into trajectory tensors
 - `to_splited_trajectories()`: split trajectories along the batch dimension
 
-.. autoclass:: rlinf.data.embodied_io_struct.EmbodiedRolloutResult
+.. autoclass:: rlinf.data.schema.embodied_trajectory_builder.EmbodiedRolloutResult
    :members:
    :member-order: bysource
 
@@ -62,6 +62,6 @@ actions, rewards, termination flags, observations, and model forward inputs.
 The typical tensor shape is `[T, B, ...]`, where **T is the chunk-step count**
 and **B is the number of parallel environments** (batch dimension).
 
-.. autoclass:: rlinf.data.embodied_io_struct.Trajectory
+.. autoclass:: rlinf.data.schema.embodied_types.Trajectory
    :members:
    :member-order: bysource

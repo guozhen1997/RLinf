@@ -22,7 +22,7 @@ EnvOutput
 `EnvOutput` 描述环境侧的输出，包含 observation 与 episode 结束信号。
 在初始化时，张量会被移动到 CPU 并整理为连续内存。
 
-.. autoclass:: rlinf.data.embodied_io_struct.EnvOutput
+.. autoclass:: rlinf.data.schema.embodied_types.EnvOutput
    :members:
    :member-order: bysource
 
@@ -33,7 +33,7 @@ ChunkStepResult
 包含动作、对数概率、价值估计与额外的 forward inputs。
 初始化时会将张量统一移动到 CPU。
 
-.. autoclass:: rlinf.data.embodied_io_struct.ChunkStepResult
+.. autoclass:: rlinf.data.schema.embodied_types.ChunkStepResult
    :members:
    :member-order: bysource
 
@@ -48,7 +48,7 @@ EmbodiedRolloutResult
 - `to_trajectory()`：拼接为轨迹张量
 - `to_splited_trajectories()`：按 batch 维度切分轨迹
 
-.. autoclass:: rlinf.data.embodied_io_struct.EmbodiedRolloutResult
+.. autoclass:: rlinf.data.schema.embodied_trajectory_builder.EmbodiedRolloutResult
    :members:
    :member-order: bysource
 
@@ -59,6 +59,6 @@ Trajectory
 观测与模型前向输入等字段。其张量维度一般为 `[T, B, ...]`，
 其中 **T 表示 chunk step 数**， **B 表示并行环境数** （batch 维度）。
 
-.. autoclass:: rlinf.data.embodied_io_struct.Trajectory
+.. autoclass:: rlinf.data.schema.embodied_types.Trajectory
    :members:
    :member-order: bysource

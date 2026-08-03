@@ -20,11 +20,11 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from rlinf.data.embodied_io_struct import (
+from rlinf.data.schema.embodied_trajectory_builder import EmbodiedRolloutResult
+from rlinf.data.schema.embodied_types import (
     ChunkStepResult,
-    EmbodiedRolloutResult,
 )
-from rlinf.data.replay_buffer import TrajectoryReplayBuffer
+from rlinf.data.storage.replay import TrajectoryReplayBuffer
 from rlinf.envs.realworld.realworld_env import RealWorldEnv
 from rlinf.scheduler import Cluster, ComponentPlacement, Worker
 

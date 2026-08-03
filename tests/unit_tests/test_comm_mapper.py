@@ -14,7 +14,7 @@
 
 import torch
 
-from rlinf.data.embodied_io_struct import EnvOutput, RolloutResult
+from rlinf.data.schema.embodied_types import EnvOutput, RolloutResult
 from rlinf.scheduler import (
     build_recv_plan,
     build_route_channel_key,

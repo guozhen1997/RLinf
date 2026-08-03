@@ -21,8 +21,8 @@ from omegaconf.omegaconf import OmegaConf
 from rlinf.agents.searchr1.search_tool_worker import SearchToolWorker
 from rlinf.agents.searchr1.searchr1_agent_loop import Searchr1AgentLoopWorker
 from rlinf.config import validate_cfg
-from rlinf.data.datasets import create_rl_dataset
-from rlinf.data.tokenizers import hf_tokenizer
+from rlinf.data.datasets.reasoning import create_rl_dataset
+from rlinf.models.tokenization.hf import hf_tokenizer
 from rlinf.runners.agent_runner import AgentRunner
 from rlinf.scheduler import Cluster, NodePlacementStrategy
 from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
