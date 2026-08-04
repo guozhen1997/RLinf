@@ -63,7 +63,7 @@ HG-DAgger 的单臂流程可参考 :doc:`hg-dagger`。
      - 用 PICO 双手遥操作采集 tcp_rot6d LeRobot 数据。
    * - HG-DAgger
      - ``realworld_dual_franka_dagger_openpi``
-     - 策略自主执行，PICO 按臂接管；完整成功轨迹进入 online LeRobot dataset。
+     - 策略自主执行，PICO 按臂接管；归档完整成功轨迹，并仅用全接管 action chunk 训练。
 
 观测与动作
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -316,7 +316,8 @@ PICO 手柄才会分别绑定到左 / 右机械臂。
 
 只接管右臂时则相反。任意一臂发生替换都会设置 ``intervene_flag=True``；只有两臂
 都未接管时才不会产生 intervention 记录。完整成功 episode 仍会由 online LeRobot
-collector 保存，``intervene_flag`` 用于区分其中的人工纠正帧。
+collector 保存。启用 ``only_save_expert: True`` 后，sampler 使用
+``intervene_flag``，只暴露所有非 padding 帧均为人工纠正的 action chunk。
 
 
 启动 PICO 数据流
@@ -430,7 +431,7 @@ tcp_rot6d；因此不需要执行 GELLO 流程中的 ``backfill_tcp_rot6d.py``�
 
    algorithm:
      dagger:
-       only_save_expert: False
+       only_save_expert: True
        online_lerobot:
          enabled: True
          only_success: True
@@ -458,8 +459,10 @@ tcp_rot6d；因此不需要执行 GELLO 流程中的 ``backfill_tcp_rot6d.py``�
 ``smooth_intervene: True`` 用于消除 PICO 接管时 action chunk 边界的停顿。如果一个 chunk 的最后一帧仍由人工接管，env worker 会跳过下一次策略推理，改用形状兼容的 dummy chunk 继续执行；接管侧仍使用 PICO 动作，暂时未接管的帧保持机械臂当前 TCP 位姿。最后一帧不再接管或 episode 结束后恢复模型推理。当前该模式要求每个 env worker pipeline stage 只运行一个环境。
 
 ``only_success: True`` 表示失败 rollout 会被丢弃，只保存成功 episode；
-``only_save_expert: False`` 表示成功 episode 的整段轨迹都参与训练，而不是只采样
-PICO 接管帧。每个成功 episode 会立即归档到
+``only_save_expert: True`` 仍会归档完整的成功 episode，但训练只采样 action chunk
+内所有非 padding 帧均满足 ``intervene_flag=True`` 的起点。双臂任意一臂被替换时，
+该帧就会标记为接管，因此这样的 chunk 可能由一侧 PICO action 与另一侧 rollout
+action 共同组成。每个成功 episode 会立即归档到
 ``${runner.logger.log_path}/online_lerobot/rank_0/id_<N>/``。
 ``env.eval.use_pico: False`` 表示评测阶段只看策略本身，不混入人工接管。
 
@@ -485,6 +488,7 @@ PICO 接管帧。每个成功 episode 会立即归档到
 ``grip``，松开后让策略继续运行。按住任意一侧 ``grip`` 时，该侧 PICO action 与
 另一侧 rollout action 会合成为完整 20D ``info["intervene_action"]``。成功结束后，
 整条 episode 经内存发送给 actor，并写入 online LeRobot shard；失败 episode 被丢弃。
+actor 保留完整物理归档，但只向训练暴露全程带接管标记的 action chunk。
 
 监控
 ----------------------------------------
@@ -497,10 +501,10 @@ PICO 接管帧。每个成功 episode 会立即归档到
 
 推荐关注：
 
-* ``train/dagger/actor_loss``：基于完整成功轨迹的监督损失。
+* ``train/dagger/actor_loss``：基于 expert-only action chunk 的监督损失。
 * ``train/lerobot_dataset/total_episodes``：actor 已接收的成功 episode 数量。
 * ``train/lerobot_dataset/physical_frames``：已接收的 LeRobot 物理帧数量。
-* ``train/lerobot_dataset/logical_samples``：rolling window 内可采样的训练样本数。
+* ``train/lerobot_dataset/logical_samples``：rolling window 内符合专家条件、可训练的 chunk 起点数。
 * ``train/lerobot_dataset/num_sub_datasets``：当前加载的 LeRobot shard 数量。
 * ``train/actor/lr`` 和 ``train/actor/grad_norm``：训练稳定性。
 

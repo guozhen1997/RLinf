@@ -6,7 +6,7 @@
 
    用于采集干预数据并在线训练 Franka 策略的 Human-Gated DAgger 流程。
 
-使用 Human-Gated DAgger 训练 Franka 真机策略。你将采集干预数据，计算 OpenPI 归一化统计，运行 SFT，然后启动在线 HG-DAgger。在线阶段使用 LeRobot 保存完整的成功 episode：未接管帧保留策略实际执行动作，接管帧保存人工动作和 ``intervene_flag``，整段成功轨迹共同参与训练。
+使用 Human-Gated DAgger 训练 Franka 真机策略。你将采集干预数据，计算 OpenPI 归一化统计，运行 SFT，然后启动在线 HG-DAgger。在线阶段使用 LeRobot 归档完整的成功 episode：未接管帧保留策略实际执行动作，接管帧保存人工动作和 ``intervene_flag``。启用 ``only_save_expert: True`` 后，训练只采样非 padding 帧全部由人工接管的 action chunk。
 
 概览
 ----------------------------------------
@@ -57,7 +57,7 @@
      - 训练 student 初始化。
    * - HG-DAgger
      - ``realworld_pnp_dagger_openpi``
-     - 使用 online LeRobot 聚合完整成功轨迹并运行在线干预训练。
+     - 使用 online LeRobot 归档完整成功轨迹，并仅用全接管 action chunk 训练。
 
 观测与动作
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -297,7 +297,7 @@ SFT 导出的 checkpoint 会作为在线阶段的学生模型初始化。更多 
 
    algorithm:
      dagger:
-       only_save_expert: False
+       only_save_expert: True
        online_lerobot:
          enabled: True
          only_success: True
@@ -335,15 +335,16 @@ SFT 导出的 checkpoint 会作为在线阶段的学生模型初始化。更多 
 
 ``smooth_intervene: True`` 会在人类接管持续到 action chunk 最后一帧时绕过下一次 策略推理。env worker 使用 dummy chunk 持续驱动遥操 wrapper，并在接管释放或 episode 结束后恢复正常推理。该模式要求每个 env worker pipeline stage 只运行一个环境。
 
-``only_success: True`` 会丢弃失败 episode；``only_save_expert: False`` 则允许成功
-episode 中的所有帧参与训练。每个成功 episode 内：
+``only_success: True`` 会丢弃失败 episode。``only_save_expert: True`` 仍将完整的
+成功 episode 保存在 LeRobot 归档中，但在线 sampler 只暴露 action chunk 内所有非
+padding 帧均满足 ``intervene_flag=True`` 的起点。当 ``num_action_chunks: 1`` 时，
+该规则退化为逐帧过滤。每个成功 episode 内：
 
-* 未接管帧的 ``actions`` 是 student 实际执行的动作；
-* 人工接管帧的 ``actions`` 是接管设备实际执行的动作，并带有
-  ``intervene_flag=True``；
+* 未接管帧仍保留在物理归档中，但不会作为 expert-only 训练样本暴露；
+* 人工接管帧保存接管设备实际执行的动作，并带有 ``intervene_flag=True``；
 * ``finalize_interval: 1`` 表示每完成一个成功 episode 就立即写出一个 LeRobot shard；
-* ``rolling_lerobot_window_size: 50000`` 表示在线训练只从最近 50,000 个逻辑帧
-  起点采样，较早的 shard 仍保留在磁盘中。
+* ``rolling_lerobot_window_size: 50000`` 表示在线训练只从最近 50,000 个符合专家
+  条件的逻辑 chunk 起点采样，较早的 shard 仍保留在磁盘中。
 
 真机 DAgger 配置不包含 beta 相关字段，因为没有配置 ``rollout.expert_model``。Beta 只用于模型 expert 和 student 之间的动作混合；真机人工接管由 ``env.train`` 中启用的接管 wrapper 决定。
 
@@ -376,10 +377,10 @@ episode 中的所有帧参与训练。每个成功 episode 内：
 
 **3. 推荐关注的监控指标**
 
-- ``train/dagger/actor_loss``：基于完整成功轨迹计算的监督损失。
+- ``train/dagger/actor_loss``：基于 expert-only action chunk 计算的监督损失。
 - ``train/lerobot_dataset/total_episodes``：actor 当前已接收的成功 episode 数量。
 - ``train/lerobot_dataset/physical_frames``：已接收的 LeRobot 物理帧数量。
-- ``train/lerobot_dataset/logical_samples``：rolling window 内可采样的训练样本数。
+- ``train/lerobot_dataset/logical_samples``：rolling window 内符合专家条件、可训练的 chunk 起点数。
 - ``train/lerobot_dataset/num_sub_datasets``：当前加载的 LeRobot shard 数量。
 - ``train/actor/lr``：学习率。
 - ``train/actor/grad_norm``：梯度范数。
