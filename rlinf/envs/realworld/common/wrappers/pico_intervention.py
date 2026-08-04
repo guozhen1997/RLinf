@@ -356,6 +356,7 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
         super().__init__(env)
         self.gripper_enabled = gripper_enabled
         self.hold_current_when_inactive = bool(hold_current_when_inactive)
+        self.smooth_intervene_mode = False
         self.hand = str(pico_config.get("hand", "dual")).lower()
         if self.hand not in ("left", "right", "dual"):
             raise ValueError(
@@ -384,7 +385,11 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
         obs, info = self.env.reset(**kwargs)
         self.left = False
         self.right = False
+        self.smooth_intervene_mode = False
         return obs, info
+
+    def set_smooth_intervene_mode(self, smooth_intervene_mode: bool) -> None:
+        self.smooth_intervene_mode = bool(smooth_intervene_mode)
 
     @staticmethod
     def _arm_index(side: str) -> int:
@@ -472,7 +477,7 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
             action_flat = action_flat.copy()
 
         per_arm_dim = target_dim // 2
-        if self.hold_current_when_inactive:
+        if self.hold_current_when_inactive or self.smooth_intervene_mode:
             new_action = np.concatenate(
                 [
                     self._current_tcp_action(tcp_pose, action_flat, 0, per_arm_dim),
@@ -538,10 +543,7 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
         new_action, replaced, pico_info = self.action(action)
 
         obs, rew, done, truncated, info = self.env.step(new_action)
-        should_record_intervention = replaced
-        if self.hand == "dual" and not self.hold_current_when_inactive:
-            should_record_intervention = bool(pico_info["pico_dual_replaced"])
-        if should_record_intervention or self.hold_current_when_inactive:
+        if replaced or self.hold_current_when_inactive:
             info["intervene_action"] = new_action
             info["intervene_flag"] = np.ones(1)
         info.update(pico_info)

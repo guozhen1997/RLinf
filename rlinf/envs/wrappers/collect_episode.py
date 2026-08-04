@@ -236,7 +236,7 @@ class CollectEpisode(gym.Wrapper):
         self._maybe_flush(terminated, truncated)
         return obs, reward, terminated, truncated, info
 
-    def chunk_step(self, chunk_actions):
+    def chunk_step(self, chunk_actions, smooth_intervene_mode: bool = False):
         """Execute a chunk of actions, recording each sub-step individually.
 
         Both pickle and lerobot formats receive step-level records for maximum
@@ -245,12 +245,15 @@ class CollectEpisode(gym.Wrapper):
         Args:
             chunk_actions: Action chunk, typically a tensor of shape
                 ``[num_envs, chunk_size, action_dim]``.
+            smooth_intervene_mode: Whether an intervention wrapper should hold
+                human control while policy inference is bypassed.
 
         Returns:
             Tuple of (obs_list, rewards, terminations, truncations, infos_list).
         """
         obs_list, rewards, terminations, truncations, infos_list = self.env.chunk_step(
-            chunk_actions
+            chunk_actions,
+            smooth_intervene_mode=smooth_intervene_mode,
         )
 
         chunk_size = len(obs_list) if isinstance(obs_list, (list, tuple)) else 1
