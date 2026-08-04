@@ -26,14 +26,6 @@ from rlinf.utils.data_iter_utils import split_list
 if TYPE_CHECKING:
     from vllm.outputs import RequestOutput as VllmRequestOutput
 
-    from rlinf.data.schema.reasoning_results import (
-        DynamicRolloutResult,
-        RolloutResult,
-    )
-    from rlinf.data.schema.reasoning_results import (
-        RolloutResult as ReasoningRolloutResult,
-    )
-
 
 def get_batch_size(
     batch: dict[str, torch.Tensor], batch_tensor_key: str = "input_ids"
@@ -49,6 +41,15 @@ def get_seq_length(
 
 @dataclass
 class RolloutRequest:
+    """
+    Attr
+    input_ids: list of input token IDs for rollout
+    n: Number of completions to generate for each input
+    image_data: list of image data (bytes or URLs) for multimodal inputs
+    answers: list of answers for the requests, where each answer can be either a list of strings (for typical tasks) or a dict (for VQA tasks), if available.
+    multi_modal_inputs: list of multi-modal inputs for the requests
+    """
+
     n: int
     input_ids: list[list[int]]
     image_data: Union[list[list[bytes]], list[list[str]]]
@@ -132,6 +133,21 @@ class FinishReasonEnum(str, Enum):
 
 @dataclass
 class SeqGroupInfo:
+    """
+    SeqGroupInfo represents a group of sequences and tracks their processing status and results.
+
+    Each SeqGroupInfo instance corresponds to a single input sequence that is expanded into `group_size` sequences
+
+    Attributes:
+        id (int): Unique identifier for the sequence group.
+        input_ids (list[int]): list of input IDs of the original sequence.
+        answer (Union[list[str], dict]): list of answers of the original sequence.(One sequence can have multiple equivalent answers), or a dict in case of vqa task.
+        group_size (int): Number of sequences in the group.
+        idx_completed (set[int]): Set of indices for sequences that have completed rollout and are ready for evaluation.
+        idx_aborted (set[int]): Set of indices for sequences that have been aborted. These sequences need to be re-rolled out before they can be evaluated.
+        results (list[Optional[dict]]): list storing result for each sequence, or None if not yet available.
+    """
+
     id: int
     input_ids: list[int]
     answer: Union[list[str], dict]
@@ -162,6 +178,26 @@ class SeqGroupInfo:
             self.results[idx].add(next_output=result, aggregate=True)
 
     def record_sglang_result(self, idx: int, result: dict, logger=None):
+        """Record a single sglang execution result and update internal tracking.
+
+        This method is responsible for updating the internal state of the SeqGroupInfo
+        instance based on the result of a single sglang execution. It accepts the index of the
+        sequence within the group and the result dictionary returned by sglang. Then it updates
+        the sets of completed and aborted indices based on the finish reason provided in the result.
+        If the result for the given index already exists, indicating that this is a re-rollout
+        sequence, this method will merge the new result with the previous one by concatenating the output IDs.
+
+        Args:
+            idx: int
+                The index of the sequence within the group (0 <= idx < group_size).
+            result: dict
+                Result of SGLang. Expected to contain at least:
+                - "meta_info": {"finish_reason": {"type": FinishReasonEnum}}
+                - "output_ids": a list (or list-like) of output identifier elements
+            logger: optional
+                Optional logger for diagnostic messages.
+        """
+
         finished_reason = result["meta_info"]["finish_reason"]["type"]
         match finished_reason:
             case FinishReasonEnum.ABORT:
@@ -182,50 +218,39 @@ class SeqGroupInfo:
 
     @property
     def num_completed(self) -> int:
+        """Returns the number of completed sequences."""
         return len(self.idx_completed)
 
     @property
     def num_aborted(self) -> int:
+        """Returns the number of aborted sequences."""
         return len(self.idx_aborted)
 
     @property
     def num_returned(self) -> int:
+        """Returns the total number of sequences that have either completed or aborted."""
         return self.num_completed + self.num_aborted
 
     @property
     def num_running(self) -> int:
+        """Returns the number of sequences still running."""
         return self.group_size - self.num_returned
 
     @property
     def all_returned(self) -> bool:
+        """Returns True if all sequences have either completed or aborted."""
         return self.num_returned == self.group_size
 
     @property
     def all_completed(self) -> bool:
+        """Returns True if all sequences have completed."""
         return self.num_completed == self.group_size
 
 
-def __getattr__(name: str) -> Any:
-    """Lazily resolve heavy rollout result classes to avoid import cycles."""
-    if name in {"RolloutResult", "DynamicRolloutResult", "ReasoningRolloutResult"}:
-        from rlinf.data.schema.reasoning_results import (
-            DynamicRolloutResult,
-            RolloutResult,
-        )
-
-        if name == "DynamicRolloutResult":
-            return DynamicRolloutResult
-        return RolloutResult
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 __all__ = [
-    "DynamicRolloutResult",
     "FinishReasonEnum",
-    "ReasoningRolloutResult",
     "RolloutRequest",
     "build_rollout_requests_from_batch",
-    "RolloutResult",
     "SeqGroupInfo",
     "get_batch_size",
     "get_seq_length",

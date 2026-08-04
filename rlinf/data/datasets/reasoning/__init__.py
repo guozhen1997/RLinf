@@ -12,18 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Text datasets for reasoning / LLM RL."""
+
 import logging
 
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-from rlinf.data.datasets.reasoning.collate_rl import collate_fn
-from rlinf.data.datasets.reasoning.collate_sft import sft_collate_fn
+from rlinf.data.datasets.reasoning.collate_fn import collate_fn
 from rlinf.data.datasets.reasoning.dataset import ReasoningDataset
 from rlinf.data.datasets.reasoning.rstar2 import Rstar2Dataset
 from rlinf.data.datasets.reasoning.wideseek_r1 import WideSeekR1Dataset
-from rlinf.data.datasets.vlm import VLMDatasetRegistry
 
 TEXT_DATASET_TYPE_MAP = {
     "reasoning": ReasoningDataset,
@@ -33,59 +33,43 @@ TEXT_DATASET_TYPE_MAP = {
 }
 
 
-def create_rl_dataset(
+def create_reasoning_datasets(
     config: DictConfig, tokenizer: AutoTokenizer
 ) -> tuple[Dataset | None, Dataset | None]:
-    """Create train/val datasets according to ``config.data.type``."""
-    if config.data.type in TEXT_DATASET_TYPE_MAP:
-        dataset_cls = TEXT_DATASET_TYPE_MAP[config.data.type]
-        logging.info(f"Using dataset class: {dataset_cls.__name__}")
+    """Create train/val text reasoning datasets via ``config.data.type``.
 
-        train_dataset, val_dataset = None, None
-        if config.runner.task_type != "reasoning_eval":
-            train_dataset = dataset_cls(
-                data_paths=config.data.train_data_paths,
-                config=config,
-                tokenizer=tokenizer,
-            )
+    Supported ``config.data.type`` values: ``reasoning``, ``math``,
+    ``wideseek_r1``, ``rstar2``.
 
-        if config.data.get("val_data_paths", None) is not None:
-            val_dataset = dataset_cls(
-                data_paths=config.data.val_data_paths,
-                config=config,
-                tokenizer=tokenizer,
-            )
-        return train_dataset, val_dataset
-
-    if config.data.type == "vision_language":
-        dataset_name = getattr(config.data, "dataset_name", None)
-        lazy_loading = bool(getattr(config.data, "lazy_loading", False))
-
-        logging.info(
-            f"Using VLM dataset: name={dataset_name}, lazy_loading={lazy_loading}"
+    For VLM datasets (``vlm``), use
+    ``rlinf.data.datasets.vlm.create_vlm_datasets`` instead.
+    """
+    if config.data.type not in TEXT_DATASET_TYPE_MAP:
+        raise NotImplementedError(
+            "Unsupported dataset type "
+            f"{config.data.type}, only support "
+            f"{sorted(TEXT_DATASET_TYPE_MAP.keys())}. "
+            "For VLM use rlinf.data.datasets.vlm.create_vlm_datasets."
         )
 
-        train_dataset = VLMDatasetRegistry.create(
-            dataset_name,
+    dataset_cls = TEXT_DATASET_TYPE_MAP[config.data.type]
+    logging.info(f"Using dataset class: {dataset_cls.__name__}")
+
+    train_dataset, val_dataset = None, None
+    if config.runner.task_type != "reasoning_eval":
+        train_dataset = dataset_cls(
             data_paths=config.data.train_data_paths,
             config=config,
             tokenizer=tokenizer,
         )
-        val_dataset = None
-        if config.data.get("val_data_paths", None) is not None:
-            val_dataset = VLMDatasetRegistry.create(
-                dataset_name,
-                data_paths=config.data.val_data_paths,
-                config=config,
-                tokenizer=tokenizer,
-            )
-        return train_dataset, val_dataset
 
-    raise NotImplementedError(
-        "Unsupported dataset type "
-        f"{config.data.type}, only support "
-        f"{sorted(TEXT_DATASET_TYPE_MAP.keys()) + ['vision_language']}"
-    )
+    if config.data.get("val_data_paths", None) is not None:
+        val_dataset = dataset_cls(
+            data_paths=config.data.val_data_paths,
+            config=config,
+            tokenizer=tokenizer,
+        )
+    return train_dataset, val_dataset
 
 
 __all__ = [
@@ -94,6 +78,5 @@ __all__ = [
     "TEXT_DATASET_TYPE_MAP",
     "WideSeekR1Dataset",
     "collate_fn",
-    "create_rl_dataset",
-    "sft_collate_fn",
+    "create_reasoning_datasets",
 ]

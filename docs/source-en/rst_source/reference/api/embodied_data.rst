@@ -2,19 +2,27 @@ Embodied Data Interface
 ========================
 
 This section describes the core data structures used during rollout and training
-in embodied settings: `EnvOutput`, `ChunkStepResult`, `EmbodiedRolloutResult`,
-and `Trajectory`. Together, they connect environment outputs, chunk-step
-accumulation, trajectory construction, and training batches.
+in embodied settings: `EnvOutput`, `PolicyOutput`, `ChunkStepResult`,
+`EmbodiedTrajectoryBuilder`, and `Trajectory`. Together, they connect environment
+outputs, policy communication, chunk-step accumulation, trajectory construction,
+and training batches.
 
 Relationships
 -------------
 
 - `EnvOutput`: raw environment outputs per chunk step (obs, reward, done, etc.).
-- `ChunkStepResult`: model inference outputs and reward signals per chunk step.
-- `EmbodiedRolloutResult`: accumulates chunk-step results and transitions.
+- `PolicyOutput`: policy/rollout-worker outputs for one communication round
+  (actions, log-probabilities, values, etc.).
+- `ChunkStepResult`: env-side per-chunk package combining policy outputs with
+  reward and termination signals.
+- `EmbodiedTrajectoryBuilder`: accumulates chunk-step results and transitions.
 - `Trajectory`: aggregated trajectory tensors (typically `[T, B, ...]`).
 
-`EmbodiedRolloutResult.to_splited_trajectories()` can split trajectories along the
+Typical flow::
+
+   EnvOutput -> PolicyOutput -> ChunkStepResult -> EmbodiedTrajectoryBuilder -> Trajectory
+
+`EmbodiedTrajectoryBuilder.to_splited_trajectories()` can split trajectories along the
 batch dimension for Channel distribution to multiple Actor/Trainer workers.
 
 EnvOutput
@@ -25,6 +33,17 @@ episode-termination signals. During initialization, tensors are moved to CPU
 and made contiguous.
 
 .. autoclass:: rlinf.data.schema.embodied_types.EnvOutput
+   :members:
+   :member-order: bysource
+
+PolicyOutput
+------------
+
+`PolicyOutput` is the message sent from the rollout worker to the env worker for
+one communication round. It carries actions and optional training signals such
+as log-probabilities, values, intervene flags, and forward inputs.
+
+.. autoclass:: rlinf.data.schema.embodied_types.PolicyOutput
    :members:
    :member-order: bysource
 
@@ -39,10 +58,10 @@ Tensors are moved to CPU on initialization.
    :members:
    :member-order: bysource
 
-EmbodiedRolloutResult
----------------------
+EmbodiedTrajectoryBuilder
+--------------------------
 
-`EmbodiedRolloutResult` accumulates chunk-step results and transitions during
+`EmbodiedTrajectoryBuilder` accumulates chunk-step results and transitions during
 rollout, and provides conversion utilities:
 
 - `append_step_result()`: append chunk-step results
@@ -50,7 +69,7 @@ rollout, and provides conversion utilities:
 - `to_trajectory()`: concatenate into trajectory tensors
 - `to_splited_trajectories()`: split trajectories along the batch dimension
 
-.. autoclass:: rlinf.data.schema.embodied_trajectory_builder.EmbodiedRolloutResult
+.. autoclass:: rlinf.data.schema.embodied_trajectory_builder.EmbodiedTrajectoryBuilder
    :members:
    :member-order: bysource
 

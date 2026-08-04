@@ -127,16 +127,16 @@ class TestOverlapEnvBootstrap(unittest.TestCase):
         rollout_channel = MagicMock()
         input_channel = MagicMock()
 
-        # Mock recv_from to return a dummy RolloutResult
-        mock_rollout_result = MagicMock()
-        mock_rollout_result.actions = torch.zeros(2, 28)
-        mock_rollout_result.bootstrap_values = None
-        mock_rollout_result.forward_inputs = {"action": torch.zeros(2, 28)}
-        mock_rollout_result.versions = torch.zeros(2, 1)
-        mock_rollout_result.intervene_flags = None
+        # Mock recv_from to return a dummy PolicyOutput
+        mock_policy_output = MagicMock()
+        mock_policy_output.actions = torch.zeros(2, 28)
+        mock_policy_output.bootstrap_values = None
+        mock_policy_output.forward_inputs = {"action": torch.zeros(2, 28)}
+        mock_policy_output.versions = torch.zeros(2, 1)
+        mock_policy_output.intervene_flags = None
 
         # Patch methods on the instance
-        self.worker.recv_from = MagicMock(return_value=mock_rollout_result)
+        self.worker.recv_from = MagicMock(return_value=mock_policy_output)
         self.worker.env_interact_step = MagicMock(
             return_value=(
                 EnvOutput(
@@ -238,14 +238,14 @@ class TestOverlapEnvBootstrap(unittest.TestCase):
         rollout_channel = MagicMock()
         input_channel = MagicMock()
 
-        mock_rollout_result = MagicMock()
-        mock_rollout_result.actions = torch.zeros(2, 28)
-        mock_rollout_result.bootstrap_values = None
-        mock_rollout_result.forward_inputs = {"action": torch.zeros(2, 28)}
-        mock_rollout_result.versions = torch.zeros(2, 1)
-        mock_rollout_result.intervene_flags = None
+        mock_policy_output = MagicMock()
+        mock_policy_output.actions = torch.zeros(2, 28)
+        mock_policy_output.bootstrap_values = None
+        mock_policy_output.forward_inputs = {"action": torch.zeros(2, 28)}
+        mock_policy_output.versions = torch.zeros(2, 1)
+        mock_policy_output.intervene_flags = None
 
-        self.worker.recv_from = MagicMock(return_value=mock_rollout_result)
+        self.worker.recv_from = MagicMock(return_value=mock_policy_output)
         self.worker.env_interact_step = MagicMock(
             return_value=(
                 EnvOutput(

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Reasoning SFT collate function preserving multimodal fields."""
+"""VLM SFT collate function preserving multimodal fields."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from typing import Any
 import torch
 
 
-def sft_collate_fn(data_list: list[Any]) -> dict[str, Any]:
-    """Collate SFT samples and preserve multi-modal fields."""
+def collate_fn(data_list: list[Any]) -> dict[str, Any]:
+    """Collate VLM SFT samples and preserve multi-modal fields."""
     prompts = []
     lens = []
     attention_masks = []
@@ -133,4 +133,4 @@ def sft_collate_fn(data_list: list[Any]) -> dict[str, Any]:
     return batch
 
 
-__all__ = ["sft_collate_fn"]
+__all__ = ["collate_fn"]

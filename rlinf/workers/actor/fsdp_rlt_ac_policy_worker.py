@@ -527,7 +527,7 @@ class RLTACReplayMixin:
 
                 # Dones have one extra initial slot, so transition t reads
                 # terminal flags from t+1. Rewards are already action-aligned
-                # by EmbodiedRolloutResult because the initial empty reward is
+                # by EmbodiedTrajectoryBuilder because the initial empty reward is
                 # skipped and the final reward is appended after rollout.
                 done_idx = min(
                     t + 1,

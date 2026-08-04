@@ -21,7 +21,7 @@ from omegaconf.omegaconf import OmegaConf
 from rlinf.agents.searchr1.search_tool_worker import SearchToolWorker
 from rlinf.agents.searchr1.searchr1_agent_loop import Searchr1AgentLoopWorker
 from rlinf.config import validate_cfg
-from rlinf.data.datasets.reasoning import create_rl_dataset
+from rlinf.data.datasets.reasoning import create_reasoning_datasets
 from rlinf.models.tokenization.hf import hf_tokenizer
 from rlinf.runners.agent_runner import AgentRunner
 from rlinf.scheduler import Cluster, NodePlacementStrategy
@@ -96,7 +96,7 @@ def main(cfg) -> None:
 
     # Dataset
     tokenizer = hf_tokenizer(cfg.actor.tokenizer.tokenizer_model)
-    train_ds, val_ds = create_rl_dataset(cfg, tokenizer)
+    train_ds, val_ds = create_reasoning_datasets(cfg, tokenizer)
 
     # Tool workers group
     singleton_tool_placement = NodePlacementStrategy([0])

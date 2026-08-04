@@ -24,7 +24,15 @@ from rlinf.utils.nested_dict_process import cat_list_of_dict_tensor, put_tensor_
 
 
 def get_model_weights_id(versions: torch.Tensor) -> str:
-    """Get the model weights id from the tensor."""
+    """
+    Get the model weights id from the tensor.
+
+    Args:
+        versions (torch.Tensor): The tensor to get the model weights id from.
+
+    Returns:
+        str: The model weights id.
+    """
     name_bytes = versions.cpu().numpy().tobytes()
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, name_bytes.hex()))
 
@@ -101,16 +109,32 @@ class EnvOutput:
         )
 
         return {
-            "main_images": image_tensor,
-            "wrist_images": wrist_image_tensor,
-            "extra_view_images": extra_view_image_tensor,
+            "main_images": image_tensor,  # [N_ENV, H, W, C]
+            "wrist_images": wrist_image_tensor,  # [N_ENV, H, W, C] or [N_ENV, N_IMG, H, W, C]
+            "extra_view_images": extra_view_image_tensor,  # [N_ENV, N_IMG, H, W, C]
             "states": states,
             "task_descriptions": task_descriptions,
         }
 
     @staticmethod
     def merge_env_outputs(env_outputs: list[dict]) -> dict[str, Any]:
-        """Merge multiple env output dicts into one batch-aligned env output."""
+        """Merge multiple env output dicts into one batch-aligned env output.
+
+        Merge strategy:
+
+        - Tensor fields: concatenate on batch dimension.
+        - List fields: flatten in source order.
+        - ``None`` fields: keep ``None``.
+        - ``final_obs`` supports partial ``None`` across shards. For shards
+            without ``final_obs``, use the corresponding ``obs`` as fallback to
+            keep batch alignment.
+
+        Args:
+            env_outputs: Per-source env output dicts that share the same schema.
+
+        Returns:
+            A merged env output dict produced via ``EnvOutput(...).to_dict()``.
+        """
 
         def _get_batch_size(env_output: dict[str, Any]) -> int:
             dones = env_output.get("dones")
@@ -225,6 +249,8 @@ class EnvOutput:
 
 @dataclass(kw_only=True)
 class RTCRequest:
+    """Real-time correction request sent from the env worker to rollout."""
+
     obs: dict[str, Any]
     request_type: str = "bootstrap"
     executed_horizon: int = 0
@@ -232,17 +258,23 @@ class RTCRequest:
     chunk_id: int = 0
 
     def __post_init__(self):
+        # Keep Ray channel payloads on CPU so the control node never receives
+        # CUDA tensors from the rollout node.
         self.obs = put_tensor_device(self.obs, "cpu")
 
 
 @dataclass(kw_only=True)
 class RTCActionResponse:
+    """RTC response carrying a fresh action chunk."""
+
     actions: torch.Tensor = None
     model_actions: torch.Tensor | None = None
     chunk_id: int = 0
     guidance_applied: bool = False
 
     def __post_init__(self):
+        # Actions are executed by the env worker, while model_actions are kept
+        # for the next RTC overlap constraint.
         if self.actions is not None:
             self.actions = self.actions.cpu().contiguous()
         if self.model_actions is not None:
@@ -250,14 +282,17 @@ class RTCActionResponse:
 
 
 @dataclass(kw_only=True)
-class RolloutResult:
-    actions: torch.Tensor = None
-    prev_logprobs: torch.Tensor = None
-    prev_values: torch.Tensor = None
-    bootstrap_values: torch.Tensor = None
-    intervene_flags: torch.Tensor = None
+class PolicyOutput:
+    """Policy/rollout-worker outputs for one embodied communication round."""
+
+    actions: torch.Tensor = None  # [B, action_dim]
+    prev_logprobs: torch.Tensor = None  # [B, action_dim]
+    prev_values: torch.Tensor = None  # [B, 1]
+
+    bootstrap_values: torch.Tensor = None  # [B, 1]
+    intervene_flags: torch.Tensor = None  # [B, num_action_chunks]
     forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
-    versions: torch.Tensor = None
+    versions: torch.Tensor = None  # [B, 1]
 
     def __post_init__(self):
         if self.actions is not None:
@@ -276,14 +311,11 @@ class RolloutResult:
             self.versions = self.versions.cpu().contiguous()
 
     @staticmethod
-    def merge_rollout_results(
-        rollout_results: list["RolloutResult"],
-    ) -> "RolloutResult":
+    def merge(
+        outputs: list["PolicyOutput"],
+    ) -> "PolicyOutput":
         def _merge_optional_tensor(field_name: str) -> torch.Tensor | None:
-            values = [
-                getattr(rollout_result, field_name)
-                for rollout_result in rollout_results
-            ]
+            values = [getattr(output, field_name) for output in outputs]
             if all(value is None for value in values):
                 return None
             if any(value is None for value in values):
@@ -292,15 +324,13 @@ class RolloutResult:
                 )
             return torch.cat(values, dim=0)
 
-        forward_inputs_list = [
-            rollout_result.forward_inputs for rollout_result in rollout_results
-        ]
+        forward_inputs_list = [output.forward_inputs for output in outputs]
         merged_forward_inputs = (
             {}
             if all(not forward_inputs for forward_inputs in forward_inputs_list)
             else cat_list_of_dict_tensor(forward_inputs_list)
         )
-        return RolloutResult(
+        return PolicyOutput(
             actions=_merge_optional_tensor("actions"),
             prev_logprobs=_merge_optional_tensor("prev_logprobs"),
             prev_values=_merge_optional_tensor("prev_values"),
@@ -313,17 +343,17 @@ class RolloutResult:
 
 @dataclass(kw_only=True)
 class ChunkStepResult:
-    """Per-step rollout outputs collected from embodied environment workers."""
+    """Model outputs, env outputs (without observations), and training forward inputs for a chunk step."""
 
-    actions: torch.Tensor = None
-    prev_logprobs: torch.Tensor = None
-    prev_values: torch.Tensor = None
-    dones: torch.Tensor = None
-    truncations: torch.Tensor = None
-    terminations: torch.Tensor = None
-    rewards: torch.Tensor = None
+    actions: torch.Tensor = None  # [B, action_dim]
+    prev_logprobs: torch.Tensor = None  # [B, action_dim]
+    prev_values: torch.Tensor = None  # [B, 1]
+    dones: torch.Tensor = None  # [B, 1]
+    truncations: torch.Tensor = None  # [B, 1]
+    terminations: torch.Tensor = None  # [B, 1]
+    rewards: torch.Tensor = None  # [B, 1]
     forward_inputs: dict[str, torch.Tensor] = field(default_factory=dict)
-    versions: torch.Tensor = None
+    versions: torch.Tensor = None  # [B, 1]
 
     def __post_init__(self):
         if self.actions is not None:
@@ -348,6 +378,10 @@ class ChunkStepResult:
 
 @dataclass
 class Trajectory:
+    """
+    trajectory contains multiple episodes.
+    """
+
     max_episode_length: int = 0
     model_weights_id: str = ""
     actions: torch.Tensor = None
@@ -367,6 +401,10 @@ class Trajectory:
     def _generate_field_mask(
         ref_tensor: torch.Tensor, mask: torch.Tensor, traj_len: int
     ) -> torch.Tensor:
+        """
+        Generate a mask for terminations/truncations/dones based on their original shape.
+        """
+
         assert mask.dim() == 1, f"Expected 1D mask, got {mask.shape=}"
         if ref_tensor.shape[0] == traj_len:
             return mask
@@ -521,15 +559,12 @@ def convert_trajectories_to_batch(
     return batch
 
 
-EmbodiedRolloutStepResult = RolloutResult
-
 __all__ = [
     "ChunkStepResult",
-    "EmbodiedRolloutStepResult",
+    "PolicyOutput",
     "EnvOutput",
     "RTCActionResponse",
     "RTCRequest",
-    "RolloutResult",
     "Trajectory",
     "convert_trajectories_to_batch",
     "get_model_weights_id",

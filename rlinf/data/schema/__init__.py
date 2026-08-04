@@ -15,13 +15,13 @@
 """Schema-layer entrypoints for data module."""
 
 from rlinf.data.schema.embodied_trajectory_builder import (
-    EmbodiedLerobotRolloutResult,
-    EmbodiedRolloutResult,
+    EmbodiedLerobotTrajectoryBuilder,
+    EmbodiedTrajectoryBuilder,
 )
 from rlinf.data.schema.embodied_types import (
     ChunkStepResult,
-    EmbodiedRolloutStepResult,
     EnvOutput,
+    PolicyOutput,
     RTCActionResponse,
     RTCRequest,
     Trajectory,
@@ -37,21 +37,21 @@ from rlinf.data.schema.reasoning_requests import (
 )
 from rlinf.data.schema.reasoning_results import (
     DynamicRolloutResult,
-    ReasoningRolloutResult,
+    RolloutResult,
 )
 
 __all__ = [
     "ChunkStepResult",
     "convert_trajectories_to_batch",
     "DynamicRolloutResult",
-    "EmbodiedLerobotRolloutResult",
-    "EmbodiedRolloutResult",
-    "EmbodiedRolloutStepResult",
+    "EmbodiedLerobotTrajectoryBuilder",
+    "PolicyOutput",
+    "EmbodiedTrajectoryBuilder",
     "EnvOutput",
     "FinishReasonEnum",
     "RTCActionResponse",
     "RTCRequest",
-    "ReasoningRolloutResult",
+    "RolloutResult",
     "RolloutRequest",
     "SeqGroupInfo",
     "Trajectory",

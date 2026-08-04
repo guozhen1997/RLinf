@@ -331,7 +331,7 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
     def recv_lerobot_rollout_trajectories(self, input_channel: Channel) -> None:
         """Receive episodes from EnvWorker and append them to the memory dataset.
 
-        EnvWorkers collect completed episodes via ``EmbodiedLerobotRolloutResult``
+        EnvWorkers collect completed episodes via ``EmbodiedLerobotTrajectoryBuilder``
         and send them here each interact round. Empty batches are not sent by env;
         if the dataset is still below ``min_frames``, training is skipped later.
         """

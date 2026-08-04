@@ -23,7 +23,7 @@ import torch
 
 from rlinf.data.schema.embodied_types import (
     ChunkStepResult,
-    RolloutResult,
+    PolicyOutput,
     Trajectory,
     get_model_weights_id,
 )
@@ -35,24 +35,39 @@ from rlinf.utils.nested_dict_process import (
 
 
 @dataclass(kw_only=True)
-class EmbodiedRolloutResult:
-    """Accumulates step results and converts them into trajectory objects."""
+class EmbodiedTrajectoryBuilder:
+    """
+    Collect chunk-step results and transitions during rollout,
+    and convert them into trajectory tensors.
+    """
 
     max_episode_length: int = 0
 
-    actions: list[torch.Tensor] = field(default_factory=list)
-    intervene_flags: list[torch.Tensor] = field(default_factory=list)
-    rewards: list[torch.Tensor] = field(default_factory=list)
-    terminations: list[torch.Tensor] = field(default_factory=list)
-    truncations: list[torch.Tensor] = field(default_factory=list)
-    dones: list[torch.Tensor] = field(default_factory=list)
-    prev_logprobs: list[torch.Tensor] = field(default_factory=list)
-    prev_values: list[torch.Tensor] = field(default_factory=list)
-    versions: list[torch.Tensor] = field(default_factory=list)
-    forward_inputs: list[dict[str, Any]] = field(default_factory=list)
+    actions: list[torch.Tensor] = field(default_factory=list)  # trajectory_length
+    intervene_flags: list[torch.Tensor] = field(
+        default_factory=list
+    )  # trajectory_length
+    rewards: list[torch.Tensor] = field(default_factory=list)  # trajectory_length
+    terminations: list[torch.Tensor] = field(
+        default_factory=list
+    )  # trajectory_length + rollout_epoch
+    truncations: list[torch.Tensor] = field(
+        default_factory=list
+    )  # trajectory_length + rollout_epoch
+    dones: list[torch.Tensor] = field(
+        default_factory=list
+    )  # trajectory_length + rollout_epoch
+    prev_logprobs: list[torch.Tensor] = field(default_factory=list)  # trajectory_length
+    prev_values: list[torch.Tensor] = field(
+        default_factory=list
+    )  # trajectory_length + rollout_epoch
+    versions: list[torch.Tensor] = field(default_factory=list)  # trajectory_length
+    forward_inputs: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # trajectory_length
 
-    curr_obs: list[dict[str, Any]] = field(default_factory=list)
-    next_obs: list[dict[str, Any]] = field(default_factory=list)
+    curr_obs: list[dict[str, Any]] = field(default_factory=list)  # trajectory_length
+    next_obs: list[dict[str, Any]] = field(default_factory=list)  # trajectory_length
 
     def append_step_result(self, result: ChunkStepResult):
         if result.actions is not None:
@@ -97,6 +112,10 @@ class EmbodiedRolloutResult:
     def update_last_actions(
         self, intervene_actions: torch.Tensor, intervene_flags: torch.Tensor
     ):
+        # action: [bsz, num-chunk-size x action-dim]
+        # intervene_actions: [bsz, num-chunk-size x action-dim]
+        # intervene_flags: [bsz, num-chunk-size]
+
         if self.actions and len(self.actions) > 0:
             last_action = self.actions[-1]
             assert last_action.dim() == 2, (
@@ -293,7 +312,106 @@ class EmbodiedRolloutResult:
 
 
 @dataclass(kw_only=True)
-class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
+class EmbodiedLerobotTrajectoryBuilder(EmbodiedTrajectoryBuilder):
+    """Online LeRobot episode collector for embodied env workers.
+
+    EnvWorker creates one collector per pipeline stage when
+    ``algorithm.dagger.online_lerobot.enabled`` is set. Completed episodes are
+    sent in memory to the actor for DAgger training; no manual instantiation is
+    required.
+
+    **Configuration**: Set ``algorithm.dagger.online_lerobot`` in the training
+    yaml. EnvWorker and Actor both read that block directly. A minimal example
+    is shown below; see
+    ``examples/embodiment/config/libero_spatial_dagger_openpi_lerobot.yaml`` for
+    a full reference config.
+
+    Example yaml::
+
+        algorithm:
+          dagger:
+            online_lerobot:
+              enabled: true
+              only_success: true
+              robot_type: "panda"
+              fps: 10
+              finalize_interval: 8
+              data_path: /path/to/shards
+              rolling_lerobot_window_size: 50000
+              enable_decoded_cache: true
+              decoded_cache_capacity: 25000
+              cache_ingest_mode: new_shards
+              lerobot_num_workers: 0
+
+    **Integration**: When online LeRobot collection is enabled, EnvWorker builds
+    this class and the actor loads
+    :class:`~rlinf.data.datasets.dagger.RollingLeRobotDataset`. Each training
+    chunk calls :meth:`append_chunk_episode_data`; at the end of
+    :meth:`interact`, completed episodes flow through
+    :meth:`drain_episodes` → ``EnvWorker.send_lerobot_episodes`` →
+    ``EmbodiedDAGGERFSDPPolicy.recv_lerobot_rollout_trajectories``. Do not
+    enable ``env.train.data_collection`` on the same train env; that wrapper is
+    for offline disk export only.
+
+    **Responsibilities**:
+
+    1. Accumulate per-env, in-progress episode frames from each
+       ``env_interact_step`` call.
+    2. Detect episode boundaries (termination / truncation), apply
+       ``only_success`` filtering, and enqueue completed episodes.
+    3. Preserve unfinished episodes across multiple ``interact`` rounds until
+       each parallel env finishes its current episode.
+    4. Optionally retain per-chunk ``rewards`` for history-buffer reward-model
+       back-propagation (see :meth:`append_step_result`).
+
+    **Episode semantics**: Frame construction follows the same rules as offline
+    :class:`CollectEpisode`.
+
+    1. Auto-reset envs: ``final_observation`` is attributed to the finished
+       episode; post-reset observations are carried via ``_pending_obs``.
+    2. DAgger intervention: ``PolicyOutput.intervene_flags`` and expert actions
+       override recorded actions and set ``intervene_flag``.
+    3. Real-world hooks: ``record_reset``, ``pre_record``, and
+       ``segment_advance`` info flags are honored.
+    4. ``only_success=True`` (from
+       ``algorithm.dagger.online_lerobot.only_success``): only successful
+       terminations are exported; failed episodes are discarded.
+
+    Each exported frame is a ``dict`` compatible with
+    ``LeRobotDatasetWriter.add_episode`` and
+    :class:`~rlinf.data.datasets.dagger.RollingLeRobotDataset`, with fields such
+    as ``state``, ``actions``, ``task``, ``image``, ``intervene_flag``,
+    ``segment_id``, ``is_success``, and ``done``.
+
+    **Runtime lifecycle inside EnvWorker**:
+
+    1. First ``interact`` round: create one collector per pipeline stage.
+    2. Later ``interact`` rounds: ``rewards.clear()`` only; episode buffers
+       persist until each env finishes its episode.
+    3. Every chunk: ``append_chunk_episode_data(policy_output=..., **payload)``.
+    4. End of ``interact``: ``drain_episodes()`` and send to the actor.
+    5. Non auto-reset bootstrap ``env.reset()``: :meth:`reset_episode_buffers`.
+
+    **Offline vs online collection**: Offline collection uses
+    ``env.train.data_collection.enabled`` and writes shards to disk via
+    :class:`CollectEpisode` (for example ``collect_real_data.py``). Online
+    collection uses ``algorithm.dagger.online_lerobot.enabled`` and sends
+    episodes to the actor in memory (for example
+    ``libero_spatial_dagger_openpi_lerobot.yaml``).
+
+    **Differences from** :class:`EmbodiedTrajectoryBuilder`: This collector does not
+    build PPO trajectories. :meth:`update_last_actions` and
+    :meth:`append_transitions` are intentionally no-ops. Use
+    :class:`EmbodiedTrajectoryBuilder` when online LeRobot collection is disabled.
+
+    Args:
+        max_episode_length: Inherited upper bound used by the parent class.
+        num_envs: Number of parallel environments in this pipeline stage.
+        only_success: If ``True``, export only episodes that terminate
+            successfully; otherwise export every finished episode.
+
+    """
+
     num_envs: int = 1
     only_success: bool = False
     num_action_chunks: int = 1
@@ -379,7 +497,7 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
             )
         if isinstance(data, dict):
             return {
-                k: EmbodiedLerobotRolloutResult._slice_data(v, env_idx, num_envs)
+                k: EmbodiedLerobotTrajectoryBuilder._slice_data(v, env_idx, num_envs)
                 for k, v in data.items()
             }
         if isinstance(data, list):
@@ -412,10 +530,10 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
         if isinstance(task, (list, tuple)):
             task = task[0] if task else "unknown task"
         return (
-            EmbodiedLerobotRolloutResult._to_numpy(image),
-            EmbodiedLerobotRolloutResult._to_numpy(wrist_image),
-            EmbodiedLerobotRolloutResult._to_numpy(extra_view_image),
-            EmbodiedLerobotRolloutResult._to_numpy(state),
+            EmbodiedLerobotTrajectoryBuilder._to_numpy(image),
+            EmbodiedLerobotTrajectoryBuilder._to_numpy(wrist_image),
+            EmbodiedLerobotTrajectoryBuilder._to_numpy(extra_view_image),
+            EmbodiedLerobotTrajectoryBuilder._to_numpy(state),
             str(task),
         )
 
@@ -436,7 +554,7 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
                 val = src.get(key)
                 if val is None:
                     continue
-                arr = EmbodiedLerobotRolloutResult._to_numpy(val)
+                arr = EmbodiedLerobotTrajectoryBuilder._to_numpy(val)
                 if arr is not None:
                     return bool(np.asarray(arr).reshape(-1).any())
         return None
@@ -448,7 +566,7 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
         val = info.get("intervene_flag")
         if val is None:
             return False
-        arr = EmbodiedLerobotRolloutResult._to_numpy(val)
+        arr = EmbodiedLerobotTrajectoryBuilder._to_numpy(val)
         if arr is None:
             return False
         return bool(np.asarray(arr, dtype=bool).reshape(-1).any())
@@ -463,7 +581,7 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
     ) -> np.ndarray | None:
         if actions is None:
             return None
-        arr = EmbodiedLerobotRolloutResult._to_numpy(actions)
+        arr = EmbodiedLerobotTrajectoryBuilder._to_numpy(actions)
         batch_size = arr.shape[0]
         flat_dim = num_chunks * action_dim
         if arr.ndim == 3:
@@ -482,7 +600,7 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
     def _normalize_intervene_in_info(env_info: Any, action_dim: int) -> None:
         if not isinstance(env_info, dict) or "intervene_action" not in env_info:
             return
-        intervene_action = EmbodiedLerobotRolloutResult._to_numpy(
+        intervene_action = EmbodiedLerobotTrajectoryBuilder._to_numpy(
             env_info["intervene_action"]
         )
         if intervene_action.size <= action_dim:
@@ -491,7 +609,7 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
         chunk_size = intervene_action.reshape(-1, action_dim).shape[0]
         env_info["intervene_action"] = intervene_action.reshape(-1, action_dim)[-1]
         if "intervene_flag" in env_info:
-            intervene_flag = EmbodiedLerobotRolloutResult._to_numpy(
+            intervene_flag = EmbodiedLerobotTrajectoryBuilder._to_numpy(
                 env_info["intervene_flag"]
             )
             env_info["intervene_flag"] = intervene_flag.reshape(chunk_size, -1)[-1, 0]
@@ -518,8 +636,8 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
             step_info["final_info"]["intervene_action"] = expert_actions
             step_info["final_info"]["intervene_flag"] = intervene_flags
             step_info["intervene_action"] = step_expert
-            term = EmbodiedLerobotRolloutResult._to_numpy(step_term)
-            trunc = EmbodiedLerobotRolloutResult._to_numpy(step_trunc)
+            term = EmbodiedLerobotTrajectoryBuilder._to_numpy(step_term)
+            trunc = EmbodiedLerobotTrajectoryBuilder._to_numpy(step_trunc)
             step_info["intervene_flag"] = step_intervene_flags & ~(term | trunc)
         else:
             step_info["intervene_action"] = step_expert
@@ -629,7 +747,7 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
     def append_chunk_episode_data(
         self,
         *,
-        rollout_result: RolloutResult,
+        policy_output: PolicyOutput,
         chunk_actions,
         obs_list,
         terminations,
@@ -647,12 +765,12 @@ class EmbodiedLerobotRolloutResult(EmbodiedRolloutResult):
             num_chunks=num_chunks,
             action_dim=action_dim,
         )
-        intervene_flags = rollout_result.intervene_flags
+        intervene_flags = policy_output.intervene_flags
         if intervene_flags is not None:
             intervene_flags = self._to_numpy(intervene_flags).reshape(
                 num_envs, num_chunks
             )
-        expert_actions = rollout_result.forward_inputs.get("action", None)
+        expert_actions = policy_output.forward_inputs.get("action", None)
         if expert_actions is not None:
             expert_actions = self._reshape_chunk_actions(
                 expert_actions,
