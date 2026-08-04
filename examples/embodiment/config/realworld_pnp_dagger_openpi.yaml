@@ -58,7 +58,7 @@ algorithm:
   dagger:
     # Train on every frame from successful episodes. Human-intervened frames
     # still carry intervene_flag=True and store the executed expert action.
-    only_save_expert: False
+    only_save_expert: True
     online_lerobot:
       enabled: True
       only_success: True
