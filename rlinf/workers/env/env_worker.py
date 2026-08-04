@@ -574,9 +574,7 @@ class EnvWorker(Worker):
         def _zero_tensor(tensor: torch.Tensor | None) -> torch.Tensor | None:
             return torch.zeros_like(tensor) if tensor is not None else None
 
-        def _dummy_forward_input(
-            key: str, value: torch.Tensor
-        ) -> torch.Tensor | None:
+        def _dummy_forward_input(key: str, value: torch.Tensor) -> torch.Tensor | None:
             if key.startswith("observation/"):
                 env_obs_key = self._OBS_KEY_FROM_ENV_OBS.get(key)
                 if env_obs_key is None or env_obs_key not in curr_obs:
@@ -626,7 +624,9 @@ class EnvWorker(Worker):
     ) -> bool:
         if intervene_flags is None:
             return False
-        continue_smooth_intervene = bool(intervene_flags[:, -1].any().item()) and not bool(dones.any().item())
+        continue_smooth_intervene = bool(
+            intervene_flags[:, -1].any().item()
+        ) and not bool(dones.any().item())
         return continue_smooth_intervene
 
     def env_evaluate_step(
