@@ -142,7 +142,6 @@ env:
       max_num_steps: 10000
       task_description: TASK_DESCRIPTION  # Replace: prompt for the SFT policy
       # Replace: recompute from your SFT dataset's first-frame joint means;
-      # stale values push initial obs out of the training distribution.
       joint_reset_qpos:
         - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
