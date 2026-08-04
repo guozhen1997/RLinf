@@ -106,6 +106,9 @@ class TestOverlapEnvBootstrap(unittest.TestCase):
         )
         self.worker._accelerator_type = AcceleratorType.NO_ACCEL
         self.worker._prefetched_train_bootstrap = None
+        self.worker.smooth_intervene = False
+        self.worker.next_intervene_flags = [False] * self.worker.stage_num
+        self.worker.last_train_rollout_results = [None] * self.worker.stage_num
 
         # Mock env_list
         mock_env = MagicMock()

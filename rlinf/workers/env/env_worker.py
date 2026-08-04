@@ -476,10 +476,11 @@ class EnvWorker(Worker):
             chunk_actions = exec_actions
         env_info = {}
 
+        chunk_step_kwargs = (
+            {"smooth_intervene_mode": True} if smooth_intervene_mode else {}
+        )
         obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = (
-            self.env_list[stage_id].chunk_step(
-                chunk_actions, smooth_intervene_mode=smooth_intervene_mode
-            )
+            self.env_list[stage_id].chunk_step(chunk_actions, **chunk_step_kwargs)
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None

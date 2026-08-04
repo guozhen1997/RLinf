@@ -251,9 +251,11 @@ class CollectEpisode(gym.Wrapper):
         Returns:
             Tuple of (obs_list, rewards, terminations, truncations, infos_list).
         """
+        chunk_step_kwargs = (
+            {"smooth_intervene_mode": True} if smooth_intervene_mode else {}
+        )
         obs_list, rewards, terminations, truncations, infos_list = self.env.chunk_step(
-            chunk_actions,
-            smooth_intervene_mode=smooth_intervene_mode,
+            chunk_actions, **chunk_step_kwargs
         )
 
         chunk_size = len(obs_list) if isinstance(obs_list, (list, tuple)) else 1
