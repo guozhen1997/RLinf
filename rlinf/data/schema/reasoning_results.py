@@ -38,6 +38,8 @@ from rlinf.data.schema.reasoning_requests import SeqGroupInfo, get_batch_size
 
 @dataclass(kw_only=True)
 class RolloutResult:
+    """Container for reasoning rollout sequences and training metadata."""
+
     num_sequence: int
     group_size: int
     prompt_lengths: list[int]

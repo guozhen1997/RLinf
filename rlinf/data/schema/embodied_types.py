@@ -313,6 +313,8 @@ class RolloutResult:
 
 @dataclass(kw_only=True)
 class ChunkStepResult:
+    """Per-step rollout outputs collected from embodied environment workers."""
+
     actions: torch.Tensor = None
     prev_logprobs: torch.Tensor = None
     prev_values: torch.Tensor = None

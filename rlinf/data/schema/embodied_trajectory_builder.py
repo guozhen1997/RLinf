@@ -36,6 +36,8 @@ from rlinf.utils.nested_dict_process import (
 
 @dataclass(kw_only=True)
 class EmbodiedRolloutResult:
+    """Accumulates step results and converts them into trajectory objects."""
+
     max_episode_length: int = 0
 
     actions: list[torch.Tensor] = field(default_factory=list)
