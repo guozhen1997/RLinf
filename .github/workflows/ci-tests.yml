@@ -69,6 +69,7 @@ jobs:
               - 'rlinf/algorithms/**'
               - 'rlinf/scheduler/**'
               - 'rlinf/utils/**'
+              - 'rlinf/models/tokenization/**'
               - 'rlinf/workers/actor/__init__.py'
               - 'rlinf/workers/actor/fsdp_actor_worker.py'
               - 'rlinf/workers/reward/*.py'
