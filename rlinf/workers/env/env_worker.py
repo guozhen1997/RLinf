@@ -184,9 +184,14 @@ class EnvWorker(Worker):
             )
         )
         if self.smooth_intervene:
-            assert self.train_num_envs_per_stage == 1, (
-                "smooth_intervene requires exactly one env per EnvWorker stage"
-            )
+            if self.cfg.env.train.env_type != "realworld":
+                raise ValueError(
+                    "smooth_intervene requires env.train.env_type to be 'realworld'"
+                )
+            if self.train_num_envs_per_stage != 1:
+                raise ValueError(
+                    "smooth_intervene requires exactly one env per EnvWorker stage"
+                )
         self.next_intervene_flags = [False for _ in range(self.stage_num)]
         self.last_train_policy_outputs: list[PolicyOutput | None] = [
             None for _ in range(self.stage_num)
