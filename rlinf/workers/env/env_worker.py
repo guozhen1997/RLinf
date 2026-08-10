@@ -55,6 +55,7 @@ from rlinf.utils.utils import (
     preprocess_embodied_batch,
 )
 from rlinf.workers.env.history_manager import HistoryManager
+from rlinf.workers.env.smooth_intervene import SmoothInterveneController
 
 
 class EnvWorker(Worker):
@@ -175,27 +176,12 @@ class EnvWorker(Worker):
             ]
         self.env_decoupled_mode = self.cfg.runner.get("enable_decoupled_mode", False)
 
-        self.smooth_intervene = bool(
-            self.enable_train
-            and OmegaConf.select(
-                self.cfg,
-                "env.train.smooth_intervene",
-                default=False,
-            )
+        self.smooth_intervene = SmoothInterveneController.from_cfg(
+            self.cfg,
+            stage_num=self.stage_num,
+            enable_train=self.enable_train,
+            train_num_envs_per_stage=self.train_num_envs_per_stage,
         )
-        if self.smooth_intervene:
-            if self.cfg.env.train.env_type != "realworld":
-                raise ValueError(
-                    "smooth_intervene requires env.train.env_type to be 'realworld'"
-                )
-            if self.train_num_envs_per_stage != 1:
-                raise ValueError(
-                    "smooth_intervene requires exactly one env per EnvWorker stage"
-                )
-        self.next_intervene_flags = [False for _ in range(self.stage_num)]
-        self.last_train_policy_outputs: list[PolicyOutput | None] = [
-            None for _ in range(self.stage_num)
-        ]
 
         if self.env_decoupled_mode:
             # Init the batch_router for env decoupled mode
@@ -478,7 +464,6 @@ class EnvWorker(Worker):
         self,
         chunk_actions: torch.Tensor,
         stage_id: int,
-        smooth_intervene_mode: bool = False,
     ) -> tuple[EnvOutput, dict[str, Any], dict[str, Any]]:
         """
         This function is used to interact with the environment.
@@ -501,11 +486,8 @@ class EnvWorker(Worker):
             chunk_actions = exec_actions
         env_info = {}
 
-        chunk_step_kwargs = (
-            {"smooth_intervene_mode": True} if smooth_intervene_mode else {}
-        )
         obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = (
-            self.env_list[stage_id].chunk_step(chunk_actions, **chunk_step_kwargs)
+            self.env_list[stage_id].chunk_step(chunk_actions)
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None
@@ -570,90 +552,6 @@ class EnvWorker(Worker):
             "infos_list": infos_list,
         }
         return env_output, env_info, chunk_step_payload
-
-    # Maps forward_inputs observation keys → env_obs keys (from obs_processor).
-    _OBS_KEY_FROM_ENV_OBS: dict[str, str] = {
-        "observation/image": "main_images",
-        "observation/state": "states",
-        "observation/extra_view_image": "extra_view_images",
-        "observation/wrist_image": "wrist_images",
-    }
-
-    def _build_smooth_intervene_policy_output(
-        self,
-        policy_output: PolicyOutput | None,
-        curr_obs: dict[str, Any] | None,
-    ) -> PolicyOutput:
-        """Build a shape-compatible policy output without running inference.
-
-        Smooth-intervention chunks are controlled by the human expert, so policy
-        actions and policy statistics are zeroed. Current observation tensors and
-        prompt tokens are retained to keep trajectory/collector inputs valid.
-        """
-        if policy_output is None:
-            raise ValueError(
-                "smooth_intervene requires one real policy output before dummy chunks"
-            )
-        if curr_obs is None:
-            raise ValueError("smooth_intervene requires the current observation")
-
-        def _zero_tensor(tensor: torch.Tensor | None) -> torch.Tensor | None:
-            return torch.zeros_like(tensor) if tensor is not None else None
-
-        def _dummy_forward_input(key: str, value: torch.Tensor) -> torch.Tensor | None:
-            if key.startswith("observation/"):
-                env_obs_key = self._OBS_KEY_FROM_ENV_OBS.get(key)
-                if env_obs_key is None or env_obs_key not in curr_obs:
-                    raise KeyError(
-                        f"Cannot map smooth-intervene forward input {key!r} "
-                        "to the current environment observation"
-                    )
-                env_value = curr_obs[env_obs_key]
-                if not isinstance(env_value, torch.Tensor):
-                    raise TypeError(
-                        f"Expected curr_obs[{env_obs_key!r}] to be a tensor, "
-                        f"got {type(env_value).__name__}"
-                    )
-                return env_value.cpu().contiguous()
-            if key in ("tokenized_prompt", "tokenized_prompt_mask"):
-                return value.clone()
-            return _zero_tensor(value)
-
-        dummy_actions = _zero_tensor(policy_output.actions)
-        dummy_forward_inputs = {
-            key: _dummy_forward_input(key, value)
-            for key, value in policy_output.forward_inputs.items()
-            if value is not None
-        }
-        if "action" not in dummy_forward_inputs and dummy_actions is not None:
-            dummy_forward_inputs["action"] = dummy_actions.reshape(
-                dummy_actions.shape[0], -1
-            ).contiguous()
-        if dummy_actions is None or "action" not in dummy_forward_inputs:
-            raise ValueError(
-                "smooth_intervene requires action tensors from a real policy output"
-            )
-
-        return PolicyOutput(
-            actions=dummy_actions,
-            prev_logprobs=_zero_tensor(policy_output.prev_logprobs),
-            prev_values=_zero_tensor(policy_output.prev_values),
-            bootstrap_values=_zero_tensor(policy_output.bootstrap_values),
-            intervene_flags=_zero_tensor(policy_output.intervene_flags),
-            forward_inputs=dummy_forward_inputs,
-            versions=_zero_tensor(policy_output.versions),
-        )
-
-    @staticmethod
-    def _should_continue_smooth_intervene(
-        intervene_flags: torch.Tensor | None, dones: torch.Tensor
-    ) -> bool:
-        if intervene_flags is None:
-            return False
-        continue_smooth_intervene = bool(
-            intervene_flags[:, -1].any().item()
-        ) and not bool(dones.any().item())
-        return continue_smooth_intervene
 
     def env_evaluate_step(
         self, raw_actions: torch.Tensor, stage_id: int
@@ -1097,15 +995,6 @@ class EnvWorker(Worker):
         )
         return env_outputs
 
-    def _smooth_intervene_stage_ids(self) -> set[int]:
-        if not getattr(self, "smooth_intervene", False):
-            return set()
-        return {
-            stage_id
-            for stage_id, intervene in enumerate(self.next_intervene_flags)
-            if intervene
-        }
-
     def prefetch_train_bootstrap(self, rollout_channel: Channel) -> None:
         """Prepare and send the first env batch for the next training rollout."""
         if self._prefetched_train_bootstrap is not None:
@@ -1115,7 +1004,7 @@ class EnvWorker(Worker):
             )
         self._prefetched_train_bootstrap = self._bootstrap_and_send_train(
             rollout_channel,
-            skip_stage_ids=self._smooth_intervene_stage_ids(),
+            skip_stage_ids=self.smooth_intervene.active_stage_ids(),
         )
 
     def record_env_metrics(
@@ -1188,7 +1077,7 @@ class EnvWorker(Worker):
             else:
                 env_outputs = self._bootstrap_and_send_train(
                     rollout_channel,
-                    skip_stage_ids=self._smooth_intervene_stage_ids(),
+                    skip_stage_ids=self.smooth_intervene.active_stage_ids(),
                 )
 
             for stage_id in range(self.stage_num):
@@ -1220,9 +1109,10 @@ class EnvWorker(Worker):
                                 reward_model_output.detach().float().reshape(-1).cpu()
                             )
 
-                    if self.smooth_intervene and self.next_intervene_flags[stage_id]:
-                        policy_output = self._build_smooth_intervene_policy_output(
-                            self.last_train_policy_outputs[stage_id],
+                    if self.smooth_intervene.is_active(stage_id):
+                        policy_output = self.smooth_intervene.build_dummy_policy_output(
+                            stage_id,
+                            env=self.env_list[stage_id],
                             curr_obs=env_output.obs,
                         )
                     else:
@@ -1236,7 +1126,9 @@ class EnvWorker(Worker):
                             infer_batch_size_fn=self._infer_rollout_batch_size,
                             decoupled_mode=self.env_decoupled_mode,
                         )
-                        self.last_train_policy_outputs[stage_id] = policy_output
+                        self.smooth_intervene.remember_policy_output(
+                            stage_id, policy_output
+                        )
                     rewards = self.compute_bootstrap_rewards(
                         env_output, policy_output.bootstrap_values, reward_model_output
                     )
@@ -1287,7 +1179,6 @@ class EnvWorker(Worker):
                     env_output, env_info, chunk_step_payload = self.env_interact_step(
                         policy_output.actions,
                         stage_id,
-                        smooth_intervene_mode=self.next_intervene_flags[stage_id],
                     )
                     # Emulated observation latency: wait before the obs goes out,
                     # without blocking the other coroutines in this worker.
@@ -1299,14 +1190,12 @@ class EnvWorker(Worker):
                             **chunk_step_payload,
                         )
                     env_batch = env_output.to_dict()
-                    self.next_intervene_flags[stage_id] = (
-                        self.smooth_intervene
-                        and self._should_continue_smooth_intervene(
-                            env_output.intervene_flags,
-                            env_output.dones,
-                        )
+                    skip_rollout_send = self.smooth_intervene.on_chunk_done(
+                        stage_id,
+                        env_output.intervene_flags,
+                        env_output.dones,
                     )
-                    if not self.next_intervene_flags[stage_id]:
+                    if not skip_rollout_send:
                         self.send_to(
                             group_name=self.cfg.rollout.group_name,
                             channel=rollout_channel,
@@ -1364,9 +1253,10 @@ class EnvWorker(Worker):
                         env_metrics["reward_model_output"].append(
                             reward_model_output.detach().float().reshape(-1).cpu()
                         )
-                if self.smooth_intervene and self.next_intervene_flags[stage_id]:
-                    policy_output = self._build_smooth_intervene_policy_output(
-                        self.last_train_policy_outputs[stage_id],
+                if self.smooth_intervene.is_active(stage_id):
+                    policy_output = self.smooth_intervene.build_dummy_policy_output(
+                        stage_id,
+                        env=self.env_list[stage_id],
                         curr_obs=env_output.obs,
                     )
                 else:
@@ -1380,7 +1270,9 @@ class EnvWorker(Worker):
                         infer_batch_size_fn=self._infer_rollout_batch_size,
                         decoupled_mode=self.env_decoupled_mode,
                     )
-                    self.last_train_policy_outputs[stage_id] = policy_output
+                    self.smooth_intervene.remember_policy_output(
+                        stage_id, policy_output
+                    )
                 rewards = self.compute_bootstrap_rewards(
                     env_output, policy_output.bootstrap_values, reward_model_output
                 )

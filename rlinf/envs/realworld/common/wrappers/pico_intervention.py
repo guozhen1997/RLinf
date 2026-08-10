@@ -356,7 +356,6 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
         super().__init__(env)
         self.gripper_enabled = gripper_enabled
         self.hold_current_when_inactive = bool(hold_current_when_inactive)
-        self.smooth_intervene_mode = False
         self.hand = str(pico_config.get("hand", "dual")).lower()
         if self.hand not in ("left", "right", "dual"):
             raise ValueError(
@@ -385,11 +384,7 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
         obs, info = self.env.reset(**kwargs)
         self.left = False
         self.right = False
-        self.smooth_intervene_mode = False
         return obs, info
-
-    def set_smooth_intervene_mode(self, smooth_intervene_mode: bool) -> None:
-        self.smooth_intervene_mode = bool(smooth_intervene_mode)
 
     @staticmethod
     def _arm_index(side: str) -> int:
@@ -453,6 +448,51 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
         target_pose = np.concatenate([target_pos, target_rot.as_quat()])
         return self._tcp_pose_to_rot6d_action(target_pose, gripper_action)
 
+    def get_hold_action(self, fallback_action: np.ndarray | None = None) -> np.ndarray:
+        """Return absolute TCP hold actions for both arms.
+
+        Used by smooth-intervene dummy chunks so inactive arms keep the measured
+        TCP pose when ``hold_current_when_inactive`` is False. Gripper commands
+        are taken from ``fallback_action`` when provided.
+        """
+        target_shape = self.env.action_space.shape
+        target_dim = int(np.prod(target_shape))
+        if target_dim != 20:
+            raise ValueError(
+                "DualFrankaTcpPicoIntervention expects DualFrankaTcpEnv's 20D "
+                f"action space, got action_space.shape={target_shape}."
+            )
+
+        tcp_pose = np.asarray(self.get_wrapper_attr("get_tcp_pose")(), dtype=np.float32)
+        if tcp_pose.size != 14:
+            raise ValueError(
+                "DualFrankaTcpPicoIntervention expects get_tcp_pose() to return "
+                f"14 values, got shape {tcp_pose.shape}."
+            )
+
+        if fallback_action is None:
+            action_flat = np.zeros(target_dim, dtype=np.float32)
+        else:
+            action_flat = np.asarray(fallback_action, dtype=np.float32).reshape(-1)
+            if action_flat.size != target_dim:
+                action_flat = _match_action_space(
+                    action_flat, action_flat, (target_dim,)
+                )
+
+        per_arm_dim = target_dim // 2
+        hold_action = np.concatenate(
+            [
+                self._current_tcp_action(tcp_pose, action_flat, 0, per_arm_dim),
+                self._current_tcp_action(tcp_pose, action_flat, 1, per_arm_dim),
+            ]
+        ).astype(np.float32)
+        hold_action = np.clip(
+            hold_action,
+            self.env.action_space.low.reshape(-1),
+            self.env.action_space.high.reshape(-1),
+        )
+        return hold_action.reshape(target_shape)
+
     def action(self, action: np.ndarray) -> tuple[np.ndarray, bool, dict[str, Any]]:
         target_shape = self.env.action_space.shape
         target_dim = int(np.prod(target_shape))
@@ -477,7 +517,7 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
             action_flat = action_flat.copy()
 
         per_arm_dim = target_dim // 2
-        if self.hold_current_when_inactive or self.smooth_intervene_mode:
+        if self.hold_current_when_inactive:
             new_action = np.concatenate(
                 [
                     self._current_tcp_action(tcp_pose, action_flat, 0, per_arm_dim),
