@@ -344,6 +344,11 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
     ``PicoExpert`` emits a 7D delta-TCP action with rotation as a normalized
     rotvec.  This wrapper adapts that output to the dual TCP env layout:
     ``[L_xyz, L_rot6d, L_grip, R_xyz, R_rot6d, R_grip]``.
+
+    When ``hold_current_when_inactive`` is False, releasing grip keeps the last
+    intervened TCP command for the rest of the current action chunk (not marked
+    as intervention). ``on_action_chunk_begin`` clears that latch so the next
+    chunk can resume policy actions cleanly.
     """
 
     def __init__(
@@ -379,11 +384,21 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
 
         self.left = False
         self.right = False
+        # After mid-chunk release, keep the last intervened absolute TCP command
+        # until the next action chunk begins (cleared via on_action_chunk_begin).
+        self._post_intervene_hold = {side: False for side in self.experts}
+        self._last_arm_action = {side: None for side in self.experts}
+
+    def on_action_chunk_begin(self) -> None:
+        """Clear mid-chunk hold latches so the next chunk can resume policy actions."""
+        self._post_intervene_hold = {side: False for side in self.experts}
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         self.left = False
         self.right = False
+        self.on_action_chunk_begin()
+        self._last_arm_action = {side: None for side in self.experts}
         return obs, info
 
     @staticmethod
@@ -555,12 +570,25 @@ class DualFrankaTcpPicoIntervention(gym.ActionWrapper):
             replaced_by_side[side] = bool(replaced)
             pico_info[f"{side}_pico_replaced"] = bool(replaced)
             if replaced:
-                new_action[action_slice] = self._expert_delta_to_tcp_action(
+                pico_action = self._expert_delta_to_tcp_action(
                     expert_action,
                     tcp_pose[tcp_slice],
                     action_scale,
                 )
+                new_action[action_slice] = pico_action
+                self._last_arm_action[side] = np.asarray(
+                    pico_action, dtype=np.float32
+                ).copy()
+                self._post_intervene_hold[side] = True
                 replaced_any = True
+            elif (
+                self._post_intervene_hold[side]
+                and not self.hold_current_when_inactive
+                and self._last_arm_action[side] is not None
+            ):
+                # Mid-chunk release: hold last action until next chunk begins.
+                # Do not mark intervene so expert training skips these frames.
+                new_action[action_slice] = self._last_arm_action[side]
 
         pico_info["pico_active"] = bool(self.left or self.right)
         pico_info["pico_ready"] = bool(

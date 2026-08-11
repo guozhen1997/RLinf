@@ -56,6 +56,12 @@ def build_smooth_intervene_policy_output(
 
     Policy statistics are zeroed. Executed actions use ``hold_actions`` so
     inactive arms stay put when the intervention wrapper does not auto-hold.
+
+    The hold is a per-chunk baseline (typically measured TCP at chunk build).
+    Mid-chunk release is handled by the intervention wrapper: it keeps the last
+    intervened action until the next action chunk begins, rather than snapping
+    back to this baseline pose.
+
     Current observation tensors and prompt tokens are retained for collectors.
     """
 

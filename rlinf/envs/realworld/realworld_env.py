@@ -327,6 +327,16 @@ class RealWorldEnv(gym.Env):
             infos,
         )
 
+    def _notify_action_chunk_begin(self) -> None:
+        """Tell intervention wrappers a new action chunk is starting."""
+        for env in self.env.envs:
+            try:
+                on_begin = env.get_wrapper_attr("on_action_chunk_begin")
+            except AttributeError:
+                continue
+            if callable(on_begin):
+                on_begin()
+
     def chunk_step(self, chunk_actions):
         # chunk_actions: [num_envs, chunk_step, action_dim]
         chunk_size = chunk_actions.shape[1]
@@ -341,6 +351,7 @@ class RealWorldEnv(gym.Env):
         raw_chunk_intervene_actions = []
         raw_chunk_intervene_flag = []
         raw_chunk_rlt_switch_flags = []
+        self._notify_action_chunk_begin()
         for i in range(chunk_size):
             actions = chunk_actions[:, i]
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
