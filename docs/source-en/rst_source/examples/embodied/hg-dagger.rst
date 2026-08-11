@@ -34,10 +34,10 @@ Use human-gated interventions to improve a real-world Franka policy online.
    .. grid-item-card:: Hardware
       :text-align: center
 
-      Franka · teleoperator
+      Franka · PICO
 
 | **You'll do:** collect intervention data → compute norm stats → run SFT → launch HG-DAgger → monitor interventions.
-| **Prerequisites:** :doc:`franka` · :doc:`sft_openpi` · Ray cluster · trained or base OpenPI checkpoint.
+| **Prerequisites:** :doc:`franka` · :doc:`franka_vr` · :doc:`sft_openpi` · Ray cluster · trained or base OpenPI checkpoint.
 
 Tasks
 ~~~~~
@@ -50,8 +50,8 @@ Tasks
      - Config / entry point
      - Description
    * - Collection
-     - ``realworld_collect_data``
-     - Collect real-world intervention demonstrations.
+     - ``realworld_collect_data_pico``
+     - Collect real-world demonstrations with PICO.
    * - SFT
      - ``realworld_sft_openpi``
      - Train the student initialization.
@@ -180,7 +180,7 @@ Run It
 1. Collect Human-Guided Real-World Data
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Start from ``examples/embodiment/config/realworld_collect_data.yaml``. For the
+Start from ``examples/embodiment/config/realworld_collect_data_pico.yaml``. For the
 pick-and-place task, switch the env from peg insertion to bin relocation:
 
 .. code-block:: yaml
@@ -189,7 +189,8 @@ pick-and-place task, switch the env from peg insertion to bin relocation:
      - env/realworld_bin_relocation@env.eval
      - override hydra/job_logging: stdout
 
-Then fill in the robot configuration and keep LeRobot export enabled. The following collection config uses a SpaceMouse as an example; when using another human-intervention device, update the device fields and configuration under ``env.eval`` accordingly:
+Then fill in the robot configuration and PICO publisher address, and set the
+export format to LeRobot:
 
 .. code-block:: yaml
 
@@ -205,18 +206,39 @@ Then fill in the robot configuration and keep LeRobot export enabled. The follow
 
    env:
      eval:
-       use_spacemouse: True
+       use_spacemouse: False
+       use_pico: True
+       pico:
+         zmq_addr: "ipc:///tmp/vr_data.ipc"
+         hand: "right"
+         control_trigger: "grip"
+         control_threshold: 0.85
+         gripper_close_button: "A"
+         gripper_open_button: "B"
+         position_scale: 1.0
+         rotation_scale: 1.0
+         max_stale_s: 0.2
+         calibration:
+           enabled: True
+           required: True
+           auto_calibrate_on_start: True
+           button: "trigger"
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
          success_hold_steps: 1
          camera_serials: ["CAMERA_SERIAL_1", "CAMERA_SERIAL_2"]
-      data_collection:
-        enabled: True
-        save_dir: ${runner.logger.log_path}/collected_data
-        export_format: "lerobot"
-        only_success: True
-        robot_type: "panda"
-        fps: 10
+       data_collection:
+         enabled: True
+         save_dir: ${runner.logger.log_path}/collected_data
+         export_format: "lerobot"
+         only_success: True
+         robot_type: "panda"
+         fps: 10
+
+Before launching, start and verify the PICO data stream as described in
+:doc:`franka_vr`. The ``ipc://`` address above requires the publisher and env
+worker to run on the same machine; use ``tcp://<publisher_ip>:<port>`` when
+they run on different machines.
 
 Launch collection with your copied config:
 
@@ -313,11 +335,29 @@ your cluster, cameras, target pose, and checkpoints:
    env:
      train:
        smooth_intervene: True
-       use_spacemouse: True
+       use_spacemouse: False
+       use_pico: True
+       pico:
+         zmq_addr: "ipc:///tmp/vr_data.ipc"
+         hand: "right"
+         control_trigger: "grip"
+         control_threshold: 0.85
+         gripper_close_button: "A"
+         gripper_open_button: "B"
+         position_scale: 1.0
+         rotation_scale: 1.0
+         max_stale_s: 0.2
+         calibration:
+           enabled: True
+           required: True
+           auto_calibrate_on_start: True
+           button: "trigger"
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
          camera_serials: ["CAMERA_SERIAL_1", "CAMERA_SERIAL_2"]
      eval:
+       use_spacemouse: False
+       use_pico: False
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
          camera_serials: ["CAMERA_SERIAL_1", "CAMERA_SERIAL_2"]
@@ -334,7 +374,7 @@ your cluster, cameras, target pose, and checkpoints:
 
 ``online_lerobot.enabled: True`` enables the online LeRobot data path. The env worker collects rollouts by episode and sends episodes that satisfy the configured filters to the actor; the actor adds them to ``RollingLeRobotDataset`` for training, so online training no longer uses the trajectory replay buffer.
 
-``smooth_intervene: True`` bypasses policy inference when human intervention continues through the last frame of an action chunk. The env worker uses a dummy chunk to keep stepping the teleoperation wrapper and resumes normal inference after intervention is released or the episode ends. It requires one environment per env-worker pipeline stage.
+``smooth_intervene: True`` bypasses policy inference when PICO intervention continues through the last frame of an action chunk. The env worker uses a dummy chunk to keep stepping the teleoperation wrapper and resumes normal inference after ``grip`` is released or the episode ends. It requires one environment per env-worker pipeline stage. ``env.eval.use_pico: False`` keeps evaluation policy-only.
 
 ``only_success: True`` discards failed episodes. ``only_save_expert: True`` keeps
 the complete successful episode in the LeRobot archive, but restricts the online
@@ -351,7 +391,7 @@ individual frames. Within a successful episode:
   recent 50,000 expert-valid logical chunk starts, while older shards remain on
   disk.
 
-The real-world DAgger config intentionally omits beta-related fields because it does not configure ``rollout.expert_model``. Beta only controls action mixing between a model expert and the student; real-world human intervention is determined by the intervention wrapper enabled under ``env.train``.
+The real-world DAgger config intentionally omits beta-related fields because it does not configure ``rollout.expert_model``. Beta only controls action mixing between a model expert and the student; real-world human intervention is determined by the PICO intervention wrapper enabled under ``env.train``.
 
 Launch HG-DAgger from the Ray head node:
 

@@ -34,10 +34,10 @@
    .. grid-item-card:: 硬件
       :text-align: center
 
-      Franka · teleoperator
+      Franka · PICO
 
 | **你将完成:** 采集干预数据 → 计算 norm stats → 运行 SFT → 启动 HG-DAgger → 监控干预.
-| **前置条件:** :doc:`franka` · :doc:`sft_openpi` · Ray cluster · trained or base OpenPI checkpoint.
+| **前置条件:** :doc:`franka` · :doc:`franka_vr` · :doc:`sft_openpi` · Ray cluster · trained or base OpenPI checkpoint.
 
 任务
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -50,8 +50,8 @@
      - 配置 / 入口
      - 说明
    * - Collection
-     - ``realworld_collect_data``
-     - 采集真机干预示教。
+     - ``realworld_collect_data_pico``
+     - 使用 PICO 采集真机示教。
    * - SFT
      - ``realworld_sft_openpi``
      - 训练 student 初始化。
@@ -179,7 +179,7 @@ Ray 会在启动时记录当前 Python 解释器与环境变量，因此务必�
 1. 采集带人工引导的真实数据
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-从 ``examples/embodiment/config/realworld_collect_data.yaml`` 开始。对于抓放
+从 ``examples/embodiment/config/realworld_collect_data_pico.yaml`` 开始。对于抓放
 任务，需要将环境从 peg insertion 切换为 bin relocation：
 
 .. code-block:: yaml
@@ -188,7 +188,7 @@ Ray 会在启动时记录当前 Python 解释器与环境变量，因此务必�
      - env/realworld_bin_relocation@env.eval
      - override hydra/job_logging: stdout
 
-然后填写机器人配置，并保持 LeRobot 导出开启。以下采集配置以 SpaceMouse 为例；使用其他人工接管设备时，需要相应修改 ``env.eval`` 下的接管设备字段及配置：
+然后填写机器人配置和 PICO publisher 地址，并将导出格式设置为 LeRobot：
 
 .. code-block:: yaml
 
@@ -204,7 +204,23 @@ Ray 会在启动时记录当前 Python 解释器与环境变量，因此务必�
 
    env:
      eval:
-       use_spacemouse: True
+       use_spacemouse: False
+       use_pico: True
+       pico:
+         zmq_addr: "ipc:///tmp/vr_data.ipc"
+         hand: "right"
+         control_trigger: "grip"
+         control_threshold: 0.85
+         gripper_close_button: "A"
+         gripper_open_button: "B"
+         position_scale: 1.0
+         rotation_scale: 1.0
+         max_stale_s: 0.2
+         calibration:
+           enabled: True
+           required: True
+           auto_calibrate_on_start: True
+           button: "trigger"
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
          success_hold_steps: 1
@@ -216,6 +232,10 @@ Ray 会在启动时记录当前 Python 解释器与环境变量，因此务必�
          only_success: True
          robot_type: "panda"
          fps: 10
+
+启动采集前，请按照 :doc:`franka_vr` 启动并检查 PICO 数据流。上述 ``ipc://``
+地址要求 publisher 与 env worker 运行在同一台机器；若二者位于不同机器，请改为
+``tcp://<publisher_ip>:<port>``。
 
 使用你复制后的配置启动采集：
 
@@ -312,11 +332,29 @@ SFT 导出的 checkpoint 会作为在线阶段的学生模型初始化。更多 
    env:
      train:
        smooth_intervene: True
-       use_spacemouse: True
+       use_spacemouse: False
+       use_pico: True
+       pico:
+         zmq_addr: "ipc:///tmp/vr_data.ipc"
+         hand: "right"
+         control_trigger: "grip"
+         control_threshold: 0.85
+         gripper_close_button: "A"
+         gripper_open_button: "B"
+         position_scale: 1.0
+         rotation_scale: 1.0
+         max_stale_s: 0.2
+         calibration:
+           enabled: True
+           required: True
+           auto_calibrate_on_start: True
+           button: "trigger"
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
          camera_serials: ["CAMERA_SERIAL_1", "CAMERA_SERIAL_2"]
      eval:
+       use_spacemouse: False
+       use_pico: False
        override_cfg:
          target_ee_pose: [0.50, 0.00, 0.01, 3.14, 0.0, 0.0]
          camera_serials: ["CAMERA_SERIAL_1", "CAMERA_SERIAL_2"]
@@ -333,7 +371,7 @@ SFT 导出的 checkpoint 会作为在线阶段的学生模型初始化。更多 
 
 ``online_lerobot.enabled: True`` 表示启用在线 LeRobot 数据链路。env worker 按 episode 收集 rollout，并将满足过滤条件的 episode 发送给 actor；actor 将其加入 ``RollingLeRobotDataset`` 进行训练，因此在线训练不再使用 trajectory replay buffer。
 
-``smooth_intervene: True`` 会在人类接管持续到 action chunk 最后一帧时绕过下一次 策略推理。env worker 使用 dummy chunk 持续驱动遥操 wrapper，并在接管释放或 episode 结束后恢复正常推理。该模式要求每个 env worker pipeline stage 只运行一个环境。
+``smooth_intervene: True`` 会在 PICO 接管持续到 action chunk 最后一帧时绕过下一次策略推理。env worker 使用 dummy chunk 持续驱动遥操 wrapper，并在松开 ``grip`` 或 episode 结束后恢复正常推理。该模式要求每个 env worker pipeline stage 只运行一个环境。``env.eval.use_pico: False`` 表示评测阶段只运行策略，不启用人工接管。
 
 ``only_success: True`` 会丢弃失败 episode。``only_save_expert: True`` 仍将完整的
 成功 episode 保存在 LeRobot 归档中，但在线 sampler 只暴露 action chunk 内所有非
@@ -346,7 +384,7 @@ padding 帧均满足 ``intervene_flag=True`` 的起点。当 ``num_action_chunks
 * ``rolling_lerobot_window_size: 50000`` 表示在线训练只从最近 50,000 个符合专家
   条件的逻辑 chunk 起点采样，较早的 shard 仍保留在磁盘中。
 
-真机 DAgger 配置不包含 beta 相关字段，因为没有配置 ``rollout.expert_model``。Beta 只用于模型 expert 和 student 之间的动作混合；真机人工接管由 ``env.train`` 中启用的接管 wrapper 决定。
+真机 DAgger 配置不包含 beta 相关字段，因为没有配置 ``rollout.expert_model``。Beta 只用于模型 expert 和 student 之间的动作混合；真机人工接管由 ``env.train`` 中启用的 PICO intervention wrapper 决定。
 
 在 Ray head 节点上启动 HG-DAgger：
 

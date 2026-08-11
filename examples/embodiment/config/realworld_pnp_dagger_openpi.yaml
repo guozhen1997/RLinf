@@ -87,7 +87,28 @@ env:
     ignore_terminations: False
     total_num_envs: 1
     no_gripper: False
-    use_spacemouse: True
+    use_spacemouse: False
+    use_pico: True
+    pico:
+      # Address of the PICO / XRoboToolkit publisher on the Franka node.
+      zmq_addr: "ipc:///tmp/vr_data.ipc"
+      hand: "right"
+      # Hold grip to take over; releasing it returns control to the policy.
+      control_trigger: "grip"
+      control_threshold: 0.85
+      gripper_close_button: "A"
+      gripper_open_button: "B"
+      position_scale: 1.0
+      rotation_scale: 1.0
+      max_stale_s: 0.2
+      calibration:
+        enabled: True
+        required: True
+        auto_calibrate_on_start: True
+        button: "trigger"
+        threshold: 0.5
+        head_forward_axis: "-z"
+        base_position: [0.0, 0.0, 0.0]
     max_steps_per_rollout_epoch: 180
     max_episode_steps: 180
     override_cfg:
@@ -102,7 +123,8 @@ env:
     auto_reset: True
     ignore_terminations: False
     no_gripper: False
-    use_spacemouse: True
+    use_spacemouse: False
+    use_pico: False
     max_steps_per_rollout_epoch: 180
     max_episode_steps: 180
     override_cfg:
