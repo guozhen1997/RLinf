@@ -176,6 +176,10 @@ class LiberoEnv(gym.Env):
 
         self.video_cfg = cfg.video_cfg
         self.current_raw_obs = None
+        self.skip_intermediate_renders = bool(
+            getattr(cfg, "skip_intermediate_renders", False)
+        )
+        self._cached_camera_obs = [None] * self.num_envs
 
     def _log_evaluation_mode(self):
         """Log the LIBERO evaluation mode banner (rank 0 env worker only)."""
@@ -931,6 +935,11 @@ class LiberoEnv(gym.Env):
         raw_chunk_terminations = []
         raw_chunk_truncations = []
         for i in range(chunk_size):
+            should_render = True
+            if self.skip_intermediate_renders:
+                cahce_is_cold = any(c is None for c in self._cached_camera_obs)
+                should_render = i == chunk_size - 1 or (cahce_is_cold and i == 0)
+                
             actions = chunk_actions[:, i]
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
                 actions, auto_reset=False
