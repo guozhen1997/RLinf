@@ -77,15 +77,17 @@ warnings.simplefilter("once", DeprecationWarning)
 
 LIBERO_CAMERA_OBS_NAMES = ("agentview_image", "robot0_eye_in_hand_image")
 
+
 def _set_camera_rendering(env, enabled: bool) -> None:
     """Enable or disable LIBERO camera observables without resetting the env."""
-    robosute_env = getattr(env, "env", None)
-    observables = getattr(robosute_env, "_observables", None)
-    if observables is not None:
+    robosuite_env = getattr(env, "env", None)
+    observables = getattr(robosuite_env, "_observables", None)
+    if observables is None:
         return
     for name in LIBERO_CAMERA_OBS_NAMES:
         if name in observables:
-            observables[name].enabled = enabled
+            observables[name].set_enabled(enabled)
+
 
 def _worker(
     parent: connection.Connection,

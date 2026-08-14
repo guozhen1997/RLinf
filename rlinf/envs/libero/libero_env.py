@@ -176,9 +176,7 @@ class LiberoEnv(gym.Env):
 
         self.video_cfg = cfg.video_cfg
         self.current_raw_obs = None
-        self.skip_intermediate_renders = bool(
-            getattr(cfg, "skip_intermediate_renders", False)
-        )
+        self.skip_intermediate_renders = getattr(cfg, "skip_intermediate_renders", False)
         self._cached_camera_obs = [None] * self.num_envs
 
     def _log_evaluation_mode(self):
@@ -843,7 +841,15 @@ class LiberoEnv(gym.Env):
             reset_state_ids = self._get_random_reset_state_ids(num_reset_states)
 
         self._reconfigure(reset_state_ids, env_idx)
-        for _ in range(15):
+        if self.skip_intermediate_renders:
+            self.env.set_camera_rendering(False, id=env_idx)
+        n_reset_steps = 15
+        for i in range(n_reset_steps):
+            # Re-enable one step early: set_enabled() resets the sample timer but not
+            # _sampled, which _reconfigure's forced updates leave True. That step flushes
+            # _sampled so the final step actually samples instead of returning a zeroed image.
+            if self.skip_intermediate_renders and i == n_reset_steps - 2:
+                self.env.set_camera_rendering(True, id=env_idx)
             zero_actions = np.zeros((len(env_idx), 7))
             if self.cfg.reset_gripper_open:
                 zero_actions[:, -1] = -1
@@ -854,6 +860,7 @@ class LiberoEnv(gym.Env):
             self.current_raw_obs = [None] * self.num_envs
         for i, idx in enumerate(env_idx):
             self.current_raw_obs[idx] = raw_obs[i]
+        self._refresh_camera_cache(raw_obs, env_idx)
 
         obs = self._wrap_obs(self.current_raw_obs)
         self._reset_metrics(env_idx)
@@ -933,7 +940,7 @@ class LiberoEnv(gym.Env):
         for local_idx, global_idx in enumerate(env_idx):
             self._cached_camera_obs[global_idx] = self._get_camera_cache(obs_list[local_idx])
 
-    def _apply_camera_cache(self, obs_list, env_idx=None):
+    def _apply_cached_camera_obs(self, obs_list, env_idx=None):
         if env_idx is None:
             env_idx = np.arange(self.num_envs)
         patched = []
@@ -942,7 +949,7 @@ class LiberoEnv(gym.Env):
             cached = self._cached_camera_obs[global_idx]
             if cached is not None:
                 for name in LIBERO_CAMERA_OBS_NAMES:
-                    obs[name] = np.array(cached[name], copy=True)
+                    obs[name] = cached[name]
             patched.append(obs)
         return patched
 
@@ -959,10 +966,10 @@ class LiberoEnv(gym.Env):
         for i in range(chunk_size):
             should_render = True
             if self.skip_intermediate_renders:
-                cahce_is_cold = any(c is None for c in self._cached_camera_obs)
-                should_render = i == chunk_size - 1 or (cahce_is_cold and i == 0)
+                cache_is_cold = any(c is None for c in self._cached_camera_obs)
+                should_render = i == chunk_size - 1 or (cache_is_cold and i == 0)
                 self.env.set_camera_rendering(should_render)
-                
+
             actions = chunk_actions[:, i]
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
                 actions, auto_reset=False, _skip_obs_wrap=not should_render
@@ -971,7 +978,7 @@ class LiberoEnv(gym.Env):
                 if should_render:
                     self._refresh_camera_cache(self.current_raw_obs)
                 else:
-                    self.current_raw_obs = self._apply_camera_cache(self.current_raw_obs)
+                    self.current_raw_obs = self._apply_cached_camera_obs(self.current_raw_obs)
                     extracted_obs = self._wrap_obs(self.current_raw_obs)
             obs_list.append(extracted_obs)
             infos_list.append(infos)
