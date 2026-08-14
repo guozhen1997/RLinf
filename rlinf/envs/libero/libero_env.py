@@ -35,7 +35,7 @@ from rlinf.envs.libero.utils import (
     quat2axisangle,
     record_completed_episode_task_stats,
 )
-from rlinf.envs.libero.venv import ReconfigureSubprocEnv
+from rlinf.envs.libero.venv import LIBERO_CAMERA_OBS_NAMES, ReconfigureSubprocEnv
 from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 from rlinf.utils.logging import get_logger
 
@@ -893,7 +893,7 @@ class LiberoEnv(gym.Env):
             depth=depth,
         )
 
-    def step(self, actions=None, auto_reset=True):
+    def step(self, actions=None, auto_reset=True, _skip_obs_wrap=False):
         """Step the environment with the given actions."""
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().numpy()
@@ -903,7 +903,7 @@ class LiberoEnv(gym.Env):
         self.current_raw_obs = raw_obs
         infos = list_of_dict_to_dict_of_list(info_lists)
         truncations = self.elapsed_steps >= self.cfg.max_episode_steps
-        obs = self._wrap_obs(raw_obs)
+        obs = None if _skip_obs_wrap else self._wrap_obs(raw_obs)
 
         step_reward = self._calc_step_reward(terminations)
 
@@ -924,6 +924,28 @@ class LiberoEnv(gym.Env):
             infos,
         )
 
+    def _get_camera_cache(self, obs):
+        return {name: np.array(obs[name], copy=True) for name in LIBERO_CAMERA_OBS_NAMES}
+
+    def _refresh_camera_cache(self, obs_list, env_idx=None):
+        if env_idx is None:
+            env_idx = np.arange(self.num_envs)
+        for local_idx, global_idx in enumerate(env_idx):
+            self._cached_camera_obs[global_idx] = self._get_camera_cache(obs_list[local_idx])
+
+    def _apply_camera_cache(self, obs_list, env_idx=None):
+        if env_idx is None:
+            env_idx = np.arange(self.num_envs)
+        patched = []
+        for local_idx, global_idx in enumerate(env_idx):
+            obs = dict(obs_list[local_idx])
+            cached = self._cached_camera_obs[global_idx]
+            if cached is not None:
+                for name in LIBERO_CAMERA_OBS_NAMES:
+                    obs[name] = np.array(cached[name], copy=True)
+            patched.append(obs)
+        return patched
+
     def chunk_step(self, chunk_actions):
         # chunk_actions: [num_envs, chunk_step, action_dim]
         chunk_size = chunk_actions.shape[1]
@@ -939,17 +961,26 @@ class LiberoEnv(gym.Env):
             if self.skip_intermediate_renders:
                 cahce_is_cold = any(c is None for c in self._cached_camera_obs)
                 should_render = i == chunk_size - 1 or (cahce_is_cold and i == 0)
+                self.env.set_camera_rendering(should_render)
                 
             actions = chunk_actions[:, i]
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
-                actions, auto_reset=False
+                actions, auto_reset=False, _skip_obs_wrap=not should_render
             )
+            if self.skip_intermediate_renders:
+                if should_render:
+                    self._refresh_camera_cache(self.current_raw_obs)
+                else:
+                    self.current_raw_obs = self._apply_camera_cache(self.current_raw_obs)
+                    extracted_obs = self._wrap_obs(self.current_raw_obs)
             obs_list.append(extracted_obs)
             infos_list.append(infos)
 
             chunk_rewards.append(step_reward)
             raw_chunk_terminations.append(terminations)
             raw_chunk_truncations.append(truncations)
+        if self.skip_intermediate_renders:
+            self.env.set_camera_rendering(True)
 
         chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
         raw_chunk_terminations = torch.stack(
