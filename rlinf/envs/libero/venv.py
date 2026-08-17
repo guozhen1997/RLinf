@@ -86,7 +86,7 @@ def _set_camera_rendering(env, enabled: bool) -> None:
         return
     for name in LIBERO_CAMERA_OBS_NAMES:
         if name in observables:
-            observables[name].set_enabled(enabled)
+            observables[name]._enabled = enabled
 
 
 def _worker(

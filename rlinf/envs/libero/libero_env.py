@@ -949,7 +949,7 @@ class LiberoEnv(gym.Env):
             cached = self._cached_camera_obs[global_idx]
             if cached is not None:
                 for name in LIBERO_CAMERA_OBS_NAMES:
-                    obs[name] = cached[name]
+                    obs[name] = np.array(cached[name], copy=True)
             patched.append(obs)
         return patched
 
