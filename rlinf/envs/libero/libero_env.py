@@ -841,15 +841,7 @@ class LiberoEnv(gym.Env):
             reset_state_ids = self._get_random_reset_state_ids(num_reset_states)
 
         self._reconfigure(reset_state_ids, env_idx)
-        # if self.skip_intermediate_renders:
-        #     self.env.set_camera_rendering(False, id=env_idx)
-        n_reset_steps = 15
-        for i in range(n_reset_steps):
-            # Re-enable one step early: set_enabled() resets the sample timer but not
-            # _sampled, which _reconfigure's forced updates leave True. That step flushes
-            # _sampled so the final step actually samples instead of returning a zeroed image.
-            # if self.skip_intermediate_renders and i == n_reset_steps - 2:
-            #     self.env.set_camera_rendering(True, id=env_idx)
+        for _ in range(15):
             zero_actions = np.zeros((len(env_idx), 7))
             if self.cfg.reset_gripper_open:
                 zero_actions[:, -1] = -1
