@@ -88,6 +88,9 @@ agentic = [
 ]
 embodied = [
     "transformers<=4.57.6",
+    # transformers 4.x imports fail against huggingface_hub 1.x
+    # (e.g. 1.28.0: cannot import name 'is_offline_mode').
+    "huggingface_hub>=0.34.0,<1.0",
     "torchcodec",
     "peft",
     "timm",

@@ -2498,6 +2498,11 @@ install_calvin_env() {
     uv pip install -e ${calvin_dir}/calvin_env/tacto
     uv pip install -e ${calvin_dir}/calvin_env
     uv pip install -e ${calvin_dir}/calvin_models
+    # calvin_models depends on sentence-transformers, which upgrades
+    # huggingface_hub to 1.x and transformers to 5.x. Embodied jobs pin
+    # transformers<=4.57.6, which is incompatible with huggingface_hub>=1.0
+    # (ImportError: cannot import name 'is_offline_mode').
+    uv pip install "huggingface-hub>=0.34.0,<1.0" "transformers<=4.57.6"
     uv pip install --upgrade hydra-core==1.3.2
 }
 
