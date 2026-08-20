@@ -24,6 +24,11 @@ import numpy as np
 import torch
 
 
+_META_FEATURE_KEYS = frozenset(
+    {"index", "episode_index", "frame_index", "timestamp", "task_index"}
+)
+
+
 class InMemoryArrowStore:
     """Append-only in-memory frame store backed by per-episode Arrow tables.
 
@@ -51,6 +56,9 @@ class InMemoryArrowStore:
         fps: Frames per second used for the ``timestamp`` metadata column.
         image_transforms: Optional callable applied to image tensors after
             ``hf_transform_to_torch`` converts PIL → float32 ``[C,H,W]``.
+        chunk_all_data_keys: When ``True`` and ``chunk_size > 1``, every
+            non-metadata column — including images — is stacked into a
+            ``[chunk_size, …]`` window after the schema is inferred.
     """
 
     def __init__(
@@ -59,10 +67,12 @@ class InMemoryArrowStore:
         action_sequence_keys: list[str] | None = None,
         fps: int = 10,
         image_transforms: Callable | None = None,
+        chunk_all_data_keys: bool = False,
     ) -> None:
         self._chunk_size = chunk_size
         self._fps = max(fps, 1)
         self._image_transforms = image_transforms
+        self._chunk_all_data_keys = bool(chunk_all_data_keys)
         keys = action_sequence_keys or []
         self._delta_indices: dict[str, list[int]] = (
             {k: list(range(chunk_size)) for k in keys} if chunk_size > 1 else {}
@@ -223,11 +233,46 @@ class InMemoryArrowStore:
         self._image_keys = prepared_episode["image_keys"]
         self._task_to_idx = prepared_episode["task_to_idx"]
         self._tasks = prepared_episode["tasks"]
+        self._refresh_delta_indices()
         self._episode_datasets.append(prepared_episode["dataset"])
         self._ep_from.append(base)
         self._ep_to.append(base + n)
         self._total_frames += n
         return n
+
+    def _refresh_delta_indices(self) -> None:
+        """Fill ``_delta_indices`` once the HuggingFace schema is known."""
+        if self._chunk_size <= 1:
+            self._delta_indices = {}
+            return
+        if not self._chunk_all_data_keys or self._hf_features is None:
+            return
+        self._delta_indices = {
+            key: list(range(self._chunk_size))
+            for key in self._hf_features
+            if key not in _META_FEATURE_KEYS
+        }
+
+    def _stack_chunk_key(self, ep_ds: Any, key: str, local_indices: list[int]) -> torch.Tensor:
+        """Stack ``chunk_size`` rows of ``key``, including decoded images."""
+        if key in self._image_keys:
+            frames = []
+            for local in local_indices:
+                frame = ep_ds[local][key]
+                if self._image_transforms is not None:
+                    frame = self._image_transforms(frame)
+                if not torch.is_tensor(frame):
+                    frame = torch.as_tensor(np.asarray(frame))
+                frames.append(frame)
+            return torch.stack(frames)
+        stacked = ep_ds.select(local_indices)[key]
+        if torch.is_tensor(stacked):
+            return stacked
+        if isinstance(stacked, np.ndarray):
+            return torch.as_tensor(stacked)
+        return torch.stack(
+            [item if torch.is_tensor(item) else torch.as_tensor(item) for item in stacked]
+        )
 
     def add_episode(self, ep_frames: list[dict]) -> None:
         prepared_episode = self._prepare_episode_dataset(ep_frames)
@@ -271,11 +316,6 @@ class InMemoryArrowStore:
         item: dict[str, Any] = ep_ds[local_frame]
         item["task"] = self._tasks.get(int(item["task_index"].item()), "")
 
-        if self._image_transforms is not None:
-            for k in self._image_keys:
-                if k in item:
-                    item[k] = self._image_transforms(item[k])
-
         if self._delta_indices:
             query_indices = {
                 key: [max(ep_start, min(ep_end - 1, local_idx + d)) for d in deltas]
@@ -290,14 +330,15 @@ class InMemoryArrowStore:
                 )
                 for key, deltas in self._delta_indices.items()
             }
-            # All chunk indices are within the same episode — use local offsets.
-            query_result = {
-                key: torch.stack(ep_ds.select([q - ep_start for q in q_idxs])[key])
-                for key, q_idxs in query_indices.items()
-                if key in self._hf_features and key not in self._image_keys
-            }
             item = {**item, **padding}
-            for k, v in query_result.items():
-                item[k] = v
+            for key, q_idxs in query_indices.items():
+                if key not in self._hf_features:
+                    continue
+                local_indices = [q - ep_start for q in q_idxs]
+                item[key] = self._stack_chunk_key(ep_ds, key, local_indices)
+        elif self._image_transforms is not None:
+            for k in self._image_keys:
+                if k in item:
+                    item[k] = self._image_transforms(item[k])
 
         return item

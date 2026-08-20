@@ -18,6 +18,7 @@ import threading
 import time
 
 import torch
+from omegaconf import OmegaConf
 
 from rlinf.scheduler import Worker
 from rlinf.utils.metric_utils import append_to_dict, compute_split_num
@@ -96,10 +97,23 @@ class AsyncEmbodiedDAGGERFSDPPolicy(EmbodiedDAGGERFSDPPolicy):
             return
 
         intervene_traj_list = []
+        distill_context = bool(
+            OmegaConf.select(
+                self.cfg, "algorithm.dagger.distill_context", default=False
+            )
+        )
         for traj in recv_list:
-            intervene_trajs = traj.extract_intervene_traj(mode="all")
-            if intervene_trajs is not None:
-                intervene_traj_list.extend(intervene_trajs)
+            if distill_context:
+                if traj.intervene_flags is not None and traj.intervene_flags.any():
+                    mask = traj.intervene_flags
+                    if mask.ndim > 2:
+                        mask = mask.any(dim=-1)
+                    traj.forward_inputs["loss_mask"] = mask.to(dtype=torch.float32)
+                    intervene_traj_list.append(traj)
+            else:
+                intervene_trajs = traj.extract_intervene_traj(mode="all")
+                if intervene_trajs is not None:
+                    intervene_traj_list.extend(intervene_trajs)
         if intervene_traj_list:
             self.replay_buffer.add_trajectories(intervene_traj_list)
 

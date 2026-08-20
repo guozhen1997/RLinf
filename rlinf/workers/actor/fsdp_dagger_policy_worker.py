@@ -63,6 +63,26 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
         self._lerobot_resume_thread: threading.Thread | None = None
         self._lerobot_resume_error: Exception | None = None
 
+    def _distill_context_enabled(self) -> bool:
+        return bool(
+            OmegaConf.select(
+                self.cfg, "algorithm.dagger.distill_context", default=False
+            )
+        )
+
+    def _distill_num_timesteps(self) -> int:
+        configured = OmegaConf.select(
+            self.cfg, "algorithm.dagger.distill_num_timesteps", default=None
+        )
+        if configured is not None:
+            return max(1, int(configured))
+        robottt = OmegaConf.select(
+            self.cfg, "data.robottt.num_timesteps", default=None
+        )
+        if robottt is not None:
+            return max(1, int(robottt))
+        return 16
+
     def _online_lerobot_cfg(self) -> DictConfig:
         return OmegaConf.select(
             self.cfg, "algorithm.dagger.online_lerobot", default=OmegaConf.create({})
@@ -76,14 +96,23 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
             raise ValueError(
                 "algorithm.dagger.online_lerobot.lerobot_num_workers must be non-negative."
             )
+        chunk_size = self.cfg.actor.model.num_action_chunks
+        require_all_intervene = self.cfg.algorithm.dagger.get(
+            "only_save_expert", False
+        )
+        chunk_all_data_keys = False
+        if self._distill_context_enabled():
+            chunk_size = self._distill_num_timesteps()
+            require_all_intervene = False
+            # Distillation needs a real observation sequence, not just a
+            # chunked action horizon on a single frame.
+            chunk_all_data_keys = True
         self.dataset = RollingLeRobotDataset(
             root_dir=self.cfg.algorithm.dagger.online_lerobot.data_path,
-            chunk_size=self.cfg.actor.model.num_action_chunks,
+            chunk_size=chunk_size,
             min_frames=online_lerobot_cfg.get("min_frames", 1),
             wait_interval_s=online_lerobot_cfg.get("wait_interval_s", 10.0),
-            require_all_intervene=self.cfg.algorithm.dagger.get(
-                "only_save_expert", False
-            ),
+            require_all_intervene=require_all_intervene,
             window_size=online_lerobot_cfg.get("rolling_lerobot_window_size", None),
             in_memory_mode=True,
             fps=int(
@@ -91,6 +120,7 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
                     self.cfg, "algorithm.dagger.online_lerobot.fps", default=10
                 )
             ),
+            chunk_all_data_keys=chunk_all_data_keys,
         )
 
     def _discover_lerobot_resume_shards(self) -> list[dict]:
@@ -297,12 +327,27 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
             return self.recv_lerobot_rollout_trajectories(input_channel)
 
     def recv_buffer_rollout_trajectories(self, recv_list: list[Trajectory]) -> None:
+        distill_context = bool(
+            OmegaConf.select(
+                self.cfg, "algorithm.dagger.distill_context", default=False
+            )
+        )
         intervene_traj_list = []
         for traj in recv_list:
             assert isinstance(traj, Trajectory)
-            intervene_trajs = traj.extract_intervene_traj(mode="all")
-            if intervene_trajs is not None:
-                intervene_traj_list.extend(intervene_trajs)
+            if distill_context:
+                # Keep the full ordered trajectory: failed steps are TTT
+                # context and intervening steps are the imitation targets.
+                if traj.intervene_flags is not None and traj.intervene_flags.any():
+                    mask = traj.intervene_flags
+                    if mask.ndim > 2:
+                        mask = mask.any(dim=-1)
+                    traj.forward_inputs["loss_mask"] = mask.to(dtype=torch.float32)
+                    intervene_traj_list.append(traj)
+            else:
+                intervene_trajs = traj.extract_intervene_traj(mode="all")
+                if intervene_trajs is not None:
+                    intervene_traj_list.extend(intervene_trajs)
         if intervene_traj_list:
             self.replay_buffer.add_trajectories(intervene_traj_list)
 
@@ -441,9 +486,15 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
     def _prepare_sft_batch(self, batch):
         """Prepare model-specific DAgger training inputs."""
         if not self.enable_online_lerobot:
-            # Replay-buffer samples store model inputs under forward_inputs.
+            num_timesteps = batch.get("num_timesteps")
             if "forward_inputs" in batch:
-                batch = batch["forward_inputs"]
+                inner = dict(batch["forward_inputs"])
+                if num_timesteps is not None:
+                    inner["num_timesteps"] = num_timesteps
+                for key in ("loss_mask", "intervene_flags"):
+                    if key in batch and key not in inner:
+                        inner[key] = batch[key]
+                batch = inner
             return self.model.prepare_dagger_sft_batch(batch)
         return self.model.prepare_lerobot_sft_batch(batch)
 
@@ -454,11 +505,14 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
         use_action_chunk_loss = (
             SupportedModel(self.cfg.actor.model.model_type) == SupportedModel.OPENPI
         )
-        return self.model(
+        output = self.model(
             forward_type=ForwardType.SFT,
             data=data,
             use_action_chunk_loss=use_action_chunk_loss,
         )
+        if isinstance(output, torch.Tensor):
+            return output
+        return output["loss"]
 
     @Worker.timer("update_one_epoch")
     def update_one_epoch(self):
@@ -471,16 +525,35 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
         global_batch_size_per_rank = (
             self.cfg.actor.global_batch_size // self._world_size
         )
+        distill_context = self._distill_context_enabled()
+        num_timesteps = 1
         with self.worker_timer("sample"):
-            global_batch = self.replay_buffer.sample(
-                num_chunks=global_batch_size_per_rank
-            )
+            if distill_context:
+                distill_t = self._distill_num_timesteps()
+                windows_per_micro = max(
+                    1, int(self.cfg.actor.micro_batch_size) // distill_t
+                )
+                num_windows = max(
+                    windows_per_micro, global_batch_size_per_rank // distill_t
+                )
+                num_windows = (
+                    num_windows // windows_per_micro
+                ) * windows_per_micro
+                global_batch = self.replay_buffer.sample_sequences(
+                    num_windows=num_windows, num_timesteps=distill_t
+                )
+                num_timesteps = int(global_batch.pop("num_timesteps", distill_t))
+                n_split = max(1, num_windows // windows_per_micro)
+            else:
+                global_batch = self.replay_buffer.sample(
+                    num_chunks=global_batch_size_per_rank
+                )
+                n_split = global_batch_size_per_rank // self.cfg.actor.micro_batch_size
 
-        train_micro_batch_list = split_dict_to_chunk(
-            global_batch,
-            global_batch_size_per_rank // self.cfg.actor.micro_batch_size,
-        )
+        train_micro_batch_list = split_dict_to_chunk(global_batch, n_split)
         for idx, batch in enumerate(train_micro_batch_list):
+            if distill_context:
+                batch["num_timesteps"] = num_timesteps
             batch = put_tensor_device(batch, device=self.device)
             if self.enable_drq:
                 drq.apply_drq(batch["curr_obs"], pad=4)
@@ -492,14 +565,15 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
         for mb_idx, batch in enumerate(train_micro_batch_list):
             backward_ctx = self.before_micro_batch(
                 self.model,
-                is_last_micro_batch=(mb_idx + 1) == self.gradient_accumulation,
+                is_last_micro_batch=(mb_idx + 1) == len(train_micro_batch_list),
             )
             with self.amp_context:
-                actor_loss = self.forward_actor(batch["forward_inputs"])
-            actor_loss = actor_loss / self.gradient_accumulation
+                actor_input = batch if distill_context else batch["forward_inputs"]
+                actor_loss = self.forward_actor(actor_input)
+            actor_loss = actor_loss / len(train_micro_batch_list)
             with backward_ctx:
                 self.grad_scaler.scale(actor_loss).backward()
-            gbs_actor_loss.append(actor_loss.item() * self.gradient_accumulation)
+            gbs_actor_loss.append(actor_loss.item() * len(train_micro_batch_list))
 
         actor_grad_norm = self.model.clip_grad_norm_(
             max_norm=self.cfg.actor.optim.clip_grad
@@ -522,7 +596,11 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
                 train_micro_batch_list = [
                     next(self._lerobot_iter) for _ in range(num_batches)
                 ]
+            distill_context = self._distill_context_enabled()
+            distill_t = self._distill_num_timesteps() if distill_context else 1
             for idx, batch in enumerate(train_micro_batch_list):
+                if distill_context:
+                    batch["num_timesteps"] = distill_t
                 batch = put_tensor_device(batch, device=self.device)
                 if self.enable_drq:
                     drq.apply_drq(batch["curr_obs"], pad=4)

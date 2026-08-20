@@ -32,5 +32,14 @@ rl_head_config:
   use_vlm_value: False
   value_vlm_mode: "mean_token"
   padding_value: 570
+  # RoboTTT: off by default so existing PPO configs stay bit-identical.
+  use_ttt: False
+  ttt:
+    fast_model: mlp
+    num_register_tokens: 16
+    context_tokens: register  # state | state_action | register
+    train_ttt_only: False
+    gate_init: 0.001
+    base_lr: 0.1
 
 num_steps: 4

@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from gr00t.configs.model.gr00t_n1d7 import Gr00tN1d7Config
 from gr00t.data.embodiment_tags import EmbodimentTag
 from gr00t.model.gr00t_n1d7.gr00t_n1d7 import Gr00tN1d7, Gr00tN1d7ActionHead
@@ -30,6 +31,9 @@ from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
 from transformers.feature_extraction_utils import BatchFeature
 
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
+from rlinf.models.embodiment.gr00t.gr00t_n1d7.sequence_utils import flatten_leading_bt
+from rlinf.models.embodiment.gr00t.gr00t_n1d7.ttt import TTTContext
+from rlinf.models.embodiment.gr00t.gr00t_n1d7.ttt_dit import TTTAlternateVLDiT
 from rlinf.models.embodiment.gr00t.simulation_io import (
     ACTION_CONVERSION_N1D7,
     OBS_CONVERSION,
@@ -251,6 +255,11 @@ def _batchify_gr00t_forward_input(
     return value
 
 
+# Which of a timestep's DiT tokens are routed through the TTT layers. The
+# paper's ablation adds them cumulatively; "register" is the full setting.
+TTT_CONTEXT_TOKEN_CHOICES = ("state", "state_action", "register")
+
+
 def _tensorize_forward_input(value: Any) -> Any:
     """Convert list-valued cached inputs into tensors."""
     if not isinstance(value, list):
@@ -342,6 +351,116 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
                 noise_scheduler_type="learn",
             )
 
+        self.ttt_enabled = bool(self.rl_config.get("use_ttt", False))
+        self.num_register_tokens = 0
+        if self.ttt_enabled:
+            self._install_ttt(config)
+
+    # ------------------------------------------------------------------- RoboTTT
+
+    def _install_ttt(self, config: Any) -> None:
+        """Swap in the TTT-augmented DiT and add the register tokens.
+
+        Called only when ``use_ttt`` is set, so the default RL behaviour of this
+        head is bit-for-bit unchanged.
+        """
+        if not getattr(config, "use_alternate_vl_dit", False):
+            raise ValueError(
+                "RoboTTT requires the AlternateVLDiT action head "
+                "(config.use_alternate_vl_dit=True)."
+            )
+
+        ttt_options = dict(self.rl_config.get("ttt", {}) or {})
+        self.num_register_tokens = int(ttt_options.pop("num_register_tokens", 16))
+        self.ttt_context_tokens = str(ttt_options.pop("context_tokens", "register"))
+        if self.ttt_context_tokens not in TTT_CONTEXT_TOKEN_CHOICES:
+            raise ValueError(
+                f"ttt.context_tokens must be one of {TTT_CONTEXT_TOKEN_CHOICES}, "
+                f"got {self.ttt_context_tokens!r}."
+            )
+        train_ttt_only = bool(ttt_options.pop("train_ttt_only", False))
+
+        self.model = TTTAlternateVLDiT(
+            **config.diffusion_model_cfg,
+            cross_attention_dim=config.backbone_embedding_dim,
+            attend_text_every_n_blocks=config.attend_text_every_n_blocks,
+            ttt_config=ttt_options,
+        )
+
+        if self.num_register_tokens > 0:
+            # Vision-language tokens are kept out of the TTT inner loop for
+            # compute reasons, so these learned slots are what carries visual
+            # context across timesteps.
+            self.register_tokens = torch.nn.Parameter(
+                torch.zeros(self.num_register_tokens, self.input_embedding_dim)
+            )
+            torch.nn.init.normal_(self.register_tokens, std=0.02)
+
+        self.register_buffer(
+            "ttt_token_mask", self._build_ttt_token_mask(), persistent=False
+        )
+
+        # The upstream constructor already froze modules according to the tune_*
+        # flags; redo it for the replaced DiT, then unfreeze the TTT additions.
+        self.set_trainable_parameters(
+            config.tune_projector, config.tune_diffusion_model, config.tune_vlln
+        )
+        if train_ttt_only:
+            self.requires_grad_(False)
+        self.model.ttt.requires_grad_(True)
+        if self.num_register_tokens > 0:
+            self.register_tokens.requires_grad_(True)
+
+        logger.info(
+            "RoboTTT enabled: fast_model=%s, register_tokens=%d, "
+            "context_tokens=%s, train_ttt_only=%s",
+            self.model.ttt_config.fast_model,
+            self.num_register_tokens,
+            self.ttt_context_tokens,
+            train_ttt_only,
+        )
+
+    def _build_ttt_token_mask(self) -> torch.Tensor:
+        """Select the per-timestep DiT tokens that the TTT layers see.
+
+        Token layout is ``[register..., state, action...]``; the register slots
+        come first so the head's ``[:, -action_horizon:]`` slice is unaffected.
+        """
+        num_register = self.num_register_tokens
+        tokens_per_step = num_register + 1 + self.action_horizon
+        mask = torch.zeros(tokens_per_step, dtype=torch.bool)
+        mask[num_register] = True  # state token, always included
+        if self.ttt_context_tokens in ("state_action", "register"):
+            mask[num_register + 1 :] = True
+        if self.ttt_context_tokens == "register":
+            mask[:num_register] = True
+        return mask
+
+    def make_ttt_context(
+        self,
+        num_timesteps: int = 1,
+        states: Optional[list] = None,
+        reset_mask: Optional[torch.Tensor] = None,
+        detach_states: bool = False,
+    ) -> Optional[TTTContext]:
+        """Build a TTT context wired with this head's token layout."""
+        if not self.ttt_enabled:
+            return None
+        return TTTContext(
+            num_timesteps=num_timesteps,
+            states=states,
+            reset_mask=reset_mask,
+            token_mask=self.ttt_token_mask,
+            detach_states=detach_states,
+        )
+
+    def _prepend_register_tokens(self, sa_embs: torch.Tensor) -> torch.Tensor:
+        if not self.ttt_enabled or self.num_register_tokens == 0:
+            return sa_embs
+        registers = self.register_tokens.to(dtype=sa_embs.dtype)
+        registers = registers.unsqueeze(0).expand(sa_embs.shape[0], -1, -1)
+        return torch.cat((registers, sa_embs), dim=1)
+
     def _get_component(self, name: str):
         """Return a named submodule of the head, or ``None`` if absent."""
         return getattr(self, name, None)
@@ -417,6 +536,33 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         """Sample standard Gaussian exploration noise in bf16."""
         return torch.normal(mean=0.0, std=1.0, size=shape, dtype=dtype, device=device)
 
+    def _run_denoising_model(
+        self,
+        sa_embs: torch.Tensor,
+        vl_embs: torch.Tensor,
+        timesteps_tensor: torch.Tensor,
+        backbone_output: Optional[BatchFeature],
+        ttt_context: Optional[TTTContext],
+    ) -> torch.Tensor:
+        """Run the DiT, forwarding TTT state when the head is TTT-enabled."""
+        denoising_model = self._get_component("model")
+        if denoising_model is None:
+            return sa_embs
+        kwargs = {
+            "hidden_states": sa_embs,
+            "encoder_hidden_states": vl_embs,
+            "timestep": timesteps_tensor,
+        }
+        if (
+            getattr(self.config, "use_alternate_vl_dit", False)
+            and backbone_output is not None
+        ):
+            kwargs["image_mask"] = backbone_output.image_mask
+            kwargs["backbone_attention_mask"] = backbone_output.backbone_attention_mask
+        if self.ttt_enabled:
+            kwargs["ttt_context"] = ttt_context
+        return denoising_model(**kwargs)
+
     def sample_mean_var_val(
         self,
         vl_embs: torch.Tensor,
@@ -428,6 +574,7 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         mode: Literal["train", "eval"] = "train",
         compute_values=False,
         backbone_output: Optional[BatchFeature] = None,
+        ttt_context: Optional[TTTContext] = None,
     ):
         """Compute the mean and std of the posterior over the next denoising state.
 
@@ -477,29 +624,16 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
             pos_embs = position_embedding(pos_ids).unsqueeze(0)
             action_features = action_features + pos_embs
 
-        sa_embs = torch.cat((state_features, action_features), dim=1)
-
-        denoising_model = self._get_component("model")
-        if denoising_model is not None:
-            if (
-                getattr(self.config, "use_alternate_vl_dit", False)
-                and backbone_output is not None
-            ):
-                model_output = denoising_model(
-                    hidden_states=sa_embs,
-                    encoder_hidden_states=vl_embs,
-                    timestep=timesteps_tensor,
-                    image_mask=backbone_output.image_mask,
-                    backbone_attention_mask=backbone_output.backbone_attention_mask,
-                )
-            else:
-                model_output = denoising_model(
-                    hidden_states=sa_embs,
-                    encoder_hidden_states=vl_embs,
-                    timestep=timesteps_tensor,
-                )
-        else:
-            model_output = sa_embs
+        sa_embs = self._prepend_register_tokens(
+            torch.cat((state_features, action_features), dim=1)
+        )
+        model_output = self._run_denoising_model(
+            sa_embs=sa_embs,
+            vl_embs=vl_embs,
+            timesteps_tensor=timesteps_tensor,
+            backbone_output=backbone_output,
+            ttt_context=ttt_context,
+        )
         model_output = model_output[:, -self.action_horizon :]
 
         action_decoder = self._get_component("action_decoder")
@@ -575,6 +709,7 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         action_input: BatchFeature,
         mode: Literal["train", "eval"] = "train",
         compute_values=True,
+        ttt_context: Optional[TTTContext] = None,
     ) -> BatchFeature:
         """Sample an action chunk via stochastic denoising (rollout path).
 
@@ -627,6 +762,13 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
             # Stochastic noise is injected only on the sampled denoising index;
             # all other steps follow the deterministic ("eval") transition.
             step_mode = "train" if idx == denoise_inds[0][idx] else "eval"
+            # Intermediate denoising iterations must read the incoming fast
+            # weights without advancing them: TTT steps once per timestep.
+            step_context = (
+                ttt_context
+                if (ttt_context is None or idx == num_steps - 1)
+                else ttt_context.branch()
+            )
             x_t_mean, x_t_std = self.sample_mean_var_val(
                 vl_embs=vl_embs,
                 idx=idx,
@@ -637,6 +779,7 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
                 denoise_steps=num_steps,
                 compute_values=compute_values,
                 backbone_output=backbone_output,
+                ttt_context=step_context,
             )
 
             x_t = (
@@ -675,6 +818,7 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         chains,
         denoise_inds,
         compute_values=True,
+        ttt_context: Optional[TTTContext] = None,
     ):
         """Recompute log-probabilities and values for cached denoising chains.
 
@@ -713,6 +857,11 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
             denoise_ind = denoise_inds[:, idx]
             chains_pre = chains[batch_indices, denoise_ind]
             chains_next = chains[batch_indices, denoise_ind + 1]
+            step_context = (
+                ttt_context
+                if (ttt_context is None or idx == num_steps - 1)
+                else ttt_context.branch()
+            )
             x_t_mean, x_t_std = self.sample_mean_var_val(
                 vl_embs=vl_embs,
                 idx=denoise_ind,
@@ -723,6 +872,7 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
                 denoise_steps=self.num_inference_timesteps,
                 compute_values=compute_values,
                 backbone_output=backbone_output,
+                ttt_context=step_context,
             )
             log_probs = self.get_logprob_norm(chains_next, x_t_mean, x_t_std)
             chains_log_probs.append(log_probs)
@@ -738,6 +888,107 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
 
         return chains_log_probs, chains_values
 
+    def sft_forward(
+        self,
+        backbone_output: BatchFeature,
+        action_input: BatchFeature,
+        ttt_context: Optional[TTTContext] = None,
+        loss_mask: Optional[torch.Tensor] = None,
+        num_timesteps: int = 1,
+    ) -> dict[str, torch.Tensor]:
+        """Sequence flow-matching loss with per-timestep action forcing.
+
+        Each row of the flattened ``[B * T]`` batch samples its own ``tau``
+        independently from ``s * (1 - Beta(alpha, beta))``. Sharing one tau
+        across a trajectory is the ablation the paper found diverges.
+        ``loss_mask`` of shape ``[B * T]`` or ``[B, T]`` zeros the imitation
+        target without stopping the TTT inner-loop update.
+
+        The returned scalar is the paper's
+        :math:`(1/T)\\sum_t \\ell_t` (batch-averaged): masked steps contribute
+        ``\\ell_t = 0`` but still occupy the ``T`` denominator.
+        """
+        self.set_frozen_modules_to_eval_mode()
+        backbone_output = self._process_backbone_output(backbone_output)
+        vl_embeds = backbone_output.backbone_features
+        embodiment_id = action_input.embodiment_id
+        state_features = self._encode_state_features(action_input, embodiment_id)
+
+        if self.training and getattr(self, "state_dropout_prob", 0) > 0:
+            do_dropout = (
+                torch.rand(state_features.shape[0], device=state_features.device)
+                < self.state_dropout_prob
+            )
+            do_dropout = do_dropout[:, None, None].to(dtype=state_features.dtype)
+            state_features = state_features * (1 - do_dropout)
+
+        actions = action_input.action
+        noise = torch.randn(actions.shape, device=actions.device, dtype=actions.dtype)
+        # Independent tau per flattened timestep: sequence action forcing.
+        t = self.sample_time(actions.shape[0], device=actions.device, dtype=actions.dtype)
+        t = t[:, None, None]
+        noisy_trajectory = (1 - t) * noise + t * actions
+        velocity = actions - noise
+
+        t_discretized = (t[:, 0, 0] * self.num_timestep_buckets).long()
+        action_encoder = self._get_component("action_encoder")
+        action_features = (
+            action_encoder(noisy_trajectory, t_discretized, embodiment_id)
+            if action_encoder is not None
+            else noisy_trajectory
+        )
+        position_embedding = self._get_component("position_embedding")
+        if (
+            getattr(self.config, "add_pos_embed", False)
+            and position_embedding is not None
+        ):
+            pos_ids = torch.arange(
+                action_features.shape[1], dtype=torch.long, device=actions.device
+            )
+            action_features = action_features + position_embedding(pos_ids).unsqueeze(0)
+
+        sa_embs = self._prepend_register_tokens(
+            torch.cat((state_features, action_features), dim=1)
+        )
+        model_output = self._run_denoising_model(
+            sa_embs=sa_embs,
+            vl_embs=vl_embeds,
+            timesteps_tensor=t_discretized,
+            backbone_output=backbone_output,
+            ttt_context=ttt_context,
+        )
+
+        action_decoder = self._get_component("action_decoder")
+        pred = (
+            action_decoder(model_output, embodiment_id)
+            if action_decoder is not None
+            else model_output
+        )
+        pred_actions = pred[:, -actions.shape[1] :]
+
+        action_mask = action_input.action_mask
+        action_loss = F.mse_loss(pred_actions, velocity, reduction="none") * action_mask
+        per_step = action_loss.sum(dim=(1, 2)) / (action_mask.sum(dim=(1, 2)) + 1e-6)
+        if loss_mask is not None:
+            step_mask = loss_mask.to(device=per_step.device, dtype=per_step.dtype)
+            if step_mask.ndim == 2:
+                step_mask = step_mask.reshape(-1)
+            per_step = per_step * step_mask.reshape(-1)
+        timesteps = max(1, int(num_timesteps))
+        if per_step.shape[0] % timesteps != 0:
+            raise ValueError(
+                f"Flattened batch {per_step.shape[0]} is not divisible by "
+                f"num_timesteps={timesteps}"
+            )
+        n_traj = per_step.shape[0] // timesteps
+        # Paper Eq. (4): (1/T) sum_t ell_t, then mean over the batch.
+        loss = per_step.sum() / (n_traj * timesteps)
+        return {
+            "loss": loss,
+            "action_loss": action_loss,
+            "action_mask": action_mask,
+        }
+
 
 class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
     """GR00T N1.7 model for reinforcement-learning action prediction."""
@@ -746,6 +997,10 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         "Qwen3VLTextDecoderLayer",
         "Qwen3VLVisionBlock",
         "BasicTransformerBlock",
+        # A TTT layer carries a recurrent state across its inner loop, so FSDP
+        # must keep it whole rather than shard its fast weights.
+        "TTTLinear",
+        "TTTMLP",
     ]
 
     def __init__(
@@ -823,6 +1078,14 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         ):
             self.action_head.num_inference_timesteps = denoising_steps
 
+        if self.action_head.ttt_enabled and self.action_head.rl_config.get(
+            "ttt", {}
+        ).get("train_ttt_only", False):
+            self.requires_grad_(False)
+            self.action_head.model.ttt.requires_grad_(True)
+            if self.action_head.num_register_tokens > 0:
+                self.action_head.register_tokens.requires_grad_(True)
+
         self.obs_converter_type = obs_converter_type
         self.obs_convert_fn = OBS_CONVERSION[obs_converter_type]
         self.action_convert_fn = ACTION_CONVERSION_N1D7[obs_converter_type]
@@ -843,6 +1106,8 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
             "Forced FSDP _no_split_modules into config: %s",
             self.config.no_split_modules,
         )
+        # Per-pipeline-stage TTT fast weights carried across rollout chunks.
+        self._ttt_rollout_states: dict[int, Optional[list]] = {}
 
     def _load_modality_processor(
         self,
@@ -917,8 +1182,11 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
         if forward_type == ForwardType.DEFAULT:
             return self.default_forward(**kwargs)
-        else:
-            raise NotImplementedError
+        if forward_type == ForwardType.SFT:
+            return self.sft_forward(**kwargs)
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement {forward_type}."
+        )
 
     def default_forward(
         self,
@@ -939,6 +1207,9 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         backbone_inputs, action_inputs = self.prepare_input(normalized_input)
         backbone_outputs = self.backbone(backbone_inputs)
 
+        num_timesteps = int(kwargs.get("num_timesteps", 1) or 1)
+        ttt_context = self.action_head.make_ttt_context(num_timesteps=num_timesteps)
+
         chains = forward_inputs["chains"]
         denoise_inds = forward_inputs["denoise_inds"]
         log_probs, value_t = self.action_head(
@@ -947,6 +1218,7 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
             chains=chains,
             denoise_inds=denoise_inds,
             compute_values=compute_values,
+            ttt_context=ttt_context,
         )
 
         log_probs = log_probs[
@@ -986,12 +1258,19 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         self,
         env_obs,
         mode: Literal["train", "eval"] = "train",
+        dones: Optional[torch.Tensor] = None,
+        stage_id: int = 0,
         **kwargs,
     ):
         """Rollout entry point: produce env-ready actions and RL bookkeeping."""
         del kwargs
         observations, obs_copy, is_batch = self._prepare_rollout_observation(env_obs)
-        normalized_action, result = self._predict_normalized_action(obs_copy, mode)
+        ttt_context = self._rollout_ttt_context(stage_id=stage_id, dones=dones)
+        normalized_action, result = self._predict_normalized_action(
+            obs_copy, mode, ttt_context=ttt_context
+        )
+        if ttt_context is not None:
+            self._ttt_rollout_states[int(stage_id)] = ttt_context.states
         unnormalized_action = self._get_unnormalized_action(
             normalized_action,
             state=observations,
@@ -1054,6 +1333,7 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         self,
         obs_copy: dict[str, Any],
         mode: Literal["train", "eval"],
+        ttt_context: Optional[TTTContext] = None,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         """Run the policy and return normalized actions plus RL bookkeeping."""
         normalized_input = self.apply_transforms(obs_copy)
@@ -1067,7 +1347,9 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         )
 
         if mode == "eval":
-            normalized_action = self._get_action_from_normalized_input(normalized_input)
+            normalized_action = self._get_action_from_normalized_input(
+                normalized_input, ttt_context=ttt_context
+            )
             result = {
                 "prev_logprobs": None,
                 "prev_values": None,
@@ -1077,6 +1359,7 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
             normalized_action, result = self._get_rl_action(
                 normalized_input,
                 mode=mode,
+                ttt_context=ttt_context,
             )
         return normalized_action, result
 
@@ -1102,6 +1385,153 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
     def apply_transforms(self, obs: dict) -> dict:
         """Tokenize/normalize a batched observation via the GR00T processor."""
         return self._modality_transform.process_observation(obs, self.embodiment_tag)
+
+    def _rollout_ttt_context(
+        self,
+        stage_id: int,
+        dones: Optional[torch.Tensor],
+    ) -> Optional[TTTContext]:
+        """Build the TTT context for one rollout chunk, resetting finished envs."""
+        if not self.action_head.ttt_enabled:
+            return None
+        reset_mask = None
+        if dones is not None:
+            reset_mask = dones.reshape(-1).to(dtype=torch.bool)
+        return self.action_head.make_ttt_context(
+            num_timesteps=1,
+            states=self._ttt_rollout_states.get(int(stage_id)),
+            reset_mask=reset_mask,
+            detach_states=True,
+        )
+
+    def sft_forward(
+        self,
+        data: dict[str, Any],
+        ttt_context: Optional[TTTContext] = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Sequence SFT: flow matching with optional TTT across timesteps."""
+        del kwargs
+        num_timesteps = int(data.get("num_timesteps", 1) or 1)
+        loss_mask = data.get("loss_mask")
+        if ttt_context is None:
+            ttt_context = self.action_head.make_ttt_context(num_timesteps=num_timesteps)
+        else:
+            # TBPTT windows can change length (short last segment). Folding
+            # uses this field, so it must match the current flattened batch.
+            ttt_context.num_timesteps = num_timesteps
+
+        normalized_input = _normalize_gr00t_forward_inputs(data)
+        normalized_input = _canonicalize_gr00t_text_forward_inputs(
+            normalized_input,
+            getattr(self, "padding_value", 0),
+        )
+        if "action" in data:
+            normalized_input["action"] = data["action"]
+        if "action_mask" in data:
+            normalized_input["action_mask"] = data["action_mask"]
+        if "embodiment_id" in data:
+            normalized_input["embodiment_id"] = data["embodiment_id"]
+
+        backbone_inputs, action_inputs = self.prepare_input(normalized_input)
+        backbone_outputs = self.backbone(backbone_inputs)
+        output = self.action_head.sft_forward(
+            backbone_output=backbone_outputs,
+            action_input=action_inputs,
+            ttt_context=ttt_context,
+            loss_mask=loss_mask,
+            num_timesteps=num_timesteps,
+        )
+        output["ttt_context"] = ttt_context
+        return output
+
+    def prepare_dagger_sft_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """Turn a replay-buffer sample into a GR00T SFT batch.
+
+        Failed robot steps stay in the sequence as TTT context; intervening
+        (human-corrected) steps are the only imitation targets, via
+        ``loss_mask = intervene_flags``.
+        """
+        device = next(self.parameters()).device
+        source = batch["forward_inputs"] if "forward_inputs" in batch else batch
+        prepared = _normalize_gr00t_forward_inputs(source)
+        if "action" in source:
+            prepared["action"] = source["action"]
+        elif "model_action" in source:
+            prepared["action"] = source["model_action"]
+        elif "action" in batch:
+            prepared["action"] = batch["action"]
+        elif "model_action" in batch:
+            prepared["action"] = batch["model_action"]
+
+        intervene = batch.get("intervene_flags", source.get("intervene_flags"))
+        if intervene is not None:
+            mask = intervene.to(device=device)
+            if mask.ndim > 1:
+                mask = mask.any(dim=-1)
+            prepared["loss_mask"] = mask.to(dtype=torch.float32)
+        elif "loss_mask" in batch:
+            prepared["loss_mask"] = batch["loss_mask"]
+
+        prepared["num_timesteps"] = int(
+            batch.get("num_timesteps", source.get("num_timesteps", 1)) or 1
+        )
+        for key, value in list(prepared.items()):
+            if torch.is_tensor(value):
+                prepared[key] = value.to(device)
+        return prepared
+
+    def prepare_lerobot_sft_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """Turn online-LeRobot DAgger frames into a GR00T SFT batch."""
+        device = next(self.parameters()).device
+        num_timesteps = int(batch.get("num_timesteps", 1) or 1)
+        state = batch.get("state")
+        actions = batch.get("actions")
+        batch_size = None
+        if torch.is_tensor(state) and state.ndim >= 3:
+            batch_size = int(state.shape[0])
+            num_timesteps = int(state.shape[1])
+        elif torch.is_tensor(actions) and actions.ndim >= 3:
+            batch_size = int(actions.shape[0])
+            num_timesteps = int(actions.shape[1])
+        elif torch.is_tensor(state):
+            batch_size = int(state.shape[0])
+        if num_timesteps > 1 and batch_size is not None:
+            batch = flatten_leading_bt(batch, batch_size, num_timesteps)
+
+        env_obs = {
+            "states": batch["state"],
+            "task_descriptions": batch.get(
+                "task", ["empty"] * int(batch["state"].shape[0])
+            ),
+        }
+        for key in ("image", "wrist_image", "extra_view_image"):
+            if key in batch:
+                env_obs[key] = batch[key]
+        observations = self.obs_convert_fn(env_obs)
+        is_batch = self._check_state_is_batched(observations)
+        if not is_batch:
+            observations = unsqueeze_dict_values(observations)
+        observations = self._coerce_observation_values_to_numpy(observations)
+        processed = self.apply_transforms(observations)
+        processed = _normalize_gr00t_forward_inputs(processed)
+
+        actions = batch["actions"]
+        if not torch.is_tensor(actions):
+            actions = torch.as_tensor(actions)
+        prepared = dict(processed)
+        prepared["action"] = actions
+        intervene = batch.get("intervene_flag", batch.get("intervene_flags"))
+        if intervene is not None:
+            mask = torch.as_tensor(intervene)
+            if mask.ndim > 1:
+                mask = mask.any(dim=-1)
+            prepared["loss_mask"] = mask.to(dtype=torch.float32)
+        prepared["num_timesteps"] = int(batch.get("num_timesteps", 1) or 1)
+        for key, value in list(prepared.items()):
+            if torch.is_tensor(value):
+                prepared[key] = value.to(device)
+        return prepared
 
     def unapply_transforms(
         self,
@@ -1135,6 +1565,7 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         self,
         normalized_input: dict[str, Any],
         mode: Literal["train", "eval"] = "train",
+        ttt_context: Optional[TTTContext] = None,
     ):
         """Sample an action and assemble the ``forward_inputs`` cached for the actor."""
         normalized_input = _normalize_gr00t_forward_inputs(normalized_input)
@@ -1142,7 +1573,10 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         backbone_inputs, action_inputs = self.prepare_input(normalized_input)
         backbone_outputs = self.backbone(backbone_inputs)
         action_head_outputs, rlinf_outputs = self.action_head.get_rl_action(
-            backbone_outputs, action_inputs, mode=mode
+            backbone_outputs,
+            action_inputs,
+            mode=mode,
+            ttt_context=ttt_context,
         )
         actions = rlinf_outputs["actions"]
         if hasattr(self, "validate_data"):
@@ -1181,7 +1615,9 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         return finalized
 
     def _get_action_from_normalized_input(
-        self, normalized_input: dict[str, Any]
+        self,
+        normalized_input: dict[str, Any],
+        ttt_context: Optional[TTTContext] = None,
     ) -> torch.Tensor:
         """Deterministic action prediction (eval path) without RL bookkeeping."""
         device_type = getattr(self.device, "type", "cpu")
@@ -1191,7 +1627,15 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
             else nullcontext()
         )
         with torch.inference_mode(), autocast_context:
-            model_pred = self.get_action(normalized_input)
+            if ttt_context is None or not self.action_head.ttt_enabled:
+                model_pred = self.get_action(normalized_input)
+            else:
+                # Eval still has to update fast weights along the episode, so
+                # go through the RL sampling path in deterministic mode.
+                model_pred, _ = self._get_rl_action(
+                    normalized_input, mode="eval", ttt_context=ttt_context
+                )
+                return model_pred.float()
 
         normalized_action = model_pred["action_pred"].float()
         return normalized_action

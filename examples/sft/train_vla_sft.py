@@ -28,6 +28,19 @@ from rlinf.workers.sft.fsdp_vla_sft_worker import FSDPVlaSftWorker
 mp.set_start_method("spawn", force=True)
 
 
+def _launch_sft_worker(cfg, cluster, actor_placement):
+    model_type = str(cfg.actor.model.model_type)
+    if model_type == "gr00t_n1d7":
+        from rlinf.workers.sft.fsdp_robottt_sft_worker import FSDPRoboTTTSftWorker
+
+        worker_cls = FSDPRoboTTTSftWorker
+    else:
+        worker_cls = FSDPVlaSftWorker
+    return worker_cls.create_group(cfg).launch(
+        cluster, name=cfg.actor.group_name, placement_strategy=actor_placement
+    )
+
+
 @hydra.main(
     version_base="1.1", config_path="config", config_name="maniskill_ppo_openvlaoft"
 )
@@ -42,9 +55,7 @@ def main(cfg) -> None:
     actor_placement = component_placement.get_strategy("actor")
 
     if cfg.actor.training_backend == "fsdp" or cfg.actor.training_backend == "fsdp2":
-        actor_group = FSDPVlaSftWorker.create_group(cfg).launch(
-            cluster, name=cfg.actor.group_name, placement_strategy=actor_placement
-        )
+        actor_group = _launch_sft_worker(cfg, cluster, actor_placement)
 
     else:
         raise ValueError(f"{cfg.actor.training_backend} backend is not supported yet")

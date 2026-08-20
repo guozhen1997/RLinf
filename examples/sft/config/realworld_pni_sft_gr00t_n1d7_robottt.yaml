@@ -1,0 +1,98 @@
+defaults:
+  - model/gr00t_n1d7@actor.model
+  - hybrid_engines/fsdp@actor.fsdp_config
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor: all
+
+runner:
+  task_type: sft
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "realworld_pni_sft_gr00t_n1d7_robottt"
+    logger_backends: ["tensorboard"]
+
+  max_epochs: -1
+  max_steps: 50000
+  val_check_interval: -1
+  save_interval: 2000
+  log_interval: 50
+  resume_dir: null
+
+data:
+  # Output of:
+  #   python toolkits/lerobot/convert_realworld_pni_to_gr00t.py convert \
+  #       --src /path/to/realworld-pni --dst /path/to/realworld-pni-gr00t
+  train_data_paths: /path/to/realworld-pni-gr00t
+  num_workers: 4
+  prefetch_factor: 2
+  video_backend: torchcodec
+  robottt:
+    num_timesteps: 16
+    human_video_path: null
+    human_video_timesteps: 0
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 1
+  global_batch_size: 8
+  seed: 42
+
+  model:
+    model_type: "gr00t_n1d7"
+    precision: bf16
+    # Prefer the official GR00T-N1.7 checkpoint (projector id 10 = new_embodiment),
+    # after running patch-processor so modality keys match this dataset.
+    # Do not reuse a LIBERO specialist checkpoint here (that one is libero_sim / id 2).
+    model_path: /path/to/GR00T-N1.7-realworld-pni
+    backbone_model_path: /path/to/Cosmos-Reason2-2B
+    embodiment_tag: new_embodiment
+    action_dim: 7
+    add_value_head: False
+    num_action_chunks: 16
+    denoising_steps: 4
+    tbptt_segment_length: 8
+    rl_head_config:
+      use_ttt: True
+      add_value_head: False
+      disable_dropout: True
+      ttt:
+        fast_model: mlp
+        num_register_tokens: 16
+        context_tokens: register
+        train_ttt_only: True
+        gate_init: 0.001
+        base_lr: 0.1
+
+  optim:
+    lr: 1.0e-4
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-08
+    weight_decay: 0.01
+    clip_grad: 1.0
+    lr_scheduler: cosine
+    lr_warmup_steps: 500
+    total_training_steps: 50000
+
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "full_shard"
+    use_orig_params: True
+    gradient_checkpointing: True
+    mixed_precision:
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}

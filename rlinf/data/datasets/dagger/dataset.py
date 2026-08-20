@@ -102,6 +102,11 @@ class RollingLeRobotDataset(Dataset):
             an in-memory Arrow store for training reads.
         fps: Dataset frame rate used when auto-generating ``delta_timestamps``.
             Defaults to ``10``.
+        chunk_all_data_keys: When ``True`` and ``chunk_size > 1``, every data
+            column (state, images, intervene flags, actions) is returned as a
+            ``[chunk_size, …]`` window.  Used by DAgger Distillation so TTT
+            sees a real observation sequence rather than a single frame plus
+            a chunked action horizon.
     """
 
     def __init__(
@@ -120,6 +125,7 @@ class RollingLeRobotDataset(Dataset):
         window_size: int | None = None,
         in_memory_mode: bool = False,
         fps: int = 10,
+        chunk_all_data_keys: bool = False,
     ) -> None:
         if not in_memory_mode:
             raise ValueError(
@@ -168,6 +174,7 @@ class RollingLeRobotDataset(Dataset):
         self._shard_cache_chunk_size: int = chunk_size
         self._shard_cache_fps: int = max(1, int(fps))
         self._shard_cache_action_keys: list[str] = list(action_sequence_keys or [])
+        self._shard_cache_chunk_all_data_keys: bool = bool(chunk_all_data_keys)
         # Hit/miss counters for the shard-level cache lookup in
         # _load_item_from_lerobot (shard found in RAM vs. fell back to disk).
         self._shard_cache_hits: int = 0
@@ -280,6 +287,7 @@ class RollingLeRobotDataset(Dataset):
             action_sequence_keys=self._shard_cache_action_keys,
             fps=self._shard_cache_fps,
             image_transforms=self.image_transforms,
+            chunk_all_data_keys=self._shard_cache_chunk_all_data_keys,
         )
 
     def append_episode_to_memory(self, path: str | Path, ep_frames: list[dict]) -> None:

@@ -710,6 +710,114 @@ class TrajectoryReplayBuffer:
 
         return batch if batch is not None else {}
 
+    def _index_select_flat(self, flat: dict, indices: torch.Tensor) -> dict:
+        """Gather rows ``indices`` from a flattened trajectory dict."""
+        selected: dict = {}
+        for key, value in flat.items():
+            if isinstance(value, torch.Tensor):
+                selected[key] = value.index_select(0, indices.to(device=value.device))
+            elif isinstance(value, dict):
+                selected[key] = self._index_select_flat(value, indices)
+            else:
+                selected[key] = value
+        return selected
+
+    def sample_sequences(
+        self, num_windows: int, num_timesteps: int
+    ) -> dict[str, torch.Tensor]:
+        """Sample contiguous per-env windows in batch-major ``[N * T, ...]`` order.
+
+        Replay trajectories are stored as ``[T, B, ...]`` and flattened
+        time-major (``index = t * B + b``). Each sampled window is one env's
+        consecutive timesteps, then windows are concatenated sample-major so
+        TTT sees row ``n * T + t`` as window ``n`` step ``t``.
+
+        The returned dict includes Python-int ``num_timesteps``, which the
+        caller must pop before ``split_dict_to_chunk``.
+        """
+        if num_windows <= 0:
+            raise ValueError(f"num_windows must be positive, got {num_windows}")
+        if num_timesteps <= 0:
+            raise ValueError(f"num_timesteps must be positive, got {num_timesteps}")
+        if self._total_samples == 0:
+            raise RuntimeError("Cannot sample sequences from an empty buffer.")
+
+        window_size = max(0, int(self.sample_window_size))
+        with self._index_lock:
+            if window_size > 0:
+                window_ids = list(self._trajectory_id_list[-window_size:])
+            else:
+                window_ids = list(self._trajectory_id_list)
+
+        eligible: list[tuple[int, int, int, str]] = []
+        for trajectory_id in window_ids:
+            info = self._trajectory_index[trajectory_id]
+            shape = info.get("shape")
+            if not shape or len(shape) < 2:
+                continue
+            time_size, env_size = int(shape[0]), int(shape[1])
+            if time_size >= num_timesteps and env_size > 0:
+                eligible.append(
+                    (
+                        trajectory_id,
+                        time_size,
+                        env_size,
+                        info["model_weights_id"],
+                    )
+                )
+        if not eligible:
+            raise RuntimeError(
+                "No trajectory in the replay buffer is long enough for "
+                f"DAgger Distillation windows of {num_timesteps} timesteps."
+            )
+
+        picks: list[tuple[int, int, int, int, int, str]] = []
+        for _ in range(num_windows):
+            choice = int(
+                torch.randint(
+                    0, len(eligible), (1,), generator=self.random_generator
+                ).item()
+            )
+            trajectory_id, time_size, env_size, weights_id = eligible[choice]
+            env_index = int(
+                torch.randint(
+                    0, env_size, (1,), generator=self.random_generator
+                ).item()
+            )
+            max_start = time_size - num_timesteps + 1
+            start = int(
+                torch.randint(
+                    0, max_start, (1,), generator=self.random_generator
+                ).item()
+            )
+            picks.append(
+                (trajectory_id, time_size, env_size, env_index, start, weights_id)
+            )
+
+        flats: dict[int, dict] = {}
+        for trajectory_id, _, _, _, _, weights_id in picks:
+            if trajectory_id in flats:
+                continue
+            cache = self._flat_trajectory_cache
+            flat = cache.get(trajectory_id) if cache is not None else None
+            if flat is None:
+                trajectory = self._load_trajectory(trajectory_id, weights_id)
+                flat = self._flatten_trajectory(trajectory)
+            flats[trajectory_id] = flat
+
+        window_flats = []
+        for trajectory_id, _, env_size, env_index, start, _ in picks:
+            # Time-major flatten of [T, B]: index(t, b) = t * B + b.
+            indices = (
+                torch.arange(num_timesteps, dtype=torch.long) * env_size
+                + (start * env_size + env_index)
+            )
+            window_flats.append(self._index_select_flat(flats[trajectory_id], indices))
+
+        batch = self._concat_flat_trajectories(window_flats)
+        batch["num_timesteps"] = num_timesteps
+        return batch
+
     def _flatten_trajectory(self, trajectory: Trajectory) -> dict:
         flat: dict[str, object] = {}
         tensor_fields = trajectory.__dataclass_fields__.keys()

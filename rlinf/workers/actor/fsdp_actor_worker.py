@@ -126,6 +126,32 @@ def process_nested_dict_for_train(nested_dict, shuffle_id):
     return ret_dict
 
 
+def process_nested_dict_for_ordered_train(nested_dict):
+    """Flatten ``[T, B, ...]`` to batch-major ``[B * T, ...]`` without shuffling.
+
+    TTT fast weights depend on each env's own history, so the time axis must
+    stay contiguous after the flatten: row ``b * T + t``.
+    """
+    ret_dict = {}
+    for key, value in nested_dict.items():
+        if key in ["dones", "terminations", "truncations", "prev_values"]:
+            value = value[:-1]
+        if "env_info" in key:
+            raise NotImplementedError
+        if value is None:
+            ret_dict[key] = None
+        elif isinstance(value, torch.Tensor):
+            time, batch = value.shape[0], value.shape[1]
+            ret_dict[key] = value.transpose(0, 1).reshape(
+                batch * time, *value.shape[2:]
+            )
+        elif isinstance(value, dict):
+            ret_dict[key] = process_nested_dict_for_ordered_train(value)
+        else:
+            ret_dict[key] = value
+    return ret_dict
+
+
 def trim_nested_tensor_time_dim(value, target_steps: int, key_path=()):
     if value is None:
         return None
@@ -1515,18 +1541,25 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 )
 
         self.model.train()
-        rollout_size = (
-            self.rollout_batch["prev_logprobs"].shape[0]
-            * self.rollout_batch["prev_logprobs"].shape[1]
-        )
-        g = torch.Generator()
-        g.manual_seed(self.cfg.actor.seed + self._rank)
-        shuffle_id = torch.randperm(rollout_size, generator=g)
-
-        with torch.no_grad():
-            self.rollout_batch = process_nested_dict_for_train(
-                self.rollout_batch, shuffle_id
-            )
+        time_size = self.rollout_batch["prev_logprobs"].shape[0]
+        env_size = self.rollout_batch["prev_logprobs"].shape[1]
+        shuffle_rollout = bool(self.cfg.algorithm.get("shuffle_rollout", True))
+        ordered_num_timesteps = 1
+        if shuffle_rollout:
+            rollout_size = time_size * env_size
+            g = torch.Generator()
+            g.manual_seed(self.cfg.actor.seed + self._rank)
+            shuffle_id = torch.randperm(rollout_size, generator=g)
+            with torch.no_grad():
+                self.rollout_batch = process_nested_dict_for_train(
+                    self.rollout_batch, shuffle_id
+                )
+        else:
+            ordered_num_timesteps = int(time_size)
+            with torch.no_grad():
+                self.rollout_batch = process_nested_dict_for_ordered_train(
+                    self.rollout_batch
+                )
 
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
@@ -1535,6 +1568,17 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         assert rollout_size % batch_size_per_rank == 0, (
             f"{rollout_size} is not divisible by {batch_size_per_rank}"
         )
+        if ordered_num_timesteps > 1:
+            assert batch_size_per_rank % ordered_num_timesteps == 0, (
+                "Ordered TTT PPO requires actor.global_batch_size / world_size "
+                f"({batch_size_per_rank}) to be divisible by the rollout length "
+                f"T={ordered_num_timesteps}."
+            )
+            assert self.cfg.actor.micro_batch_size % ordered_num_timesteps == 0, (
+                "Ordered TTT PPO requires actor.micro_batch_size "
+                f"({self.cfg.actor.micro_batch_size}) to be divisible by T="
+                f"{ordered_num_timesteps} so each micro-batch holds whole trajectories."
+            )
         metrics = {}
         update_epoch = self.cfg.algorithm.get("update_epoch", 1)
         for _ in range(update_epoch):
@@ -1565,6 +1609,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                         micro_batch=batch,
                         metrics=metrics,
                         is_last=(idx + 1) == self.gradient_accumulation,
+                        num_timesteps=ordered_num_timesteps,
                     )
                     # avoid gpu memory leak
                     train_micro_batch[idx] = None
@@ -1605,6 +1650,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         metrics: dict[str, list[float]],
         *,
         is_last: bool,
+        num_timesteps: int = 1,
     ) -> None:
         micro_batch = put_tensor_device(micro_batch, self.device)
         backward_ctx = self.before_micro_batch(self.model, is_last_micro_batch=is_last)
@@ -1630,6 +1676,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             SupportedModel.ABOT_M0,
         ]:
             kwargs["prev_logprobs"] = prev_logprobs
+            kwargs["num_timesteps"] = num_timesteps
 
         compute_values = self.cfg.algorithm.adv_type == "gae"
         with self.amp_context:

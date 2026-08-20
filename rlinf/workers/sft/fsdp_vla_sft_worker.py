@@ -70,6 +70,14 @@ class FSDPVlaSftWorker(FSDPSftWorker):
             return build_evo1_sft_dataloader(
                 self.cfg, self._world_size, self._rank, data_paths
             )
+        elif model_type == SupportedModel.GR00T_N1D7:
+            from rlinf.data.datasets.gr00t_n1d7 import (
+                build_gr00t_n1d7_sft_dataloader,
+            )
+
+            return build_gr00t_n1d7_sft_dataloader(
+                self.cfg, self._world_size, self._rank, data_paths, eval_dataset
+            )
         else:
             raise KeyError(
                 f"not support such model type {self.cfg.actor.model.model_type} for SFT right now."
