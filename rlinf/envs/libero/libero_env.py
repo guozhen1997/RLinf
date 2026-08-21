@@ -852,7 +852,6 @@ class LiberoEnv(gym.Env):
             self.current_raw_obs = [None] * self.num_envs
         for i, idx in enumerate(env_idx):
             self.current_raw_obs[idx] = raw_obs[i]
-        self._refresh_camera_cache(raw_obs, env_idx)
 
         obs = self._wrap_obs(self.current_raw_obs)
         self._reset_metrics(env_idx)
