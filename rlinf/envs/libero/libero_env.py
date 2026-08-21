@@ -967,9 +967,9 @@ class LiberoEnv(gym.Env):
                 extracted_obs, step_reward, terminations, truncations, infos = self.step(
                     actions, auto_reset=False, _skip_obs_wrap=not should_render
                 )
-                if self.skip_intermediate_renders:
-                    if not should_render:
-                        extracted_obs = None
+                # if self.skip_intermediate_renders:
+                #     if not should_render:
+                #         extracted_obs = None
                 obs_list.append(extracted_obs)
                 infos_list.append(infos)
 
