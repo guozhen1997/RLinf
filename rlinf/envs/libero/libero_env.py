@@ -35,7 +35,7 @@ from rlinf.envs.libero.utils import (
     quat2axisangle,
     record_completed_episode_task_stats,
 )
-from rlinf.envs.libero.venv import LIBERO_CAMERA_OBS_NAMES, ReconfigureSubprocEnv
+from rlinf.envs.libero.venv import ReconfigureSubprocEnv
 from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 from rlinf.utils.logging import get_logger
 
@@ -177,7 +177,6 @@ class LiberoEnv(gym.Env):
         self.video_cfg = cfg.video_cfg
         self.current_raw_obs = None
         self.skip_intermediate_renders = getattr(cfg, "skip_intermediate_renders", False)
-        # self._cached_camera_obs = [None] * self.num_envs
 
     def _log_evaluation_mode(self):
         """Log the LIBERO evaluation mode banner (rank 0 env worker only)."""
@@ -922,27 +921,6 @@ class LiberoEnv(gym.Env):
             infos,
         )
 
-    # def _get_camera_cache(self, obs):
-    #     return {name: np.array(obs[name], copy=True) for name in LIBERO_CAMERA_OBS_NAMES}
-
-    # def _refresh_camera_cache(self, obs_list, env_idx=None):
-    #     if env_idx is None:
-    #         env_idx = np.arange(self.num_envs)
-    #     for local_idx, global_idx in enumerate(env_idx):
-    #         self._cached_camera_obs[global_idx] = self._get_camera_cache(obs_list[local_idx])
-
-    # def _apply_cached_camera_obs(self, obs_list, env_idx=None):
-    #     if env_idx is None:
-    #         env_idx = np.arange(self.num_envs)
-    #     patched = []
-    #     for local_idx, global_idx in enumerate(env_idx):
-    #         obs = dict(obs_list[local_idx])
-    #         cached = self._cached_camera_obs[global_idx]
-    #         if cached is not None:
-    #             for name in LIBERO_CAMERA_OBS_NAMES:
-    #                 obs[name] = np.array(cached[name], copy=True)
-    #         patched.append(obs)
-    #     return patched
 
     def chunk_step(self, chunk_actions):
         # chunk_actions: [num_envs, chunk_step, action_dim]
@@ -966,9 +944,6 @@ class LiberoEnv(gym.Env):
                 extracted_obs, step_reward, terminations, truncations, infos = self.step(
                     actions, auto_reset=False, _skip_obs_wrap=not should_render
                 )
-                # if self.skip_intermediate_renders:
-                #     if not should_render:
-                #         extracted_obs = None
                 obs_list.append(extracted_obs)
                 infos_list.append(infos)
 

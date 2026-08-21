@@ -256,10 +256,6 @@ class ReconfigureSubprocEnvWorker(SubprocEnvWorker):
         self.parent_remote.send(["reconfigure", env_fn_param])
         return self.parent_remote.recv()
 
-    # def set_camera_rendering(self, enabled: bool):
-    #     self.parent_remote.send(["set_camera_rendering", enabled])
-    #     return self.parent_remote.recv()
-
 
 class ReconfigureSubprocEnv(SubprocVectorEnv):
     def __init__(self, env_fns: list[Callable[[], gym.Env]], **kwargs: Any) -> None:
