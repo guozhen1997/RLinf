@@ -256,9 +256,9 @@ class ReconfigureSubprocEnvWorker(SubprocEnvWorker):
         self.parent_remote.send(["reconfigure", env_fn_param])
         return self.parent_remote.recv()
 
-    def set_camera_rendering(self, enabled: bool):
-        self.parent_remote.send(["set_camera_rendering", enabled])
-        return self.parent_remote.recv()
+    # def set_camera_rendering(self, enabled: bool):
+    #     self.parent_remote.send(["set_camera_rendering", enabled])
+    #     return self.parent_remote.recv()
 
 
 class ReconfigureSubprocEnv(SubprocVectorEnv):
@@ -283,4 +283,6 @@ class ReconfigureSubprocEnv(SubprocVectorEnv):
         if self.is_async:
             self._assert_id(id)
         for i in id:
-            self.workers[i].set_camera_rendering(enabled)
+            self.workers[i].parent_remote.send(["set_camera_rendering", enabled])
+        for i in id:
+            self.workers[i].parent_remote.recv()
