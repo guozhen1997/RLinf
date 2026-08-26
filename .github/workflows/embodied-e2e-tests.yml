@@ -855,6 +855,7 @@ jobs:
           source .venv/bin/activate
           cd /workspace/dataset/ManiSkill-GS
           uv pip install -e .
+          uv pip install "protobuf>=6.33.5,<7"
           python scripts/test_rlinf_interface.py
 
       - name: ManiSkill-GS PPO Pi05 test
