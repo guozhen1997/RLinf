@@ -37,10 +37,13 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from rlinf.models.embodiment.gr00t.gr00t_n1d7.gr00t_action_model import (
     _batchify_gr00t_forward_input,
     _find_processor_dir,
+    redirect_qwen3_backbone_to_local,
 )
 from rlinf.utils.logging import get_logger
 
 logger = get_logger()
+
+_DEFAULT_BACKBONE_MODEL_NAME = "nvidia/Cosmos-Reason2-2B"
 
 _EMBODIMENT_TAG_BY_CFG = {
     "libero_sim": "libero_sim",
@@ -55,6 +58,15 @@ _EMBODIMENT_TAG_BY_CFG = {
     "so101": "new_embodiment",
     "so100": "new_embodiment",
 }
+
+
+def _resolve_backbone_model_path(backbone_model_path: Optional[str]) -> Optional[str]:
+    if backbone_model_path is None:
+        return None
+    resolved = str(Path(backbone_model_path).expanduser().resolve())
+    if not Path(resolved).is_dir():
+        raise FileNotFoundError(f"Backbone model path does not exist: {resolved}")
+    return resolved
 
 
 def _load_processor(model_path: str, backbone_model_path: Optional[str] = None):
@@ -72,10 +84,20 @@ def _load_processor(model_path: str, backbone_model_path: Optional[str] = None):
         processor_cfg["statistics"] = json.load(f)
     with open(processor_dir / "embodiment_id.json", "r") as f:
         processor_cfg["embodiment_id_mapping"] = json.load(f)
-    if backbone_model_path is not None:
+    resolved_backbone = _resolve_backbone_model_path(backbone_model_path)
+    if resolved_backbone is not None:
         processor_cfg.setdefault("transformers_loading_kwargs", {})
         processor_cfg["transformers_loading_kwargs"]["local_files_only"] = True
-    processor = Gr00tN1d7Processor(**processor_cfg)
+        logger.info(
+            "Loading processor backbone locally from %s (canonical model_name=%s)",
+            resolved_backbone,
+            processor_cfg.get("model_name", _DEFAULT_BACKBONE_MODEL_NAME),
+        )
+    canonical_name = str(
+        processor_cfg.get("model_name", _DEFAULT_BACKBONE_MODEL_NAME)
+    )
+    with redirect_qwen3_backbone_to_local(canonical_name, resolved_backbone):
+        processor = Gr00tN1d7Processor(**processor_cfg)
     processor.training = True
     return processor
 
@@ -188,8 +210,11 @@ class Gr00tN1d7SequenceDataset(Dataset):
         """``(episode_id, max_start, length)`` for episodes that fit a window."""
         index = []
         for episode_id, length in enumerate(loader.episode_lengths):
+            # Last step of the window is start+T-1 and still needs H action
+            # frames, so start <= length - H - T + 1. Zero is a legal single
+            # window at the start of the episode; negative means too short.
             max_start = int(length) - self.action_horizon - (num_timesteps - 1)
-            if max_start > 0:
+            if max_start >= 0:
                 index.append((episode_id, max_start, int(length)))
         return index
 
@@ -216,7 +241,7 @@ class Gr00tN1d7SequenceDataset(Dataset):
 
     def _sample_window(self, loader, index_row, num_timesteps: int, *, mask_loss: bool):
         episode_id, max_start, _ = index_row
-        start = int(self.rng.randint(0, max_start))
+        start = int(self.rng.randint(0, max_start + 1))
         episode_data = loader[episode_id]
         steps = [
             self._process_step(episode_data, start + t, mask_loss=mask_loss)
@@ -321,9 +346,12 @@ def build_gr00t_n1d7_sft_dataloader(
     model_cfg = cfg.actor.model
     data_cfg = cfg.data
     dataset_path = data_paths if isinstance(data_paths, str) else data_paths[0]
+    backbone_model_path = _resolve_backbone_model_path(
+        model_cfg.get("backbone_model_path", None)
+    )
     processor = _load_processor(
         str(model_cfg.model_path),
-        backbone_model_path=model_cfg.get("backbone_model_path", None),
+        backbone_model_path=backbone_model_path,
     )
     embodiment_tag = _resolve_embodiment_tag(str(model_cfg.embodiment_tag))
     robottt_cfg = data_cfg.get("robottt", {}) or {}
@@ -346,12 +374,15 @@ def build_gr00t_n1d7_sft_dataloader(
         shuffle=not eval_dataset,
         drop_last=not eval_dataset,
     )
-    collator = Gr00tN1d7SequenceCollator(
-        model_name=processor.model_name,
-        transformers_loading_kwargs=getattr(
-            processor, "transformers_loading_kwargs", {"trust_remote_code": True}
-        ),
-    )
+    with redirect_qwen3_backbone_to_local(
+        processor.model_name, backbone_model_path
+    ):
+        collator = Gr00tN1d7SequenceCollator(
+            model_name=processor.model_name,
+            transformers_loading_kwargs=getattr(
+                processor, "transformers_loading_kwargs", {"trust_remote_code": True}
+            ),
+        )
     data_loader = StatefulDataLoader(
         dataset,
         batch_size=int(cfg.actor.micro_batch_size),

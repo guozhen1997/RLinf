@@ -16,11 +16,12 @@ import pytest
 import torch
 
 from rlinf.models.embodiment.gr00t.gr00t_n1d7.ttt import (
+    TTTMLP,
     TTTConfig,
     TTTContext,
     TTTLinear,
-    TTTMLP,
     TTTTimeMixer,
+    _batched_fast_weight,
     build_ttt_layer,
 )
 
@@ -229,6 +230,20 @@ def test_mixer_is_a_noop_at_initialization():
     torch.testing.assert_close(output, hidden)
 
 
+def test_apply_layer_accepts_external_layer_and_gate():
+    mixer = _make_mixer()
+    hidden = _flat_batch(2, 3)
+    via_index = mixer.apply_layer(0, hidden.clone(), TTTContext(num_timesteps=3))
+    via_args = mixer.apply_layer(
+        0,
+        hidden.clone(),
+        TTTContext(num_timesteps=3),
+        layer=mixer.layers[0],
+        gate=mixer.gates[0],
+    )
+    torch.testing.assert_close(via_index, via_args)
+
+
 def test_mixer_keeps_trajectories_independent():
     """Batch-major folding must not let one trajectory read another's history."""
     mixer = _make_mixer()
@@ -339,3 +354,168 @@ def test_mixer_updates_num_timesteps_when_windows_change_length():
         context.states[0].seq_offset,
         offset_after_first + 2 * MIXER_TOKENS,
     )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="bf16 inner loop needs CUDA")
+def test_ttt_mlp_stays_finite_in_bf16_at_dit_width():
+    """GR00T N1.7 DiT is 1536-wide with 16 registers + state + action tokens."""
+    torch.manual_seed(0)
+    config = TTTConfig(
+        hidden_size=1536,
+        num_heads=32,
+        fast_model="mlp",
+        max_mini_batch_size=64,
+    )
+    layer = build_ttt_layer(config).cuda().to(dtype=torch.bfloat16)
+    tokens_per_step = 57
+    hidden = torch.randn(
+        2, 16 * tokens_per_step, 1536, device="cuda", dtype=torch.bfloat16
+    )
+    output, state = layer(hidden, tokens_per_step=tokens_per_step)
+    assert torch.isfinite(output.float()).all()
+    for param in state.params:
+        assert torch.isfinite(param.float()).all()
+
+
+def test_ttt_layer_snapshots_meta_parameters_on_cpu():
+    config = TTTConfig(hidden_size=16, num_heads=2, fast_model="mlp")
+    layer = build_ttt_layer(config)
+    meta = torch.empty(16, 16, device="meta")
+    q_snap = layer._snapshot_tensor("q_proj.weight", meta)
+    o_snap = layer._snapshot_tensor("o_proj.weight", meta)
+    assert q_snap.device.type == "cpu"
+    assert torch.isfinite(q_snap).all()
+    assert float(q_snap.abs().amax()) < 1.0
+    torch.testing.assert_close(o_snap, torch.zeros_like(o_snap))
+
+
+def test_ttt_layer_constructs_under_meta_device():
+    config = TTTConfig(hidden_size=16, num_heads=2, fast_model="mlp")
+    with torch.device("meta"):
+        layer = build_ttt_layer(config)
+    assert layer._init_snapshot
+    for name, snap in layer._init_snapshot.items():
+        assert snap.device.type == "cpu", name
+        assert torch.isfinite(snap).all(), name
+
+
+def test_ttt_layer_restores_corrupted_q_proj():
+    torch.manual_seed(0)
+    config = TTTConfig(hidden_size=16, num_heads=2, fast_model="mlp")
+    layer = build_ttt_layer(config)
+    with torch.no_grad():
+        layer.q_proj.weight.fill_(1.0e20)
+        layer.w1_init.fill_(1.0e20)
+        layer.o_proj.weight.fill_(1.0e20)
+    hidden = torch.randn(2, 8, 16)
+    output, _ = layer(hidden, tokens_per_step=4)
+    assert torch.isfinite(output).all()
+    assert float(layer.q_proj.weight.detach().abs().amax()) < 1.0
+    assert float(layer.w1_init.detach().abs().amax()) < 1.0
+    assert float(layer.o_proj.weight.detach().abs().amax()) < 1e-5
+
+
+def test_batched_fast_weight_keeps_grad_to_w0():
+    param = torch.randn(2, 3, 4, requires_grad=True)
+    out = _batched_fast_weight(param, 5)
+    assert out.shape == (5, 2, 3, 4)
+    out.sum().backward()
+    assert param.grad is not None
+
+
+def test_ttt_layer_zeros_nan_readout_when_restore_is_skipped():
+    """Inner-loop NaNs must not leak through zero o_proj (0 * NaN is NaN)."""
+    torch.manual_seed(0)
+    config = TTTConfig(hidden_size=16, num_heads=2, fast_model="mlp")
+    layer = build_ttt_layer(config)
+    layer._sane_checked = True
+    with torch.no_grad():
+        layer.w1_init.fill_(float("nan"))
+    hidden = torch.randn(2, 8, 16)
+    output, _ = layer(hidden, tokens_per_step=4)
+    assert torch.isfinite(output).all()
+    torch.testing.assert_close(output, torch.zeros_like(output))
+
+
+def test_ttt_layer_counts_fast_weight_reset():
+    """Non-finite inner-loop state is reset to W_0 and counted for logging."""
+    layer = _make_layer("mlp")
+    original = layer._mini_batch_step
+
+    def exploding(*args, **kwargs):
+        params, out = original(*args, **kwargs)
+        nan_params = tuple(torch.full_like(p, float("nan")) for p in params)
+        return nan_params, out
+
+    layer._mini_batch_step = exploding
+    output, state = layer(_inputs(1, 2), tokens_per_step=TOKENS_PER_STEP)
+    assert torch.isfinite(output).all()
+    for param in state.params:
+        assert torch.isfinite(param).all()
+    assert layer.fast_weight_resets == 1
+
+
+# --------------------------------------------------------------- RoboTTT SFT
+
+
+def _make_sample_time_head(noise_s: float = 0.999):
+    pytest.importorskip("gr00t")
+    from torch.distributions import Beta
+
+    from rlinf.models.embodiment.gr00t.gr00t_n1d7.gr00t_action_model import (
+        FlowMatchingActionHeadForRLActionPrediction,
+    )
+
+    head = FlowMatchingActionHeadForRLActionPrediction.__new__(
+        FlowMatchingActionHeadForRLActionPrediction
+    )
+    head.beta_dist = Beta(
+        torch.tensor(1.5, dtype=torch.float32),
+        torch.tensor(1.0, dtype=torch.float32),
+    )
+    head.config = type("Cfg", (), {"noise_s": noise_s})()
+    return head
+
+
+def test_sample_time_matches_groot_n1d7_schedule():
+    """RoboTTT Eq. (5) / GR00T N1.7: tau = s * (1 - Beta(1.5, 1))."""
+    head = _make_sample_time_head(noise_s=0.999)
+    torch.manual_seed(0)
+    expected = (1.0 - head.beta_dist.sample((16,))) * 0.999
+    torch.manual_seed(0)
+    tau = head.sample_time(16, torch.device("cpu"), torch.float32)
+    torch.testing.assert_close(tau, expected)
+    assert float(tau.max()) <= 0.999 + 1e-6
+    assert float(tau.min()) >= 0.0
+
+
+def test_register_tokens_keep_loaded_checkpoint_values():
+    pytest.importorskip("gr00t")
+    from rlinf.models.embodiment.gr00t.gr00t_n1d7.gr00t_action_model import (
+        RoboTTTRegisterTokens,
+    )
+
+    torch.manual_seed(1)
+    bank = RoboTTTRegisterTokens(4, 8)
+    trained = torch.randn(4, 8)
+    with torch.no_grad():
+        bank.tokens.copy_(trained)
+
+    out = bank(torch.zeros(2, 1, 8))
+    torch.testing.assert_close(bank.tokens.detach(), trained)
+    torch.testing.assert_close(out[0], trained.to(out.dtype))
+    torch.testing.assert_close(out[1], trained.to(out.dtype))
+
+
+def test_register_tokens_restore_uninitialized_storage():
+    pytest.importorskip("gr00t")
+    from rlinf.models.embodiment.gr00t.gr00t_n1d7.gr00t_action_model import (
+        RoboTTTRegisterTokens,
+    )
+
+    bank = RoboTTTRegisterTokens(4, 8)
+    with torch.no_grad():
+        bank.tokens.fill_(1.0e20)
+    bank(torch.zeros(2, 1, 8))
+    assert torch.isfinite(bank.tokens).all()
+    assert float(bank.tokens.detach().abs().amax()) < 1.0

@@ -297,6 +297,14 @@ class FSDPModelManager:
         # persist buffers' names are also recorded, which will be used for weight syncing.
         self.param_names_need_sync = collect_param_names_need_sync(module)
 
+        # HuggingFace leaves missing TTT keys as uninitialized CUDA storage.
+        # Restore from CPU snapshots before FSDP wrap: inplace copy_ during
+        # FSDP forward hits all-gathered views and breaks autograd.
+        for submodule in module.modules():
+            restore = getattr(submodule, "restore_uninitialized_params_", None)
+            if callable(restore):
+                restore()
+
         # build model, optimizer, lr_scheduler, grad_scaler
         self.model = self._strategy.wrap_model(
             model=module, device_mesh=self._device_mesh

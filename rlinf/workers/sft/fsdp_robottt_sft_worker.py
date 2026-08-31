@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
 
 import torch
 
@@ -27,6 +27,60 @@ from rlinf.models.embodiment.gr00t.gr00t_n1d7.sequence_utils import (
     slice_batch_major,
 )
 from rlinf.workers.sft.fsdp_vla_sft_worker import FSDPVlaSftWorker
+
+_SKIP_OUTPUT_KEYS = {"loss", "ttt_context", "action_loss", "action_mask"}
+_SUM_METRIC_KEYS = {"ttt_fast_weight_reset"}
+
+
+def _scalar_metric(value: Any) -> Optional[float]:
+    if torch.is_tensor(value) and value.numel() == 1:
+        return float(value.detach().item())
+    if isinstance(value, (float, int, bool)):
+        return float(value)
+    return None
+
+
+def _collect_output_metrics(output: Any) -> dict[str, float]:
+    if not isinstance(output, dict):
+        return {}
+    metrics: dict[str, float] = {}
+    for key, value in output.items():
+        if key in _SKIP_OUTPUT_KEYS:
+            continue
+        scalar = _scalar_metric(value)
+        if scalar is not None:
+            metrics[key] = scalar
+    return metrics
+
+
+def reduce_tbptt_metrics(
+    per_segment: list[dict[str, float]],
+    segment_losses: list[float],
+    bounds: list[tuple[int, int]],
+    num_timesteps: int,
+) -> dict[str, float]:
+    """Collapse per-window SFT stats into one training-step record.
+
+    ``loss`` is the length-weighted trajectory objective.
+    """
+    metrics: dict[str, float] = {}
+    if per_segment:
+        keys = set().union(*per_segment)
+        for key in keys:
+            values = [row[key] for row in per_segment if key in row]
+            if not values:
+                continue
+            if key in _SUM_METRIC_KEYS:
+                metrics[key] = sum(values)
+            else:
+                metrics[key] = sum(values) / len(values)
+
+    weights = [(end - start) / float(num_timesteps) for start, end in bounds]
+    metrics["loss"] = sum(
+        loss_i * weight for loss_i, weight in zip(segment_losses, weights)
+    )
+    metrics["tbptt_segments"] = float(len(bounds))
+    return metrics
 
 
 class FSDPRoboTTTSftWorker(FSDPVlaSftWorker):
@@ -80,7 +134,8 @@ class FSDPRoboTTTSftWorker(FSDPVlaSftWorker):
 
         ttt_context = None
         last_loss = None
-        metrics: dict[str, Any] = {}
+        segment_losses: list[float] = []
+        per_segment: list[dict[str, float]] = []
         for index, (start, end) in enumerate(bounds):
             window = end - start
             segment = slice_batch_major(batch, start, end, num_timesteps)
@@ -98,13 +153,8 @@ class FSDPRoboTTTSftWorker(FSDPVlaSftWorker):
             else:
                 loss = output["loss"]
                 ttt_context = output.get("ttt_context", ttt_context)
-                for key, value in output.items():
-                    if key in {"loss", "ttt_context", "action_loss", "action_mask"}:
-                        continue
-                    if torch.is_tensor(value) and value.numel() == 1:
-                        metrics[key] = value.detach().item()
-                    elif isinstance(value, (float, int)):
-                        metrics[key] = value
+            per_segment.append(_collect_output_metrics(output))
+            segment_losses.append(float(loss.detach().item()))
 
             # Segment ``loss`` is already (1/window) sum_{t in seg} ell_t.
             # Weight by window/T so the sum of segment contributions is
@@ -118,6 +168,7 @@ class FSDPRoboTTTSftWorker(FSDPVlaSftWorker):
                     self.grad_scaler.scale(scaled).backward()
 
         assert last_loss is not None
-        metrics["loss"] = last_loss.detach().item()
-        metrics["tbptt_segments"] = len(bounds)
+        metrics = reduce_tbptt_metrics(
+            per_segment, segment_losses, bounds, num_timesteps
+        )
         return last_loss, metrics

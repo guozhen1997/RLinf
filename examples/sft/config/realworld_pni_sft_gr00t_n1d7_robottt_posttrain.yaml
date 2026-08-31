@@ -34,15 +34,15 @@ data:
   # Output of:
   #   python toolkits/lerobot/convert_realworld_pni_to_gr00t.py convert \
   #       --src /path/to/realworld-pni --dst /path/to/realworld-pni-gr00t
-  train_data_paths: /path/to/realworld-pni-gr00t
+  train_data_paths: /mnt/public/guozhen/dev_robottt/franka-pni-gr00t
   num_workers: 4
   prefetch_factor: 2
   video_backend: torchcodec
   robottt:
     # Paper post-train uses 1K timesteps. realworld-pni episodes are
-    # 163–563 frames (mean 247 @ 30 Hz); windows need
-    # length > action_horizon + T - 1 (H=16), so T=1000 yields an empty
-    # index. 128 keeps all 260 episodes (~4.3 s). 147 is the hard max
+    # 163–563 frames (mean 247 @ 30 Hz); a window fits when
+    # length >= action_horizon + T - 1 (H=16), so T=1000 yields an empty
+    # index. 128 keeps all 260 episodes (~4.3 s). 148 is the hard max
     # that still uses every episode; 192 drops the shortest ~20%.
     num_timesteps: 128
     human_video_path: null
@@ -52,8 +52,8 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   # Paper post-train: per-device 1, 8 GPU → global 8.
-  micro_batch_size: 1
-  global_batch_size: 8
+  micro_batch_size: 2
+  global_batch_size: 16
   seed: 42
 
   model:
@@ -61,8 +61,8 @@ actor:
     precision: bf16
     # Official GR00T-N1.7 after patch-processor (new_embodiment / id 10).
     # There is no RoboTTT-8K checkpoint to start from; TTT layers init here.
-    model_path: /path/to/GR00T-N1.7-realworld-pni
-    backbone_model_path: /path/to/Cosmos-Reason2-2B
+    model_path: /mnt/public/guozhen/dev_robottt/GR00T-N1.7-realworld-pni
+    backbone_model_path: /mnt/public/guozhen/models/Cosmos-Reason2-2B
     embodiment_tag: new_embodiment
     action_dim: 7
     add_value_head: False
@@ -100,6 +100,6 @@ actor:
     use_orig_params: True
     gradient_checkpointing: True
     mixed_precision:
-      param_dtype: ${actor.model.precision}
-      reduce_dtype: ${actor.model.precision}
-      buffer_dtype: ${actor.model.precision}
+      param_dtype: bf16
+      reduce_dtype: fp32
+      buffer_dtype: fp32

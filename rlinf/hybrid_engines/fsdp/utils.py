@@ -68,6 +68,19 @@ def create_device_mesh(world_size):
     )
 
 
+def collect_fsdp_ignore_modules(module: torch.nn.Module) -> list:
+    """Modules tagged ``_fsdp_ignore`` stay replicated (not flattened/sharded)."""
+    return [m for m in module.modules() if getattr(m, "_fsdp_ignore", False)]
+
+
+def collect_fsdp_ignore_params(module: torch.nn.Module) -> set:
+    """Parameters belonging to ``_fsdp_ignore`` modules."""
+    params: set = set()
+    for ignored in collect_fsdp_ignore_modules(module):
+        params.update(ignored.parameters())
+    return params
+
+
 def init_fn(x: torch.nn.Module):
     if not torch.distributed.get_rank() == 0:
         x = x.to_empty(device=Worker.torch_platform.current_device(), recurse=False)
@@ -100,13 +113,39 @@ def _normalize_wrap_targets(value):
     return [value]
 
 
+def _filter_present_wrap_class_names(module, class_names):
+    """Keep wrap-target names that actually appear in ``module``.
+
+    ``_no_split_modules`` often lists mutually exclusive variants (e.g.
+    ``TTTLinear`` vs ``TTTMLP``). HuggingFace's lookup raises if *any* name is
+    missing, so drop the absent ones instead of failing FSDP init.
+    """
+    present = []
+    missing = []
+    for class_name in _normalize_wrap_targets(class_names) or []:
+        if get_module_class_from_name(module, class_name) is None:
+            missing.append(class_name)
+        else:
+            present.append(class_name)
+    if missing:
+        warnings.warn(
+            "Skipping FSDP wrap targets not present in the model: "
+            + ", ".join(missing),
+            stacklevel=2,
+        )
+    return present
+
+
 def _resolve_module_classes_to_wrap(module, module_classes_to_wrap):
     resolved_module_classes = set()
     for module_class in _normalize_wrap_targets(module_classes_to_wrap) or []:
         if isinstance(module_class, str):
             resolved_class = get_module_class_from_name(module, module_class)
             if resolved_class is None:
-                raise Exception("Could not find the module class to wrap in the model.")
+                raise Exception(
+                    "Could not find the module class to wrap in the model: "
+                    f"{module_class}."
+                )
             resolved_module_classes.add(resolved_class)
         else:
             raise TypeError(
@@ -207,6 +246,12 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
         module_classes_to_wrap = None
         no_split_names = getattr(module, "_no_split_names", None)
 
+    fsdp_transformer_layer_cls_to_wrap = _filter_present_wrap_class_names(
+        module, fsdp_transformer_layer_cls_to_wrap
+    )
+    if not fsdp_transformer_layer_cls_to_wrap:
+        fsdp_transformer_layer_cls_to_wrap = None
+
     # Build policies list
     policies = []
 
@@ -304,7 +349,8 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
             transformer_cls = get_module_class_from_name(module, layer_class)
             if transformer_cls is None:
                 raise Exception(
-                    "Could not find the transformer layer class to wrap in the model."
+                    "Could not find the transformer layer class to wrap in "
+                    f"the model: {layer_class}."
                 )
             else:
                 transformer_cls_to_wrap.add(transformer_cls)
@@ -438,6 +484,8 @@ def apply_fsdp2_to_model(
     modules_to_shard = []
 
     for name, submodule in module.named_modules():
+        if getattr(submodule, "_fsdp_ignore", False):
+            continue
         if (
             submodule.__class__.__name__ in transformer_cls_names
             or (custom_module_classes and isinstance(submodule, custom_module_classes))
@@ -475,7 +523,9 @@ def apply_fsdp2_to_model(
         ignored_params = _collect_ignored_params_for_fsdp2(
             module, ignored_module_classes
         )
-        root_kwargs["ignored_params"] = ignored_params
+        ignored_params |= collect_fsdp_ignore_params(module)
+        if ignored_params:
+            root_kwargs["ignored_params"] = ignored_params
     elif (
         "ignored_module_classes" in config
         or "ignored_module_classes" in wrap_policy_config

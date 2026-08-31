@@ -30,6 +30,7 @@ from rlinf.hybrid_engines.fsdp import FSDP, CPUOffload
 from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
 from rlinf.hybrid_engines.fsdp.utils import (
     FSDPVersion,
+    collect_fsdp_ignore_modules,
     get_backward_prefetch_strategy,
     get_fsdp_wrap_policy,
     get_grad_norm_for_mixed_precision,
@@ -37,7 +38,10 @@ from rlinf.hybrid_engines.fsdp.utils import (
     init_fn,
 )
 from rlinf.scheduler import Worker
+from rlinf.utils.logging import get_logger
 from rlinf.utils.utils import clear_memory
+
+logger = get_logger()
 
 
 class FSDPStrategy(FSDPStrategyBase):
@@ -170,6 +174,14 @@ class FSDPStrategy(FSDPStrategyBase):
 
         cpu_offload = CPUOffload(offload_params=self.cfg.fsdp_config.cpu_offload)
 
+        ignored_modules = collect_fsdp_ignore_modules(model)
+        if ignored_modules:
+            n_params = sum(p.numel() for m in ignored_modules for p in m.parameters())
+            logger.info(
+                "FSDP ignored_modules=%s (%d params, replicated)",
+                [type(m).__name__ for m in ignored_modules],
+                n_params,
+            )
         fsdp_model = FSDP(
             module=model,
             param_init_fn=init_fn,
@@ -184,6 +196,7 @@ class FSDPStrategy(FSDPStrategyBase):
             limit_all_gathers=self.cfg.fsdp_config.limit_all_gathers,
             use_orig_params=self.cfg.fsdp_config.use_orig_params,
             cpu_offload=cpu_offload,
+            ignored_modules=ignored_modules or None,
         )
         return fsdp_model
 

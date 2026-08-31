@@ -41,6 +41,10 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from rlinf.utils.logging import get_logger
+
+logger = get_logger()
+
 
 @dataclass
 class TTTConfig:
@@ -245,6 +249,15 @@ def _apply_rope(
     return x * cos + _rotate_half(x) * sin
 
 
+def _batched_fast_weight(param: torch.Tensor, batch_size: int) -> torch.Tensor:
+    """Independent ``[B, ...]`` copy of ``W_0`` that is safe after FSDP unshard.
+
+    ``unsqueeze().expand().clone()`` on an FSDP all-gathered view whose storage
+    was just ``copy_``'d raises ViewBackward. ``repeat`` allocates new storage.
+    """
+    return param.repeat((batch_size,) + (1,) * param.ndim)
+
+
 class TTTLayer(nn.Module):
     """Base class for TTT layers; subclasses define the fast model."""
 
@@ -281,6 +294,17 @@ class TTTLayer(nn.Module):
 
         self._init_fast_weights()
         self._reset_projections()
+        # CPU copy of construction init. HuggingFace ``from_pretrained``
+        # (``low_cpu_mem_usage``) builds the module on the meta device, so we
+        # must not ``.cpu()`` parameter storage here. Missing checkpoint keys
+        # later land as uninitialized CUDA (~1e24–1e38 / NaN) and are restored
+        # in-place on the first real forward after FSDP all-gather.
+        self._init_snapshot = {
+            name: self._snapshot_tensor(name, param)
+            for name, param in self.named_parameters()
+        }
+        self._sane_checked = False
+        self.fast_weight_resets = 0
 
     # ---------------------------------------------------------------- fast model
 
@@ -323,6 +347,77 @@ class TTTLayer(nn.Module):
         nn.init.zeros_(self.o_proj.weight)
         nn.init.normal_(self.ttt_lr_proj.weight, std=0.02)
         nn.init.zeros_(self.ttt_lr_proj.bias)
+
+    def _synthesized_init(self, name: str, shape: torch.Size) -> torch.Tensor:
+        """CPU init that matches construction, used when params live on meta."""
+        cpu = torch.device("cpu")
+        if (
+            name.endswith("o_proj.weight")
+            or name.endswith("ttt_lr_proj.bias")
+            or name.endswith("post_norm.bias")
+            or name in {"token_idx_bias", "ttt_norm_bias", "b1_init", "b2_init"}
+        ):
+            return torch.zeros(shape, dtype=torch.float32, device=cpu)
+        if name.endswith("post_norm.weight") or name == "ttt_norm_weight":
+            return torch.ones(shape, dtype=torch.float32, device=cpu)
+        if name in {"w1_init", "w2_init"}:
+            return torch.randn(shape, dtype=torch.float32, device=cpu) * (
+                self.config.fast_weight_init_std
+            )
+        return torch.randn(shape, dtype=torch.float32, device=cpu) * 0.02
+
+    def _snapshot_tensor(self, name: str, param: torch.Tensor) -> torch.Tensor:
+        if param.device.type == "meta":
+            return self._synthesized_init(name, param.shape)
+        return param.detach().cpu().float().clone()
+
+    def restore_uninitialized_params_(self) -> None:
+        """Copy construction init over HF-uninitialized CUDA storage.
+
+        Must run *before* FSDP wrap. Inplace ``copy_`` on FSDP all-gathered
+        views is rejected by autograd (the subsequent ``unsqueeze`` of
+        ``w1_init`` in ``_initial_params`` raises ViewBackward).
+        """
+        if self._sane_checked:
+            return
+        snapshot = getattr(self, "_init_snapshot", None)
+        if not snapshot:
+            self._sane_checked = True
+            return
+
+        named = dict(self.named_parameters())
+        bad: list[tuple[str, float]] = []
+        for name, snap in snapshot.items():
+            param = named.get(name)
+            if param is None or param.device.type == "meta":
+                return
+            if param._is_view():
+                # FSDP all-gathered orig params are views of the flat tensor.
+                # Inplace copy_ here makes _initial_params' batch expand illegal.
+                self._sane_checked = True
+                return
+            if tuple(param.shape) != tuple(snap.shape):
+                return
+            current = param.detach().float()
+            abs_max = float(current.abs().amax()) if current.numel() else 0.0
+            if not bool(torch.isfinite(current).all()) or abs_max > 10.0:
+                bad.append((name, abs_max))
+
+        self._sane_checked = True
+        if not bad:
+            return
+        logger.warning(
+            "TTT layer weights corrupted %s; restoring construction init.",
+            bad[:8],
+        )
+        with torch.no_grad():
+            for name, snap in snapshot.items():
+                param = named[name]
+                param.copy_(snap.to(device=param.device, dtype=param.dtype))
+
+    def _ensure_sane_weights(self) -> None:
+        """Restore only when the Parameter is a real tensor, not an FSDP view."""
+        self.restore_uninitialized_params_()
 
     # -------------------------------------------------------------------- state
 
@@ -428,6 +523,7 @@ class TTTLayer(nn.Module):
         batch_size, seq_len, _ = hidden_states.shape
         input_dtype = hidden_states.dtype
         device = hidden_states.device
+        self._ensure_sane_weights()
 
         state = self.reset_state(state, reset_mask, batch_size)
         inner_dtype = self._inner_dtype(input_dtype)
@@ -485,6 +581,18 @@ class TTTLayer(nn.Module):
             )
             outputs.append(out)
 
+        if not all(torch.isfinite(p).all() for p in params):
+            self.fast_weight_resets += 1
+            logger.warning(
+                "TTT inner loop produced non-finite fast weights; "
+                "resetting to W_0 so the rest of this sequence does not "
+                "carry a poisoned recurrent state."
+            )
+            params = tuple(
+                p.to(device=device, dtype=inner_dtype)
+                for p in self._initial_params(batch_size)
+            )
+
         # [B, H, L, head_dim] -> [B, L, D]
         readout = torch.cat(outputs, dim=2)
         readout = (
@@ -492,7 +600,14 @@ class TTTLayer(nn.Module):
             .reshape(batch_size, seq_len, self.config.hidden_size)
             .to(input_dtype)
         )
+        # Zero o_proj is a no-op only if readout is finite; 0 * NaN is NaN.
+        readout = torch.where(
+            torch.isfinite(readout), readout, torch.zeros_like(readout)
+        )
         output = self.o_proj(self.post_norm(readout))
+        output = torch.where(
+            torch.isfinite(output), output, torch.zeros_like(output)
+        )
 
         offset = _seq_offset_to_tensor(
             state.seq_offset, batch_size, device=device
@@ -525,9 +640,9 @@ class TTTLinear(TTTLayer):
         self.b1_init = nn.Parameter(torch.zeros(self.num_heads, 1, self.head_dim))
 
     def _initial_params(self, batch_size: int) -> tuple[torch.Tensor, ...]:
-        return (
-            self.w1_init.unsqueeze(0).expand(batch_size, -1, -1, -1),
-            self.b1_init.unsqueeze(0).expand(batch_size, -1, -1, -1),
+        return tuple(
+            _batched_fast_weight(param, batch_size)
+            for param in (self.w1_init, self.b1_init)
         )
 
     def _mini_batch_step(self, params, xq, xk, xv, eta, ln_weight, ln_bias):
@@ -568,7 +683,7 @@ class TTTMLP(TTTLayer):
 
     def _initial_params(self, batch_size: int) -> tuple[torch.Tensor, ...]:
         return tuple(
-            param.unsqueeze(0).expand(batch_size, -1, -1, -1)
+            _batched_fast_weight(param, batch_size)
             for param in (self.w1_init, self.b1_init, self.w2_init, self.b2_init)
         )
 
@@ -682,26 +797,29 @@ class TTTTimeMixer(nn.Module):
     def __init__(self, config: TTTConfig, num_layers: int):
         super().__init__()
         self.config = config
+        self.num_layers = int(num_layers)
         self.layers = nn.ModuleList(
-            [build_ttt_layer(config) for _ in range(num_layers)]
+            [build_ttt_layer(config) for _ in range(self.num_layers)]
         )
         # Per-channel tanh gate, initialized near zero so the TTT branch starts
         # as a no-op and a pretrained backbone is reproduced exactly.
         self.gates = nn.ParameterList(
             [
                 nn.Parameter(torch.full((config.hidden_size,), config.gate_init))
-                for _ in range(num_layers)
+                for _ in range(self.num_layers)
             ]
         )
 
     def __len__(self) -> int:
-        return len(self.layers)
+        return self.num_layers
 
     def apply_layer(
         self,
         layer_index: int,
         hidden_states: torch.Tensor,
         context: Optional[TTTContext],
+        layer: Optional[nn.Module] = None,
+        gate: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Fold to time-major, run one TTT layer, add the gated result back.
 
@@ -724,6 +842,9 @@ class TTTTimeMixer(nn.Module):
             )
         batch_size = flat_batch // num_timesteps
 
+        ttt_layer = self.layers[layer_index] if layer is None else layer
+        ttt_gate = self.gates[layer_index] if gate is None else gate
+
         per_step = hidden_states.reshape(
             batch_size, num_timesteps, tokens_per_step, dim
         )
@@ -739,7 +860,7 @@ class TTTTimeMixer(nn.Module):
         if context is not None and context.states is not None:
             state = context.states[layer_index]
 
-        ttt_output, new_state = self.layers[layer_index](
+        ttt_output, new_state = ttt_layer(
             selected.reshape(batch_size, num_timesteps * num_selected, dim),
             state=state,
             reset_mask=None if context is None else context.reset_mask,
@@ -748,13 +869,19 @@ class TTTTimeMixer(nn.Module):
 
         if context is not None:
             if context.states is None:
-                context.states = [None] * len(self.layers)
+                context.states = [None] * self.num_layers
             context.states[layer_index] = (
                 new_state.detach() if context.detach_states else new_state
             )
 
-        gate = torch.tanh(self.gates[layer_index]).to(ttt_output.dtype)
-        gated = (gate * ttt_output).reshape(
+        gate_value = torch.tanh(ttt_gate).to(ttt_output.dtype)
+        gate_value = torch.where(
+            torch.isfinite(gate_value), gate_value, torch.zeros_like(gate_value)
+        )
+        ttt_output = torch.where(
+            torch.isfinite(ttt_output), ttt_output, torch.zeros_like(ttt_output)
+        )
+        gated = (gate_value * ttt_output).reshape(
             batch_size, num_timesteps, num_selected, dim
         )
 

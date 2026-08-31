@@ -113,3 +113,37 @@ def test_custom_model_registration_with_fsdp_wrap_policy():
     assert wrap_policy is not None
     assert wrap_policy(module=model.block, recurse=False, nonwrapped_numel=0)
     assert wrap_policy(module=model.head, recurse=False, nonwrapped_numel=0)
+
+
+def test_fsdp_wrap_policy_skips_missing_transformer_cls():
+    """Optional wrap targets (e.g. TTTLinear vs TTTMLP) must not abort FSDP init."""
+    model_type = f"custom_model_fsdp_skip_{int(time.time() * 1000)}"
+
+    def _builder(cfg, torch_dtype):
+        return _DummyFSDPModel()
+
+    register_model(model_type, _builder, category="embodied")
+    model = get_model(
+        OmegaConf.create(
+            {"model_type": model_type, "precision": "fp32", "is_lora": False}
+        )
+    )
+    fsdp_cfg = OmegaConf.create(
+        {
+            "wrap_policy": {
+                "transformer_layer_cls_to_wrap": ["_DummyBlock", "_MissingBlock"],
+            },
+            "use_orig_params": True,
+        }
+    )
+
+    wrap_policy = get_fsdp_wrap_policy(
+        module=model,
+        config=fsdp_cfg,
+        is_lora=False,
+        model_type=model_type,
+    )
+
+    assert wrap_policy is not None
+    assert wrap_policy(module=model.block, recurse=False, nonwrapped_numel=0)
+    assert not wrap_policy(module=model.head, recurse=False, nonwrapped_numel=0)

@@ -26,7 +26,7 @@ from gr00t.configs.model.gr00t_n1d7 import Gr00tN1d7Config
 from gr00t.data.embodiment_tags import EmbodimentTag
 from gr00t.model.gr00t_n1d7.gr00t_n1d7 import Gr00tN1d7, Gr00tN1d7ActionHead
 from gr00t.model.gr00t_n1d7.processing_gr00t_n1d7 import Gr00tN1d7Processor
-from torch.distributions import Normal
+from torch.distributions import Beta, Normal
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
 from transformers.feature_extraction_utils import BatchFeature
 
@@ -260,6 +260,82 @@ def _batchify_gr00t_forward_input(
 TTT_CONTEXT_TOKEN_CHOICES = ("state", "state_action", "register")
 
 
+class RoboTTTRegisterTokens(torch.nn.Module):
+    """Learned register tokens, kept replicated (not FSDP-sharded).
+
+    HuggingFace ``from_pretrained`` reports these as missing checkpoint keys
+    and leaves the CUDA storage uninitialized (~1e24–1e38). FSDP ignore keeps
+    that tensor replicated, so the first forward restores a CPU ``N(0, 0.02)``
+    snapshot taken at construction *only when the loaded values look
+    corrupted*. A finite checkpoint (resume / RoboTTT post-train) is kept.
+    Grads are all-reduced by a hook because FSDP will not reduce-scatter
+    ignored parameters.
+    """
+
+    _fsdp_ignore = True
+
+    def __init__(self, num_tokens: int, dim: int):
+        super().__init__()
+        init = torch.empty(num_tokens, dim, dtype=torch.float32)
+        torch.nn.init.normal_(init, std=0.02)
+        # Not a buffer: FSDP / HF must not move or re-init this copy.
+        self._init_snapshot = init.detach().cpu().clone()
+        self.tokens = torch.nn.Parameter(init.clone())
+        self._replicas_synced = False
+        self._grad_hook = None
+
+    def _restore_from_snapshot(self) -> None:
+        """Replace HF-uninitialized storage; keep a loaded RoboTTT checkpoint.
+
+        HuggingFace leaves missing keys as ~1e24 CUDA garbage. A trained
+        checkpoint has finite values well below the threshold, so it must not
+        be overwritten with the construction snapshot.
+        """
+        if self.tokens.device.type == "meta":
+            return
+        with torch.no_grad():
+            current = self.tokens.detach().float()
+            abs_max = float(current.abs().amax()) if current.numel() else 0.0
+            if bool(torch.isfinite(current).all()) and abs_max <= 10.0:
+                return
+            logger.warning(
+                "RoboTTT register tokens were corrupted (abs_max=%s); "
+                "restoring N(0, 0.02).",
+                abs_max,
+            )
+            snapshot = self._init_snapshot.to(
+                device=self.tokens.device, dtype=self.tokens.dtype
+            )
+            self.tokens.copy_(snapshot)
+
+    def _prepare_distributed(self) -> None:
+        if not self._replicas_synced:
+            self._restore_from_snapshot()
+            if (
+                torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                torch.distributed.broadcast(self.tokens.data, src=0)
+            self._replicas_synced = True
+        if (
+            self._grad_hook is None
+            and self.tokens.requires_grad
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
+
+            def _avg_grad(grad: torch.Tensor) -> torch.Tensor:
+                torch.distributed.all_reduce(grad, op=torch.distributed.ReduceOp.SUM)
+                return grad / torch.distributed.get_world_size()
+
+            self._grad_hook = self.tokens.register_hook(_avg_grad)
+
+    def forward(self, like: torch.Tensor) -> torch.Tensor:
+        self._prepare_distributed()
+        tokens = self.tokens.to(dtype=like.dtype).clone()
+        return tokens.unsqueeze(0).expand(like.shape[0], -1, -1)
+
+
 def _tensorize_forward_input(value: Any) -> Any:
     """Convert list-valued cached inputs into tensors."""
     if not isinstance(value, list):
@@ -290,6 +366,22 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         super().__init__(config)
         self.config = config
         self.rl_config = rl_head_config
+        # Pin the time-sampling Beta to CPU/fp32. HuggingFace from_pretrained
+        # with torch_dtype=bf16 sets the default dtype, so Beta(alpha, beta)
+        # built from Python floats would store bf16 concentration tensors.
+        # torch._sample_dirichlet is not implemented for BFloat16.
+        self.beta_dist = Beta(
+            torch.tensor(
+                float(getattr(config, "noise_beta_alpha", 1.5)),
+                dtype=torch.float32,
+                device="cpu",
+            ),
+            torch.tensor(
+                float(getattr(config, "noise_beta_beta", 1.0)),
+                dtype=torch.float32,
+                device="cpu",
+            ),
+        )
         # Only set defaults if not already specified in config.
         if "noise_method" not in self.rl_config:
             self.rl_config["noise_method"] = "flow_sde"
@@ -356,6 +448,20 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         if self.ttt_enabled:
             self._install_ttt(config)
 
+    def sample_time(self, batch_size, device, dtype):
+        """Draw flow-matching times in fp32, then cast to the compute dtype.
+
+        Matches GR00T N1.7 and RoboTTT Eq. (5): ``tau = s * (1 - u)`` with
+        ``u ~ Beta(alpha, beta)`` and ``s = noise_s`` (default 0.999). The
+        Beta draw stays in fp32 because ``torch._sample_dirichlet`` is not
+        implemented for BFloat16; concentration tensors are pinned to CPU
+        float32 in ``__init__``.
+        """
+        sample = self.beta_dist.sample((batch_size,))
+        sample = sample.to(device=device, dtype=torch.float32)
+        noise_s = float(getattr(self.config, "noise_s", 0.999))
+        return ((1.0 - sample) * noise_s).to(dtype=dtype)
+
     # ------------------------------------------------------------------- RoboTTT
 
     def _install_ttt(self, config: Any) -> None:
@@ -390,11 +496,10 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         if self.num_register_tokens > 0:
             # Vision-language tokens are kept out of the TTT inner loop for
             # compute reasons, so these learned slots are what carries visual
-            # context across timesteps.
-            self.register_tokens = torch.nn.Parameter(
-                torch.zeros(self.num_register_tokens, self.input_embedding_dim)
+            # context across timesteps. Own FSDP unit: see RoboTTTRegisterTokens.
+            self.register_token_bank = RoboTTTRegisterTokens(
+                self.num_register_tokens, self.input_embedding_dim
             )
-            torch.nn.init.normal_(self.register_tokens, std=0.02)
 
         self.register_buffer(
             "ttt_token_mask", self._build_ttt_token_mask(), persistent=False
@@ -407,9 +512,12 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         )
         if train_ttt_only:
             self.requires_grad_(False)
-        self.model.ttt.requires_grad_(True)
+        if hasattr(self.model, "unfreeze_ttt"):
+            self.model.unfreeze_ttt()
+        else:
+            self.model.ttt.requires_grad_(True)
         if self.num_register_tokens > 0:
-            self.register_tokens.requires_grad_(True)
+            self.register_token_bank.requires_grad_(True)
 
         logger.info(
             "RoboTTT enabled: fast_model=%s, register_tokens=%d, "
@@ -454,11 +562,19 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
             detach_states=detach_states,
         )
 
+    def _expand_register_tokens(self, like: torch.Tensor) -> Optional[torch.Tensor]:
+        """Materialize ``[B, R, D]`` registers via the FSDP-wrapped bank."""
+        bank = getattr(self, "register_token_bank", None)
+        if bank is None or self.num_register_tokens == 0:
+            return None
+        return bank(like)
+
     def _prepend_register_tokens(self, sa_embs: torch.Tensor) -> torch.Tensor:
         if not self.ttt_enabled or self.num_register_tokens == 0:
             return sa_embs
-        registers = self.register_tokens.to(dtype=sa_embs.dtype)
-        registers = registers.unsqueeze(0).expand(sa_embs.shape[0], -1, -1)
+        registers = self._expand_register_tokens(sa_embs)
+        if registers is None:
+            return sa_embs
         return torch.cat((registers, sa_embs), dim=1)
 
     def _get_component(self, name: str):
@@ -947,8 +1063,11 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
             )
             action_features = action_features + position_embedding(pos_ids).unsqueeze(0)
 
-        sa_embs = self._prepend_register_tokens(
-            torch.cat((state_features, action_features), dim=1)
+        registers = self._expand_register_tokens(state_features)
+        sa_embs = (
+            torch.cat((registers, state_features, action_features), dim=1)
+            if registers is not None
+            else torch.cat((state_features, action_features), dim=1)
         )
         model_output = self._run_denoising_model(
             sa_embs=sa_embs,
@@ -983,11 +1102,29 @@ class FlowMatchingActionHeadForRLActionPrediction(Gr00tN1d7ActionHead):
         n_traj = per_step.shape[0] // timesteps
         # Paper Eq. (4): (1/T) sum_t ell_t, then mean over the batch.
         loss = per_step.sum() / (n_traj * timesteps)
-        return {
+        output = {
             "loss": loss,
             "action_loss": action_loss,
             "action_mask": action_mask,
         }
+        if self.ttt_enabled:
+            output["ttt_fast_weight_reset"] = float(
+                self._consume_ttt_fast_weight_resets()
+            )
+        return output
+
+    def _consume_ttt_fast_weight_resets(self) -> int:
+        """Sum inner-loop ``W_0`` resets across DiT TTT layers, then clear them."""
+        if not self.ttt_enabled:
+            return 0
+        count = 0
+        for block in getattr(self.model, "transformer_blocks", []):
+            layer = getattr(block, "ttt_layer", None)
+            if layer is None:
+                continue
+            count += int(layer.fast_weight_resets)
+            layer.fast_weight_resets = 0
+        return count
 
 
 class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
@@ -997,10 +1134,10 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         "Qwen3VLTextDecoderLayer",
         "Qwen3VLVisionBlock",
         "BasicTransformerBlock",
-        # A TTT layer carries a recurrent state across its inner loop, so FSDP
-        # must keep it whole rather than shard its fast weights.
-        "TTTLinear",
-        "TTTMLP",
+        # TTT layers are registered on BasicTransformerBlock so FSDP unshards
+        # them with AdaLN/attention. Do not wrap TTTLinear/TTTMLP separately:
+        # a nested FSDP unit would run the inner loop on shards and NaN.
+        # Register tokens are _fsdp_ignore (replicated); do not wrap them.
     ]
 
     def __init__(
@@ -1082,9 +1219,12 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
             "ttt", {}
         ).get("train_ttt_only", False):
             self.requires_grad_(False)
-            self.action_head.model.ttt.requires_grad_(True)
+            if hasattr(self.action_head.model, "unfreeze_ttt"):
+                self.action_head.model.unfreeze_ttt()
+            else:
+                self.action_head.model.ttt.requires_grad_(True)
             if self.action_head.num_register_tokens > 0:
-                self.action_head.register_tokens.requires_grad_(True)
+                self.action_head.register_token_bank.requires_grad_(True)
 
         self.obs_converter_type = obs_converter_type
         self.obs_convert_fn = OBS_CONVERSION[obs_converter_type]
@@ -1098,7 +1238,13 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
         self.action_head.env_action_dim = self.action_dim
         self.action_head.valid_action_dim = self.valid_action_dim
 
-        self._no_split_modules = self.__class__._no_split_modules
+        # Only advertise wrap targets that actually exist. TTTLinear/TTTMLP
+        # are mutually exclusive (fast_model), and neither is present when
+        # use_ttt is off — FSDP lookup otherwise raises on the missing name.
+        declared = self.__class__._no_split_modules
+        present_cls = {type(m).__name__ for m in self.modules()}
+        self._no_split_modules = [n for n in declared if n in present_cls]
+        omitted = [n for n in declared if n not in present_cls]
         if hasattr(self, "config"):
             self.config.no_split_modules = self._no_split_modules
             self.config._no_split_modules = self._no_split_modules
@@ -1106,6 +1252,11 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
             "Forced FSDP _no_split_modules into config: %s",
             self.config.no_split_modules,
         )
+        if omitted:
+            logger.info(
+                "Omitted FSDP wrap targets not present in the model: %s",
+                omitted,
+            )
         # Per-pipeline-stage TTT fast weights carried across rollout chunks.
         self._ttt_rollout_states: dict[int, Optional[list]] = {}
 
