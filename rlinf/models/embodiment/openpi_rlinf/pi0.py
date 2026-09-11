@@ -354,13 +354,13 @@ class Pi0(model.BaseModel):
         B = actions.shape[0]
         device = actions.device
 
-        # Preprocess first (requries float32 for image ops),
-        # then cast to model dtype for FSDP2 mixed precision compatibility.
+        # Preprocess first (requires float32 for image ops), then cast the
+        # observation to embed_dtype for Gemma / SigLIP. Keep actions in
+        # fp32 like the RL sampler: action / time projections stay fp32.
         observation = model.preprocess_observation(observation, train=train, rng=rng)
 
-        embed_dtype = self.embed_dtype
-        observation = model._observation_to_dtype(observation, embed_dtype)
-        actions = actions.to(dtype=embed_dtype)
+        observation = model._observation_to_dtype(observation, self.embed_dtype)
+        actions = actions.to(dtype=torch.float32)
         dtype = actions.dtype
 
         # Sample noise and time (or use provided values for reproducibility)
@@ -784,7 +784,7 @@ class Pi0(model.BaseModel):
 
         observation = model.preprocess_observation(observation, train=True)
         observation = model._observation_to_dtype(observation, self.embed_dtype)
-        actions = actions.to(dtype=self.embed_dtype)
+        actions = actions.to(dtype=torch.float32)
         dtype = actions.dtype
 
         noise = torch.randn(actions.shape, device=device, dtype=dtype)
