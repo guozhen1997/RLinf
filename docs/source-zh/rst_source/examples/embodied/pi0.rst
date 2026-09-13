@@ -330,7 +330,7 @@ LIBERO PPO 常见写法是 ``num_action_chunks: 5``，而 ``pi0_libero`` 官方 
      noise_logvar_range: [0.08, 0.16] # 针对 flow-noise 的可学习噪声范围
      joint_logprob: False # 是否优化联合概率密度函数，对于flow-sde，请设置为False，对于flow-noise，请设置为True
 
-例如，``openpi_rlinf`` 上完整的 flow-sde 设置见 ``libero_spatial_ppo_openpi_rlinf.yaml``。legacy ``openpi`` 配方为 ``libero_spatial_ppo_openpi.yaml``（flow-sde）和 ``maniskill_ppo_openpi.yaml``（flow-noise）。
+例如，``openpi_rlinf`` 上完整的 flow-sde 设置见 ``libero_spatial_ppo_openpi_rlinf.yaml``。legacy ``openpi`` 配方为 ``libero_spatial_ppo_openpi.yaml``\ （flow-sde）和 ``maniskill_ppo_openpi.yaml``\ （flow-noise）。
 
 **2.3 LoRA设置**
 

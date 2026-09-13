@@ -110,6 +110,14 @@ def gaussian_entropy(sigma: torch.Tensor) -> torch.Tensor:
     return torch.where(mask, torch.zeros_like(entropy), entropy)
 
 
+def _cast_for_value_head(
+    value_head: torch.nn.Module, hidden: torch.Tensor
+) -> torch.Tensor:
+    """Match OpenPI: PT Linear cannot mix bf16 activations with an fp32 head."""
+    param = next(value_head.parameters())
+    return hidden.to(device=param.device, dtype=param.dtype)
+
+
 def value_from_prefix(
     value_head: torch.nn.Module,
     prefix_out: torch.Tensor,
@@ -141,7 +149,7 @@ def value_from_prefix(
             f"value_vlm_mode={mode!r} is not implemented. "
             "Supported: 'mean_token', 'first_token', 'last_token'."
         )
-    return value_head(pooled)[:, 0].to(torch.float32)
+    return value_head(_cast_for_value_head(value_head, pooled))[:, 0].to(torch.float32)
 
 
 def value_from_suffix(
@@ -159,4 +167,4 @@ def value_from_suffix(
         pooled = torch.mean(suffix_out, dim=1)
     if detach_critic_input:
         pooled = pooled.detach()
-    return value_head(pooled)[:, 0].to(torch.float32)
+    return value_head(_cast_for_value_head(value_head, pooled))[:, 0].to(torch.float32)

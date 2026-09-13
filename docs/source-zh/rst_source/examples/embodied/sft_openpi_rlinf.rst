@@ -32,7 +32,7 @@ OpenPI_RLinf 监督微调
 
 ``openpi_rlinf`` 实现不把 ``num_action_chunks`` 当作网络 horizon。``num_action_chunks`` / ``openpi.action_chunk`` 是 **环境实际执行**（以及 SFT 数据集窗口）的长度。**网络** ``action_horizon`` 优先用 YAML 里的 ``openpi.action_horizon``；未设置时用 ``openpi.config_name`` 对应官方 OpenPI ``TrainConfig.model.action_horizon``。现有 ``model_type: openpi`` 实现同样从 ``TrainConfig.model`` 拷出 ``action_horizon``，只把 ``num_action_chunks`` 插值到 ``action_chunk``。
 
-BEHAVIOR ``pi05_behavior`` 官方 horizon 是 **32**，与 ``num_action_chunks: 32`` 一致。RoboTwin ``pi0_aloha_robotwin`` 官方 horizon 是 **50**（``Pi0Config()`` 默认值），与 ``num_action_chunks: 50`` 一致。只有 checkpoint 的 horizon 和该 ``TrainConfig`` 不一致时，才在实验 YAML 里覆写 ``openpi.action_horizon``。
+BEHAVIOR ``pi05_behavior`` 官方 horizon 是 **32**，与 ``num_action_chunks: 32`` 一致。RoboTwin ``pi0_aloha_robotwin`` 官方 horizon 是 **50**\ （``Pi0Config()`` 默认值），与 ``num_action_chunks: 50`` 一致。只有 checkpoint 的 horizon 和该 ``TrainConfig`` 不一致时，才在实验 YAML 里覆写 ``openpi.action_horizon``。
 
 Pi0.5 + BEHAVIOR-1K
 ---------------------
