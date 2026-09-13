@@ -19,7 +19,7 @@ Contents
 --------
 
 - The OpenPI_RLinf SFT flow and its configuration
-- The FSDP optimizer and mixed-precision contract
+- The precision and FSDP sharding contract
 - BEHAVIOR streaming-loader fields and norm-stat/tokenizer handling
 - Launching training and converting checkpoints for evaluation
 - The official OpenPI/LeRobot data path, training, and evaluation for Pi0 RoboTwin
@@ -80,21 +80,28 @@ The experiment config imports the model template through Hydra ``defaults``:
      - hybrid_engines/fsdp@actor.fsdp_config
      - override hydra/job_logging: stdout
 
-Precision contract
-~~~~~~~~~~~~~~~~~~
+Precision and FSDP contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 openpi_rlinf does not support FSDP mixed precision (``param_dtype`` must be
-``null`` or ``fp32``, matching ``actor.model.precision``):
+``null`` or ``fp32``, matching ``actor.model.precision``).
+``actor.fsdp_config.sharding_strategy`` must be ``no_shard``. The
+``hybrid_engines/fsdp`` default is ``full_shard``, so set it explicitly.
+Each rank then holds the full parameters, gradients, and optimizer states.
+Nested FSDP flattening (``full_shard`` / ``shard_grad_op``) is not
+supported for this model.
 
 - The SFT model template sets ``actor.model.precision`` to ``null`` (in
   ``pi0_5_rlinf.yaml`` / ``pi0_rlinf.yaml``), the OpenPI default: Gemma /
   SigLIP in bf16, action heads in fp32.
-- Bind FSDP dtypes to the model precision so they cannot drift:
+- Bind FSDP dtypes to the model precision so they cannot drift, and set
+  ``sharding_strategy`` explicitly:
 
   .. code:: yaml
 
      actor:
        fsdp_config:
+         sharding_strategy: no_shard
          gradient_checkpointing: True
          mixed_precision:
            param_dtype: ${actor.model.precision}
@@ -228,11 +235,11 @@ statistics directory for the selected task, such as ``adjust_bottle`` above.
 the official ``pi0_aloha_robotwin`` ``TrainConfig`` value of **50**, not this
 field by itself.
 
-The Pi0 RoboTwin recipe also uses fp32 master weights, bf16 FSDP computation,
-and fp32 gradient reduction. Its experiment YAML defaults to
-``actor.optim.lr_scheduler: openpi_cosine``. This schedule starts warmup at
-``peak / (warmup + 1)`` and reproduces the RoboTwin JAX reference learning-rate
-curve.
+The Pi0 RoboTwin recipe follows the same precision contract
+(``precision: null``, with the FSDP dtypes bound to it). Its experiment YAML
+defaults to ``actor.optim.lr_scheduler: openpi_cosine``. This schedule starts
+warmup at ``peak / (warmup + 1)`` and reproduces the RoboTwin JAX reference
+learning-rate curve.
 
 
 Launch scripts

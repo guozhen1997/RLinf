@@ -165,7 +165,6 @@ Important Stage 1 fields:
        openpi_data:
          repo_id: "realworld_peg_insertion_rlt_stage1"
        model_type: "openpi_rlinf"
-       precision: fp32
        is_lora: False
        model_path: "/path/to/model"
        num_action_chunks: 20

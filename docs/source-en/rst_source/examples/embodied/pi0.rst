@@ -288,9 +288,11 @@ interference, eliminating the need for offload functionality.
 
 **2.1 Model Parameters**
 
-The ``openpi_rlinf`` implementation (``model_type: openpi_rlinf``, template
-``model/pi0_rlinf`` or ``model/pi0_5_rlinf``) splits the two lengths, matching
-the existing ``model_type: openpi`` implementation:
+This page covers two implementations of π\ :sub:`0`\ / π\ :sub:`0.5`\ :
+``model_type: openpi`` (templates ``model/pi0``, ``model/pi0_5``), which the
+recipes above use, and ``model_type: openpi_rlinf`` (templates
+``model/pi0_rlinf``, ``model/pi0_5_rlinf``). Both keep the network action
+horizon separate from the chunk the environment executes:
 
 - ``num_action_chunks`` / ``openpi.action_chunk`` is the **env-executed**
   chunk (what RLinf sends to the simulator).
@@ -307,6 +309,9 @@ LIBERO PPO commonly sets ``num_action_chunks: 5`` while ``pi0_libero`` still
 uses official horizon **50** and ``pi05_libero`` uses official horizon **10**.
 Override ``openpi.action_horizon`` in the experiment YAML only when the
 checkpoint horizon differs from that ``TrainConfig``.
+
+The following is an ``openpi_rlinf`` example. Launch it with
+``bash examples/embodiment/run_embodiment.sh libero_spatial_ppo_openpi_rlinf``.
 
 .. code:: yaml
 
@@ -334,8 +339,9 @@ checkpoint horizon differs from that ``TrainConfig``.
   `flow_noise <https://arxiv.org/abs/2505.22094>`__.
   ``noise_level`` controls the noise intensity for ``flow_sde``, and ``noise_logvar_range`` controls the learnable noise range for ``flow_noise``.
 
-- Enable π\ :sub:`0.5`\  by setting ``actor.model.pi05: True`` (the π\ :sub:`0.5`\
-  template ``model/pi0_5_rlinf`` already does this).
+- Select π\ :sub:`0.5`\  through ``openpi.config_name`` (e.g. ``pi05_libero``).
+  With ``openpi_rlinf``, also set ``actor.model.pi05: True``; it defaults to
+  True when omitted, and ``model/pi0_rlinf`` sets it to False.
 
 - Control the critic position via ``value_after_vlm``: when True, the critic is connected after the VLM module output; when False, the critic input is from the action expert module output. π\ :sub:`0.5`\  PPO should set ``value_after_vlm: True``.
 
@@ -353,9 +359,10 @@ In the paper, we provide two technical approaches, flow-noise and flow-sde, to f
      noise_logvar_range: [0.08, 0.16] # learnable noise range for flow-noise
      joint_logprob: False # whether to optimize joint probability density function. For flow-sde, please set to False. For flow-noise, please set to True.
 
-For example, for complete parameter settings of flow-sde on ``openpi_rlinf``,
-please refer to ``libero_spatial_ppo_openpi.yaml``; for complete parameter
-settings of flow-noise, please refer to ``maniskill_ppo_openpi.yaml``.
+For a complete flow-sde setup on ``openpi_rlinf``, see
+``libero_spatial_ppo_openpi_rlinf.yaml``. The legacy ``openpi`` recipes are
+``libero_spatial_ppo_openpi.yaml`` (flow-sde) and
+``maniskill_ppo_openpi.yaml`` (flow-noise).
 
 **2.3 LoRA Settings**
 
