@@ -55,6 +55,7 @@ from rlinf.utils.placement import (
 from rlinf.utils.utils import (
     clear_memory,
     get_loss_agg_func,
+    masked_mean,
     reshape_entropy,
 )
 
