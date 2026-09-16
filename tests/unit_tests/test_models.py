@@ -354,6 +354,47 @@ def test_build_history_input_emits_on_interval_tick():
     ]
 
 
+def _success_potential_state_machine():
+    from rlinf.models.embodiment.reward.vlm_reward_model import (
+        ShapedVLMRewardModel,
+    )
+
+    model = ShapedVLMRewardModel.__new__(ShapedVLMRewardModel)
+    model.potential_gamma = 1.0
+    model.potential_scale = 1.0
+    model.potential_ema_alpha = 0.5
+    model.potential_clip = 0.0
+    model.success_threshold = 0.5
+    model.success_bonus = 1.0
+    model.success_confirmation_windows = 1
+    model.gt_success_bonus = 0.0
+    model.infer_micro_batch_size = 0
+    model._previous_potentials = None
+    model._success_fired = None
+    model._success_streak = None
+    return model
+
+
+def test_empty_history_input_still_resets_shaping_state_on_done():
+    model = _success_potential_state_machine()
+    model._previous_potentials = torch.tensor([0.4, 0.8])
+    model._success_fired = torch.tensor([True, True])
+    model._success_streak = torch.tensor([3, 1], dtype=torch.int32)
+
+    rewards = model.compute_reward(
+        {
+            "history_input": {},
+            "dones": torch.tensor([True, False]),
+        }
+    )
+
+    assert rewards.tolist() == pytest.approx([0.0, 0.0])
+    assert torch.isnan(model._previous_potentials[0])
+    assert float(model._previous_potentials[1]) == pytest.approx(0.8)
+    assert model._success_fired.tolist() == [False, True]
+    assert model._success_streak.tolist() == [0, 1]
+
+
 VALUE_CLIP = 0.2
 HUBER_DELTA = 10.0
 
@@ -648,7 +689,7 @@ def test_delay_metrics_report_every_sample():
 
 
 def _sfp_targets(**kwargs):
-    from rlinf.models.embodiment.openpi_rlinf.pi0_model.sfp import (
+    from rlinf.models.embodiment.openpi_rlinf.modules.sfp import (
         compute_sfp_flow_targets,
     )
 
@@ -741,7 +782,7 @@ def test_sfp_rejects_a_noise_shape_meant_for_a_whole_chunk():
 
 
 def test_sfp_config_reads_the_openpi_block():
-    from rlinf.models.embodiment.openpi_rlinf.utils.sfp_utils import build_sfp_config
+    from rlinf.models.embodiment.openpi_rlinf.sfp_config import build_sfp_config
 
     default = build_sfp_config(OmegaConf.create({"task": "sft"}))
     assert not default.use_sfp
@@ -756,77 +797,85 @@ def test_sfp_config_reads_the_openpi_block():
     )
 
 
-@pytest.mark.parametrize("task", ["eval", "rl"])
-def test_sfp_is_refused_by_the_tasks_without_a_trajectory_sampler(task):
-    from rlinf.models.embodiment.openpi_rlinf.utils.model_builders import _reject_sfp
+@pytest.mark.parametrize("task", ["eval", "rl", "dagger", "dsrl"])
+def test_sfp_is_refused_by_the_tasks_that_sample_actions(task):
+    from rlinf.models.embodiment.openpi_rlinf.rlt_config import (
+        OpenPiPytorchRLTConfig,
+    )
+    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+        OpenPiPytorchSfpConfig,
+        validate_sfp_config,
+    )
 
-    _reject_sfp(OmegaConf.create({"use_sfp": False}), task)
+    rlt_off = OpenPiPytorchRLTConfig()
+    validate_sfp_config(OpenPiPytorchSfpConfig(use_sfp=False), rlt_off, task)
+    validate_sfp_config(OpenPiPytorchSfpConfig(use_sfp=True), rlt_off, "sft")
 
     with pytest.raises(ValueError, match="use_sfp is not supported"):
-        _reject_sfp(OmegaConf.create({"use_sfp": True}), task)
-
-
-class _FakePi0Core(torch.nn.Module):
-    """Stands in for the Pi0 core to observe which objective the wrapper picks."""
-
-    action_dim = 32
-    action_horizon = 10
-
-    def __init__(self):
-        super().__init__()
-        self.weight = torch.nn.Parameter(torch.zeros(1))
-        self.calls: list = []
-
-    def compute_loss(self, observation, actions, **kwargs):
-        self.calls.append("flow_matching")
-        return torch.zeros(actions.shape[0], self.action_horizon) + self.weight
-
-    def compute_sfp_loss(self, observation, actions, **kwargs):
-        self.calls.append(("sfp", kwargs.get("sigma"), kwargs.get("noise_decay")))
-        return torch.zeros(actions.shape[0], 1) + self.weight
-
-
-def _sft_batch():
-    return (
-        {
-            "image": {},
-            "image_mask": {},
-            "state": torch.zeros(2, 32),
-            "action_states": torch.zeros(2, 32),
-        },
-        torch.zeros(2, 10, 32),
-    )
-
-
-@pytest.mark.parametrize(
-    ("use_sfp", "expected"),
-    [(False, ["flow_matching"]), (True, [("sfp", 0.2, 3.0)])],
-)
-def test_sft_wrapper_selects_the_objective_from_use_sfp(use_sfp, expected):
-    from rlinf.models.embodiment.openpi_rlinf.utils.model_builders import (
-        _build_sft_model,
-    )
-
-    core = _FakePi0Core()
-    model_cfg = OmegaConf.create(
-        {"use_sfp": use_sfp, "sfp_sigma": 0.2, "sfp_noise_decay": 3.0}
-    )
-
-    wrapper = _build_sft_model(model_cfg, core, num_steps=10, action_env_dim=7)
-    wrapper.sft_forward(_sft_batch())
-
-    assert core.calls == expected
+        validate_sfp_config(OpenPiPytorchSfpConfig(use_sfp=True), rlt_off, task)
 
 
 def test_sfp_and_rlt_objectives_are_mutually_exclusive():
-    from rlinf.models.embodiment.openpi_rlinf.utils.model_builders import (
-        _build_sft_model,
+    from rlinf.models.embodiment.openpi_rlinf.rlt_config import (
+        OpenPiPytorchRLTConfig,
+    )
+    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+        OpenPiPytorchSfpConfig,
+        validate_sfp_config,
     )
 
     with pytest.raises(ValueError, match="mutually exclusive"):
-        _build_sft_model(
-            OmegaConf.create({"use_sfp": True, "use_rlt": True}),
-            _FakePi0Core(),
-            num_steps=10,
-            action_env_dim=7,
+        validate_sfp_config(
+            OpenPiPytorchSfpConfig(use_sfp=True),
+            OpenPiPytorchRLTConfig(use_rlt=True),
+            "sft",
         )
+
+
+@pytest.mark.parametrize("use_sfp", [False, True])
+def test_pi0_sft_forward_selects_the_objective_from_use_sfp(use_sfp):
+    """``sft_forward`` routes to SFP, and the batch keeps ``action_states``.
+
+    The model is built on the meta device, so construction allocates nothing;
+    only the two loss methods are replaced, to observe which one runs.
+    """
+    from rlinf.models.embodiment.openpi_rlinf.pi0 import Pi0
+    from rlinf.models.embodiment.openpi_rlinf.pi0_config import Pi0Config
+    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+        OpenPiPytorchSfpConfig,
+    )
+
+    with torch.device("meta"):
+        model = Pi0(
+            Pi0Config(
+                pi05=True,
+                action_horizon=10,
+                action_dim=32,
+                paligemma_variant="dummy",
+                action_expert_variant="dummy",
+            ),
+            sfp_cfg=OpenPiPytorchSfpConfig(use_sfp=use_sfp, sigma=0.2, noise_decay=3.0),
+        )
+
+    calls = []
+
+    def sfp_loss(observation, actions, **kwargs):
+        calls.append(("sfp", observation.action_states is not None, kwargs["sigma"]))
+        return torch.ones(actions.shape[0], 1, actions.shape[-1], device="meta")
+
+    def flow_matching_loss(observation, actions, **kwargs):
+        calls.append("flow_matching")
+        return torch.ones(actions.shape, device="meta")
+
+    model.compute_sfp_loss = sfp_loss
+    model.compute_loss = flow_matching_loss
+
+    observation = {
+        "image": {},
+        "image_mask": {},
+        "state": torch.zeros(2, 32),
+        "action_states": torch.zeros(2, 32),
+    }
+    model.sft_forward((observation, torch.zeros(2, 10, 32)))
+
+    assert calls == ([("sfp", True, 0.2)] if use_sfp else ["flow_matching"])

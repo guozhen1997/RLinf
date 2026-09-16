@@ -167,7 +167,7 @@ SFP 运行在 OpenPI 环境中，不需要单独的安装目标。
 
 ``config_name`` 起两个作用：既选中负责 repack 和补齐 ``action_states`` 的 OpenPI 数据配置，也通过名字匹配到对应的 SFT 数据加载器。
 
-配套配置在四张卡上做全量 FSDP 微调，权重主副本为 fp32，计算使用 bf16。
+配套配置在四张卡上做全量微调，精度沿用 OpenPI 默认设置：Gemma 和 SigLIP 使用 bf16，action head 保持 fp32。SFP 的轨迹目标始终在 fp32 下构建。
 
 .. warning::
 

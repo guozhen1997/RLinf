@@ -4,11 +4,11 @@ model_type: "openpi_rlinf"
 # (model_path and the openpi_data assets) live in the experiment config
 # (libero_sft_pi05_sfp.yaml), so this template stays path-free and reusable.
 
-# Weight dtype for SFT: fp32. The fp32 weights are the FSDP optimizer master;
-# FSDP MixedPrecision casts params to bf16 only for compute (param_dtype is a
-# separate knob in the experiment config), so the small updates during the long
-# SFP warmup are not lost to bf16 rounding.
-precision: fp32
+# OpenPI default: Gemma / SigLIP in bf16, action heads stay fp32. The SFP
+# trajectory targets are built in fp32 regardless. openpi_rlinf does not support
+# FSDP mixed precision, so the experiment config binds mixed_precision.* to this
+# field (null or fp32).
+precision: null
 
 # LoRA is not used, but the shared model factory reads these keys.
 is_lora: False
@@ -26,8 +26,8 @@ num_steps: 10
 add_value_head: False
 
 openpi:
-  # SFT is the only task SFP supports today; eval and RL would need a trajectory
-  # sampler and reject use_sfp until one exists.
+  # SFT is the only task SFP supports today; eval, rl, dagger and dsrl all sample
+  # actions, need a trajectory sampler, and reject use_sfp until one exists.
   task: sft
   # Selects the openpi TrainConfig that repacks and pads action_states, and
   # through its name also selects the SFP SFT data loader.

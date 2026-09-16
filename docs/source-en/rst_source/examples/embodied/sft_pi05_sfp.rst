@@ -209,8 +209,9 @@ The model template selects the objective and the data pipeline together:
 and pads ``action_states``, and its name also selects the matching SFT data
 loader.
 
-The supplied recipe runs full-parameter FSDP on four GPUs with fp32 master
-weights and bf16 compute.
+The supplied recipe runs full-parameter training on four GPUs with OpenPI's
+default precision: Gemma and SigLIP in bf16, the action heads in fp32. The SFP
+trajectory targets are always built in fp32.
 
 .. warning::
 

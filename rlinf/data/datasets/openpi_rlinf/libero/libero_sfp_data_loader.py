@@ -82,7 +82,7 @@ def build_libero_sfp_sft_dataloader(
     """Build the LIBERO SFP loader for the openpi_rlinf SFT worker.
 
     Yields ``(observation, actions)`` batches whose observation carries the
-    ``action_states`` field :meth:`~rlinf.models.embodiment.openpi_rlinf.pi0_model.pi0.Pi0.compute_sfp_loss`
+    ``action_states`` field :meth:`~rlinf.models.embodiment.openpi_rlinf.pi0.Pi0.compute_sfp_loss`
     integrates the action trajectory from. The loader is stateful so the SFT
     worker can save and restore its position with the rest of a checkpoint.
     """
