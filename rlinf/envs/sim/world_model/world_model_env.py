@@ -458,7 +458,6 @@ class WorldModelEnv(BaseWorldEnv):
         full_image = (full_image + 1.0) / 2.0 * 255.0
         full_image = torch.clamp(full_image.float(), 0, 255)
 
-        # Resize to match libero_env format
         if full_image.shape[1:3] != self.image_size:
             full_image = full_image.permute(0, 3, 1, 2)  # [num_envs, 3, H, W]
             full_image = F.interpolate(
@@ -533,9 +532,8 @@ class WorldModelEnv(BaseWorldEnv):
         past_truncations = raw_chunk_truncations.any(dim=1)
         past_dones = torch.logical_or(past_terminations, past_truncations)
 
-        # Metrics come before auto reset, as in LiberoEnv. reset() zeroes the per-slot
-        # accumulators, so reading elapsed_steps after it would report a restarted
-        # slot's zero as the length of the episode that just ended.
+        # Before auto reset, as in LiberoEnv: reset() zeroes the per-slot accumulators,
+        # so elapsed_steps read afterwards is the restarted slot's zero.
         infos = self._record_metrics(
             chunk_rewards_tensors.sum(dim=1), past_terminations, {}
         )
@@ -545,8 +543,7 @@ class WorldModelEnv(BaseWorldEnv):
             extracted_obs, infos = self._handle_auto_reset(
                 past_dones, extracted_obs, infos
             )
-            # reset() hands back a fresh infos dict, but the step being reported is
-            # still the one that ended, so keep the metrics measured before the restart.
+            # reset() returns a fresh infos; the step reported is still the one that ended.
             infos["episode"] = episode_info
 
         chunk_terminations = torch.zeros_like(raw_chunk_terminations)
