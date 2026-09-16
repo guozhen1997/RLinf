@@ -77,12 +77,10 @@ class WanBackend:
         env_ids: Sequence[int],
         init_frames: FrameQueue,
         init_actions: torch.Tensor,
-        task_ids: Sequence[Any],
         seeds: Sequence[int],
     ) -> None:
-        for row, (env_id, task_id, seed) in enumerate(zip(env_ids, task_ids, seeds)):
+        for row, (env_id, seed) in enumerate(zip(env_ids, seeds)):
             self._sessions[int(env_id)] = {
-                "task_id": task_id,
                 "seed": int(seed),
                 "frames": [self._to_pil(f) for f in init_frames[row]],
                 "actions": init_actions[row].clone(),

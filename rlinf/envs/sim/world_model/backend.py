@@ -23,7 +23,7 @@ file each.
 from __future__ import annotations
 
 from contextlib import nullcontext
-from typing import Any, ContextManager, Protocol, Sequence, runtime_checkable
+from typing import ContextManager, Protocol, Sequence
 
 import torch
 
@@ -39,7 +39,6 @@ def autocast(device: torch.device, dtype: torch.dtype) -> ContextManager:
     return torch.amp.autocast(device_type=device.type, dtype=dtype)
 
 
-@runtime_checkable
 class WorldModelBackend(Protocol):
     """Advances frames for a world-model environment."""
 
@@ -52,7 +51,6 @@ class WorldModelBackend(Protocol):
         env_ids: Sequence[int],
         init_frames: FrameQueue,
         init_actions: torch.Tensor,
-        task_ids: Sequence[Any],
         seeds: Sequence[int],
     ) -> None:
         """Start a trajectory per env slot from its initial condition window.
@@ -63,9 +61,10 @@ class WorldModelBackend(Protocol):
                 tensors in ``[-1, 1]``. The first is the reference frame, kept for the
                 whole trajectory.
             init_actions: ``[B, window, action_dim]``, the actions that led to
-                ``init_frames``.
-            task_ids: Per env slot, the task the trajectory runs.
-            seeds: Per env slot, the seed its noise is drawn from.
+                ``init_frames``. A backend that conditions on the action chunk alone
+                ignores them.
+            seeds: Per env slot, the seed its noise is drawn from. A backend that draws
+                noise from the global RNG ignores them.
         """
 
     def generate(
@@ -73,7 +72,17 @@ class WorldModelBackend(Protocol):
         env_ids: Sequence[int],
         actions: torch.Tensor,
     ) -> torch.Tensor:
-        """Advance one action chunk from the session's own condition window."""
+        """Advance one action chunk from each session's own condition window.
+
+        Args:
+            env_ids: Env slots to advance; each needs an open session.
+            actions: ``[B, chunk, action_dim]``, rows in ``env_ids`` order.
+
+        Returns:
+            The newly generated frames as ``[B, C, T, H, W]`` in ``[-1, 1]``. ``T``, the
+            device and the dtype are the backend's own; the caller moves the result to
+            where it keeps observations.
+        """
 
     def close_session(self, env_ids: Sequence[int]) -> None:
         """End these env slots' trajectories; slots without a session are ignored."""

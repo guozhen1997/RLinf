@@ -123,12 +123,12 @@ class OpenSoraBackend:
         env_ids: Sequence[int],
         init_frames: FrameQueue,
         init_actions: torch.Tensor,
-        task_ids: Sequence[Any],
         seeds: Sequence[int],
     ) -> None:
         """Encode the initial condition frames into each session's latent queue.
 
-        ``init_actions`` is unused: OpenSora conditions on the action chunk only.
+        ``init_actions`` and ``seeds`` are unused: OpenSora conditions on the action
+        chunk only and its scheduler draws noise from the global RNG.
         """
         windows = torch.stack(
             [torch.cat(list(frames), dim=1) for frames in init_frames], dim=0
@@ -147,15 +147,11 @@ class OpenSoraBackend:
         encoded = encoded.reshape(batch_size, window_len, *encoded.shape[1:])
         encoded = encoded.permute(0, 2, 1, 3, 4)  # [B, C', T, H', W']
 
-        for row, (env_id, task_id, seed) in enumerate(zip(env_ids, task_ids, seeds)):
+        for row, env_id in enumerate(env_ids):
             queue = deque(maxlen=self.z_condition_frame_length)
             for t_idx in range(window_len):
                 queue.append(encoded[row : row + 1, :, t_idx : t_idx + 1, :, :])
-            self._sessions[int(env_id)] = {
-                "task_id": task_id,
-                "seed": int(seed),
-                "latents": queue,
-            }
+            self._sessions[int(env_id)] = {"latents": queue}
 
     def close_session(self, env_ids: Sequence[int]) -> None:
         for env_id in env_ids:
@@ -200,7 +196,6 @@ class OpenSoraBackend:
         condition = self._session_latents(env_ids)
 
         with autocast(self.device, self.inference_dtype):
-            # The scheduler draws noise from the global RNG, so session seeds go unused.
             z = torch.randn(
                 batch_size,
                 self.vae.out_channels,

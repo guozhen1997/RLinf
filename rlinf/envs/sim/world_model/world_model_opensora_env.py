@@ -27,6 +27,8 @@ __all__ = ["OpenSoraEnv"]
 
 
 class OpenSoraEnv(WorldModelEnv):
+    supports_kir = False
+
     def _build_backend(self) -> WorldModelBackend:
         return OpenSoraBackend(self.cfg, self._get_runtime_device())
 

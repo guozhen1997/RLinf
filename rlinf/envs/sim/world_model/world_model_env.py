@@ -20,7 +20,6 @@ generates the frames and which reward model scores them.
 
 from __future__ import annotations
 
-import io
 from abc import abstractmethod
 from typing import Optional, Union
 
@@ -41,6 +40,9 @@ DEFAULT_ACTION_DIM = 7  # LIBERO
 
 class WorldModelEnv(BaseWorldEnv):
     """A gym-style env whose dynamics come from a generative world model."""
+
+    # Whether the model conditions on KIR keyframes; ``enable_kir`` is rejected otherwise.
+    supports_kir = True
 
     def __init__(
         self,
@@ -106,6 +108,10 @@ class WorldModelEnv(BaseWorldEnv):
         return None
 
     def _build_dataset(self, cfg):
+        if not self.supports_kir:
+            if cfg.get("enable_kir", False):
+                raise ValueError(f"{type(self).__name__} does not support enable_kir")
+            self.enable_kir = False
         return NpyTrajectoryDatasetWrapper(
             cfg.initial_image_path, enable_kir=self.enable_kir
         )
@@ -221,7 +227,7 @@ class WorldModelEnv(BaseWorldEnv):
 
         # first condition frame is the reference frame,
         # so the length of target_items should be condition_frame_length - 1
-        if len(target_items) == self.condition_frame_length - 1:
+        if self.supports_kir and len(target_items) == self.condition_frame_length - 1:
             for target_idx, target_frame in enumerate(target_items):
                 if "image" not in target_frame or "action" not in target_frame:
                     raise ValueError(
@@ -285,6 +291,12 @@ class WorldModelEnv(BaseWorldEnv):
                 observation tensor; a subset restarts those slots in place and leaves the
                 other episodes running.
         """
+        if env_idx is not None and self.current_obs is None:
+            raise RuntimeError(
+                "reset(env_idx=...) restarts slots of running episodes; "
+                "call reset() on every slot first"
+            )
+
         self.onload()
 
         # Handle first reset with fixed reset state ids
@@ -366,7 +378,6 @@ class WorldModelEnv(BaseWorldEnv):
             init_actions=torch.stack(
                 [window[1] for window in condition_windows], dim=0
             ).to(self.device),
-            task_ids=list(episode_indices),
             seeds=[0] * num_slots,
         )
 
@@ -590,29 +601,3 @@ class WorldModelEnv(BaseWorldEnv):
             self.success_once = self.success_once.to(self.device)
             self.returns = self.returns.to(self.device)
         self._is_offloaded = False
-
-    def get_state(self) -> bytes:
-        """Serialize runtime state to CPU bytes buffer for offload."""
-        env_state = {
-            "current_obs": recursive_to_device(self.current_obs, "cpu")
-            if self.current_obs is not None
-            else None,
-            "task_descriptions": self.task_descriptions,
-            "init_ee_poses": self.init_ee_poses,
-            "elapsed_steps": self.elapsed_steps.cpu(),
-            "prev_step_reward": self.prev_step_reward.cpu(),
-            "_is_start": self._is_start,
-            "reset_state_ids": self.reset_state_ids.cpu(),
-            "generator_state": self._generator.get_state(),
-        }
-        if self.record_metrics:
-            env_state.update(
-                {
-                    "success_once": self.success_once.cpu(),
-                    "returns": self.returns.cpu(),
-                }
-            )
-
-        buffer = io.BytesIO()
-        torch.save(env_state, buffer)
-        return buffer.getvalue()
