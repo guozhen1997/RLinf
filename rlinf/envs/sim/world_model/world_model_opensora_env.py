@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import os
-
 from omegaconf import OmegaConf
 from opensora.registry import MODELS, build_module
 

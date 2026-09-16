@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from diffsynth.models.reward_model import ResnetRewModel, TaskEmbedResnetRewModel
