@@ -109,11 +109,12 @@ class BaseWorldEnv(ABC):
     def step(self, actions):
         """Perform a single action step and return (obs, reward, done, info)."""
 
-    def _get_runtime_device_str(self) -> str:
+    def _get_runtime_device(self) -> torch.device:
+        """The device a backend should run on, with the platform's device type resolved."""
         if Worker.torch_device_type is not None:
             device_index = 0 if self.device.index is None else self.device.index
-            return f"{Worker.torch_device_type}:{device_index}"
-        return self.device.type
+            return torch.device(f"{Worker.torch_device_type}:{device_index}")
+        return torch.device(self.device.type)
 
     @staticmethod
     def _clear_accelerator_cache() -> None:

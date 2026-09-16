@@ -39,7 +39,7 @@ class OpenSoraBackend:
     only ever decoded on the way out.
     """
 
-    def __init__(self, cfg, device: torch.device, device_str: str):
+    def __init__(self, cfg, device: torch.device):
         self.cfg = cfg
         self.wm_cfg = cfg.world_model_cfg
         self.device = device

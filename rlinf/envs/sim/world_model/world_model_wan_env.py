@@ -30,7 +30,7 @@ __all__ = ["WanEnv"]
 
 class WanEnv(WorldModelEnv):
     def _build_backend(self) -> WorldModelBackend:
-        return WanBackend(self.cfg, self.device, self._get_runtime_device_str())
+        return WanBackend(self.cfg, self._get_runtime_device())
 
     def _load_reward_model(self):
         if self.cfg.reward_model.type == "ResnetRewModel":
@@ -50,55 +50,3 @@ class WanEnv(WorldModelEnv):
         for env_idx in range(self.num_envs):
             instructions.extend([self.task_descriptions[env_idx]] * self.chunk)
         return instructions
-
-
-# PYTHONPATH="/mnt/project_rlinf/jzn/workspace/release/DiffSynth-Studio:$PYTHONPATH" python -m rlinf.envs.sim.world_model.world_model_wan_env
-if __name__ == "__main__":
-    from pathlib import Path
-
-    import numpy as np
-    from hydra import compose
-    from hydra.core.global_hydra import GlobalHydra
-    from hydra.initialize import initialize_config_dir
-
-    # # Set required environment variable
-    os.environ.setdefault("EMBODIED_PATH", "examples/embodiment")
-
-    repo_root = Path(__file__).resolve().parents[3]
-
-    # Clear any existing Hydra instance
-    GlobalHydra.instance().clear()
-
-    config_dir = Path(
-        os.environ.get("EMBODIED_CONFIG_DIR", repo_root / "examples/embodiment/config")
-    ).resolve()
-    config_name = "wan_libero_spatial_grpo_openvlaoft_quick"
-
-    print(f"Loading config: {config_name} from {config_dir}")
-    with initialize_config_dir(config_dir=str(config_dir), version_base="1.1"):
-        cfg_ = compose(config_name=config_name)
-        cfg = cfg_["env"]["train"]
-
-    env = WanEnv(cfg, cfg.total_num_envs, seed_offset=0, total_num_processes=1)
-
-    # Reset environment
-    for i in range(20):
-        obs, info = env.reset()
-
-    print("\nAfter reset:")
-    print(f"  obs keys: {list(obs.keys())}")
-
-    print("\n" + "-" * 80)
-
-    chunk_steps = cfg.chunk
-    num_envs = cfg.total_num_envs
-
-    chunk_traj = 1
-    zeros_actions = np.zeros((num_envs, chunk_steps, 7))
-
-    for i in range(chunk_traj):
-        print(f"Chunk {i} of {chunk_traj}")
-        print("-" * 100)
-        o, r, te, tr, infos = env.chunk_step(
-            zeros_actions[:, i * chunk_steps : (i + 1) * chunk_steps, :]
-        )

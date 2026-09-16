@@ -33,7 +33,7 @@ class WanBackend:
     actions that produced them.
     """
 
-    def __init__(self, cfg, device: torch.device, device_str: str):
+    def __init__(self, cfg, device: torch.device):
         self.cfg = cfg
         self.device = device
         self.num_inference_steps = cfg.num_inference_steps
@@ -48,12 +48,13 @@ class WanBackend:
                 f"{self.condition_frame_length} + {self.chunk}"
             )
         self._sessions: dict[int, dict[str, Any]] = {}
-        self._pipe = self._build_pipeline(device_str)
+        self._pipe = self._build_pipeline()
 
-    def _build_pipeline(self, device_str: str) -> WanVideoPipeline:
+    def _build_pipeline(self) -> WanVideoPipeline:
+        # diffsynth takes the device as a string, torch.device stringifies to one.
         pipe = WanVideoPipeline.from_pretrained(
             torch_dtype=torch.bfloat16,
-            device=device_str,
+            device=str(self.device),
             model_configs=[
                 ModelConfig(path=self.cfg.model_path, offload_device="cpu"),
                 ModelConfig(path=self.cfg.VAE_path, offload_device="cpu"),

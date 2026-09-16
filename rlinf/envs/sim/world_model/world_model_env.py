@@ -124,7 +124,7 @@ class WorldModelEnv(BaseWorldEnv):
         episode_info["success_once"] = self.success_once.clone()
         episode_info["return"] = self.returns.clone()
         episode_info["episode_len"] = self.elapsed_steps.to(torch.float32)
-        # A slot restarted by auto reset sits at zero steps, so the divisor is clamped.
+        # Clamped only to keep the first chunk of a fresh episode from dividing by zero.
         episode_info["reward"] = episode_info["return"] / episode_info[
             "episode_len"
         ].clamp(min=1)
@@ -533,16 +533,21 @@ class WorldModelEnv(BaseWorldEnv):
         past_truncations = raw_chunk_truncations.any(dim=1)
         past_dones = torch.logical_or(past_terminations, past_truncations)
 
-        if past_dones.any() and self.auto_reset:
-            extracted_obs, infos = self._handle_auto_reset(
-                past_dones, extracted_obs, {}
-            )
-        else:
-            infos = {}
-
+        # Metrics come before auto reset, as in LiberoEnv. reset() zeroes the per-slot
+        # accumulators, so reading elapsed_steps after it would report a restarted
+        # slot's zero as the length of the episode that just ended.
         infos = self._record_metrics(
-            chunk_rewards_tensors.sum(dim=1), past_terminations, infos
+            chunk_rewards_tensors.sum(dim=1), past_terminations, {}
         )
+
+        if past_dones.any() and self.auto_reset:
+            episode_info = infos["episode"]
+            extracted_obs, infos = self._handle_auto_reset(
+                past_dones, extracted_obs, infos
+            )
+            # reset() hands back a fresh infos dict, but the step being reported is
+            # still the one that ended, so keep the metrics measured before the restart.
+            infos["episode"] = episode_info
 
         chunk_terminations = torch.zeros_like(raw_chunk_terminations)
         chunk_terminations[:, -1] = past_terminations
