@@ -627,6 +627,11 @@ class Pi0(model.BaseModel):
         Returns:
             actions: (B, action_horizon, action_dim)
         """
+        if self.sfp_cfg.use_sfp:
+            raise NotImplementedError(
+                "Pi0.sample_actions is the flow-matching Euler sampler. "
+                "SFP eval must go through Pi0Eval, which calls sample_sfp_actions."
+            )
         observation = model.preprocess_observation(observation, train=False)
 
         dt = -1.0 / num_steps

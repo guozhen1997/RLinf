@@ -797,7 +797,7 @@ def test_sfp_config_reads_the_openpi_block():
     )
 
 
-@pytest.mark.parametrize("task", ["eval", "rl", "dagger", "dsrl"])
+@pytest.mark.parametrize("task", ["rl", "dagger", "dsrl"])
 def test_sfp_is_refused_by_the_tasks_that_sample_actions(task):
     from rlinf.models.embodiment.openpi_rlinf.rlt_config import (
         OpenPiPytorchRLTConfig,
@@ -810,6 +810,7 @@ def test_sfp_is_refused_by_the_tasks_that_sample_actions(task):
     rlt_off = OpenPiPytorchRLTConfig()
     validate_sfp_config(OpenPiPytorchSfpConfig(use_sfp=False), rlt_off, task)
     validate_sfp_config(OpenPiPytorchSfpConfig(use_sfp=True), rlt_off, "sft")
+    validate_sfp_config(OpenPiPytorchSfpConfig(use_sfp=True), rlt_off, "eval")
 
     with pytest.raises(ValueError, match="use_sfp is not supported"):
         validate_sfp_config(OpenPiPytorchSfpConfig(use_sfp=True), rlt_off, task)

@@ -636,6 +636,13 @@ class EnvWorker(Worker):
         env_output = EnvOutput(
             obs=extracted_obs,
             final_obs=final_obs,
+            dones=current_dones,
+            terminations=chunk_terminations.any(dim=1)
+            if chunk_terminations.ndim > 1
+            else chunk_terminations,
+            truncations=chunk_truncations.any(dim=1)
+            if chunk_truncations.ndim > 1
+            else chunk_truncations,
             env_infos=infos if isinstance(infos, dict) else None,
             rlt_switch_flags=rlt_switch_flags,
         )
@@ -977,6 +984,7 @@ class EnvWorker(Worker):
         data = {
             "obs": env_batch["obs"],
             "final_obs": env_batch["final_obs"],
+            "dones": env_batch.get("dones"),
         }
         if self.enable_rlt:
             data["rlt_switch_flags"] = env_batch.get("rlt_switch_flags", None)

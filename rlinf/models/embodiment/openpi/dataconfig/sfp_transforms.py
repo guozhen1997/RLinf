@@ -20,6 +20,15 @@ import numpy as np
 from openpi import transforms
 
 
+def sfp_quantile_scale(stats: transforms.NormStats, last_dim: int) -> np.ndarray:
+    """Scale used by SFP quantile maps: ``max(|q01|, |q99|) + 1e-6``."""
+    if stats.q01 is None or stats.q99 is None:
+        raise ValueError("SFP normalization needs q01 and q99 statistics.")
+    q01 = stats.q01[..., :last_dim]
+    q99 = stats.q99[..., :last_dim]
+    return np.maximum(np.abs(q01), np.abs(q99)) + 1e-6
+
+
 class SfpNormalize(transforms.Normalize):
     """Quantile normalization by scale alone, without recentering.
 
@@ -35,11 +44,20 @@ class SfpNormalize(transforms.Normalize):
     def _normalize_quantile(
         self, x: np.ndarray, stats: transforms.NormStats
     ) -> np.ndarray:
-        if stats.q01 is None or stats.q99 is None:
-            raise ValueError("SFP normalization needs q01 and q99 statistics.")
-        q01 = stats.q01[..., : x.shape[-1]]
-        q99 = stats.q99[..., : x.shape[-1]]
-        return x / (np.maximum(np.abs(q01), np.abs(q99)) + 1e-6)
+        return x / sfp_quantile_scale(stats, x.shape[-1])
+
+
+class SfpUnnormalize(transforms.Unnormalize):
+    """Inverse of :class:`SfpNormalize`: multiply by the same quantile scale."""
+
+    def _unnormalize_quantile(
+        self, x: np.ndarray, stats: transforms.NormStats
+    ) -> np.ndarray:
+        scale = sfp_quantile_scale(stats, stats.q01.shape[-1])
+        dim = scale.shape[-1]
+        if dim < x.shape[-1]:
+            return np.concatenate([x[..., :dim] * scale, x[..., dim:]], axis=-1)
+        return x * scale[..., : x.shape[-1]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,10 +73,9 @@ class PadSfpActionStates(transforms.DataTransformFn):
     def __call__(self, data: dict) -> dict:
         if "action_states" not in data:
             raise KeyError(
-                "SFP training needs an 'action_states' field in every sample. "
-                "Convert the dataset with "
-                "toolkits/lerobot/convert_libero_data_to_lerobot.py, which "
-                "records the cumulative action state per frame."
+                "SFP needs an 'action_states' field. For training, convert the "
+                "dataset with toolkits/lerobot/convert_libero_data_to_lerobot.py. "
+                "For eval, Pi0Eval injects the running action-state accumulator."
             )
         data["action_states"] = transforms.pad_to_dim(
             data["action_states"], self.model_action_dim, axis=-1

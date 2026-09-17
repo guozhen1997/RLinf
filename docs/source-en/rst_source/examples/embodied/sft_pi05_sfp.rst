@@ -49,10 +49,10 @@ Train π₀.₅ on LIBERO demonstrations with the SFP objective, full-parameter,
 
 .. warning::
 
-   RLinf implements the SFP training objective only. Rollout, simulator
-   evaluation, and RL need a trajectory sampler that does not exist yet, so
-   ``actor.model.openpi.task`` values other than ``sft`` reject ``use_sfp``
-   rather than quietly running the flow-matching sampler on an SFP checkpoint.
+   SFP eval uses a trajectory sampler (``task: eval`` plus ``use_sfp``), not the
+   flow-matching Euler used by ordinary π₀.₅. RL, DAgger, and DSRL still reject
+   ``use_sfp``. Loading an SFP checkpoint with ``use_sfp: False`` would silently
+   integrate the wrong field — keep the SFP eval recipe.
 
 How Streaming Flow Policy Differs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -246,3 +246,19 @@ demonstrations. For every logged metric, see :doc:`Training metrics
 directory, so checkpoints land in
 ``logs/<timestamp>-libero_sft_pi05_sfp/checkpoints/global_step_<N>/``. To
 resume, point ``runner.resume_dir`` at one of them and relaunch.
+
+Evaluate a Checkpoint
+---------------------
+
+SFP eval uses the trajectory sampler (``task: eval`` plus ``use_sfp``), not the
+flow-matching Euler used by ordinary π₀.₅. Point
+``evaluations/libero/libero_spatial_openpi_pi05_sfp_eval.yaml`` at the SFT
+checkpoint and the same ``norm_stats.json`` used for training:
+
+.. code:: bash
+
+   bash evaluations/run_eval.sh libero libero_spatial_openpi_pi05_sfp_eval \
+     rollout.model.model_path=/path/to/pi05_libero_sfp \
+     rollout.model.openpi_data.norm_stats_path=/data/assets/libero_sfp/norm_stats.json
+
+RTC is incompatible with SFP: it integrates the flow-matching velocity field.

@@ -109,8 +109,8 @@ class Observation:
     token_ar_mask: torch.Tensor | None = None
     token_loss_mask: torch.Tensor | None = None
     pcd_xyz: torch.Tensor | None = None
-    # Cumulative action state the current chunk starts from. Only Streaming Flow
-    # Policy training reads it; flow-matching models leave it None.
+    # Cumulative action state the current chunk starts from. Streaming Flow
+    # Policy training and eval read it; flow-matching models leave it None.
     action_states: torch.Tensor | None = None
 
     @classmethod

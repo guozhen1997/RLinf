@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Streaming Flow Policy sidecar config used by SFT ``Pi0``.
+"""Streaming Flow Policy sidecar config used by SFT and eval ``Pi0``.
 
-Not a ``tasks/`` entry: YAML is still ``task: sft`` plus ``use_sfp``, the same
-way ``use_rlt`` selects the RLT objective.
+Not a ``tasks/`` entry: YAML is still ``task: sft`` or ``task: eval`` plus
+``use_sfp``, the same way ``use_rlt`` selects the RLT objective.
 """
 
 from __future__ import annotations
@@ -30,9 +30,10 @@ from rlinf.models.embodiment.openpi_rlinf.rlt_config import OpenPiPytorchRLTConf
 class OpenPiPytorchSfpConfig:
     """Selects the SFP objective and its noise schedule.
 
-    ``use_sfp`` picks the training objective only: the parameters, their shapes,
-    and the checkpoint layout are the same as an ordinary Pi0.5, so an SFP run
-    starts from a stock Pi0.5 checkpoint and its output loads back into one.
+    ``use_sfp`` picks the SFP objective for SFT and the trajectory sampler for
+    eval. The parameters, their shapes, and the checkpoint layout stay those of
+    an ordinary Pi0.5, so an SFP run starts from a stock Pi0.5 checkpoint and
+    its output loads back into one.
     """
 
     use_sfp: bool = False
@@ -56,19 +57,19 @@ def validate_sfp_config(
 ) -> None:
     """Reject the configurations SFP cannot run under.
 
-    Every task other than ``sft`` samples actions, and an SFP checkpoint has the
-    same shape as any Pi0.5 one, so eval, RL, DAgger, and DSRL would load it and
-    silently run the flow-matching sampler, which integrates the wrong field.
-    The RLT objective extends flow matching rather than SFP, so the two cannot
-    be combined either.
+    RL, DAgger, and DSRL sample actions with the flow-matching sampler, which
+    integrates the wrong field on an SFP checkpoint. Eval now has its own
+    trajectory sampler. The RLT objective extends flow matching rather than
+    SFP, so the two cannot be combined either.
     """
     if not sfp_cfg.use_sfp:
         return
-    if task != "sft":
+    if task not in ("sft", "eval"):
         raise ValueError(
             f"actor.model.openpi.use_sfp is not supported with task={task!r}: "
-            "Streaming Flow Policy needs a trajectory sampler that is not "
-            "implemented yet. Use task='sft' to train."
+            "Streaming Flow Policy only trains under task='sft' and samples "
+            "actions under task='eval'. RL, DAgger, and DSRL still need a "
+            "trajectory logprob sampler."
         )
     if rlt_cfg.use_rlt:
         raise ValueError(

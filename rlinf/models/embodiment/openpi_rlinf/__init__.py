@@ -137,6 +137,7 @@ def get_model(cfg: Any, torch_dtype: Any = None) -> Any:
             config_name=config_name,
             state_indices=OmegaConf.select(model_cfg, "state_indices", default=None),
             rlt_cfg=rlt_cfg,
+            sfp_cfg=sfp_cfg,
             rtc_enabled=bool(OmegaConf.select(model_cfg, "rtc_enabled", default=False)),
             rtc_guidance_mode=str(
                 OmegaConf.select(model_cfg, "rtc_guidance_mode", default="approx")
@@ -145,7 +146,7 @@ def get_model(cfg: Any, torch_dtype: Any = None) -> Any:
                 OmegaConf.select(model_cfg, "rtc_guidance_clip", default=5.0)
             ),
         )
-        _install_transforms(model, cfg, config_name)
+        _install_transforms(model, cfg, config_name, use_sfp=sfp_cfg.use_sfp)
     elif task == "rl":
         from rlinf.models.embodiment.openpi_rlinf.tasks.rl import Pi0RL, Pi0RLConfig
 
@@ -402,13 +403,16 @@ def _resolve_data_kwargs(cfg):
     return data_kwargs
 
 
-def _install_transforms(model, cfg, config_name: str):
+def _install_transforms(model, cfg, config_name: str, *, use_sfp: bool = False):
     from rlinf.models.embodiment.openpi_rlinf.transforms.pipeline import (
         build_openpi_transforms,
     )
 
     input_transforms, output_transforms = build_openpi_transforms(
-        cfg.model_path, config_name, data_kwargs=_resolve_data_kwargs(cfg)
+        cfg.model_path,
+        config_name,
+        data_kwargs=_resolve_data_kwargs(cfg),
+        use_sfp=use_sfp,
     )
     model.setup_transforms(input_transforms, output_transforms)
     return model

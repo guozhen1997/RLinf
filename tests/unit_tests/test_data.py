@@ -739,6 +739,35 @@ def test_sfp_normalization_commutes_with_the_action_sum():
     assert not np.allclose(trajectory_from_parts(affine), normalized_trajectory(affine))
 
 
+def test_sfp_unnormalize_inverts_sfp_normalize():
+    import numpy as np
+    from openpi.shared.normalize import NormStats
+
+    from rlinf.models.embodiment.openpi.dataconfig.sfp_transforms import (
+        SfpNormalize,
+        SfpUnnormalize,
+    )
+
+    stats = NormStats(
+        mean=np.array([0.0, 0.0]),
+        std=np.array([1.0, 1.0]),
+        q01=np.array([-2.0, -1.0]),
+        q99=np.array([4.0, 3.0]),
+    )
+    norm_stats = {"actions": stats, "action_states": stats}
+    raw = {
+        "actions": np.array([[1.0, 2.0], [3.0, -1.0], [0.5, 0.5]]),
+        "action_states": np.array([2.0, -3.0]),
+    }
+    normalize = SfpNormalize(norm_stats, use_quantiles=True)
+    unnormalize = SfpUnnormalize(norm_stats, use_quantiles=True)
+    recovered = unnormalize(normalize(raw))
+    np.testing.assert_allclose(recovered["actions"], raw["actions"], rtol=1e-6)
+    np.testing.assert_allclose(
+        recovered["action_states"], raw["action_states"], rtol=1e-6
+    )
+
+
 def test_sfp_padding_names_the_converter_when_action_states_are_missing():
     from rlinf.models.embodiment.openpi.dataconfig.sfp_transforms import (
         PadSfpActionStates,

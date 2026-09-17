@@ -30,9 +30,9 @@ class LiberoSfpInputs(libero_policy.LiberoInputs):
         inputs = super().__call__(data)
         if "observation/action_states" not in data:
             raise KeyError(
-                "SFP training needs 'observation/action_states'. Convert the "
-                "dataset with toolkits/lerobot/convert_libero_data_to_lerobot.py, "
-                "which records the cumulative action state per frame."
+                "SFP needs 'observation/action_states'. For training, convert "
+                "the dataset with toolkits/lerobot/convert_libero_data_to_lerobot.py. "
+                "For eval, Pi0Eval injects the running action-state accumulator."
             )
         inputs["action_states"] = data["observation/action_states"]
         return inputs

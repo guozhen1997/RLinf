@@ -42,7 +42,7 @@ Streaming Flow Policy 监督微调
 
 .. warning::
 
-   RLinf 目前只实现了 SFP 的训练目标。rollout、仿真评测和 RL 需要一个尚不存在的轨迹采样器，因此 ``actor.model.openpi.task`` 取 ``sft`` 以外的值时会直接拒绝 ``use_sfp``，而不是拿 flow matching 的采样器去跑 SFP 权重。
+   SFP 评测走轨迹采样器（``task: eval`` 且 ``use_sfp``），不是普通 π₀.₅ 的 flow-matching Euler。RL、DAgger、DSRL 仍然拒绝 ``use_sfp``。用 ``use_sfp: False`` 加载 SFP 权重会静默积错场，请使用 SFP 评测配方。
 
 SFP 与 flow matching 的区别
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -194,3 +194,16 @@ SFP 运行在 OpenPI 环境中，不需要单独的安装目标。
    tensorboard --logdir ./logs
 
 ``run_vla_sft.sh`` 会把 ``runner.logger.log_path`` 覆盖成带时间戳的目录，因此 checkpoint 位于 ``logs/<时间戳>-libero_sft_pi05_sfp/checkpoints/global_step_<N>/``。需要继续训练时，把 ``runner.resume_dir`` 指向其中一个目录再启动即可。
+
+评测 checkpoint
+----------------------------------------
+
+SFP 评测走轨迹采样器（``task: eval`` 且 ``use_sfp``），不是普通 π₀.₅ 的 flow-matching Euler。把 ``evaluations/libero/libero_spatial_openpi_pi05_sfp_eval.yaml`` 指向 SFT checkpoint，以及训练时同一份 ``norm_stats.json``：
+
+.. code:: bash
+
+   bash evaluations/run_eval.sh libero libero_spatial_openpi_pi05_sfp_eval \
+     rollout.model.model_path=/path/to/pi05_libero_sfp \
+     rollout.model.openpi_data.norm_stats_path=/data/assets/libero_sfp/norm_stats.json
+
+RTC 与 SFP 不兼容：RTC 积分的是 flow-matching 速度场。

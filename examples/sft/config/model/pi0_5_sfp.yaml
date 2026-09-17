@@ -26,8 +26,8 @@ num_steps: 10
 add_value_head: False
 
 openpi:
-  # SFT is the only task SFP supports today; eval, rl, dagger and dsrl all sample
-  # actions, need a trajectory sampler, and reject use_sfp until one exists.
+  # SFT trains the SFP objective. Eval uses the matching trajectory sampler.
+  # RL, DAgger, and DSRL still reject use_sfp.
   task: sft
   # Selects the openpi TrainConfig that repacks and pads action_states, and
   # through its name also selects the SFP SFT data loader.
