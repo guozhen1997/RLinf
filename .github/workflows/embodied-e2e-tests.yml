@@ -723,7 +723,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-maniskill-libero-musa-test:
+  embodied-openpi-rlinf-maniskill-libero-musa-test:
     runs-on: musa
     steps:
       - name: Checkout code
@@ -737,7 +737,7 @@ jobs:
           export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
           bash requirements/install.sh --platform musa embodied --model openpi --env maniskill_libero
 
-      - name: LIBERO-10 PPO OpenPI Pi05 test
+      - name: LIBERO-10 PPO OpenPI-RLinf Pi05 test
         timeout-minutes: 60
         run: |
           unset PYTHONPATH
@@ -747,7 +747,7 @@ jobs:
           bash tests/e2e_tests/embodied/run.sh libero_10_ppo_openpi_pi05_musa osmesa
           ray stop
 
-      - name: ManiSkill PPO OpenPI Pi05 test
+      - name: ManiSkill PPO OpenPI-RLinf Pi05 test
         timeout-minutes: 60
         run: |
           unset PYTHONPATH
@@ -993,7 +993,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-behavior-test:
+  embodied-openpi-rlinf-behavior-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1010,7 +1010,7 @@ jobs:
           export ISAAC_SIM_WHEEL_PATH=/workspace/dataset/isaac_sim_wheels
           bash requirements/install.sh embodied --model openpi --env behavior
 
-      - name: BEHAVIOR-OpenPI test
+      - name: BEHAVIOR OpenPI-RLinf PPO test
         timeout-minutes: 30
         run: |
           unset PYTHONPATH
@@ -1026,7 +1026,7 @@ jobs:
           uv cache prune
           rm -rf /tmp/tmp*
 
-  embodied-openpi-pytorch-behavior-eval-test:
+  embodied-openpi-rlinf-behavior-eval-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1043,7 +1043,7 @@ jobs:
           export ISAAC_SIM_WHEEL_PATH=/workspace/dataset/isaac_sim_wheels
           bash requirements/install.sh embodied --model openpi --env behavior
 
-      - name: BEHAVIOR-OpenPI-PyTorch eval test
+      - name: BEHAVIOR OpenPI-RLinf eval test
         timeout-minutes: 30
         run: |
           unset PYTHONPATH
@@ -1212,7 +1212,7 @@ jobs:
           uv cache prune
           rm -rf /tmp/tmp*
 
-  embodied-openpi-isaaclab-test:
+  embodied-openpi-rlinf-isaaclab-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1228,7 +1228,7 @@ jobs:
           export ISAAC_LAB_PATH=/workspace/dataset/IsaacLab
           bash requirements/install.sh embodied --model openpi --env isaaclab
 
-      - name: ISAACLAB OpenPI PPO Pi05 test
+      - name: ISAACLAB OpenPI-RLinf PPO Pi05 test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1243,7 +1243,7 @@ jobs:
           uv cache prune
           rm -rf /tmp/tmp*
           
-  embodied-openpi-maniskill-libero-test:
+  embodied-openpi-rlinf-maniskill-libero-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1258,7 +1258,7 @@ jobs:
           export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
           bash requirements/install.sh embodied --model openpi --env maniskill_libero
 
-      - name: Maniskill PPO Pi05 training pipeline test
+      - name: ManiSkill PPO OpenPI-RLinf Pi05 training pipeline test
         timeout-minutes: 20
         run: |
           export REPO_PATH=$(pwd)
@@ -1266,7 +1266,7 @@ jobs:
           cp -r /workspace/dataset/maniskill_assets/assets ${REPO_PATH}/rlinf/envs/sim/maniskill/
           bash tests/e2e_tests/embodied/run.sh maniskill_ppo_openpi05_pipeline
 
-      - name: Libero-Spatial PPO OpenPI_RLinf test
+      - name: Libero-Spatial PPO OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1274,7 +1274,7 @@ jobs:
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run.sh libero_spatial_ppo_openpi_rlinf
 
-      - name: Libero-Object NFT test
+      - name: Libero-Object NFT OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1282,7 +1282,7 @@ jobs:
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run.sh libero_object_nft_openpi
 
-      - name: Libero-Spatial DAgger test
+      - name: Libero-Spatial DAgger OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1290,7 +1290,7 @@ jobs:
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run.sh libero_spatial_dagger_openpi
 
-      - name: Libero-Spatial PPO Pi05 torch compile test
+      - name: Libero-Spatial PPO OpenPI-RLinf Pi05 torch compile test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1298,7 +1298,7 @@ jobs:
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run.sh libero_spatial_ppo_openpi05
 
-      - name: ManiSkill Async PPO test
+      - name: ManiSkill Async PPO OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1307,7 +1307,7 @@ jobs:
           cp -r /workspace/dataset/maniskill_assets/assets ${REPO_PATH}/rlinf/envs/sim/maniskill/
           bash tests/e2e_tests/embodied/run_async.sh maniskill_async_ppo_openpi
 
-      - name: Libero-Spatial DSRL PPO test
+      - name: Libero-Spatial DSRL OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1315,7 +1315,7 @@ jobs:
           source .venv/bin/activate
           bash tests/e2e_tests/embodied/run.sh libero_spatial_dsrl_openpi
 
-      - name: Maniskill PPO Co-Training Pi05 test
+      - name: ManiSkill PPO Co-Training OpenPI-RLinf Pi05 test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1338,7 +1338,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-maniskill-gsenv-test:
+  embodied-openpi-rlinf-maniskill-gsenv-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1363,7 +1363,7 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           uv pip install "protobuf>=6.33.5,<7"
 
-      - name: ManiSkill-GS PPO Pi05 test
+      - name: ManiSkill-GS PPO OpenPI-RLinf Pi05 test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1376,7 +1376,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-metaworld-test:
+  embodied-openpi-rlinf-metaworld-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1391,7 +1391,7 @@ jobs:
           export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
           bash requirements/install.sh embodied --model openpi --env metaworld
 
-      - name: Metaworld PPO test
+      - name: Metaworld PPO OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1432,7 +1432,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-calvin-test:
+  embodied-openpi-rlinf-calvin-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1448,7 +1448,7 @@ jobs:
           export CALVIN_PATH=/workspace/dataset/calvin
           bash requirements/install.sh embodied --model openpi --env calvin
 
-      - name: Calvin PPO test
+      - name: Calvin PPO OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1490,7 +1490,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-robocasa-test:
+  embodied-openpi-rlinf-robocasa-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1506,7 +1506,7 @@ jobs:
           export ROBOCASA_PATH=/workspace/dataset/robocasa
           bash requirements/install.sh embodied --model openpi --env robocasa
 
-      - name: Robocasa PPO test
+      - name: RoboCasa PPO OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1519,7 +1519,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-roboverse-test:
+  embodied-openpi-rlinf-roboverse-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1534,7 +1534,7 @@ jobs:
           export UV_PYTHON_INSTALL_DIR=/workspace/dataset/.uv_python
           bash requirements/install.sh embodied --model openpi --env roboverse
 
-      - name: RoboVerse PPO test
+      - name: RoboVerse PPO OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -1549,7 +1549,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-robocasa365-test:
+  embodied-openpi-rlinf-robocasa365-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -1566,7 +1566,7 @@ jobs:
           export ROBOCASA_ASSETS_PATH=/workspace/dataset/robocasa365_assets
           bash requirements/install.sh embodied --model openpi --env robocasa365
 
-      - name: RoboCasa365 PPO test
+      - name: RoboCasa365 PPO OpenPI-RLinf test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
@@ -2016,7 +2016,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-openpi-polaris-test:
+  embodied-openpi-rlinf-polaris-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -2032,7 +2032,7 @@ jobs:
           export POLARIS_PATH=/workspace/dataset/polaris
           bash requirements/install.sh embodied --model openpi --env polaris
 
-      - name: PolaRiS PPO OpenPI Pi05 test
+      - name: PolaRiS PPO OpenPI-RLinf Pi05 test
         timeout-minutes: 30
         run: |
           unset PYTHONPATH
