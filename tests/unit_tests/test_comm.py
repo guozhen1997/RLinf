@@ -2355,6 +2355,7 @@ def test_merge_env_outputs_with_partial_optional_fields():
         terminations=torch.zeros((3, 1), dtype=torch.bool),
         truncations=torch.zeros((3, 1), dtype=torch.bool),
         rewards=torch.ones((3, 1), dtype=torch.float32) * 2,
+        episode_starts=torch.ones(3, dtype=torch.bool),
         intervene_actions=torch.ones((3, 4), dtype=torch.float32),
         intervene_flags=torch.ones((3, 1), dtype=torch.bool),
         rlt_switch_flags=torch.ones((3, 1), dtype=torch.bool),
@@ -2365,6 +2366,10 @@ def test_merge_env_outputs_with_partial_optional_fields():
     assert merged["obs"]["states"].shape[0] == 5
     assert len(merged["obs"]["task_descriptions"]) == 5
     assert merged["rewards"].shape[0] == 5
+    assert torch.equal(
+        merged["episode_starts"],
+        torch.tensor([False, False, True, True, True]),
+    )
     assert merged["final_obs"] is not None
     assert torch.equal(merged["final_obs"]["states"][:2], env_output_0["obs"]["states"])
     assert torch.equal(

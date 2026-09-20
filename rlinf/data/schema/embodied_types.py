@@ -44,6 +44,7 @@ class EnvOutput:
     obs: dict[str, Any]
     final_obs: Optional[dict[str, Any]] = None
     dones: Optional[torch.Tensor] = None  # [B]
+    episode_starts: Optional[torch.Tensor] = None  # [B]
     terminations: Optional[torch.Tensor] = None  # [B]
     truncations: Optional[torch.Tensor] = None  # [B]
     rewards: Optional[torch.Tensor] = None  # [B]
@@ -61,6 +62,11 @@ class EnvOutput:
             else None
         )
         self.dones = self.dones.cpu().contiguous() if self.dones is not None else None
+        self.episode_starts = (
+            self.episode_starts.cpu().contiguous()
+            if self.episode_starts is not None
+            else None
+        )
         self.terminations = (
             self.terminations.cpu().contiguous()
             if self.terminations is not None
@@ -214,6 +220,9 @@ class EnvOutput:
             obs=merged_obs,
             final_obs=merged_final_obs,
             dones=_merge_optional_tensor_field("dones"),
+            episode_starts=_merge_optional_tensor_field(
+                "episode_starts", allow_partial_none=True, fill_value=False
+            ),
             terminations=_merge_optional_tensor_field("terminations"),
             truncations=_merge_optional_tensor_field("truncations"),
             rewards=_merge_optional_tensor_field("rewards"),
@@ -237,6 +246,7 @@ class EnvOutput:
                 else None
             ),
             "dones": self.dones,
+            "episode_starts": self.episode_starts,
             "terminations": self.terminations,
             "truncations": self.truncations,
             "rewards": self.rewards,

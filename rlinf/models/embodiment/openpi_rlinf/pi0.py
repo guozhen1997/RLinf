@@ -31,7 +31,10 @@ import torch.nn.functional as F
 
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.models.embodiment.openpi_rlinf.modules import gemma, model, pointnet, siglip
-from rlinf.models.embodiment.openpi_rlinf.modules.sfp import compute_sfp_flow_targets
+from rlinf.models.embodiment.openpi_rlinf.modules.sfp import (
+    compute_sfp_flow_targets,
+    sample_sfp_training_inputs,
+)
 from rlinf.models.embodiment.openpi_rlinf.modules.utils import _str_to_dtype
 from rlinf.models.embodiment.openpi_rlinf.pi0_config import Pi0Config
 from rlinf.models.embodiment.openpi_rlinf.rlt_config import OpenPiPytorchRLTConfig
@@ -422,6 +425,8 @@ class Pi0(model.BaseModel):
         time: torch.Tensor | None = None,
         sigma: float = 0.16,
         noise_decay: float = 4.0,
+        micro_batch_index: int | None = None,
+        gradient_accumulation: int | None = None,
     ) -> torch.Tensor:
         """Compute the Streaming Flow Policy loss.
 
@@ -450,21 +455,35 @@ class Pi0(model.BaseModel):
         action_states = observation.action_states
         observation = model._observation_to_dtype(observation, self.embed_dtype)
 
-        if time is None:
-            time = (
-                torch.distributions.Beta(torch.tensor(1.5), torch.tensor(1.0))
-                .sample((B,))
-                .to(device=device)
-            )
-            time = time * 0.999 + 0.001
+        if time is None and noise is None:
+            if micro_batch_index is None and gradient_accumulation is None:
+                time, noise = sample_sfp_training_inputs(
+                    B, actions.shape[-1], device, rng=rng
+                )
+            else:
+                time, noise = self._sfp_micro_batch_random_inputs(
+                    actions,
+                    micro_batch_index=micro_batch_index,
+                    gradient_accumulation=gradient_accumulation,
+                    rng=rng,
+                )
+        else:
+            if time is None:
+                time = (
+                    torch.distributions.Beta(torch.tensor(1.5), torch.tensor(1.0))
+                    .sample((B,))
+                    .to(device=device)
+                )
+                time = time * 0.999 + 0.001
+            if noise is None:
+                noise = torch.randn(
+                    (B, 1, actions.shape[-1]),
+                    device=device,
+                    dtype=torch.float32,
+                    generator=rng,
+                )
         time = time.to(device=device, dtype=torch.float32)
-        if noise is None:
-            noise = torch.randn(
-                (B, 1, actions.shape[-1]),
-                device=device,
-                dtype=torch.float32,
-                generator=rng,
-            )
+        noise = noise.to(device=device, dtype=torch.float32)
 
         x_t, u_t = compute_sfp_flow_targets(
             actions,
@@ -496,6 +515,67 @@ class Pi0(model.BaseModel):
 
         v_t = self.velocity_from_suffix(suffix_out[:, -1:])
         return torch.square(v_t.float() - u_t)
+
+    def _sfp_micro_batch_random_inputs(
+        self,
+        actions: torch.Tensor,
+        *,
+        micro_batch_index: int | None,
+        gradient_accumulation: int | None,
+        rng: torch.Generator | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sample one local SFP batch and return its current micro-batch slice."""
+        if micro_batch_index is None or gradient_accumulation is None:
+            raise ValueError(
+                "micro_batch_index and gradient_accumulation must be provided together."
+            )
+        if (
+            gradient_accumulation < 1
+            or not 0 <= micro_batch_index < gradient_accumulation
+        ):
+            raise ValueError(
+                "SFT micro-batch context must satisfy 0 <= micro_batch_index < "
+                f"gradient_accumulation; got {micro_batch_index} and "
+                f"{gradient_accumulation}."
+            )
+
+        micro_batch_size = actions.shape[0]
+        if micro_batch_index == 0:
+            full_batch_size = micro_batch_size * gradient_accumulation
+            time, noise = sample_sfp_training_inputs(
+                full_batch_size, actions.shape[-1], actions.device, rng=rng
+            )
+            self._sfp_step_random_inputs = (
+                time,
+                noise,
+                micro_batch_size,
+                gradient_accumulation,
+            )
+
+        cached = self._sfp_step_random_inputs
+        if cached is None:
+            raise RuntimeError(
+                "SFP micro-batch random inputs are missing. The first micro-batch "
+                "of each optimizer step must have micro_batch_index=0."
+            )
+        time, noise, cached_batch_size, cached_accumulation = cached
+        if (
+            cached_batch_size != micro_batch_size
+            or cached_accumulation != gradient_accumulation
+        ):
+            raise RuntimeError(
+                "SFP micro-batch shape changed within one optimizer step: expected "
+                f"batch {cached_batch_size} across {cached_accumulation} micro-batches, "
+                f"got batch {micro_batch_size} across {gradient_accumulation}."
+            )
+
+        start = micro_batch_index * micro_batch_size
+        stop = start + micro_batch_size
+        micro_time = time[start:stop]
+        micro_noise = noise[start:stop]
+        if micro_batch_index + 1 == gradient_accumulation:
+            self._sfp_step_random_inputs = None
+        return micro_time, micro_noise
 
     def build_prefix_cache(
         self, observation: model.Observation
@@ -690,6 +770,9 @@ class Pi0(model.BaseModel):
         )
         self.rlt_cfg = rlt_cfg or OpenPiPytorchRLTConfig()
         self.sfp_cfg = sfp_cfg or OpenPiPytorchSfpConfig()
+        self._sfp_step_random_inputs: (
+            tuple[torch.Tensor, torch.Tensor, int, int] | None
+        ) = None
         if self.rlt_cfg.use_rlt:
             from rlinf.models.embodiment.modules.rlt_token_transformer import (
                 RLTTokenTransformer,
@@ -928,7 +1011,11 @@ class Pi0(model.BaseModel):
         for SFT only, and RLT extends flow matching with a token-reconstruction
         objective; ``validate_sfp_config`` keeps the two from being combined.
         """
-        del kwargs
+        time = kwargs.pop("time", None)
+        noise = kwargs.pop("noise", None)
+        rng = kwargs.pop("rng", None)
+        micro_batch_index = kwargs.pop("micro_batch_index", None)
+        gradient_accumulation = kwargs.pop("gradient_accumulation", None)
         if hasattr(self, "gradient_checkpointing_disable"):
             self.gradient_checkpointing_disable()
         observation, actions = self._unpack_sft_batch(data)
@@ -939,8 +1026,13 @@ class Pi0(model.BaseModel):
                 observation,
                 actions,
                 train=True,
+                time=time,
+                noise=noise,
+                rng=rng,
                 sigma=self.sfp_cfg.sigma,
                 noise_decay=self.sfp_cfg.noise_decay,
+                micro_batch_index=micro_batch_index,
+                gradient_accumulation=gradient_accumulation,
             )
             return self._reduce_sft_loss(per_element_loss, use_action_chunk_loss)
 

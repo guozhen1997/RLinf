@@ -29,6 +29,43 @@ import torch
 from torch import Tensor
 
 
+def sample_sfp_training_inputs(
+    batch_size: int,
+    action_dim: int,
+    device: torch.device,
+    *,
+    rng: torch.Generator | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Sample the flow time and noise used by one local SFP training batch.
+
+    Sampling the complete local batch in one call makes the random stream
+    independent of gradient-accumulation boundaries.  Callers may then slice
+    the returned tensors into micro-batches without changing the reference
+    OpenPI sampling order.
+
+    Args:
+        batch_size: Number of samples on this data-parallel rank.
+        action_dim: Padded model action dimension.
+        device: Device on which the noise is generated.
+        rng: Optional generator used for the Gaussian noise.
+
+    Returns:
+        Flow times with shape ``(batch_size,)`` and Gaussian noise with shape
+        ``(batch_size, 1, action_dim)``. Both tensors are float32.
+    """
+    time = torch.distributions.Beta(torch.tensor(1.5), torch.tensor(1.0)).sample(
+        (batch_size,)
+    )
+    time = (time * 0.999 + 0.001).to(device=device, dtype=torch.float32)
+    noise = torch.randn(
+        (batch_size, 1, action_dim),
+        device=device,
+        dtype=torch.float32,
+        generator=rng,
+    )
+    return time, noise
+
+
 def compute_sfp_flow_targets(
     actions: Tensor,
     action_states: Tensor | None,

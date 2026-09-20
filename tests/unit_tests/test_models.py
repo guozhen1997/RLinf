@@ -880,3 +880,112 @@ def test_pi0_sft_forward_selects_the_objective_from_use_sfp(use_sfp):
     model.sft_forward((observation, torch.zeros(2, 10, 32)))
 
     assert calls == ([("sfp", True, 0.2)] if use_sfp else ["flow_matching"])
+
+
+def test_sfp_random_inputs_are_sampled_for_the_full_optimizer_step():
+    from rlinf.models.embodiment.openpi_rlinf.modules.sfp import (
+        sample_sfp_training_inputs,
+    )
+    from rlinf.models.embodiment.openpi_rlinf.pi0 import Pi0
+    from rlinf.models.embodiment.openpi_rlinf.pi0_config import Pi0Config
+    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+        OpenPiPytorchSfpConfig,
+    )
+
+    with torch.device("meta"):
+        model = Pi0(
+            Pi0Config(
+                pi05=True,
+                action_horizon=10,
+                action_dim=32,
+                paligemma_variant="dummy",
+                action_expert_variant="dummy",
+            ),
+            sfp_cfg=OpenPiPytorchSfpConfig(use_sfp=True),
+        )
+
+    torch.manual_seed(42)
+    expected_time, expected_noise = sample_sfp_training_inputs(
+        8, 32, torch.device("cpu")
+    )
+
+    torch.manual_seed(42)
+    actions = torch.zeros(4, 10, 32)
+    first = model._sfp_micro_batch_random_inputs(
+        actions, micro_batch_index=0, gradient_accumulation=2, rng=None
+    )
+    second = model._sfp_micro_batch_random_inputs(
+        actions, micro_batch_index=1, gradient_accumulation=2, rng=None
+    )
+
+    assert torch.equal(torch.cat([first[0], second[0]]), expected_time)
+    assert torch.equal(torch.cat([first[1], second[1]]), expected_noise)
+    assert model._sfp_step_random_inputs is None
+
+
+def test_pi0_sft_forward_accepts_explicit_sfp_random_inputs():
+    from rlinf.models.embodiment.openpi_rlinf.pi0 import Pi0
+    from rlinf.models.embodiment.openpi_rlinf.pi0_config import Pi0Config
+    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+        OpenPiPytorchSfpConfig,
+    )
+
+    with torch.device("meta"):
+        model = Pi0(
+            Pi0Config(
+                pi05=True,
+                action_horizon=10,
+                action_dim=32,
+                paligemma_variant="dummy",
+                action_expert_variant="dummy",
+            ),
+            sfp_cfg=OpenPiPytorchSfpConfig(use_sfp=True),
+        )
+
+    captured = {}
+
+    def sfp_loss(observation, actions, **kwargs):
+        captured.update(kwargs)
+        return torch.ones(actions.shape[0], 1, actions.shape[-1], device="meta")
+
+    model.compute_sfp_loss = sfp_loss
+    observation = {
+        "image": {},
+        "image_mask": {},
+        "state": torch.zeros(2, 32),
+        "action_states": torch.zeros(2, 32),
+    }
+    time = torch.tensor([0.25, 0.75])
+    noise = torch.zeros(2, 1, 32)
+    model.sft_forward(
+        (observation, torch.zeros(2, 10, 32)),
+        time=time,
+        noise=noise,
+        micro_batch_index=0,
+        gradient_accumulation=1,
+    )
+
+    assert captured["time"] is time
+    assert captured["noise"] is noise
+    assert captured["micro_batch_index"] == 0
+    assert captured["gradient_accumulation"] == 1
+
+
+def test_sfp_episode_start_resets_accumulated_action_state():
+    from rlinf.models.embodiment.openpi_rlinf.tasks.eval import Pi0Eval
+
+    model = object.__new__(Pi0Eval)
+    torch.nn.Module.__init__(model)
+    model.register_parameter("_test_device", torch.nn.Parameter(torch.zeros(1)))
+    model.action_env_dim = 2
+    model._sfp_env_action_states = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+
+    model._prepare_sfp_action_states(
+        2,
+        dones=torch.zeros(2, dtype=torch.bool),
+        episode_starts=torch.tensor([True, False]),
+    )
+
+    assert torch.equal(
+        model._sfp_env_action_states, torch.tensor([[0.0, 0.0], [3.0, 4.0]])
+    )
