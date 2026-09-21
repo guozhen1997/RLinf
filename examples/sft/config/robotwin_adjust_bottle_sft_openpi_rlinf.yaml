@@ -50,15 +50,11 @@ actor:
     openpi:
       task: sft
       config_name: "pi0_aloha_robotwin"
-      # The JAX-to-new conversion copies norm_stats.json here. Override these
-      # two fields when the statistics are stored outside model_path.
-      assets_dir: ${actor.model.model_path}
-      asset_id: "physical-intelligence/robotwin/adjust_bottle"
       num_images_in_input: 3
-    # Explicitly select this task's statistics for the official OpenPI loader.
-    # Override ``openpi.asset_id`` for other RoboTwin tasks.
+    # Pin this task's statistics. Omit the key to use the OpenPI TrainConfig
+    # default under model_path. Override the task name for other RoboTwin tasks.
     openpi_data:
-      norm_stats_path: ${actor.model.openpi.assets_dir}/${actor.model.openpi.asset_id}/norm_stats.json
+      norm_stats_path: ${actor.model.model_path}/physical-intelligence/robotwin/adjust_bottle/norm_stats.json
 
   optim:
     lr: 2.5e-5

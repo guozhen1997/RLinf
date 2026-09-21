@@ -2,7 +2,7 @@ model_type: "openpi_rlinf"
 
 # Default Pi0.5 SFT shape. Env-specific fields (config_name, action_dim,
 # num_action_chunks, discrete_state_input, …) are overridden in the experiment
-# YAML. Filesystem paths (model_path, openpi.assets_dir, openpi.asset_id) also
+# YAML. Filesystem paths (model_path, openpi_data.norm_stats_path) also
 # live in the experiment config so this template stays path-free.
 
 # OpenPI default: Gemma / SigLIP in bf16, action heads stay fp32.

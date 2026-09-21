@@ -186,11 +186,11 @@ Tokenizer 由 OpenPI 的 ``ModelTransformFactory`` 按基础模型加载，YAML 
 
 - ``--repo-id`` 可以是本地路径或 LeRobot HF repo id；可用 ``HF_LEROBOT_HOME`` 改缓存父目录。
 - ``--config-name`` 必须和训练用的 dataconfig 一致。
-- ``calculate_norm_stats.py`` 默认写到 ``./assets/<config_name>/<repo_id>/norm_stats.json``\ （``TrainConfig.assets_dirs / repo_id``）。训练和评测\ **不会**\ 自动从 SFT 的 ``full_weights.pt`` 目录找这份文件：要用 ``openpi.assets_dir`` + ``asset_id``，或 ``openpi_data.norm_stats_path`` 显式指过去。RoboTwin 配方把统计钉在基础权重旁的 ``physical-intelligence/robotwin/<task>/norm_stats.json``。
+- ``calculate_norm_stats.py`` 默认写到 ``./assets/<config_name>/<repo_id>/norm_stats.json``\ （``TrainConfig.assets_dirs / repo_id``）。训练和评测\ **不会**\ 自动从 SFT 的 ``full_weights.pt`` 目录找这份文件：要用 ``openpi_data.norm_stats_path`` 显式指过去。省略该字段时，OpenPI 按 TrainConfig 默认读取 ``{assets_dir}/{asset_id}/norm_stats.json``\ （会在 ``model_path`` 覆盖之后），并打一条 warning。RoboTwin 配方把统计钉在基础权重旁的 ``physical-intelligence/robotwin/<task>/norm_stats.json``。
 
 若标准差过小或 q99–q01 过窄，适当放大通常更稳，尤其是 SFT 之后还要做在线训练时。
 
-BEHAVIOR 不跑上面的脚本，而是用 ``actor.model.openpi.assets_dir`` / ``asset_id`` 指向已有的 ``{assets_dir}/{asset_id}/norm_stats.json``。
+BEHAVIOR 不跑上面的脚本，而是用 ``actor.model.openpi_data.norm_stats_path`` 指向已有的 ``{assets}/{asset_id}/norm_stats.json``。
 
 安装
 ----------------------------------------
@@ -289,8 +289,8 @@ Pi0.5 + BEHAVIOR-1K
        model_path: /path/to/pi05_base_pytorch_new   # 新格式 fp32 基础权重
        openpi:
          task: sft
-         assets_dir: /path/to/assets
-         asset_id: "behavior-1k/2025-challenge-demos"
+       openpi_data:
+         norm_stats_path: /path/to/assets/behavior-1k/2025-challenge-demos/norm_stats.json
 
 - ``use_skill: false`` 用主任务文本；``true`` 时按窗口从 ``task_subtasks`` 取逐帧技能文本（数据集里折叠后的 orchestrator 不能当标签）。
 - ``fine_grained_level`` / ``tolerance_s`` 控制流式时间对齐。
@@ -318,13 +318,11 @@ Pi0 + RoboTwin
        openpi:
          task: sft
          config_name: "pi0_aloha_robotwin"
-         assets_dir: ${actor.model.model_path}
-         asset_id: "physical-intelligence/robotwin/adjust_bottle"
          num_images_in_input: 3
        openpi_data:
-         norm_stats_path: ${actor.model.openpi.assets_dir}/${actor.model.openpi.asset_id}/norm_stats.json
+         norm_stats_path: ${actor.model.model_path}/physical-intelligence/robotwin/adjust_bottle/norm_stats.json
 
-14 维 ALOHA 动作、3 路图像；进模型前按 OpenPI 规则 pad 到 32 维。``openpi_data.norm_stats_path`` 把训练和评估钉到同一份 ``norm_stats.json``。换任务时改 ``asset_id``。
+14 维 ALOHA 动作、3 路图像；进模型前按 OpenPI 规则 pad 到 32 维。``openpi_data.norm_stats_path`` 把训练和评估钉到同一份 ``norm_stats.json``。换任务时改路径里的任务名。
 
 .. code:: bash
 
@@ -337,7 +335,7 @@ SFT 会把 ``full_weights.pt`` 写到 ``.../checkpoints/global_step_<N>/actor/mo
 
 不要把训练的 ``openpi.task: sft`` 带到评测里——评测配置必须是 ``task: eval``\ （才会走 ``Pi0Eval`` 和观测 transform）。``config_name``、``num_action_chunks`` 与训练对齐。
 
-归一化统计也\ **不会**\ 跟着 ``full_weights.pt`` 走。现成评测 YAML 常把 ``openpi_data.norm_stats_path`` 插值成 ``${rollout.model.model_path}/.../norm_stats.json``，那是给「权重和统计在同一目录」的转换产物用的。只改 ``model_path`` 指到 SFT checkpoint 时，必须\ **另外**\ 把统计指回训练用的那份（RoboTwin：基础权重旁的 ``physical-intelligence/robotwin/<task>/norm_stats.json``；BEHAVIOR：训练时的 ``assets_dir`` / ``asset_id``）。
+归一化统计也\ **不会**\ 跟着 ``full_weights.pt`` 走。现成评测 YAML 常把 ``openpi_data.norm_stats_path`` 插值成 ``${rollout.model.model_path}/.../norm_stats.json``，那是给「权重和统计在同一目录」的转换产物用的。只改 ``model_path`` 指到 SFT checkpoint 时，必须\ **另外**\ 把统计指回训练用的那份（RoboTwin：基础权重旁的 ``physical-intelligence/robotwin/<task>/norm_stats.json``；BEHAVIOR：训练时的 ``openpi_data.norm_stats_path``）。
 
 .. code:: bash
 

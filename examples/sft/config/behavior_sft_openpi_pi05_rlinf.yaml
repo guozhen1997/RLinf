@@ -73,8 +73,10 @@ actor:
     model_path: /path/to/pi05_base_pytorch_new
     openpi:
       task: sft
-      assets_dir: /path/to/assets
-      asset_id: "behavior-1k/2025-challenge-demos"
+    openpi_data:
+      # Existing {assets}/{asset_id}/norm_stats.json (the SFT base checkpoint
+      # bundles none). Omit this key to use the OpenPI TrainConfig default.
+      norm_stats_path: /path/to/assets/behavior-1k/2025-challenge-demos/norm_stats.json
 
   optim:
     lr: 2.5e-5

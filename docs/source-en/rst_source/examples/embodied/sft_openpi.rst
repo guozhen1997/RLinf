@@ -219,16 +219,19 @@ and ``actions`` before SFT (especially important for real-robot data):
 - ``calculate_norm_stats.py`` writes to
   ``./assets/<config_name>/<repo_id>/norm_stats.json``
   (``TrainConfig.assets_dirs / repo_id``). Training and eval do **not** look
-  next to SFT ``full_weights.pt`` for that file. Point
-  ``openpi.assets_dir`` + ``asset_id``, or ``openpi_data.norm_stats_path``, at
-  it. The RoboTwin recipe pins stats beside the base weights at
+  next to SFT ``full_weights.pt`` for that file. Set
+  ``openpi_data.norm_stats_path`` to that ``norm_stats.json``. If the key is
+  omitted, OpenPI loads ``{assets_dir}/{asset_id}/norm_stats.json`` from the
+  TrainConfig (after ``model_path`` is applied) and logs a warning. The
+  RoboTwin recipe pins stats beside the base weights at
   ``physical-intelligence/robotwin/<task>/norm_stats.json``.
 
 If standard deviations are tiny or the q99–q01 range is very narrow, widening
 them often stabilizes training, especially when SFT is followed by online RL.
 
-BEHAVIOR does not use that script. Point ``actor.model.openpi.assets_dir`` /
-``asset_id`` at an existing ``{assets_dir}/{asset_id}/norm_stats.json``.
+BEHAVIOR does not use that script. Point
+``actor.model.openpi_data.norm_stats_path`` at an existing
+``{assets}/{asset_id}/norm_stats.json``.
 
 Installation
 ------------
@@ -331,8 +334,8 @@ The streaming loader reads only ``data:`` (no hidden defaults). Change at least:
        model_path: /path/to/pi05_base_pytorch_new   # new-format fp32 base weights
        openpi:
          task: sft
-         assets_dir: /path/to/assets
-         asset_id: "behavior-1k/2025-challenge-demos"
+       openpi_data:
+         norm_stats_path: /path/to/assets/behavior-1k/2025-challenge-demos/norm_stats.json
 
 - ``use_skill: false`` trains on the main-task text; ``true`` uses per-frame
   skill text from ``task_subtasks`` (collapsed orchestrators in the dataset
@@ -366,15 +369,13 @@ matching HF SFT weights:
        openpi:
          task: sft
          config_name: "pi0_aloha_robotwin"
-         assets_dir: ${actor.model.model_path}
-         asset_id: "physical-intelligence/robotwin/adjust_bottle"
          num_images_in_input: 3
        openpi_data:
-         norm_stats_path: ${actor.model.openpi.assets_dir}/${actor.model.openpi.asset_id}/norm_stats.json
+         norm_stats_path: ${actor.model.model_path}/physical-intelligence/robotwin/adjust_bottle/norm_stats.json
 
 14-D ALOHA actions and three cameras; OpenPI pads actions to 32-D before the
 model. ``openpi_data.norm_stats_path`` pins SFT and eval to the same
-``norm_stats.json``. Change ``asset_id`` when switching tasks.
+``norm_stats.json``. Change the task name in that path when switching tasks.
 
 .. code:: bash
 
@@ -399,7 +400,7 @@ often interpolate ``openpi_data.norm_stats_path`` as
 directory that already bundles stats. If you only retarget ``model_path`` at
 an SFT checkpoint, also point stats back at the training copy (RoboTwin: next
 to the base weights at ``physical-intelligence/robotwin/<task>/norm_stats.json``;
-BEHAVIOR: the training ``assets_dir`` / ``asset_id``).
+BEHAVIOR: the training ``openpi_data.norm_stats_path``).
 
 .. code:: bash
 

@@ -110,10 +110,9 @@ try:  # lerobot >= 0.2 layout
 except ModuleNotFoundError:  # lerobot < 0.2
     from lerobot.common.datasets.video_utils import get_safe_default_codec
 
-# Transform base for PromptFromLeRobotItem — reuse openpi's (the openpi_rlinf
-# data path is built on openpi.transforms throughout).
-from openpi.transforms import DataTransformFn
 from torch.utils.data import Dataset, get_worker_info
+
+from rlinf.data.datasets.openpi_rlinf.transform_fn import DataTransformFn
 
 logger = logging.getLogger("BehaviorSftDataset")
 

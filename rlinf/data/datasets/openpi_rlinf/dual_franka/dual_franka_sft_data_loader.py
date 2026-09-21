@@ -34,12 +34,12 @@ import typing
 
 import numpy as np
 import torch
-from openpi.transforms import DataTransformFn, compose
 from torch.utils.data.distributed import DistributedSampler
 
 from rlinf.data.datasets.openpi_rlinf.dual_franka.dual_franka_sft_dataset import (
     DualFrankaSftDataset,
 )
+from rlinf.data.datasets.openpi_rlinf.transform_fn import DataTransformFn, compose
 from rlinf.data.storage.lerobot import resolve_lerobot_repo_id
 from rlinf.models.embodiment.openpi_rlinf.modules.model import Observation
 from rlinf.models.embodiment.openpi_rlinf.transforms.pipeline import (
@@ -178,8 +178,6 @@ def create_dual_franka_sft_data_loader(
     data_path: str,
     model_path: str,
     config_name: str,
-    assets_dir: str,
-    asset_id: str,
     action_dim: int,
     action_horizon: int,
     max_token_len: int,
@@ -205,8 +203,6 @@ def create_dual_franka_sft_data_loader(
         model_path,
         config_name,
         data_kwargs=data_kwargs,
-        norm_stats_dir=assets_dir,
-        norm_stats_asset_id=asset_id,
     )
     source = _TransformedDataset(
         dataset,
@@ -340,8 +336,6 @@ def build_dual_franka_sft_dataloader(
         data_path=str(data_path),
         model_path=str(model_cfg.model_path),
         config_name=str(openpi_cfg.config_name),
-        assets_dir=str(openpi_cfg.assets_dir),
-        asset_id=str(openpi_cfg.asset_id),
         action_dim=int(openpi_cfg.model_action_dim),
         action_horizon=int(model_cfg.num_action_chunks),
         max_token_len=int(openpi_cfg.max_token_len),

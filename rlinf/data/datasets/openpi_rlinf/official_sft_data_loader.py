@@ -22,6 +22,10 @@ from typing import Any
 from omegaconf import OmegaConf
 
 from rlinf.data.storage.lerobot import resolve_lerobot_repo_id
+from rlinf.models.embodiment.openpi_rlinf.transforms.pipeline import (
+    norm_stats_path_from_data_kwargs,
+    select_openpi_norm_stats,
+)
 
 
 def build_official_openpi_sft_dataloader(
@@ -49,12 +53,18 @@ def build_official_openpi_sft_dataloader(
     if eval_dataset:
         batch_size = cfg.actor.get("eval_batch_size", batch_size)
 
+    data_kwargs = OmegaConf.select(model_cfg, "openpi_data", default=None)
+    if data_kwargs is not None:
+        data_kwargs = OmegaConf.to_container(data_kwargs, resolve=True)
+    if not norm_stats_path_from_data_kwargs(data_kwargs):
+        select_openpi_norm_stats(None, norm_stats_path=None)
+
     config = get_openpi_config(
         model_cfg.openpi.config_name,
         model_path=model_cfg.model_path,
         batch_size=batch_size * world_size,
         repo_id=repo_id,
-        data_kwargs=getattr(model_cfg, "openpi_data", None),
+        data_kwargs=data_kwargs,
     )
     config = dataclasses.replace(
         config,

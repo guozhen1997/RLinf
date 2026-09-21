@@ -400,12 +400,11 @@ Ray 在 ``ray start`` 时捕获环境变量。启动集群前导出节点 rank �
 
    bash examples/sft/run_vla_sft.sh realworld_sft_openpi_rlinf_dual_franka_tcp_rot6d
 
-并在 ``examples/sft/config/realworld_sft_openpi_rlinf_dual_franka_tcp_rot6d.yaml``
-中更新 ``train_data_paths``、``model_path``、``assets_dir``、``asset_id``、``logger`` 设置和集群放置。
+并在 ``examples/sft/config/realworld_sft_openpi_rlinf_dual_franka_tcp_rot6d.yaml`` 中更新 ``train_data_paths``、``model_path``、``openpi_data.norm_stats_path``、``logger`` 设置和集群放置。
 Checkpoint 保存到
 ``<log_path>/checkpoints/global_step_<N>/actor/model_state_dict/full_weights.pt``。
 
-其中 ``assets_dir`` 为 ``norm_stats.json`` 所在目录，``asset_id`` 为 ``norm_stats.json`` 所在的 ``repo_id``，``model_path`` 为训练时指定的模型路径。本文使用的 ``model`` 为需要从 ``openpi-jax`` 版做转换，详情请参考 :doc:`sft_openpi`。
+其中 ``openpi_data.norm_stats_path`` 指向 ``calculate_norm_stats.py`` 写出的 ``norm_stats.json``（通常是 ``./assets/pi05_dualfranka_tcp_rot6d/<repo_id>/norm_stats.json``）。省略该字段时按 OpenPI TrainConfig 默认从 ``model_path`` 读取。``model_path`` 为训练时指定的模型路径。本文使用的 ``model`` 为需要从 ``openpi-jax`` 版做转换，详情请参考 :doc:`sft_openpi`。
 
 使用代码为：
 

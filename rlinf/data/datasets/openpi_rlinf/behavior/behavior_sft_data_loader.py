@@ -21,11 +21,11 @@ import typing
 
 import numpy as np
 import torch
-from openpi.transforms import DataTransformFn, compose
 
 from rlinf.data.datasets.openpi_rlinf.behavior.behavior_sft_dataset import (
     BehaviorSftDataset,
 )
+from rlinf.data.datasets.openpi_rlinf.transform_fn import DataTransformFn, compose
 from rlinf.data.storage.lerobot import (
     resolve_lerobot_repo_id,
 )
@@ -56,7 +56,7 @@ _LEROBOT_STATE_KEY = "observation.state"
 @dataclasses.dataclass(frozen=True)
 class _Repack(DataTransformFn):
     """Map raw LeRobot frame keys to the ``observation/*`` names openpi's
-    ``BehaviorInputs`` expects (an ``openpi.transforms`` transform, so it composes
+    ``BehaviorInputs`` expects (a ``DataTransformFn``, so it composes
     directly in front of the shared pipeline).
 
     The two wrist views are stacked into a single ``observation/wrist_image``
@@ -175,8 +175,6 @@ def _worker_init_fn(worker_id: int) -> None:
 def create_behavior_sft_data_loader(
     *,
     behavior_dataset_root: str,
-    assets_dir: str,
-    asset_id: str,
     model_path: str,
     config_name: str,
     repo_id: str,
@@ -204,10 +202,6 @@ def create_behavior_sft_data_loader(
 
     Args:
         behavior_dataset_root: Local root of the LeRobot BEHAVIOR dataset.
-        assets_dir: Directory holding the norm-stats tree; the openpi
-            ``Normalize`` stage reads ``{assets_dir}/{asset_id}/norm_stats.json``
-            (the SFT base checkpoint bundles none).
-        asset_id: Norm-stats sub-directory (e.g. ``behavior-1k/2025-challenge-demos``).
         model_path: New-format checkpoint dir passed to ``get_openpi_config`` to
             select the shared transform pipeline.
         config_name: openpi TrainConfig key (e.g. ``pi05_behavior``).
@@ -231,7 +225,8 @@ def create_behavior_sft_data_loader(
         allow_right: Skill mode — frames to extend a contiguous skill end right.
         dist_rank: This rank's id, threaded into the per-rank chunk partition.
         dist_world_size: Total ranks, threaded into the per-rank chunk partition.
-        data_kwargs: Optional ``openpi_data`` overrides forwarded to the pipeline.
+        data_kwargs: Optional ``openpi_data`` overrides forwarded to the
+            pipeline (``norm_stats_path`` pins ``norm_stats.json``).
 
     Returns:
         A loader whose iteration yields ``(Observation, actions)`` 2-tuples.
@@ -258,7 +253,8 @@ def create_behavior_sft_data_loader(
     )
 
     # The shared openpi input pipeline (BehaviorInputs -> Normalize -> ModelTransform),
-    # keyed off the checkpoint / config_name, with norm stats from assets_dir/asset_id.
+    # keyed off the checkpoint / config_name. Norm stats come from
+    # ``openpi_data.norm_stats_path`` or the OpenPI TrainConfig default.
     # Only the transform content comes from openpi; the wrapper + collate are plain
     # numpy/torch. The composed transform is built in the main process and is
     # picklable, so spawn workers receive it directly (no lazy per-worker build).
@@ -266,8 +262,6 @@ def create_behavior_sft_data_loader(
         model_path,
         config_name,
         data_kwargs=data_kwargs,
-        norm_stats_dir=assets_dir,
-        norm_stats_asset_id=asset_id,
     )
     source = _TransformedStreamingDataset(
         dataset, compose([_Repack(), *input_transforms])
@@ -281,13 +275,10 @@ def create_behavior_sft_data_loader(
     generator.manual_seed(seed)
 
     logger.info(
-        "BEHAVIOR SFT data loader: batch_size=%d, num_workers=%d, action_horizon=%d, "
-        "norm_stats=%s/%s",
+        "BEHAVIOR SFT data loader: batch_size=%d, num_workers=%d, action_horizon=%d",
         batch_size,
         num_workers,
         action_horizon,
-        assets_dir,
-        asset_id,
     )
 
     torch_loader = torch.utils.data.DataLoader(
@@ -368,12 +359,8 @@ def build_behavior_sft_dataloader(
     model_cfg = cfg.actor.model
     data_cfg = cfg.data
 
-    # Norm stats resolve STRICTLY from YAML (assets_dir / asset_id) for the openpi
-    # Normalize stage — the same file the eval / RL paths would resolve.
-    assets_dir = model_cfg.openpi.assets_dir
-    asset_id = model_cfg.openpi.asset_id
     config_name = str(model_cfg.openpi.config_name)
-    data_kwargs = OmegaConf.select(cfg.actor, "openpi_data", default=None)
+    data_kwargs = OmegaConf.select(model_cfg, "openpi_data", default=None)
     if data_kwargs is not None:
         data_kwargs = OmegaConf.to_container(data_kwargs, resolve=True)
 
@@ -407,8 +394,6 @@ def build_behavior_sft_dataloader(
 
     loader = create_behavior_sft_data_loader(
         behavior_dataset_root=str(data_cfg.behavior_dataset_root),
-        assets_dir=str(assets_dir),
-        asset_id=asset_id,
         model_path=str(model_cfg.model_path),
         config_name=config_name,
         repo_id=str(data_cfg.repo_id),
