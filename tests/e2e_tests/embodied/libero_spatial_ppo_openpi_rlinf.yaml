@@ -142,9 +142,7 @@ actor:
     # Dual-expert Gemma packs frozen VLM (expert-0) and trainable action
     # expert (expert-1) in the same Block. FSDP FlatParameter then mixes
     # requires_grad and rejects wrap unless use_orig_params=True.
-    # OpenPI can keep False because paligemma vs gemma_expert are separate
-    # modules (uniform requires_grad per GemmaDecoderLayer). This flag does
-    # not change TF32 / selective-bf16 numerics.
+    # validate_fsdp_cfg also forces this flag for openpi_rlinf.
     use_orig_params: True
     gradient_checkpointing: False # for openpi, gradient checkpointing is not supported, please do not change this value
     mixed_precision:

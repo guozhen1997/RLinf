@@ -563,6 +563,23 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
             "backward_prefetch", None
         )
         cfg.fsdp_config.use_orig_params = cfg.fsdp_config.get("use_orig_params", False)
+        if (
+            model_type is not None
+            and str(model_type) == SupportedModel.OPENPI_RLINF.value
+            and not cfg.fsdp_config.use_orig_params
+        ):
+            # Dual-expert Gemma packs frozen VLM (expert-0) and trainable
+            # action expert (expert-1) in the same Block. FSDP FlatParameter
+            # then mixes requires_grad and rejects wrap unless
+            # use_orig_params=True. The shared hybrid_engines/fsdp default is
+            # False, so inherited CI/example YAMLs would otherwise fail at
+            # FSDP wrap time.
+            logging.info(
+                "openpi_rlinf requires actor.fsdp_config.use_orig_params=True "
+                "because dual-expert Gemma Block mixes frozen and trainable "
+                "parameters. Overriding use_orig_params=False to True."
+            )
+            cfg.fsdp_config.use_orig_params = True
         cfg.fsdp_config.use_liger_kernel = cfg.fsdp_config.get(
             "use_liger_kernel", False
         )

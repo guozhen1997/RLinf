@@ -616,7 +616,7 @@ class Pi0(model.BaseModel):
     def _no_split_modules(self) -> list[str] | None:
         # FSDP1 FlatParameter requires uniform dtype per wrap unit, even with
         # use_orig_params=True. Dual-expert Block also mixes frozen/trainable
-        # params, so the experiment yaml must set use_orig_params=True.
+        # params; validate_fsdp_cfg forces use_orig_params=True for this model.
         # Mirror OpenPI: wrap GemmaRMSNorm / vision embeddings separately so
         # fp32 islands are not flattened with bf16.
         #   RMSNorm / Embedder     -- OpenPI GemmaRMSNorm
