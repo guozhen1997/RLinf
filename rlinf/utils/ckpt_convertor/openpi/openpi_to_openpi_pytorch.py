@@ -91,9 +91,7 @@ def new_to_old_state_dict(
 
         rlinf_key = f"{rlinf_prefix}attn.in_proj_weight"
         if rlinf_key in openpi_state_dict:
-            query, key, value = torch.chunk(
-                openpi_state_dict[rlinf_key], 3, dim=0
-            )
+            query, key, value = torch.chunk(openpi_state_dict[rlinf_key], 3, dim=0)
             openpi_pytorch_state_dict[f"{openpi_prefix}self_attn.q_proj.weight"] = (
                 query.contiguous()
             )
@@ -105,9 +103,7 @@ def new_to_old_state_dict(
             )
         rlinf_key = f"{rlinf_prefix}attn.in_proj_bias"
         if rlinf_key in openpi_state_dict:
-            query, key, value = torch.chunk(
-                openpi_state_dict[rlinf_key], 3, dim=0
-            )
+            query, key, value = torch.chunk(openpi_state_dict[rlinf_key], 3, dim=0)
             openpi_pytorch_state_dict[f"{openpi_prefix}self_attn.q_proj.bias"] = (
                 query.contiguous()
             )
@@ -359,9 +355,7 @@ def convert(
     output_model = pathlib.Path(output_model)
     openpi_path = resolve_model_safetensors(input_model)
     if not openpi_path.exists():
-        raise FileNotFoundError(
-            f"OpenPI checkpoint not found: {openpi_path}"
-        )
+        raise FileNotFoundError(f"OpenPI checkpoint not found: {openpi_path}")
     openpi_state_dict = load_safetensors(openpi_path)
     openpi_pytorch_state_dict = new_to_old_state_dict(openpi_state_dict)
     if ACTION_EXPERT_LM_HEAD not in openpi_pytorch_state_dict:

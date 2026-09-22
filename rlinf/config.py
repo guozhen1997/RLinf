@@ -540,10 +540,7 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
             "sharding_strategy", "full_shard"
         )
         model_type = OmegaConf.select(cfg, "model.model_type", default=None)
-        if (
-            model_type is not None
-            and str(model_type) == SupportedModel.OPENPI.value
-        ):
+        if model_type is not None and str(model_type) == SupportedModel.OPENPI.value:
             sharding = (
                 str(cfg.fsdp_config.sharding_strategy).strip().lower().replace("-", "_")
             )
@@ -617,10 +614,7 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
         )
         cfg.fsdp_config = validate_amp_cfg(cfg.fsdp_config)
 
-        if (
-            model_type is not None
-            and str(model_type) == SupportedModel.OPENPI.value
-        ):
+        if model_type is not None and str(model_type) == SupportedModel.OPENPI.value:
             mp = cfg.fsdp_config.mixed_precision
             all_none = (
                 mp.param_dtype is None

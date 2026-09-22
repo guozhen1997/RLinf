@@ -498,10 +498,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         return self._opd_teacher_model
 
     def _build_sft_data_loader(self):
-        if (
-            SupportedModel(self.cfg.actor.model.model_type)
-            == SupportedModel.OPENPI
-        ):
+        if SupportedModel(self.cfg.actor.model.model_type) == SupportedModel.OPENPI:
             repo_id = resolve_lerobot_repo_id(self.cfg.actor.get("sft_data_path"))
             if repo_id is None:
                 raise ValueError(

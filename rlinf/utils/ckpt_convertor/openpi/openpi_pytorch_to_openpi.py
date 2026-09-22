@@ -132,9 +132,9 @@ def old_to_new_state_dict(
     for suffix in (".weight", ".bias"):
         source_key = _OPENPI_PYTORCH_SIGLIP + "post_layernorm" + suffix
         if source_key in openpi_pytorch_state_dict:
-            openpi_state_dict["img.encoder.norm" + suffix] = (
-                openpi_pytorch_state_dict[source_key]
-            )
+            openpi_state_dict["img.encoder.norm" + suffix] = openpi_pytorch_state_dict[
+                source_key
+            ]
 
     # Multi-modal projector
     for suffix in (".weight", ".bias"):
@@ -156,9 +156,9 @@ def old_to_new_state_dict(
         for projection in ("q_proj", "k_proj", "v_proj", "o_proj"):
             source_key = f"{source_prefix}self_attn.{projection}.weight"
             if source_key in openpi_pytorch_state_dict:
-                openpi_state_dict[
-                    f"{target_prefix}attn.{projection}.0.weight"
-                ] = openpi_pytorch_state_dict[source_key]
+                openpi_state_dict[f"{target_prefix}attn.{projection}.0.weight"] = (
+                    openpi_pytorch_state_dict[source_key]
+                )
 
         gate_key = f"{source_prefix}mlp.gate_proj.weight"
         up_key = f"{source_prefix}mlp.up_proj.weight"
@@ -203,9 +203,9 @@ def old_to_new_state_dict(
         for projection in ("q_proj", "k_proj", "v_proj", "o_proj"):
             source_key = f"{source_prefix}self_attn.{projection}.weight"
             if source_key in openpi_pytorch_state_dict:
-                openpi_state_dict[
-                    f"{target_prefix}attn.{projection}.1.weight"
-                ] = openpi_pytorch_state_dict[source_key]
+                openpi_state_dict[f"{target_prefix}attn.{projection}.1.weight"] = (
+                    openpi_pytorch_state_dict[source_key]
+                )
 
         gate_key = f"{source_prefix}mlp.gate_proj.weight"
         up_key = f"{source_prefix}mlp.up_proj.weight"
@@ -266,9 +266,9 @@ def old_to_new_state_dict(
     ):
         lm_head_key = "paligemma_with_expert.gemma_expert.lm_head.weight"
     if lm_head_key is not None:
-        openpi_state_dict["llm.embedder.embedding.weight"] = (
-            openpi_pytorch_state_dict[lm_head_key]
-        )
+        openpi_state_dict["llm.embedder.embedding.weight"] = openpi_pytorch_state_dict[
+            lm_head_key
+        ]
 
     # Action head (same names in both layouts)
     for key in openpi_pytorch_state_dict:
