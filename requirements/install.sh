@@ -92,8 +92,8 @@ PLATFORM_COMMON_REQ_EXCLUDE_RE=""
 DEFAULT_BACKEND_NVIDIA="auto"
 # AMD composes UV_TORCH_BACKEND=rocm<version>; --rocm picks the version. When
 # unset, configure_amd detects the system's ROCm version and auto-picks the
-# minimum torch version on https://download.pytorch.org/whl/torch/ that has a
-# matching +rocm<version> wheel.
+# minimum torch version on https://download.pytorch.org/whl/rocm<ver>/torch/
+# that has a matching +rocm<version> wheel.
 # Add new platforms by extending SUPPORTED_PLATFORMS, defining
 # configure_<platform> + install_<platform>_extras, and routing in their
 # respective dispatchers below.
@@ -135,7 +135,7 @@ Common options:
                            torchcodec is left untouched. Patches pyproject.toml in place for the
                            duration of the install; the original is restored on exit. On
                            --platform amd, defaults to the lowest torch version with a matching
-                           +rocm<version> wheel on https://download.pytorch.org/whl/torch/.
+                           +rocm<version> wheel on https://download.pytorch.org/whl/rocm<ver>/torch/.
     --engine <name>        Rollout engine for target=agentic: ${SUPPORTED_ENGINES[*]}
                            (default: sglang). One venv holds one engine -- they pin the
                            same kernel libraries to different versions, so run install.sh
@@ -408,21 +408,29 @@ amd_gfx_is_cdna() {
 # Linux x86_64 wheel matching PYTHON_VERSION's cpXY tag. Prefers the smallest
 # version >= 2.5; falls back to the highest available wheel if no >= 2.5 wheel
 # exists. Uses the NJU mirror (per-ROCm subdir) when --use-mirror is set,
-# otherwise the upstream universal index. Echoes X.Y.Z on success, returns 1
-# on failure.
+# otherwise the upstream per-ROCm index, falling back to the NJU listing if
+# upstream cannot be fetched. Sets TORCH_VERSION and ROCM_TORCH_INDEX on
+# success, returns 1 on failure. Must not be called from a command
+# substitution: the index side-effect would be lost in the subshell.
 detect_torch_for_rocm() {
     local rocm_ver="$1"
+    ROCM_TORCH_INDEX=""
 
     if ! command -v curl &>/dev/null; then
         echo "[install.sh] curl not found; cannot auto-detect torch version." >&2
         return 1
     fi
 
-    local url
+    # ROCm wheels live under /whl/rocm<ver>/, not the mixed /whl/torch/ index.
+    # A single 30s fetch of the universal listing is what took ROCm CI down
+    # (timeout / block to download.pytorch.org).
+    local official_index="https://download.pytorch.org/whl/rocm${rocm_ver}"
+    local mirror_index="https://mirrors.nju.edu.cn/pytorch/whl/rocm${rocm_ver}"
+    local urls=()
     if [ "$USE_MIRRORS" -eq 1 ]; then
-        url="https://mirrors.nju.edu.cn/pytorch/whl/rocm${rocm_ver}/torch/"
+        urls=("${mirror_index}/torch/" "${official_index}/torch/")
     else
-        url="https://download.pytorch.org/whl/torch/"
+        urls=("${official_index}/torch/" "${mirror_index}/torch/")
     fi
 
     # Python ABI tag (e.g. 3.11.14 -> cp311). The venv hasn't been created yet
@@ -431,22 +439,41 @@ detect_torch_for_rocm() {
     IFS='.' read -r py_major py_minor _py_patch <<< "$PYTHON_VERSION"
     local py_tag="cp${py_major}${py_minor}"
 
-    local html
-    html=$(curl -fsSL --max-time 30 "$url" 2>/dev/null) || {
-        echo "[install.sh] Failed to fetch ${url}." >&2
-        return 1
-    }
+    local url html http_code attempt listing_file picked_url=""
+    listing_file=$(mktemp)
+    html=""
+    for url in "${urls[@]}"; do
+        http_code=""
+        # curl on Ubuntu 20.04 lacks --retry-all-errors, so retry explicitly.
+        for attempt in 1 2 3 4; do
+            http_code=$(curl -sSL --max-time 60 -o "$listing_file" -w '%{http_code}' "$url" 2>/dev/null) || http_code="000"
+            case "$http_code" in
+                200|403|404) break ;;
+            esac
+            echo "[install.sh] Fetching ${url} failed (HTTP ${http_code}, attempt ${attempt}/4)." >&2
+            [ "$attempt" -lt 4 ] && sleep $(( attempt * 5 ))
+        done
+        if [ "$http_code" = "200" ]; then
+            html=$(cat "$listing_file")
+            picked_url="$url"
+            break
+        fi
+        echo "[install.sh] Failed to fetch ${url} (HTTP ${http_code})." >&2
+    done
+    rm -f "$listing_file"
+    [ -n "$html" ] || return 1
 
     # Wheel filenames look like:
     #   torch-2.8.0+rocm6.4-cp311-cp311-manylinux_2_28_x86_64.whl
-    # The abi tag may have a trailing 't' (free-threaded build); the platform
-    # tag covers manylinux_*_x86_64 / manylinux<digits>_x86_64 / linux_x86_64
+    # Simple indexes may encode '+' as %2B. The abi tag may have a trailing
+    # 't' (free-threaded build); the platform tag covers
+    # manylinux_*_x86_64 / manylinux<digits>_x86_64 / linux_x86_64
     # (NJU and upstream both stick to manylinux_2_28 for recent ROCm wheels,
     # but allow the older tags for forward-compat).
     local rocm_re="${rocm_ver//./\\.}"
     local versions
     versions=$(echo "$html" \
-        | grep -oE "torch-[0-9]+\.[0-9]+\.[0-9]+\+rocm${rocm_re}(\.[0-9]+)?-${py_tag}-${py_tag}t?-(manylinux[^-]*|linux)_x86_64\.whl" \
+        | grep -oE "torch-[0-9]+\.[0-9]+\.[0-9]+(\+|%2[Bb])rocm${rocm_re}(\.[0-9]+)?-${py_tag}-${py_tag}t?-(manylinux[^-]*|linux)_x86_64\.whl" \
         | sed -E 's/torch-([0-9]+\.[0-9]+\.[0-9]+).*/\1/' \
         | sort -uV)
     [ -z "$versions" ] && return 1
@@ -464,7 +491,12 @@ detect_torch_for_rocm() {
     if [ -z "$picked" ]; then
         picked=$(echo "$versions" | tail -n1)
     fi
-    echo "$picked"
+
+    case "$picked_url" in
+        *mirrors.nju.edu.cn*) ROCM_TORCH_INDEX="$mirror_index" ;;
+        *) ROCM_TORCH_INDEX="$official_index" ;;
+    esac
+    TORCH_VERSION="$picked"
 }
 
 # Prints "MAJOR MINOR" (e.g. "12 4") on success, returns 1 if no CUDA is
@@ -653,7 +685,7 @@ configure_amd() {
     fi
 
     if [ -z "$TORCH_VERSION" ]; then
-        TORCH_VERSION=$(detect_torch_for_rocm "$ROCM_VERSION") || {
+        detect_torch_for_rocm "$ROCM_VERSION" || {
             echo "[install.sh] No compatible torch wheels found for ROCm ${ROCM_VERSION} (Python ${PYTHON_VERSION}). Pass --torch explicitly." >&2
             exit 1
         }
@@ -661,7 +693,9 @@ configure_amd() {
     fi
 
     PLATFORM_TORCH_STR="+rocm${ROCM_VERSION}"
-    if [ "$USE_MIRRORS" -eq 1 ]; then
+    if [ -n "${ROCM_TORCH_INDEX:-}" ]; then
+        PLATFORM_TORCH_INDEX="$ROCM_TORCH_INDEX"
+    elif [ "$USE_MIRRORS" -eq 1 ]; then
         PLATFORM_TORCH_INDEX="https://mirrors.nju.edu.cn/pytorch/whl/rocm${ROCM_VERSION}"
     else
         PLATFORM_TORCH_INDEX="https://download.pytorch.org/whl/rocm${ROCM_VERSION}"
