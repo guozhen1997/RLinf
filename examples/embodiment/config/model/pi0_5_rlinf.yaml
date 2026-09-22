@@ -34,3 +34,7 @@ openpi:
   paligemma_variant: "gemma_2b"
   action_expert_variant: "gemma_300m"
   max_token_len: 200
+
+  # Fused RoPE / GELU kernels. Isaac Sim jobs set this false: their bundled
+  # torch cannot compile against the venv Triton.
+  torch_compile: True

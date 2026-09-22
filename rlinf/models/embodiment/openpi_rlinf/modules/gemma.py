@@ -36,7 +36,7 @@ import torch.utils.checkpoint
 
 from . import lora
 from .lora import FeedForward as LoRAFeedForward
-from .utils import _str_to_dtype, gelu_glu
+from .utils import _str_to_dtype, gelu_glu, torch_compile_enabled
 
 PALIGEMMA_VOCAB_SIZE = 257_152
 
@@ -645,8 +645,7 @@ class Module(nn.Module):
         return outputs, kv_cache
 
 
-@torch.compile
-def _apply_rope(
+def _apply_rope_eager(
     x: torch.Tensor, *, positions: torch.Tensor, max_wavelength: float = 10000.0
 ) -> torch.Tensor:
     """Apply RoPE to input tensor."""
@@ -664,10 +663,31 @@ def _apply_rope(
     return res.to(x.dtype)
 
 
-@torch.compile
-def _fused_gated_residual(x, y, gate):
+_apply_rope_compiled = torch.compile(_apply_rope_eager)
+
+
+def _apply_rope(
+    x: torch.Tensor, *, positions: torch.Tensor, max_wavelength: float = 10000.0
+) -> torch.Tensor:
+    fn = _apply_rope_compiled if torch_compile_enabled() else _apply_rope_eager
+    return fn(x, positions=positions, max_wavelength=max_wavelength)
+
+
+def _fused_gated_residual_eager(x, y, gate):
     """Fuse the gated residual ``x + y * gate`` into a single kernel."""
     return x + y * gate
+
+
+_fused_gated_residual_compiled = torch.compile(_fused_gated_residual_eager)
+
+
+def _fused_gated_residual(x, y, gate):
+    fn = (
+        _fused_gated_residual_compiled
+        if torch_compile_enabled()
+        else _fused_gated_residual_eager
+    )
+    return fn(x, y, gate)
 
 
 def _gated_residual(x, y, gate):

@@ -617,7 +617,9 @@ class MultiStepRolloutWorker(Worker):
             forward_inputs=result["forward_inputs"],
             versions=torch.full_like(
                 result["prev_logprobs"], float(self.version), dtype=torch.float32
-            ),
+            )
+            if self.collect_prev_infos
+            else None,
         )
 
     @Worker.timer("sync_model_from_actor")
