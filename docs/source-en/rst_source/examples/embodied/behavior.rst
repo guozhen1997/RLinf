@@ -203,7 +203,7 @@ Each recipe is a YAML config under ``examples/embodiment/config/``:
      - ``behavior_ppo_openpi.yaml``
    * - π₀.₅
      - PPO
-     - ``behavior_ppo_openpi_pi05_rlinf.yaml``
+     - ``behavior_ppo_openpi_pi05.yaml``
 
 Launch a config with ``run_embodiment.sh``:
 
@@ -251,7 +251,7 @@ PyTorch format:
 Thanks to the OpenPI-Comet authors for open-sourcing the model and tools, which
 helps reproducibility and evaluation in RLinf.
 
-After conversion, update ``behavior_openpi_pi05_rlinf_eval.yaml`` as follows:
+After conversion, update ``behavior_openpi_pi05_eval.yaml`` as follows:
 
 1. Set ``rollout.model.model_path`` to the converted model directory.
 2. Increase ``max_episode_steps`` and ``max_steps_per_rollout_epoch`` in
@@ -266,7 +266,7 @@ After conversion, update ``behavior_openpi_pi05_rlinf_eval.yaml`` as follows:
 
 Run standalone evaluation through the :doc:`BEHAVIOR-1K evaluation guide <../../evaluations/guides/behavior>`.
 It owns the required ``ISAAC_PATH`` / ``OMNIGIBSON_DATA_PATH`` setup, the
-``behavior_openpi_pi05_rlinf_eval`` launch command, and result interpretation.
+``behavior_openpi_pi05_eval`` launch command, and result interpretation.
 
 
 Configure Further
@@ -371,15 +371,15 @@ RLinf YAML directly and preserves ``activity_definition_id``.
 
 **5. Evaluate a JAX-aligned Pi0.5 checkpoint**
 
-BEHAVIOR evaluation uses ``model_type: openpi_rlinf``. For weights from
+BEHAVIOR evaluation uses ``model_type: openpi``. For weights from
 :doc:`sft_openpi` or the OpenPI checkpoint convertor, the eval config is:
 
-- ``evaluations/behavior/behavior_openpi_pi05_rlinf_eval.yaml``
+- ``evaluations/behavior/behavior_openpi_pi05_eval.yaml``
 
 This config runs in eval-only mode (``runner.only_eval: True``) and consumes a
 converted checkpoint, i.e. one produced by the OpenPI checkpoint
-convertor (``ckpt_convertor.openpi`` ``openpi_pytorch_to_openpi_rlinf`` /
-``sft_to_openpi_rlinf``). Set the model
+convertor (``ckpt_convertor.openpi`` ``openpi_pytorch_to_openpi`` /
+``sft_to_openpi``). Set the model
 paths directly in the config as ``/path/to/...`` placeholders:
 
 - ``rollout.model.model_path``: the eval checkpoint.
@@ -391,7 +391,7 @@ Normalization statistics are loaded from the converted checkpoint's bundled
 
    export ISAAC_PATH=/path/to/isaac-sim
    export OMNIGIBSON_DATA_PATH=/path/to/BEHAVIOR-1K-datasets
-   bash evaluations/run_eval.sh behavior behavior_openpi_pi05_rlinf_eval
+   bash evaluations/run_eval.sh behavior behavior_openpi_pi05_eval
 
 .. note::
 

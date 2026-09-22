@@ -55,7 +55,7 @@ Tasks
      - ``realworld_collect_data_gello_joint_dual_franka``
      - Collect dual-arm joint trajectories.
    * - SFT
-     - ``realworld_sft_openpi_rlinf_dual_franka_tcp_rot6d``
+     - ``realworld_sft_openpi_dual_franka_tcp_rot6d``
      - Fine-tune π₀.₅ on tcp_rot6d actions.
    * - Deployment
      - ``realworld_eval_dual_franka``
@@ -178,7 +178,7 @@ Use the repository-provided configs and replace the required parameters:
      - Purpose
    * - ``examples/embodiment/config/realworld_collect_data_gello_joint_dual_franka.yaml``
      - GELLO joint-space collection
-   * - ``examples/sft/config/realworld_sft_openpi_rlinf_dual_franka_tcp_rot6d.yaml``
+   * - ``examples/sft/config/realworld_sft_openpi_dual_franka_tcp_rot6d.yaml``
      - π₀.₅ SFT on converted tcp_rot6d data
    * - ``examples/embodiment/config/realworld_eval_dual_franka.yaml``
      - Real-world policy deployment
@@ -430,11 +430,11 @@ On the training node:
        --config-name pi05_dualfranka_tcp_rot6d \
        --repo-id $SFT_REPO_ID
 
-   bash examples/sft/run_vla_sft.sh realworld_sft_openpi_rlinf_dual_franka_tcp_rot6d
+   bash examples/sft/run_vla_sft.sh realworld_sft_openpi_dual_franka_tcp_rot6d
 
 Update ``train_data_paths``, ``model_path``,
 ``openpi_data.norm_stats_path``, logger settings, and cluster placement in
-``examples/sft/config/realworld_sft_openpi_rlinf_dual_franka_tcp_rot6d.yaml``.
+``examples/sft/config/realworld_sft_openpi_dual_franka_tcp_rot6d.yaml``.
 Checkpoints are saved under
 ``<log_path>/checkpoints/global_step_<N>/actor/model_state_dict/full_weights.pt``.
 

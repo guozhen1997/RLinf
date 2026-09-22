@@ -7,7 +7,7 @@ OpenPI 监督微调
 
    OpenPI π₀ / π₀.₅ 视觉-语言-动作模型。
 
-在 RLinf 里对 π₀ / π₀.₅ 做 **全量 SFT** 或 **LoRA**。策略统一为 ``model_type: openpi_rlinf``：这是与 JAX 参考对齐的 PyTorch 实现（官方 openpi 仓库自带的 PyTorch 代码并未对齐）。SFT 通常是强化学习前的冷启动：先模仿示范，再在较好先验上做 RL。
+在 RLinf 里对 π₀ / π₀.₅ 做 **全量 SFT** 或 **LoRA**。策略统一为 ``model_type: openpi``：这是与 JAX 参考对齐的 PyTorch 实现（官方 openpi 仓库自带的 PyTorch 代码并未对齐）。SFT 通常是强化学习前的冷启动：先模仿示范，再在较好先验上做 RL。
 
 配方一览
 ----------------------------------------
@@ -24,24 +24,24 @@ OpenPI 监督微调
      - 启动名
    * - LIBERO π₀
      - ``libero_sft_openpi.yaml``
-     - ``model/pi0_rlinf``
+     - ``model/pi0``
      - ``libero_sft_openpi``
    * - 真机 Franka bin-relocation
      - ``realworld_bin_relocation_sft_openpi.yaml``
-     - ``model/pi0_rlinf``
+     - ``model/pi0``
      - ``realworld_bin_relocation_sft_openpi``
    * - 自定义 LeRobot
      - ``custom_sft_openpi.yaml``
-     - ``model/pi0_rlinf``
+     - ``model/pi0``
      - ``custom_sft_openpi``
    * - BEHAVIOR-1K π₀.₅
-     - ``behavior_sft_openpi_pi05_rlinf.yaml``
-     - ``model/pi0_5_rlinf``
-     - ``behavior_sft_openpi_pi05_rlinf``
+     - ``behavior_sft_openpi_pi05.yaml``
+     - ``model/pi0_5``
+     - ``behavior_sft_openpi_pi05``
    * - RoboTwin adjust_bottle π₀
-     - ``robotwin_adjust_bottle_sft_openpi_rlinf.yaml``
-     - ``model/pi0_rlinf``
-     - ``robotwin_adjust_bottle_sft_openpi_rlinf``
+     - ``robotwin_adjust_bottle_sft_openpi.yaml``
+     - ``model/pi0``
+     - ``robotwin_adjust_bottle_sft_openpi``
 
 双 Franka 真机的 SFT 与部署见 :doc:`dual_franka_openpi_pytorch`。
 
@@ -148,7 +148,7 @@ Tokenizer 由 OpenPI 的 ``ModelTransformFactory`` 按基础模型加载，YAML 
             task: sft
             config_name: "pi0_custom"
 
-2. 在 :file:`rlinf/models/embodiment/openpi_rlinf/dataconfig/__init__.py` 注册 ``pi0_custom``\ （仓库里已有一份模板）：
+2. 在 :file:`rlinf/models/embodiment/openpi/dataconfig/__init__.py` 注册 ``pi0_custom``\ （仓库里已有一份模板）：
 
    .. code:: python
 
@@ -165,7 +165,7 @@ Tokenizer 由 OpenPI 的 ``ModelTransformFactory`` 按基础模型加载，YAML 
           pytorch_weight_path="checkpoints/torch/pi0_base",
       ),
 
-3. 按自己的 key / 动作空间改 ``CustomDataConfig``，定义在 ``rlinf/models/embodiment/openpi_rlinf/dataconfig/franka_dataconfig.py``。
+3. 按自己的 key / 动作空间改 ``CustomDataConfig``，定义在 ``rlinf/models/embodiment/openpi/dataconfig/franka_dataconfig.py``。
 
 归一化统计
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -219,7 +219,7 @@ BEHAVIOR 不跑上面的脚本，而是用 ``actor.model.openpi_data.norm_stats_
     bash requirements/install.sh embodied --model openpi --env maniskill_libero
     source .venv/bin/activate
 
-``--model openpi`` 装的是官方 OpenPI **运行环境**\ （transforms、数据管线）；训练用的网络仍是 ``openpi_rlinf``。
+``--model openpi`` 装的是官方 OpenPI **运行环境**\ （transforms、数据管线）；训练用的网络仍是 ``openpi``。
 
 LIBERO 与真机 Franka
 ----------------------------------------
@@ -257,12 +257,12 @@ LIBERO 与真机 Franka
 Pi0.5 + BEHAVIOR-1K
 ----------------------------------------
 
-路径写在实验配置里，模型形状来自 ``model/pi0_5_rlinf``：
+路径写在实验配置里，模型形状来自 ``model/pi0_5``：
 
 .. code:: yaml
 
    defaults:
-     - model/pi0_5_rlinf@actor.model
+     - model/pi0_5@actor.model
      - hybrid_engines/fsdp@actor.fsdp_config
 
 流式加载器只读 ``data:``，没有隐藏默认值。至少改这些路径：
@@ -297,7 +297,7 @@ Pi0.5 + BEHAVIOR-1K
 
 .. code:: bash
 
-   bash examples/sft/run_vla_sft.sh behavior_sft_openpi_pi05_rlinf
+   bash examples/sft/run_vla_sft.sh behavior_sft_openpi_pi05
 
 Pi0 + RoboTwin
 ----------------------------------------
@@ -326,12 +326,12 @@ Pi0 + RoboTwin
 
 .. code:: bash
 
-   bash examples/sft/run_vla_sft.sh robotwin_adjust_bottle_sft_openpi_rlinf
+   bash examples/sft/run_vla_sft.sh robotwin_adjust_bottle_sft_openpi
 
 评测
 ----------------------------------------
 
-SFT 会把 ``full_weights.pt`` 写到 ``.../checkpoints/global_step_<N>/actor/model_state_dict/``。``openpi_rlinf`` 评测可以直接加载这个 ``.pt``\ （或 ``global_step_<N>`` 目录）：加载时会剥掉 FSDP / wrapper 前缀，模型形状来自评测 YAML，不必先转成 ``model.safetensors``。
+SFT 会把 ``full_weights.pt`` 写到 ``.../checkpoints/global_step_<N>/actor/model_state_dict/``。``openpi`` 评测可以直接加载这个 ``.pt``\ （或 ``global_step_<N>`` 目录）：加载时会剥掉 FSDP / wrapper 前缀，模型形状来自评测 YAML，不必先转成 ``model.safetensors``。
 
 不要把训练的 ``openpi.task: sft`` 带到评测里——评测配置必须是 ``task: eval``\ （才会走 ``Pi0Eval`` 和观测 transform）。``config_name``、``num_action_chunks`` 与训练对齐。
 
@@ -340,11 +340,11 @@ SFT 会把 ``full_weights.pt`` 写到 ``.../checkpoints/global_step_<N>/actor/mo
 .. code:: bash
 
    # 示例：直接评测 SFT 产出的 .pt（统计仍用训练时的文件，不要跟 model_path 走）
-   bash evaluations/run_eval.sh robotwin robotwin_adjust_bottle_openpi_rlinf_eval \
+   bash evaluations/run_eval.sh robotwin robotwin_adjust_bottle_openpi_eval \
      rollout.model.model_path=/path/to/logs/.../checkpoints/global_step_30000 \
      rollout.model.openpi_data.norm_stats_path=/path/to/pi0_base_pytorch_new/physical-intelligence/robotwin/adjust_bottle/norm_stats.json
 
-评测步骤见 :doc:`BEHAVIOR-1K <../../evaluations/guides/behavior>` 和 :doc:`RoboTwin <../../evaluations/guides/robotwin>`。如果要导出可分发的裸 ``Pi0`` 目录（``model.safetensors`` + ``config.json`` + 拷进去的 ``norm_stats.json``），用 ``sft_to_openpi_rlinf``，命令见 ``rlinf/utils/ckpt_convertor/openpi/README.md``。
+评测步骤见 :doc:`BEHAVIOR-1K <../../evaluations/guides/behavior>` 和 :doc:`RoboTwin <../../evaluations/guides/robotwin>`。如果要导出可分发的裸 ``Pi0`` 目录（``model.safetensors`` + ``config.json`` + 拷进去的 ``norm_stats.json``），用 ``sft_to_openpi``，命令见 ``rlinf/utils/ckpt_convertor/openpi/README.md``。
 
 可视化
 ----------------------------------------

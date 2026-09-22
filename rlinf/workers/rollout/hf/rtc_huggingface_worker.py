@@ -82,7 +82,7 @@ class RTCMultiStepRolloutWorker(MultiStepRolloutWorker):
             rtc_request.request_type == "replan"
             and self._rtc_eval_model_actions is not None
         ):
-            from rlinf.models.embodiment.openpi_rlinf.sampling.rtc_guidance import (
+            from rlinf.models.embodiment.openpi.sampling.rtc_guidance import (
                 RTCGuidanceContext,
             )
 

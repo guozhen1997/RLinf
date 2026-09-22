@@ -1,6 +1,6 @@
 defaults:
   - env/libero_10@env.eval
-  - model/pi0_5_rlinf@rollout.model
+  - model/pi0_5@rollout.model
   - override hydra/job_logging: stdout
   - _self_
 
@@ -61,7 +61,7 @@ rollout:
     # Official lerobot/pi05_libero_base assets converted for ApxInf. The folder
     # must contain config.json, tokenizer.model, norm_stats.json and weights.
     model_path: ${oc.env:APXINF_PI05_MODEL_DIR}
-    model_type: "openpi_rlinf"
+    model_type: "openpi"
     precision: null
     num_action_chunks: 5
     action_dim: 7

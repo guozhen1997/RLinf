@@ -196,11 +196,11 @@
 本步骤参考 :doc:`sft_openpi` 中的「支持的数据集」章节。针对真机Franka环境，
 可以创建出 ``pi0_realworld`` 数据格式，其定义在以下文件：
 
-1. ``rlinf/models/embodiment/openpi_rlinf/dataconfig/__init__.py``
-2. ``rlinf/models/embodiment/openpi_rlinf/dataconfig/realworld_dataconfig.py``
+1. ``rlinf/models/embodiment/openpi/dataconfig/__init__.py``
+2. ``rlinf/models/embodiment/openpi/dataconfig/realworld_dataconfig.py``
 
 为了统一真机和各仿真环境对策略的调用接口，创建
-3. ``rlinf/models/embodiment/openpi_rlinf/policies/realworld_policy.py``。
+3. ``rlinf/models/embodiment/openpi/policies/realworld_policy.py``。
 
 计算归一化统计
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -222,7 +222,7 @@
         |-- meta
     |-- ...
 
-这里 ``realworld_franka_bin_relocation`` 对应在 ``rlinf/models/embodiment/openpi_rlinf/dataconfig/__init__.py`` 中定义的 TrainConfig 字段中的 ``repo_id``。
+这里 ``realworld_franka_bin_relocation`` 对应在 ``rlinf/models/embodiment/openpi/dataconfig/__init__.py`` 中定义的 TrainConfig 字段中的 ``repo_id``。
 
 然后，在训练节点上运行：
 

@@ -1,7 +1,7 @@
 defaults:
   - env/robocasa365@env.train
   - env/robocasa365@env.eval
-  - model/pi0_rlinf@actor.model
+  - model/pi0@actor.model
   - weight_syncer/patch_syncer@weight_syncer
   - hybrid_engines/fsdp@actor.fsdp_config
   - _self_
@@ -129,7 +129,7 @@ actor:
 
   model:
     model_path: ${oc.env:ROBOCASA365_OPENPI_CKPT,/path/to/pi0-robocasa-pretrain-human300}
-    model_type: "openpi_rlinf"
+    model_type: "openpi"
     num_action_chunks: 5
     action_dim: 12
     num_steps: 5

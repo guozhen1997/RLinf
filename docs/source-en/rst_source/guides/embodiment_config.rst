@@ -353,7 +353,7 @@ actor
    * - ``actor.model.action_dim``
      - Action-space dimensionality.
    * - ``actor.model.num_action_chunks``
-     - Env-executed action-chunk length. For OpenPI (``openpi_rlinf``), this is
+     - Env-executed action-chunk length. For OpenPI (``openpi``), this is
        **not** the network horizon: that comes from ``openpi.action_horizon``
        when set, otherwise the official OpenPI ``TrainConfig.model.action_horizon``
        for ``openpi.config_name``. See :doc:`../examples/embodied/pi0`.

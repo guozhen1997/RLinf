@@ -500,7 +500,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
     def _build_sft_data_loader(self):
         if (
             SupportedModel(self.cfg.actor.model.model_type)
-            == SupportedModel.OPENPI_RLINF
+            == SupportedModel.OPENPI
         ):
             repo_id = resolve_lerobot_repo_id(self.cfg.actor.get("sft_data_path"))
             if repo_id is None:
@@ -511,7 +511,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
             import openpi.training.data_loader as _data
 
-            from rlinf.models.embodiment.openpi_rlinf.dataconfig import (
+            from rlinf.models.embodiment.openpi.dataconfig import (
                 get_openpi_config,
             )
 

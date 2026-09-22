@@ -151,7 +151,7 @@ def build_input_transforms(
     import openpi.models.model as _openpi_model
     import openpi.transforms as _openpi_transforms
 
-    from rlinf.models.embodiment.openpi_rlinf.policies import (
+    from rlinf.models.embodiment.openpi.policies import (
         franka_policy,
         libero_policy,
     )

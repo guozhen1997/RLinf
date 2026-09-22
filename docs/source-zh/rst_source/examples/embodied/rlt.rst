@@ -114,7 +114,7 @@ RLT 将表示学习和在线 RL 控制拆开。
    bash requirements/install.sh embodied --model openpi --env maniskill_libero
    source .venv/bin/activate
 
-下面的 RLT 配置使用 ``model_type: openpi_rlinf``。安装命令仍使用
+下面的 RLT 配置使用 ``model_type: openpi``。安装命令仍使用
 ``--model openpi``，因为 vendored PyTorch 模型复用 OpenPI 运行环境，并且 RLT
 Stage 1 dataloader 为了保持 ManiSkill 和真机行为一致，仍使用 OpenPI 数据管线。
 
@@ -149,7 +149,7 @@ Stage 1 中比较关键的字段：
      model:
        openpi_data:
          repo_id: "realworld_peg_insertion_rlt_stage1"
-       model_type: "openpi_rlinf"
+       model_type: "openpi"
        is_lora: False
        model_path: "/path/to/model"
        num_action_chunks: 20
@@ -257,7 +257,7 @@ Stage 2 中比较关键的字段：
        num_action_chunks: ${actor.model.num_action_chunks}
        ref_num_action_chunks: ${actor.model.ref_num_action_chunks}
      rlt_feature_model:
-       model_type: "openpi_rlinf"
+       model_type: "openpi"
        precision: bf16
        is_lora: False
        num_action_chunks: 20

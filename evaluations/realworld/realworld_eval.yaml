@@ -1,6 +1,6 @@
 defaults:
   - env/realworld_franka_sft_env@env.eval
-  - model/pi0_rlinf@rollout.model
+  - model/pi0@rollout.model
   - override hydra/job_logging: stdout
 
 hydra:

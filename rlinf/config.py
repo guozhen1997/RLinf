@@ -88,7 +88,7 @@ SupportedModel.QWEN3_MOE = SupportedModel.register("qwen3_moe", force=True)
 SupportedModel.OPENVLA = SupportedModel.register("openvla", force=True)
 SupportedModel.OPENVLA_OFT = SupportedModel.register("openvla_oft", force=True)
 SupportedModel.MOLMOACT2 = SupportedModel.register("molmoact2", force=True)
-SupportedModel.OPENPI_RLINF = SupportedModel.register("openpi_rlinf", force=True)
+SupportedModel.OPENPI = SupportedModel.register("openpi", force=True)
 SupportedModel.PI0_FAST = SupportedModel.register("pi0_fast", force=True)
 SupportedModel.STARVLA = SupportedModel.register("starvla", force=True)
 SupportedModel.MLP_POLICY = SupportedModel.register("mlp_policy", force=True)
@@ -135,7 +135,7 @@ EMBODIED_MODEL = set(
     {
         SupportedModel.OPENVLA,
         SupportedModel.OPENVLA_OFT,
-        SupportedModel.OPENPI_RLINF,
+        SupportedModel.OPENPI,
         SupportedModel.PI0_FAST,
         SupportedModel.STARVLA,
         SupportedModel.MLP_POLICY,
@@ -542,13 +542,13 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
         model_type = OmegaConf.select(cfg, "model.model_type", default=None)
         if (
             model_type is not None
-            and str(model_type) == SupportedModel.OPENPI_RLINF.value
+            and str(model_type) == SupportedModel.OPENPI.value
         ):
             sharding = (
                 str(cfg.fsdp_config.sharding_strategy).strip().lower().replace("-", "_")
             )
             assert sharding == "no_shard", (
-                "openpi_rlinf only supports actor.fsdp_config.sharding_strategy="
+                "openpi only supports actor.fsdp_config.sharding_strategy="
                 f"'no_shard' (got {cfg.fsdp_config.sharding_strategy!r}). "
                 "Nested FSDP flattening (full_shard / shard_grad_op) is not supported."
             )
@@ -565,7 +565,7 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
         cfg.fsdp_config.use_orig_params = cfg.fsdp_config.get("use_orig_params", False)
         if (
             model_type is not None
-            and str(model_type) == SupportedModel.OPENPI_RLINF.value
+            and str(model_type) == SupportedModel.OPENPI.value
             and not cfg.fsdp_config.use_orig_params
         ):
             # Dual-expert Gemma packs frozen VLM (expert-0) and trainable
@@ -575,7 +575,7 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
             # False, so inherited CI/example YAMLs would otherwise fail at
             # FSDP wrap time.
             logging.info(
-                "openpi_rlinf requires actor.fsdp_config.use_orig_params=True "
+                "openpi requires actor.fsdp_config.use_orig_params=True "
                 "because dual-expert Gemma Block mixes frozen and trainable "
                 "parameters. Overriding use_orig_params=False to True."
             )
@@ -619,7 +619,7 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
 
         if (
             model_type is not None
-            and str(model_type) == SupportedModel.OPENPI_RLINF.value
+            and str(model_type) == SupportedModel.OPENPI.value
         ):
             mp = cfg.fsdp_config.mixed_precision
             all_none = (
@@ -633,7 +633,7 @@ def validate_fsdp_cfg(cfg: DictConfig) -> DictConfig:
                 and mp.buffer_dtype == "fp32"
             )
             assert all_none or all_fp32, (
-                "openpi_rlinf does not support FSDP mixed precision "
+                "openpi does not support FSDP mixed precision "
                 f"(got param_dtype={mp.param_dtype!r}, "
                 f"reduce_dtype={mp.reduce_dtype!r}, "
                 f"buffer_dtype={mp.buffer_dtype!r}). "
@@ -1001,7 +1001,7 @@ def validate_only_eval_rollout_model(model_cfg) -> None:
         missing.append("rollout.model.num_action_chunks")
 
     model_type = str(OmegaConf.select(model_cfg, "model_type", default="") or "")
-    if model_type == SupportedModel.OPENPI_RLINF.value:
+    if model_type == SupportedModel.OPENPI.value:
         if not OmegaConf.select(model_cfg, "openpi.config_name", default=None):
             missing.append("rollout.model.openpi.config_name")
         if OmegaConf.select(model_cfg, "openpi.task", default=None) in (None, ""):

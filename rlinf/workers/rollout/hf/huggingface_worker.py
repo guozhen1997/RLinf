@@ -493,7 +493,7 @@ class MultiStepRolloutWorker(Worker):
 
         model_type = SupportedModel(self.model_cfg.model_type)
         if model_type in [
-            SupportedModel.OPENPI_RLINF,
+            SupportedModel.OPENPI,
             SupportedModel.PI0_FAST,
             SupportedModel.EVO1,
             SupportedModel.MLP_POLICY,

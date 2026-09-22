@@ -454,7 +454,7 @@ class EmbodiedDAGGERFSDPPolicy(EmbodiedFSDPActor):
         data = self._prepare_sft_batch(batch)
         use_action_chunk_loss = (
             SupportedModel(self.cfg.actor.model.model_type)
-            == SupportedModel.OPENPI_RLINF
+            == SupportedModel.OPENPI
         )
         return self.model(
             forward_type=ForwardType.SFT,

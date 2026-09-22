@@ -20,10 +20,10 @@ from rlinf.envs import SupportedEnvType
 
 
 def _is_openpi_family(model_type) -> bool:
-    """True for OpenPI policies loaded as ``openpi_rlinf``."""
+    """True for OpenPI policies loaded as ``openpi``."""
     if model_type is None:
         return False
-    return SupportedModel(model_type) == SupportedModel.OPENPI_RLINF
+    return SupportedModel(model_type) == SupportedModel.OPENPI
 
 
 def prepare_actions_for_maniskill(
@@ -310,7 +310,7 @@ def prepare_actions_for_d4rl(
     # D4RL: take first action_dim dims from policy output
     raw = np.asarray(raw_chunk_actions, dtype=np.float32)
     chunk_actions = raw[..., :action_dim].copy()
-    # openpi_rlinf: clip last dim to match continuous action space
+    # openpi: clip last dim to match continuous action space
     if _is_openpi_family(model_type):
         chunk_actions[..., -1] = np.clip(chunk_actions[..., -1], -1.0, 1.0)
     return chunk_actions

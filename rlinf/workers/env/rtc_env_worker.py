@@ -58,9 +58,9 @@ class RTCEnvWorker(EnvWorker):
         rtc_cfg = self.cfg.runner.get("rtc", {})
         if not rtc_cfg.get("enabled", False):
             return
-        assert str(self.cfg.actor.model.model_type) == "openpi_rlinf", (
+        assert str(self.cfg.actor.model.model_type) == "openpi", (
             "RTC real-world evaluation is currently integrated for the "
-            "openpi_rlinf policy path."
+            "openpi policy path."
         )
         assert self.stage_num == 1, (
             "RTC real-world evaluation currently supports a single pipeline stage."

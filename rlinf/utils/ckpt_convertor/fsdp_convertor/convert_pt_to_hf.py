@@ -199,7 +199,7 @@ def _verify_openpi_rlt_conversion(
     checkpoint_state_dict: Mapping,
     missing_keys: list[str],
 ) -> None:
-    if SupportedModel(model_cfg.get("model_type", "")) != SupportedModel.OPENPI_RLINF:
+    if SupportedModel(model_cfg.get("model_type", "")) != SupportedModel.OPENPI:
         return
     if not _openpi_use_rlt(model_cfg):
         return

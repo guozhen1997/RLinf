@@ -8,7 +8,7 @@ OpenPI Supervised Fine-Tuning
    OpenPI π₀ / π₀.₅ vision-language-action models.
 
 Run **full-parameter** or **LoRA** SFT on π₀ / π₀.₅ in RLinf. Policies use
-``model_type: openpi_rlinf``, a PyTorch port aligned with the JAX reference
+``model_type: openpi``, a PyTorch port aligned with the JAX reference
 (the official OpenPI PyTorch code is not). SFT is the usual RL cold start:
 imitate demonstrations first, then continue with RL from a stronger prior.
 
@@ -29,24 +29,24 @@ before launch.
      - Launch name
    * - LIBERO π₀
      - ``libero_sft_openpi.yaml``
-     - ``model/pi0_rlinf``
+     - ``model/pi0``
      - ``libero_sft_openpi``
    * - Real-world Franka bin-relocation
      - ``realworld_bin_relocation_sft_openpi.yaml``
-     - ``model/pi0_rlinf``
+     - ``model/pi0``
      - ``realworld_bin_relocation_sft_openpi``
    * - Custom LeRobot
      - ``custom_sft_openpi.yaml``
-     - ``model/pi0_rlinf``
+     - ``model/pi0``
      - ``custom_sft_openpi``
    * - BEHAVIOR-1K π₀.₅
-     - ``behavior_sft_openpi_pi05_rlinf.yaml``
-     - ``model/pi0_5_rlinf``
-     - ``behavior_sft_openpi_pi05_rlinf``
+     - ``behavior_sft_openpi_pi05.yaml``
+     - ``model/pi0_5``
+     - ``behavior_sft_openpi_pi05``
    * - RoboTwin adjust_bottle π₀
-     - ``robotwin_adjust_bottle_sft_openpi_rlinf.yaml``
-     - ``model/pi0_rlinf``
-     - ``robotwin_adjust_bottle_sft_openpi_rlinf``
+     - ``robotwin_adjust_bottle_sft_openpi.yaml``
+     - ``model/pi0``
+     - ``robotwin_adjust_bottle_sft_openpi``
 
 For dual-Franka SFT and deployment, see :doc:`dual_franka_openpi_pytorch`.
 
@@ -173,7 +173,7 @@ Custom LeRobot dataset
             config_name: "pi0_custom"
 
 2. Register ``pi0_custom`` in
-   ``rlinf/models/embodiment/openpi_rlinf/dataconfig/__init__.py`` (a template
+   ``rlinf/models/embodiment/openpi/dataconfig/__init__.py`` (a template
    is already there):
 
    .. code:: python
@@ -192,7 +192,7 @@ Custom LeRobot dataset
       ),
 
 3. Adapt ``CustomDataConfig`` in
-   ``rlinf/models/embodiment/openpi_rlinf/dataconfig/franka_dataconfig.py`` to
+   ``rlinf/models/embodiment/openpi/dataconfig/franka_dataconfig.py`` to
    your keys and action space.
 
 Normalization statistics
@@ -261,7 +261,7 @@ Installation
    source .venv/bin/activate
 
 ``--model openpi`` installs the official OpenPI **runtime** (transforms and
-data pipeline). The trained network is still ``openpi_rlinf``.
+data pipeline). The trained network is still ``openpi``.
 
 LIBERO and real-world Franka
 ----------------------------
@@ -302,12 +302,12 @@ Pi0.5 + BEHAVIOR-1K
 -------------------
 
 Filesystem paths live in the experiment config; the model shape comes from
-``model/pi0_5_rlinf``:
+``model/pi0_5``:
 
 .. code:: yaml
 
    defaults:
-     - model/pi0_5_rlinf@actor.model
+     - model/pi0_5@actor.model
      - hybrid_engines/fsdp@actor.fsdp_config
 
 The streaming loader reads only ``data:`` (no hidden defaults). Change at least:
@@ -344,7 +344,7 @@ The streaming loader reads only ``data:`` (no hidden defaults). Change at least:
 
 .. code:: bash
 
-   bash examples/sft/run_vla_sft.sh behavior_sft_openpi_pi05_rlinf
+   bash examples/sft/run_vla_sft.sh behavior_sft_openpi_pi05
 
 Pi0 + RoboTwin
 --------------
@@ -379,13 +379,13 @@ model. ``openpi_data.norm_stats_path`` pins SFT and eval to the same
 
 .. code:: bash
 
-   bash examples/sft/run_vla_sft.sh robotwin_adjust_bottle_sft_openpi_rlinf
+   bash examples/sft/run_vla_sft.sh robotwin_adjust_bottle_sft_openpi
 
 Evaluation
 ----------
 
 SFT writes ``full_weights.pt`` under
-``.../checkpoints/global_step_<N>/actor/model_state_dict/``. ``openpi_rlinf``
+``.../checkpoints/global_step_<N>/actor/model_state_dict/``. ``openpi``
 eval can load that ``.pt`` (or the ``global_step_<N>`` directory) directly:
 wrapper / FSDP prefixes are stripped in memory, and the eval YAML supplies the
 model shape. You do **not** need to convert to ``model.safetensors`` first.
@@ -405,14 +405,14 @@ BEHAVIOR: the training ``openpi_data.norm_stats_path``).
 .. code:: bash
 
    # Example: evaluate the SFT .pt in place (keep training-time norm stats)
-   bash evaluations/run_eval.sh robotwin robotwin_adjust_bottle_openpi_rlinf_eval \
+   bash evaluations/run_eval.sh robotwin robotwin_adjust_bottle_openpi_eval \
      rollout.model.model_path=/path/to/logs/.../checkpoints/global_step_30000 \
      rollout.model.openpi_data.norm_stats_path=/path/to/pi0_base_pytorch_new/physical-intelligence/robotwin/adjust_bottle/norm_stats.json
 
 Eval steps: :doc:`BEHAVIOR-1K <../../evaluations/guides/behavior>` and
 :doc:`RoboTwin <../../evaluations/guides/robotwin>`. To export a shareable
 bare ``Pi0`` directory (``model.safetensors`` + ``config.json`` + copied
-``norm_stats.json``), use ``sft_to_openpi_rlinf``; commands are in
+``norm_stats.json``), use ``sft_to_openpi``; commands are in
 ``rlinf/utils/ckpt_convertor/openpi/README.md``.
 
 Visualization

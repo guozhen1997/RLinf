@@ -1,7 +1,7 @@
 defaults:
   - env/robocasa365@env.train
   - env/robocasa365@env.eval
-  - model/pi0_rlinf@actor.model
+  - model/pi0@actor.model
   - weight_syncer/patch_syncer@weight_syncer
   - hybrid_engines/fsdp@actor.fsdp_config
   - _self_
