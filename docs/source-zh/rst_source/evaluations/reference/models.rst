@@ -34,6 +34,9 @@
    * - LingBotVLA
      - ``lingbotvla``
      - ``robotwin_click_bell_lingbotvla_eval``、``robotwin_place_shoe_lingbotvla_eval``
+   * - PI0-FAST
+     - ``pi0_fast``
+     - ``libero_10_pi0_fast_eval``
 
 模型路径设置
 ------------
