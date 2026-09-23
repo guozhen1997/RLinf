@@ -36,7 +36,7 @@ class LeRobotLiberoSfpDataConfig(DataConfigFactory):
     because openpi builds the ``Normalize`` step itself when it assembles a
     pipeline. The SFP data loader inserts
     :class:`~rlinf.models.embodiment.openpi.dataconfig.sfp_transforms.SfpNormalize`
-    in its place; see :func:`rlinf.data.datasets.openpi_rlinf.libero.build_libero_sfp_sft_dataloader`.
+    in its place; see :func:`rlinf.data.datasets.openpi.libero.build_libero_sfp_sft_dataloader`.
     """
 
     extra_delta_transform: bool = False

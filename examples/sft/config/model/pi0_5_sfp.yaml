@@ -1,13 +1,12 @@
-model_type: "openpi_rlinf"
+model_type: "openpi"
 
 # Model-shape template for Streaming Flow Policy SFT on LIBERO. Filesystem paths
 # (model_path and the openpi_data assets) live in the experiment config
 # (libero_sft_pi05_sfp.yaml), so this template stays path-free and reusable.
 
 # OpenPI default: Gemma / SigLIP in bf16, action heads stay fp32. The SFP
-# trajectory targets are built in fp32 regardless. openpi_rlinf does not support
-# FSDP mixed precision, so the experiment config binds mixed_precision.* to this
-# field (null or fp32).
+# trajectory targets are built in fp32 regardless. The experiment config binds
+# mixed_precision.* to this field (null or fp32).
 precision: null
 
 # LoRA is not used, but the shared model factory reads these keys.

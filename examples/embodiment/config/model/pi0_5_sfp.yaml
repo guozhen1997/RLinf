@@ -1,4 +1,4 @@
-model_type: "openpi_rlinf"
+model_type: "openpi"
 
 # Model-shape template for Streaming Flow Policy eval on LIBERO. Filesystem
 # paths (model_path and openpi_data.norm_stats_path) live in the experiment

@@ -794,15 +794,15 @@ def test_sfp_loader_key_does_not_capture_the_plain_libero_configs():
     """``_resolve_env`` matches registry keys as substrings of the config name.
 
     "libero" would therefore route ``pi05_libero`` to the SFP loader, which
-    demands an ``action_states`` field those datasets do not have.
+    demands an ``action_states`` field those datasets do not have. Plain
+    LIBERO configs must continue to use the official OpenPI loader.
     """
-    from rlinf.data.datasets.openpi_rlinf import _resolve_env
+    from rlinf.data.datasets.openpi import _resolve_env
 
     assert _resolve_env("pi05_libero_sfp") == "libero_sfp"
 
     for config_name in ("pi0_libero", "pi0_libero_horizon10", "pi05_libero"):
-        with pytest.raises(ValueError, match="No openpi_rlinf SFT dataloader"):
-            _resolve_env(config_name)
+        assert _resolve_env(config_name) == "official"
 
 
 def test_env_output_composes_one_transition_object():

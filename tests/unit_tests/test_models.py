@@ -990,7 +990,7 @@ def test_delay_metrics_report_every_sample():
 
 
 def _sfp_targets(**kwargs):
-    from rlinf.models.embodiment.openpi_rlinf.modules.sfp import (
+    from rlinf.models.embodiment.openpi.modules.sfp import (
         compute_sfp_flow_targets,
     )
 
@@ -1083,7 +1083,7 @@ def test_sfp_rejects_a_noise_shape_meant_for_a_whole_chunk():
 
 
 def test_sfp_config_reads_the_openpi_block():
-    from rlinf.models.embodiment.openpi_rlinf.sfp_config import build_sfp_config
+    from rlinf.models.embodiment.openpi.sfp_config import build_sfp_config
 
     default = build_sfp_config(OmegaConf.create({"task": "sft"}))
     assert not default.use_sfp
@@ -1100,10 +1100,10 @@ def test_sfp_config_reads_the_openpi_block():
 
 @pytest.mark.parametrize("task", ["rl", "dagger", "dsrl"])
 def test_sfp_is_refused_by_the_tasks_that_sample_actions(task):
-    from rlinf.models.embodiment.openpi_rlinf.rlt_config import (
+    from rlinf.models.embodiment.openpi.rlt_config import (
         OpenPiPytorchRLTConfig,
     )
-    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+    from rlinf.models.embodiment.openpi.sfp_config import (
         OpenPiPytorchSfpConfig,
         validate_sfp_config,
     )
@@ -1118,10 +1118,10 @@ def test_sfp_is_refused_by_the_tasks_that_sample_actions(task):
 
 
 def test_sfp_and_rlt_objectives_are_mutually_exclusive():
-    from rlinf.models.embodiment.openpi_rlinf.rlt_config import (
+    from rlinf.models.embodiment.openpi.rlt_config import (
         OpenPiPytorchRLTConfig,
     )
-    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+    from rlinf.models.embodiment.openpi.sfp_config import (
         OpenPiPytorchSfpConfig,
         validate_sfp_config,
     )
@@ -1141,9 +1141,9 @@ def test_pi0_sft_forward_selects_the_objective_from_use_sfp(use_sfp):
     The model is built on the meta device, so construction allocates nothing;
     only the two loss methods are replaced, to observe which one runs.
     """
-    from rlinf.models.embodiment.openpi_rlinf.pi0 import Pi0
-    from rlinf.models.embodiment.openpi_rlinf.pi0_config import Pi0Config
-    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+    from rlinf.models.embodiment.openpi.pi0 import Pi0
+    from rlinf.models.embodiment.openpi.pi0_config import Pi0Config
+    from rlinf.models.embodiment.openpi.sfp_config import (
         OpenPiPytorchSfpConfig,
     )
 
@@ -1184,12 +1184,12 @@ def test_pi0_sft_forward_selects_the_objective_from_use_sfp(use_sfp):
 
 
 def test_sfp_random_inputs_are_sampled_for_the_full_optimizer_step():
-    from rlinf.models.embodiment.openpi_rlinf.modules.sfp import (
+    from rlinf.models.embodiment.openpi.modules.sfp import (
         sample_sfp_training_inputs,
     )
-    from rlinf.models.embodiment.openpi_rlinf.pi0 import Pi0
-    from rlinf.models.embodiment.openpi_rlinf.pi0_config import Pi0Config
-    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+    from rlinf.models.embodiment.openpi.pi0 import Pi0
+    from rlinf.models.embodiment.openpi.pi0_config import Pi0Config
+    from rlinf.models.embodiment.openpi.sfp_config import (
         OpenPiPytorchSfpConfig,
     )
 
@@ -1225,9 +1225,9 @@ def test_sfp_random_inputs_are_sampled_for_the_full_optimizer_step():
 
 
 def test_pi0_sft_forward_accepts_explicit_sfp_random_inputs():
-    from rlinf.models.embodiment.openpi_rlinf.pi0 import Pi0
-    from rlinf.models.embodiment.openpi_rlinf.pi0_config import Pi0Config
-    from rlinf.models.embodiment.openpi_rlinf.sfp_config import (
+    from rlinf.models.embodiment.openpi.pi0 import Pi0
+    from rlinf.models.embodiment.openpi.pi0_config import Pi0Config
+    from rlinf.models.embodiment.openpi.sfp_config import (
         OpenPiPytorchSfpConfig,
     )
 
@@ -1273,7 +1273,7 @@ def test_pi0_sft_forward_accepts_explicit_sfp_random_inputs():
 
 
 def test_sfp_episode_start_resets_accumulated_action_state():
-    from rlinf.models.embodiment.openpi_rlinf.tasks.eval import Pi0Eval
+    from rlinf.models.embodiment.openpi.tasks.eval import Pi0Eval
 
     model = object.__new__(Pi0Eval)
     torch.nn.Module.__init__(model)

@@ -20,7 +20,7 @@ Streaming Flow Policy 监督微调
    .. grid-item-card:: 模型
       :text-align: center
 
-      π₀.₅（``openpi_rlinf``）
+      π₀.₅（``openpi``）
 
    .. grid-item-card:: 方法
       :text-align: center

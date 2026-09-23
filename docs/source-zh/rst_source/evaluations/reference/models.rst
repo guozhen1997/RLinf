@@ -13,8 +13,8 @@
    * - π₀ / π₀.₅（OpenPI）
      - ``openpi``
      - ``libero_spatial_openpi_pi05_eval``、``libero_goal_openpi_eval``、``robotwin_adjust_bottle_openpi_eval`` 等
-   * - π₀.₅ SFP（``openpi_rlinf``）
-     - ``openpi_rlinf``
+   * - π₀.₅ SFP（``openpi``）
+     - ``openpi``
      - ``libero_spatial_openpi_pi05_sfp_eval``
    * - OpenVLA-OFT
      - ``openvla_oft``

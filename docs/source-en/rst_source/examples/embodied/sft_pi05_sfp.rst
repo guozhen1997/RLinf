@@ -27,7 +27,7 @@ Train π₀.₅ on LIBERO demonstrations with the SFP objective, full-parameter,
    .. grid-item-card:: Models
       :text-align: center
 
-      π₀.₅ (``openpi_rlinf``)
+      π₀.₅ (``openpi``)
 
    .. grid-item-card:: Methods
       :text-align: center
