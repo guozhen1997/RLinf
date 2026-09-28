@@ -24,7 +24,11 @@ from omegaconf import OmegaConf
 from PIL import Image
 
 from rlinf.envs.sim.robotwin.seed_utils import partition_success_seeds
-from rlinf.envs.utils import center_crop_image, list_of_dict_to_dict_of_list
+from rlinf.envs.utils import (
+    center_crop_image,
+    list_of_dict_to_dict_of_list,
+    valid_action_mask_from_counts,
+)
 
 __all__ = ["RoboTwinEnv"]
 
@@ -347,6 +351,11 @@ class RoboTwinEnv(gym.Env):
 
         infos = list_of_dict_to_dict_of_list(info_list)
         infos_list[-1] = infos
+        # RoboTwin pads the observation list to the chunk length and reports
+        # how many actions were actually executed.
+        executed_action_count = None
+        if isinstance(infos, dict):
+            executed_action_count = infos.pop("executed_action_count", None)
         if isinstance(terminations, list):
             terminations = torch.as_tensor(
                 np.array(terminations).reshape(-1), device=self.device
@@ -393,6 +402,11 @@ class RoboTwinEnv(gym.Env):
 
         chunk_truncations = torch.zeros((num_envs, chunk_step), dtype=bool)
         chunk_truncations[:, -1] = truncations
+
+        if executed_action_count is not None and not self.cfg.get("is_eval", False):
+            infos_list[-1]["valid_action_mask"] = valid_action_mask_from_counts(
+                executed_action_count, chunk_step
+            )
 
         return (
             obs_list,
