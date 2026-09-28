@@ -336,10 +336,6 @@ class EnvWorker(Worker):
                 total_num_processes=self._world_size * self.stage_num,
                 worker_info=self.worker_info,
             )
-            if SupportedEnvType(env_cfg.env_type) is SupportedEnvType.ROBOTWIN:
-                env.enable_online_lerobot = (
-                    self.enable_online_lerobot and env_cfg is self.cfg.env.train
-                )
             if (
                 self.cfg.env.get("delay_sampler", None)
                 and env_cfg is not self.cfg.env.eval

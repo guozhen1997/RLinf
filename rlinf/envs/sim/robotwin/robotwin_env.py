@@ -59,7 +59,9 @@ class RoboTwinEnv(gym.Env):
 
         self.cfg = cfg
         self.record_metrics = record_metrics
-        self.enable_online_lerobot = False
+        self.skip_intermediate_renders = bool(
+            cfg.get("skip_intermediate_renders", True)
+        )
         self._is_start = True
 
         self.task_name = cfg.task_config.task_name
@@ -330,7 +332,7 @@ class RoboTwinEnv(gym.Env):
         obs_list = []
         infos_list = []
 
-        if self.enable_online_lerobot:
+        if not self.skip_intermediate_renders:
             raw_obs_list, step_reward, terminations, truncations, info_list = (
                 self.venv.step_with_full_obs(chunk_actions)
             )
