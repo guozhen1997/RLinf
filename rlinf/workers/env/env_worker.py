@@ -396,13 +396,12 @@ class EnvWorker(Worker):
 
     @Worker.timer("env_interact_step")
     def env_interact_step(
-        self, chunk_actions: torch.Tensor, stage_id: int, current_obs: Any
+        self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any], dict[str, Any]]:
         """Execute a chunk and build environment output and LeRobot payload.
 
-        `current_obs` is the pre-action observation for the first action.
-        Masked LeRobot payloads align it with the post-action observations to
-        store pre-action/action pairs; EnvOutput retains the final observation.
+        ``obs_list`` in the payload stays post-action. The caller prepends the
+        observation from before this chunk when a valid-action mask is present.
         """
         exec_actions = prepare_actions(
             raw_chunk_actions=chunk_actions["raw_actions"]
@@ -490,11 +489,6 @@ class EnvWorker(Worker):
                 rlt_switch_flags=rlt_switch_flags,
             ),
         )
-        if valid_action_mask is not None:
-            post_action_obs = (
-                obs_list if isinstance(obs_list, (list, tuple)) else [obs_list]
-            )
-            obs_list = [current_obs, *post_action_obs[:-1]]
         chunk_step_payload = {
             "chunk_actions": exec_actions,
             "obs_list": obs_list,
@@ -1145,8 +1139,23 @@ class EnvWorker(Worker):
                     env_output, env_info, chunk_step_data = self.env_interact_step(
                         actions,
                         stage_id,
-                        current_obs=env_outputs[stage_id].obs,
                     )
+
+                    # LeRobot stores the observation from before each action.
+                    # The env returns the frame after each action, so prepend the
+                    # frame sent to the policy and drop the last post-action frame.
+                    if (
+                        self.enable_online_lerobot
+                        and chunk_step_data.get("valid_action_mask") is not None
+                    ):
+                        post_action_obs = chunk_step_data["obs_list"]
+                        if not isinstance(post_action_obs, (list, tuple)):
+                            post_action_obs = [post_action_obs]
+                        chunk_step_data["obs_list"] = [
+                            env_outputs[stage_id].obs,
+                            *post_action_obs[:-1],
+                        ]
+
                     # Delay the next observation without blocking other worker tasks.
                     await self._maybe_wait_env_delay(stage_id)
 
