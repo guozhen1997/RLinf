@@ -377,6 +377,18 @@ class CollectEpisode(gym.Wrapper):
                     result = self.env.close()
             except BaseException as error:
                 primary_error = error
+            # Images and the JSONL sidecar are already on disk. finalize()
+            # drops episode_buffer without save_episode, so close an open
+            # streaming take first and keep it with the success flag known so
+            # far. reset() does the same before the next episode starts.
+            if self.streaming:
+                try:
+                    for env_idx in range(self.num_envs):
+                        if self._stream_frames[env_idx] > 0:
+                            self._stream_end_episode(env_idx)
+                except BaseException as error:
+                    if primary_error is None:
+                        primary_error = error
             self._finalize_lerobot()
         except BaseException as error:
             if primary_error is None:
