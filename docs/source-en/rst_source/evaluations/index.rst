@@ -36,8 +36,8 @@ The table below lists benchmarks that have example configs under ``evaluations/`
      - ``robocasa365`` pretrain task slices
      - ``robocasa365/robocasa365_eval_openpi.yaml``
    * - SIMPLE
-     - ``G1WholebodyCloseDoorTeleop-v0``
-     - ``simple/simple_closedoor_psi0_eval.yaml``
+     - ``G1WholebodyOpenOvenTeleop-v0``
+     - ``simple/simple_psi0_eval.yaml``
 
 **LIBERO variants:** Standard LIBERO, LIBERO-PRO, and LIBERO-PLUS are supported via environment variables (see :doc:`guides/libero`).
 

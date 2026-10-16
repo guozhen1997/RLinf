@@ -2,7 +2,7 @@ model_type: "psi0"
 
 # The extracted official run directory. It must contain run_config.json,
 # argv.txt, and checkpoints/ckpt_${checkpoint_step}/model.safetensors.
-model_path: "/path/to/Psi0-SIMPLE-CloseDoor"
+model_path: "/path/to/Psi0-SIMPLE-OpenOven"
 checkpoint_step: 40000
 precision: "bf16"
 load_to_device: true

@@ -36,8 +36,8 @@ RLinf 提供统一的具身智能评测入口，支持在仿真或真机环境�
      - ``robocasa365`` pretrain 任务切片
      - ``robocasa365/robocasa365_eval_openpi.yaml``
    * - SIMPLE
-     - ``G1WholebodyCloseDoorTeleop-v0``
-     - ``simple/simple_closedoor_psi0_eval.yaml``
+     - ``G1WholebodyOpenOvenTeleop-v0``
+     - ``simple/simple_psi0_eval.yaml``
 
 **LIBERO 变体：** 标准 LIBERO、LIBERO-PRO、LIBERO-PLUS 均支持，通过环境变量切换（见 :doc:`guides/libero`）。
 

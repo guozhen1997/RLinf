@@ -2,8 +2,8 @@ Psi0 + SIMPLE 评测与训练
 ========================
 
 本页介绍如何通过 RLinf 在 SIMPLE 的八个 Teleop 任务上评测 Psi0，并在
-OpenOven 上进行四卡 PPO 后训练。每个任务必须使用对应的 checkpoint 和 reset
-states；这些资产不能跨任务复用。
+OpenOven 上进行四卡 PPO 后训练。每个任务必须使用对应的 checkpoint 和
+reset states。
 
 适用范围与版本固定
 ------------------
@@ -25,11 +25,12 @@ state、action 和 System-0 协议，暂不支持。
 .. code-block:: bash
 
    bash requirements/install.sh embodied \
-     --venv .venv-psi0-simple \
      --model psi0 \
      --env simple
-   source .venv-psi0-simple/bin/activate
+   source .venv/bin/activate
 
+
+.. _simple-tasks:
 
 选择任务与下载资产
 ------------------
@@ -80,6 +81,8 @@ state、action 和 System-0 协议，暂不支持。
      - ``g1wholebodypickandplaceandhugcontainerteleop-v0.simple.flow1000.cosine.lr1.0e-04.b128.gpus8.2604280201``
      - 1000
      - 7/6/3
+
+.. _simple-reset-data:
 
 任务专属资产
 ~~~~~~~~~~~~
@@ -144,23 +147,12 @@ Psi0 的联合 checkpoint 已包含 System-2 的 ``vlm_model`` 权重和 System-
 运行 Eval
 ---------
 
-仓库提供 CloseDoor、OpenFaucet 和 OpenOven 三份直接配置：
-
-.. code-block:: text
-
-   evaluations/simple/simple_closedoor_psi0_eval.yaml
-   evaluations/simple/simple_openfaucet_psi0_eval.yaml
-   evaluations/simple/simple_openoven_psi0_eval.yaml
-
-OpenOven
-~~~~~~~~
-
-OpenOven 的任务、horizon、episode 起点和视频参数均由配置提供，
-最小 smoke 只需覆盖本地资产路径：
+``evaluations/simple/simple_psi0_eval.yaml`` 默认运行 OpenOven、DR0 和一条轨迹，
+与训练配置使用同一任务。最小 smoke 只需覆盖本地资产路径：
 
 .. code-block:: bash
 
-   bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+   bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}"
 
@@ -169,7 +161,7 @@ OpenOven 的任务、horizon、episode 起点和视频参数均由配置提供�
 .. code-block:: bash
 
    for SIMPLE_DR_LEVEL in 0 1 2; do
-     bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+     bash evaluations/run_eval.sh simple simple_psi0_eval \
        rollout.model.model_path="${PSI0_RUN_DIR}" \
        env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}" \
        env.eval.reset_dataset.dr_level="${SIMPLE_DR_LEVEL}" \
@@ -180,9 +172,8 @@ OpenOven 的任务、horizon、episode 起点和视频参数均由配置提供�
 切换其他任务
 ~~~~~~~~~~~~
 
-切换其他 Teleop 任务可以复用 OpenOven 配置。资产已下载并解压时无需重下，
-但每次切换都要重新设置下面四个变量；已导出的路径不会随任务或 run 名自动更新。
-以 XMovePick 为例：
+其他 Teleop 任务沿用同一配置。以 XMovePick 为例，先更新下面四个变量；
+已导出的路径不会随任务或 run 名自动更新：
 
 .. code-block:: bash
 
@@ -191,17 +182,22 @@ OpenOven 的任务、horizon、episode 起点和视频参数均由配置提供�
    export PSI0_RUN_DIR="${PSI0_ARTIFACT_ROOT}/psi-model/${PSI0_RUN_REL}"
    export SIMPLE_RESET_DIR="${PSI0_ARTIFACT_ROOT}/reset-states/${SIMPLE_TASK}"
 
-   bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+资产尚未准备时，用新变量重新执行模型和 reset 数据下载命令，然后运行评测：
+
+.. code-block:: bash
+
+   bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}" \
      env.eval.init_params.task_id="simple/${SIMPLE_TASK}" \
      env.eval.max_episode_steps=800 \
      env.eval.max_steps_per_rollout_epoch=816
 
-每次切换任务都要同步更新上述四个变量，并按下表选择两项步数，保证 checkpoint、
-reset 数据与 ``task_id`` 属于同一任务。三档完整测评的循环也需保留两项路径覆盖，
-并补上 ``task_id`` 和两项步数。``max_steps_per_rollout_epoch`` 是不小于任务
-horizon 的最小 24 的倍数。
+checkpoint、reset 数据与 ``task_id`` 必须属于同一任务。三档评测循环也需补上
+``env.eval.init_params.task_id="simple/${SIMPLE_TASK}"``，并保留两项资产路径和
+步数覆盖。``max_steps_per_rollout_epoch`` 是不小于任务 horizon 的最小 24 的倍数。
+
+.. _simple-task-horizons:
 
 .. list-table::
    :header-rows: 1
@@ -220,42 +216,52 @@ horizon 的最小 24 的倍数。
      - 1200
      - 1200
 
-所有八个任务都固定为 ``mujoco_isaac``、50 Hz render、200 Hz physics、最多
-300 步 stabilization，以及 30/24/6 RTC。官方结果每档只有 10 条轨迹；应分别
-报告三个 level，不能把单条 smoke 或总成功数当作严格复现结论。
+所有八个任务都使用 ``mujoco_isaac``、50 Hz render、200 Hz physics、最多
+300 步 stabilization，以及 30/24/6 RTC。官方结果每档只有 10 条轨迹，应分别
+报告三个 level；单条 smoke 或总成功数不能作为严格复现结论。
 
 运行 OpenOven PPO 后训练
 ------------------------
 
-先确认 ``PSI0_RUN_DIR`` 和 ``SIMPLE_RESET_DIR`` 对应 OpenOven。
-当前训练配置使用 DR0、600 步上限、四卡四环境；8 轮 rollout 共采集 32 条轨迹，
-``global_batch_size=200``、``update_epoch=1``，每轮训练执行 4 次优化器更新。
+开始训练前，先恢复 OpenOven 资产路径。当前训练配置使用 DR0、600 步上限、
+四卡四环境；8 轮 rollout 共采集 32 条轨迹，``global_batch_size=200``、
+``update_epoch=1``，每轮训练执行 4 次优化器更新。
 
 .. code-block:: bash
+
+   export SIMPLE_TASK=G1WholebodyOpenOvenTeleop-v0
+   export PSI0_RUN_REL=psi0/simple-checkpoints/g1wholebodyopenoventeleop-v0.simple.flow1000.cosine.lr1.0e-04.b128.gpus8.2605120604
+   export PSI0_RUN_DIR="${PSI0_ARTIFACT_ROOT}/psi-model/${PSI0_RUN_REL}"
+   export SIMPLE_RESET_DIR="${PSI0_ARTIFACT_ROOT}/reset-states/${SIMPLE_TASK}"
 
    bash examples/embodiment/run_embodiment.sh simple_openoven_ppo_psi0
 
 切换其他 Teleop 任务时，先按下载段更新 ``PSI0_RUN_DIR`` 和 ``SIMPLE_RESET_DIR``。
-这份配置的 actor、rollout 模型路径和训练 reset 路径会读取这两个变量，无需重复覆盖。
+配置的 actor、rollout 模型路径和训练 reset 路径会读取这两个变量。
+
 同时在 ``examples/embodiment/config/simple_openoven_ppo_psi0.yaml`` 中修改
 ``env.train.init_params.task_id``、``env.train.max_episode_steps`` 和
-``env.train.max_steps_per_rollout_epoch``，任务 ID 与步数对应关系见前面的测评段。
+``env.train.max_steps_per_rollout_epoch``，任务 ID 与步数对应关系见前面的评测段。
 修改 horizon 后，还需检查 ``actor.global_batch_size`` 与每轮采样 chunk 数的整除关系。
 这些任务字段在 YAML 中修改，不追加到上述 bash 命令后。
 
-测评训练后的 checkpoint 时，保持任务、reset 数据、DR level 和 horizon 一致。
-下面命令对齐当前 OpenOven 的官方 1000 步 horizon 测评配置。
+.. _simple-trained-checkpoint:
 
-value head 是 PPO 训练时估计未来回报的 critic，其参数也保存在 ``full_weights.pt``
-中。``add_value_head=true`` 是为了创建相同结构并严格加载这些已有参数，
-并非重新训练 critic；测评生成动作时不使用它。``PSI0_RUN_DIR`` 仍指向该任务
-原始 run 目录，用于构建模型和 processor，再由 ``runner.ckpt_path`` 加载训练后权重。
+评测训练后的 Checkpoint
+------------------------
+
+先将 ``PSI0_RUN_DIR`` 和 ``SIMPLE_RESET_DIR`` 恢复为 OpenOven 路径。
+原始 run 目录用于构建模型和 processor，``runner.ckpt_path`` 加载 PPO 权重，
+``add_value_head=true`` 恢复一同保存的 value-head 参数。value head 用于训练，
+生成动作时使用 policy。
+
+下面按官方 1000 步 horizon 评测 OpenOven：
 
 .. code-block:: bash
 
    export PSI0_PPO_CHECKPOINT=/absolute/path/to/global_step_20
 
-   bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+   bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      rollout.model.add_value_head=true \
      runner.ckpt_path="${PSI0_PPO_CHECKPOINT}/actor/model_state_dict/full_weights.pt" \

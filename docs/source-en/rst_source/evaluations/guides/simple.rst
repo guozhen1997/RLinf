@@ -3,7 +3,7 @@ Psi0 + SIMPLE Evaluation and Training
 
 This guide evaluates Psi0 on eight SIMPLE Teleop tasks through RLinf and runs
 four-GPU PPO post-training on OpenOven. Every task requires its matching
-checkpoint and reset states; these assets are not interchangeable.
+checkpoint and reset states.
 
 Scope and Reproducibility
 -------------------------
@@ -14,7 +14,7 @@ and
 `SIMPLE environment code <https://github.com/physical-superintelligence-lab/SIMPLE/tree/5e3d6f84e85343e34e9bca8d157f0d7813231185>`_.
 The ``--revision`` arguments below pin the model weights and reset data to
 specific repository snapshots. These pins prevent code or asset updates from
-changing the setup; no separate version-selection step is needed.
+changing the setup.
 
 The current scope is the eight Teleop tasks with task-specific checkpoints in
 the pinned Psi0 release. ``G1WholebodyBendPickMP-v0`` and
@@ -24,13 +24,16 @@ protocols and are not supported yet.
 Install the Runtime
 -------------------
 
+Install the Psi0 and SIMPLE dependencies into the default virtual environment:
+
 .. code-block:: bash
 
    bash requirements/install.sh embodied \
-     --venv .venv-psi0-simple \
      --model psi0 \
      --env simple
-   source .venv-psi0-simple/bin/activate
+   source .venv/bin/activate
+
+.. _simple-tasks:
 
 Select a Task and Download Assets
 ---------------------------------
@@ -82,6 +85,8 @@ levels 0, 1, and 2 in the
      - 1000
      - 7/6/3
 
+.. _simple-reset-data:
+
 Task-Specific Assets
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -124,10 +129,9 @@ Shared Qwen Metadata
 ~~~~~~~~~~~~~~~~~~~~
 
 The joint Psi0 checkpoint contains both the System-2 ``vlm_model`` weights and
-the System-1 ``action_header`` weights, so it does not download Qwen model
-weights separately. The pinned loader still resolves the Qwen configuration,
-tokenizer, and processor by model ID. Download the following shared metadata
-only once per ``HF_HOME``; do not repeat it when switching tasks:
+the System-1 ``action_header`` weights. The pinned loader still resolves the
+Qwen configuration, tokenizer, and processor by model ID. Download the following
+shared metadata once per ``HF_HOME``:
 
 .. code-block:: bash
 
@@ -136,35 +140,22 @@ only once per ``HF_HOME``; do not repeat it when switching tasks:
      preprocessor_config.json tokenizer.json tokenizer_config.json \
      video_preprocessor_config.json vocab.json
 
-The upstream loader resolves ``main`` by default. Downloading only a commit SHA
-does not create the cache's ``main`` reference, so an offline load may fail even
-when that snapshot exists. The command follows the loader's default and uses
-the standard cache under ``HF_HOME``; an arbitrary ``--local-dir`` is not a
-replacement. Once cached, these files can be reused offline. Unlike the pinned
-Psi0 and SIMPLE assets, this metadata is not strictly version-locked: ``main``
-can change, and strict pinning would also require the loader to use that revision.
+The upstream loader resolves ``main`` by default. This command writes metadata
+to the standard cache under ``HF_HOME`` for offline reuse. Downloading only a
+commit SHA does not create the cache's ``main`` reference, and an arbitrary
+``--local-dir`` cannot replace the standard cache. ``main`` can change; strict
+pinning also requires the loader to use the same revision.
 
 Run Evaluation
 --------------
 
-The repository provides direct configs for CloseDoor, OpenFaucet, and
-OpenOven:
-
-.. code-block:: text
-
-   evaluations/simple/simple_closedoor_psi0_eval.yaml
-   evaluations/simple/simple_openfaucet_psi0_eval.yaml
-   evaluations/simple/simple_openoven_psi0_eval.yaml
-
-OpenOven
-~~~~~~~~
-
-The OpenOven config supplies the task, horizon, episode start, and video
-settings, so the minimal smoke command only needs local asset path overrides:
+``evaluations/simple/simple_psi0_eval.yaml`` defaults to OpenOven, one episode,
+and DR0, matching the training task. For a smoke run, override the local asset
+paths:
 
 .. code-block:: bash
 
-   bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+   bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}"
 
@@ -173,7 +164,7 @@ For a full evaluation, run 10 episodes at each of the three DR levels:
 .. code-block:: bash
 
    for SIMPLE_DR_LEVEL in 0 1 2; do
-     bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+     bash evaluations/run_eval.sh simple simple_psi0_eval \
        rollout.model.model_path="${PSI0_RUN_DIR}" \
        env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}" \
        env.eval.reset_dataset.dr_level="${SIMPLE_DR_LEVEL}" \
@@ -184,10 +175,8 @@ For a full evaluation, run 10 episodes at each of the three DR levels:
 Switch to Another Task
 ~~~~~~~~~~~~~~~~~~~~~~
 
-You can reuse the OpenOven config for another Teleop task. If its assets are
-already downloaded and extracted, skip downloading them again, but reset all
-four variables below. Changing the task or run name does not automatically
-update previously exported paths. For XMovePick:
+Reuse the same config for another Teleop task. For XMovePick, update all four
+variables; exported paths do not change automatically:
 
 .. code-block:: bash
 
@@ -196,18 +185,25 @@ update previously exported paths. For XMovePick:
    export PSI0_RUN_DIR="${PSI0_ARTIFACT_ROOT}/psi-model/${PSI0_RUN_REL}"
    export SIMPLE_RESET_DIR="${PSI0_ARTIFACT_ROOT}/reset-states/${SIMPLE_TASK}"
 
-   bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+If these assets are not ready, rerun the model and reset-data download commands
+with the new variables. Then evaluate:
+
+.. code-block:: bash
+
+   bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}" \
      env.eval.init_params.task_id="simple/${SIMPLE_TASK}" \
      env.eval.max_episode_steps=800 \
      env.eval.max_steps_per_rollout_epoch=816
 
-For each task switch, update the four variables together and choose both step
-limits from the table. The checkpoint, reset data, and ``task_id`` must match.
-For the full three-level loop, retain both path overrides and add ``task_id``
-and both step limits. ``max_steps_per_rollout_epoch`` is the smallest multiple
-of 24 that is not smaller than the task horizon.
+The checkpoint, reset data, and ``task_id`` must match. In the three-level loop,
+also add ``env.eval.init_params.task_id="simple/${SIMPLE_TASK}"`` and keep both
+asset-path and step-limit overrides.
+``max_steps_per_rollout_epoch`` is the smallest multiple of 24 that is not
+smaller than the task horizon.
+
+.. _simple-task-horizons:
 
 .. list-table::
    :header-rows: 1
@@ -234,41 +230,50 @@ smoke nor an aggregate count establishes strict reproduction.
 Run PPO Post-Training on OpenOven
 ----------------------------------
 
-Set ``PSI0_RUN_DIR`` and ``SIMPLE_RESET_DIR`` to OpenOven before starting.
+Restore the OpenOven asset paths before starting.
 The current training config uses DR0, a 600-step limit, and four environments
 on four GPUs. Each iteration collects 32 trajectories over 8 rollout epochs;
 ``global_batch_size=200`` and ``update_epoch=1`` give 4 optimizer steps.
 
 .. code-block:: bash
 
+   export SIMPLE_TASK=G1WholebodyOpenOvenTeleop-v0
+   export PSI0_RUN_REL=psi0/simple-checkpoints/g1wholebodyopenoventeleop-v0.simple.flow1000.cosine.lr1.0e-04.b128.gpus8.2605120604
+   export PSI0_RUN_DIR="${PSI0_ARTIFACT_ROOT}/psi-model/${PSI0_RUN_REL}"
+   export SIMPLE_RESET_DIR="${PSI0_ARTIFACT_ROOT}/reset-states/${SIMPLE_TASK}"
+
    bash examples/embodiment/run_embodiment.sh simple_openoven_ppo_psi0
 
 To switch to another Teleop task, update ``PSI0_RUN_DIR`` and ``SIMPLE_RESET_DIR``
 as described in the download section. This config reads both variables for the
 actor and rollout model paths and the training reset path; no repeated overrides
-are needed. In ``examples/embodiment/config/simple_openoven_ppo_psi0.yaml``, also
-change ``env.train.init_params.task_id``, ``env.train.max_episode_steps``, and
+are needed.
+
+In ``examples/embodiment/config/simple_openoven_ppo_psi0.yaml``, also change
+``env.train.init_params.task_id``, ``env.train.max_episode_steps``, and
 ``env.train.max_steps_per_rollout_epoch`` using the task IDs and horizons in the
 evaluation section. After changing the horizon, check that
 ``actor.global_batch_size`` divides the number of sampled chunks per update.
 Edit these task fields in the YAML rather than appending them to the bash command.
 
-To evaluate the trained checkpoint, use the same task, reset data, DR level,
-and horizon. The command below uses the OpenOven evaluation config with the
-official 1,000-step horizon.
+.. _simple-trained-checkpoint:
 
-The value head estimates future returns during PPO training, and its parameters
-are saved in ``full_weights.pt``. ``add_value_head=true`` creates the matching
-module so the strict checkpoint load can restore those parameters. It does not
-train a new critic, and evaluation does not use it to generate actions.
-``PSI0_RUN_DIR`` still points to the original task run directory to construct
-the model and processor; ``runner.ckpt_path`` then loads the trained weights.
+Evaluate a Trained Checkpoint
+--------------------------------
+
+Set ``PSI0_RUN_DIR`` and ``SIMPLE_RESET_DIR`` back to OpenOven before starting.
+The original run directory builds the model and processor.
+``runner.ckpt_path`` loads the PPO weights;
+``add_value_head=true`` restores the value-head parameters saved alongside
+them. The value head is used during training; action generation uses the policy.
+
+The command below evaluates OpenOven at its official 1,000-step horizon:
 
 .. code-block:: bash
 
    export PSI0_PPO_CHECKPOINT=/absolute/path/to/global_step_20
 
-   bash evaluations/run_eval.sh simple simple_openoven_psi0_eval \
+   bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      rollout.model.add_value_head=true \
      runner.ckpt_path="${PSI0_PPO_CHECKPOINT}/actor/model_state_dict/full_weights.pt" \
