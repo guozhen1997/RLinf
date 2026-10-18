@@ -1006,8 +1006,8 @@ def _validate_psi0_train_cfg(cfg, model_cfg, only_eval: bool) -> None:
     """Validate Psi0 + SIMPLE PPO training settings."""
     assert not only_eval, "Psi0 training config cannot use an Eval runner."
     assert cfg.runner.get("val_check_interval", -1) <= 0, (
-        "Psi0 SIMPLE requires runner.val_check_interval <= 0: training and "
-        "evaluation would create two Isaac runtimes in one EnvWorker. "
+        "Psi0 SIMPLE requires runner.val_check_interval <= 0: evaluation "
+        "during training is not supported. "
         "Use standalone evaluation for saved checkpoints."
     )
     assert cfg.rollout.get("rollout_backend", "huggingface") == "huggingface", (
@@ -1170,7 +1170,7 @@ def validate_embodied_cfg(cfg):
     if model_type == SupportedModel.PSI0:
         assert cfg.rollout.pipeline_stage_num == 1, (
             "Psi0 SIMPLE requires rollout.pipeline_stage_num=1: "
-            "each EnvWorker can own only one Isaac runtime."
+            "each rollout worker supports one environment and RTC stream."
         )
         if only_eval:
             _validate_psi0_eval_cfg(cfg, model_cfg, only_eval)

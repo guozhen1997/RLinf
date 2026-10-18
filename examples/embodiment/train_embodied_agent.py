@@ -15,6 +15,7 @@
 import json
 
 import hydra
+import ray
 import torch.multiprocessing as mp
 from omegaconf import open_dict
 from omegaconf.omegaconf import OmegaConf
@@ -113,13 +114,8 @@ def main(cfg) -> None:
     )
 
     # Create env worker group
-    env_worker_cls = EnvWorker
-    if cfg.env.train.env_type == "simple":
-        from rlinf.workers.env.simple_env_worker import SimpleEnvWorker
-
-        env_worker_cls = SimpleEnvWorker
     env_placement = component_placement.get_strategy("env")
-    env_group = env_worker_cls.create_group(cfg).launch(
+    env_group = EnvWorker.create_group(cfg).launch(
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
     )
 
@@ -173,11 +169,13 @@ def main(cfg) -> None:
         reward=reward_group,
     )
 
-    runner.init_workers()
-    runner.run()
-    if cfg.env.train.env_type == "simple":
-        # Results and videos are complete; avoid Isaac's unsafe exit teardown.
-        env_group._close()
+    try:
+        runner.init_workers()
+        runner.run()
+    finally:
+        if cfg.env.train.env_type == "simple" and ray.is_initialized():
+            # Rollout has flushed videos; killing the owner releases its native child.
+            env_group._close()
 
     if reward_group is not None:
         reward_group.stop().wait()

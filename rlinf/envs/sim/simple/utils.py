@@ -68,7 +68,7 @@ def psi0_upper_joint_values(action: np.ndarray) -> np.ndarray:
 
 
 class SimpleController(Protocol):
-    """Controller boundary owned by a SIMPLE EnvWorker process."""
+    """Controller boundary owned by a SIMPLE runtime process."""
 
     last_base_height: float
     control_dt: float
@@ -93,7 +93,7 @@ def _load_wbc_onnx_policy(
     import onnxruntime as ort
 
     options = ort.SessionOptions()
-    # Small control policies run per EnvWorker. One thread avoids competing
+    # Small control policies run per simulator. One thread avoids competing
     # pools and affinity assignments outside a container's allowed CPU set.
     options.intra_op_num_threads = 1
     model = ort.InferenceSession(model_path, sess_options=options)

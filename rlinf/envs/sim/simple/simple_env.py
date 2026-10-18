@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Single-process SIMPLE Teleop environment for Psi0."""
+"""SIMPLE Teleop runtime and Ray proxy for Psi0."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import tempfile
 import time
@@ -27,9 +28,12 @@ from typing import Any
 
 import gymnasium as gym
 import numpy as np
+import ray
 import torch
 from filelock import FileLock
 from gymnasium.wrappers import TimeLimit
+from omegaconf import DictConfig
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 from rlinf.envs.sim.simple.utils import (
     SimpleController,
@@ -238,13 +242,17 @@ class SimpleLeRobotResetDataset:
         return json.loads(encoded_config), episode
 
 
-class SimpleEnv(gym.Env):
-    """Expose one fixed SIMPLE Teleop runtime through RLinf's chunk API."""
+@ray.remote(
+    num_cpus=1, num_gpus=0, max_concurrency=1, max_restarts=0, max_task_retries=0
+)
+class SimpleProcess(gym.Env):
+    """Own one simulator and controller on a synchronous Ray actor's main thread."""
 
     metadata = {"render_modes": ["rgb_array"], "render_fps": 50}
 
-    def __init__(self, cfg, num_envs, seed_offset, total_num_processes, worker_info):
-        del worker_info
+    def __init__(
+        self, cfg: DictConfig, num_envs: int, seed_offset: int, total_num_processes: int
+    ) -> None:
         if num_envs != 1:
             raise ValueError("SIMPLE requires one env per EnvWorker.")
         if total_num_processes < 1:
@@ -288,6 +296,9 @@ class SimpleEnv(gym.Env):
             -np.inf, np.inf, shape=(36,), dtype=np.float32
         )
         self.observation_space = gym.spaces.Dict({})
+
+    def ready(self) -> None:
+        """Confirm initialization without advancing the reset dataset cursor."""
 
     @staticmethod
     def _make_sonic_config() -> dict[str, Any]:
@@ -501,3 +512,136 @@ class SimpleEnv(gym.Env):
     def close(self):
         self._raw_env.close()
         super().close()
+
+
+class SimpleEnv(gym.Env):
+    """Proxy one SIMPLE runtime while keeping native imports out of EnvWorker."""
+
+    metadata = {"render_modes": ["rgb_array"], "render_fps": 50}
+
+    def __init__(
+        self,
+        cfg: DictConfig,
+        num_envs: int,
+        seed_offset: int,
+        total_num_processes: int,
+        worker_info: Any,
+    ) -> None:
+        del worker_info
+        self.cfg = cfg
+        self.num_envs = num_envs
+        self.seed = int(cfg.seed) + int(seed_offset)
+        self.auto_reset = bool(cfg.auto_reset)
+        self.ignore_terminations = bool(cfg.ignore_terminations)
+        self.is_start = True
+        self._process = None
+        self._image: np.ndarray | None = None
+        self.action_space = gym.spaces.Box(
+            -np.inf, np.inf, shape=(36,), dtype=np.float32
+        )
+        self.observation_space = gym.spaces.Dict({})
+
+        # RLinf assigns GPU visibility independently of Ray GPU resources.
+        env_vars = {
+            key: os.environ[key]
+            for key in (
+                "CUDA_VISIBLE_DEVICES",
+                "NVIDIA_VISIBLE_DEVICES",
+                "MUJOCO_EGL_DEVICE_ID",
+                "EGL_DEVICE_ID",
+                "MUJOCO_GL",
+                "PYOPENGL_PLATFORM",
+            )
+            if key in os.environ
+        }
+        env_vars["RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES"] = "1"
+        self._process = SimpleProcess.options(
+            # Native children follow their owner, outside Cluster's named-worker cleanup.
+            namespace=f"{ray.get_runtime_context().namespace}.simple",
+            scheduling_strategy=NodeAffinitySchedulingStrategy(
+                node_id=ray.get_runtime_context().get_node_id(), soft=False
+            ),
+            # Ray inherits the parent's Python/runtime environment and merges env_vars.
+            runtime_env={"env_vars": env_vars},
+        ).remote(cfg, num_envs, seed_offset, total_num_processes)
+        try:
+            ray.get(self._process.ready.remote())
+        except BaseException:
+            # The constructor may have only partially initialized native libraries.
+            self._kill_process()
+            raise
+
+    def _kill_process(self) -> None:
+        process, self._process = self._process, None
+        if process is not None and ray.is_initialized():
+            try:
+                ray.kill(process, no_restart=True)
+            except ray.exceptions.RayActorError:
+                pass
+
+    def _require_process(self) -> Any:
+        if self._process is None:
+            raise RuntimeError("SIMPLE environment is closed.")
+        return self._process
+
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Reset once in the simulator process and cache its initial image."""
+        observation, info = ray.get(
+            self._require_process().reset.remote(seed=seed, options=options)
+        )
+        if seed is not None:
+            self.seed = int(seed)
+        self.is_start = False
+        self._image = observation["main_images"].numpy()
+        return observation, info
+
+    def chunk_step(
+        self, chunk_actions: np.ndarray | torch.Tensor
+    ) -> tuple[
+        list[dict[str, Any]],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        list[dict[str, Any]],
+    ]:
+        """Execute a whole chunk in one RPC, including any terminal padding."""
+        if isinstance(chunk_actions, torch.Tensor):
+            chunk_actions = chunk_actions.detach().cpu().numpy()
+        result = ray.get(self._require_process().chunk_step.remote(chunk_actions))
+        observations, _, _, _, infos = result
+        executed_mask = infos[-1].get("executed_mask")
+        if (
+            not isinstance(executed_mask, torch.Tensor)
+            or executed_mask.dtype != torch.bool
+            or executed_mask.shape != (1, 24)
+        ):
+            raise RuntimeError(
+                "SIMPLE must return a bool executed_mask of shape [1, 24]."
+            )
+        self._image = observations[-1]["main_images"].numpy()
+        return result
+
+    def capture_image(self) -> np.ndarray | None:
+        """Return the latest frame without an additional simulator RPC."""
+        return self._image
+
+    def update_reset_state_ids(self) -> None:
+        """Leave reset cursor advancement to the process's next reset call."""
+
+    def close(self) -> None:
+        """Release the child once; Isaac requires process termination for teardown."""
+        if self._process is None:
+            return
+        try:
+            if ray.is_initialized() and "isaac" not in str(
+                self.cfg.init_params.sim_mode
+            ):
+                try:
+                    ray.get(self._process.close.remote())
+                except ray.exceptions.RayActorError:
+                    pass
+        finally:
+            self._kill_process()
+            self._image = None

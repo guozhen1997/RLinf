@@ -44,8 +44,6 @@ from rlinf.utils.placement import HybridComponentPlacement
 
 
 class EnvWorker(Worker):
-    # SIMPLE uses SimpleEnvWorker to keep Isaac Sim on Ray's main thread.
-    # New async methods here also need synchronous wrappers in that subclass.
     # Class-level default so the observation send path is safe even when the
     # instance is built without running ``__init__`` (e.g. ``object.__new__`` in
     # unit tests). ``None`` means "use the scheduler's default split"; when
@@ -490,6 +488,9 @@ class EnvWorker(Worker):
                 intervene_actions=intervene_actions,
                 intervene_flags=intervene_flags,
                 rlt_switch_flags=rlt_switch_flags,
+                executed_mask=infos["executed_mask"]
+                if self.cfg.env.train.env_type == "simple"
+                else None,
             ),
         )
         chunk_step_payload = {

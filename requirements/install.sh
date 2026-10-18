@@ -3536,15 +3536,16 @@ install_simple_env() {
     ensure_psi0_simple_repo_revision SIMPLE_PATH "$simple_dir" 5e3d6f84e85343e34e9bca8d157f0d7813231185
     git -C "$simple_dir" submodule update --init --recursive
 
-    uv pip install -r "$SCRIPT_DIR/embodied/envs/simple.txt"
+    # Isaac Sim resolves its shared extension tree through real file paths.
+    UV_LINK_MODE=hardlink uv pip install -r "$SCRIPT_DIR/embodied/envs/simple.txt"
     uv pip install -e "$simple_dir/third_party/unitree_sdk2_python"
     uv pip install -e "$simple_dir/third_party/gear_sonic[sim]"
     uv pip install -e "$simple_dir/third_party/decoupled_wbc[full]"
     uv pip install -e "$simple_dir" --no-deps
 
     # cuRobo's Git-derived version can change after submodule initialization.
-    # Bypass uv's wheel cache to avoid reusing a wheel with stale metadata.
-    UV_NO_CACHE=1 \
+    # Avoid stale wheels; copies survive removal of uv's temporary cache.
+    UV_NO_CACHE=1 UV_LINK_MODE=copy \
         UV_PROJECT_ENVIRONMENT="$(realpath "$VENV_DIR")" \
         bash "$simple_dir/scripts/install_curobo.sh"
 }
