@@ -978,6 +978,8 @@ def _validate_psi0_eval_cfg(cfg, model_cfg, only_eval: bool) -> None:
         or cfg.rollout.get("collect_prev_infos", False)
     ), "Psi0 evaluation requires collect_prev_infos=false and recompute_logprobs=false."
 
+    from rlinf.envs.sim.simple.utils import SIMPLE_ACTION_CHUNK_SIZE, SIMPLE_ACTION_DIM
+
     psi0_cfg = model_cfg.get("psi0", {})
     plan_horizon = int(psi0_cfg.get("plan_horizon", 30))
     execution_horizon = int(model_cfg.num_action_chunks)
@@ -986,8 +988,12 @@ def _validate_psi0_eval_cfg(cfg, model_cfg, only_eval: bool) -> None:
         "Psi0 requires plan_horizon == num_action_chunks + overlap_horizon; "
         f"got {plan_horizon} != {execution_horizon} + {overlap_horizon}."
     )
-    assert execution_horizon == 24 and int(model_cfg.action_dim) == 36, (
-        "Psi0 SIMPLE Eval requires actions shaped [B, 24, 36]."
+    assert (
+        execution_horizon == SIMPLE_ACTION_CHUNK_SIZE
+        and int(model_cfg.action_dim) == SIMPLE_ACTION_DIM
+    ), (
+        "Psi0 SIMPLE Eval requires actions shaped "
+        f"[B, {SIMPLE_ACTION_CHUNK_SIZE}, {SIMPLE_ACTION_DIM}]."
     )
     assert psi0_cfg.get("sampler", "deterministic_euler") == "deterministic_euler", (
         "Psi0 Eval requires sampler='deterministic_euler'."
@@ -1026,6 +1032,8 @@ def _validate_psi0_train_cfg(cfg, model_cfg, only_eval: bool) -> None:
         "Psi0 recomputes logprobs in the actor; rollout.recompute_logprobs must be false."
     )
 
+    from rlinf.envs.sim.simple.utils import SIMPLE_ACTION_CHUNK_SIZE, SIMPLE_ACTION_DIM
+
     psi0_cfg = model_cfg.get("psi0", {})
     plan_horizon = int(psi0_cfg.get("plan_horizon", 30))
     execution_horizon = int(model_cfg.num_action_chunks)
@@ -1034,8 +1042,12 @@ def _validate_psi0_train_cfg(cfg, model_cfg, only_eval: bool) -> None:
         "Psi0 requires plan_horizon == num_action_chunks + overlap_horizon; "
         f"got {plan_horizon} != {execution_horizon} + {overlap_horizon}."
     )
-    assert execution_horizon == 24 and int(model_cfg.action_dim) == 36, (
-        "Psi0 SIMPLE training requires actions shaped [B, 24, 36]."
+    assert (
+        execution_horizon == SIMPLE_ACTION_CHUNK_SIZE
+        and int(model_cfg.action_dim) == SIMPLE_ACTION_DIM
+    ), (
+        "Psi0 SIMPLE training requires actions shaped "
+        f"[B, {SIMPLE_ACTION_CHUNK_SIZE}, {SIMPLE_ACTION_DIM}]."
     )
     assert psi0_cfg.get("sampler") == "stochastic_transition", (
         "Psi0 training requires sampler='stochastic_transition'."
@@ -1045,9 +1057,6 @@ def _validate_psi0_train_cfg(cfg, model_cfg, only_eval: bool) -> None:
     )
     assert cfg.env.train.env_type == "simple", (
         "Psi0 training requires env.train.env_type='simple'."
-    )
-    assert not cfg.env.train.auto_reset, (
-        "Psi0 SIMPLE training requires env.train.auto_reset=false."
     )
     assert cfg.algorithm.adv_type == "gae" and cfg.algorithm.loss_type == (
         "actor_critic"
@@ -1200,6 +1209,9 @@ def validate_embodied_cfg(cfg):
                 "runner.only_eval=True, or runner.task_type=embodied_eval."
             )
             cfg.env.eval.group_size = cfg.env.eval.get("group_size", 1)
+            cfg.env.eval.early_stop_on_done = bool(
+                cfg.env.eval.get("early_stop_on_done", False)
+            )
         if algorithm_cfg.get("rollout_epoch", None) is not None:
             logging.warning(
                 "algorithm.rollout_epoch is deprecated; use env.train.rollout_epoch instead."
@@ -1377,6 +1389,24 @@ def validate_embodied_cfg(cfg):
         ), (
             "env.eval.max_steps_per_rollout_epoch must be divisible by actor.model.num_action_chunks"
         )
+        if cfg.env.eval.get("early_stop_on_done", False):
+            eval_num_envs_per_stage = (
+                cfg.env.eval.total_num_envs // env_world_size // stage_num
+            )
+            assert not cfg.env.eval.auto_reset, (
+                "env.eval.early_stop_on_done requires env.eval.auto_reset=false: "
+                "each eval rollout epoch is one episode."
+            )
+            assert stage_num == 1, (
+                "env.eval.early_stop_on_done requires rollout.pipeline_stage_num=1."
+            )
+            assert eval_num_envs_per_stage == 1, (
+                "env.eval.early_stop_on_done requires one eval env per worker "
+                f"(got {eval_num_envs_per_stage})."
+            )
+            assert not cfg.runner.get("enable_decoupled_mode", False), (
+                "env.eval.early_stop_on_done does not support decoupled mode."
+            )
 
     if not only_eval:
         assert cfg.env.train.total_num_envs > 0, (

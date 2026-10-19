@@ -971,7 +971,7 @@ class MultiStepRolloutWorker(Worker):
                 desc="Evaluating Rollout Epochs",
                 disable=(self._rank != 0),
             ):
-                simple_eval_finished = False
+                eval_epoch_done = False
                 for _ in range(self.n_eval_chunk_steps):
                     for stage_id in range(self.num_pipeline_stages):
                         env_output = await self.recv_from(
@@ -984,11 +984,9 @@ class MultiStepRolloutWorker(Worker):
                             merge_fn=self._merge_obs_batches,
                             infer_batch_size_fn=self._infer_env_batch_size,
                         ).async_wait()
-                        if self.cfg.env.eval.env_type == "simple":
-                            eval_finished = env_output["obs"].pop("eval_finished", None)
-                            if eval_finished is not None and all(eval_finished):
-                                simple_eval_finished = True
-                                break
+                        if env_output.get("eval_epoch_done"):
+                            eval_epoch_done = True
+                            break
                         actions, _ = self._predict_rollout_actions(
                             env_output["obs"],
                             mode="eval",
@@ -1008,7 +1006,7 @@ class MultiStepRolloutWorker(Worker):
                             batch_size=self.eval_batch_size,
                         )
 
-                    if simple_eval_finished:
+                    if eval_epoch_done:
                         break
 
             if self.enable_offload:
@@ -1112,6 +1110,9 @@ class MultiStepRolloutWorker(Worker):
             ),
             "intervene_flags": self._merge_optional_flag_tensors(
                 obs_dicts, intervene_flags_list
+            ),
+            "eval_epoch_done": any(
+                bool(obs_batch.get("eval_epoch_done")) for obs_batch in obs_batches
             ),
         }
 

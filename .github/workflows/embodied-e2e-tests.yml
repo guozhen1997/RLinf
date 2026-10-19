@@ -2220,7 +2220,7 @@ jobs:
           test -s "${PSI0_RUN_DIR}/checkpoints/ckpt_40000/model.safetensors"
           python - <<'PY'
           import os
-          from rlinf.envs.sim.simple.simple_env import SimpleLeRobotResetDataset
+          from rlinf.envs.sim.simple.dataset import SimpleLeRobotResetDataset
 
           dataset = SimpleLeRobotResetDataset(
               os.environ["SIMPLE_RESET_DIR"], dr_level=0, episode_start=0, num_episodes=2

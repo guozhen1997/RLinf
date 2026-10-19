@@ -33,6 +33,7 @@ env:
     env_type: simple
     total_num_envs: 1
     auto_reset: false
+    early_stop_on_done: true
     ignore_terminations: false
     seed: 0
     group_size: 1
