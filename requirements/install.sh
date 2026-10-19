@@ -6,6 +6,11 @@ TARGET=""
 
 MODEL=""
 ENV_NAME=""
+# rlinf-openpi pins torch 2.7.1, CUDA JAX, and the transformers 4.53 fork.
+# rlinf-openpi-lite installs from --openpi-path when set, otherwise from
+# RLinf/openpi@feat/openpi_lite.
+OPENPI_PACKAGE="rlinf-openpi"
+OPENPI_PATH=""
 VENV_DIR=".venv"
 PYTHON_VERSION="3.11.14"
 # Set by --python; MUSA only defaults PYTHON_VERSION when it is unset.
@@ -135,6 +140,15 @@ Targets:
 Options (for target=embodied):
     --model <name>         Embodied model to install: ${SUPPORTED_MODELS[*]}.
     --env <name>           Single environment to install: ${SUPPORTED_ENVS[*]}.
+    --openpi-package <name> OpenPI distribution for --model openpi:
+                           rlinf-openpi (default, PyPI 0.1.1) or
+                           rlinf-openpi-lite.
+                           The lite package does not pin torch or transformers,
+                           does not install CUDA JAX, and does not apply
+                           transformers_replace.
+    --openpi-path <dir>    Local OpenPI checkout used when
+                           --openpi-package rlinf-openpi-lite. Without it, lite
+                           is installed from RLinf/openpi@feat/openpi_lite.
 
 Common options:
     -h, --help             Show this help message and exit.
@@ -280,6 +294,22 @@ parse_args() {
                     exit 1
                 fi
                 MODEL="${2:-}"
+                shift 2
+                ;;
+            --openpi-package)
+                if [ -z "${2:-}" ]; then
+                    echo "--openpi-package requires rlinf-openpi or rlinf-openpi-lite." >&2
+                    exit 1
+                fi
+                OPENPI_PACKAGE="${2:-}"
+                shift 2
+                ;;
+            --openpi-path)
+                if [ -z "${2:-}" ]; then
+                    echo "--openpi-path requires a local OpenPI checkout." >&2
+                    exit 1
+                fi
+                OPENPI_PATH="${2:-}"
                 shift 2
                 ;;
             --env)
@@ -2455,13 +2485,36 @@ install_openvla_oft_model() {
     uv pip uninstall pynvml || true
 }
 
+install_openpi_distribution() {
+    case "$OPENPI_PACKAGE" in
+        rlinf-openpi)
+            uv pip install "rlinf-openpi==0.1.1"
+            ;;
+        rlinf-openpi-lite)
+            if [ -n "$OPENPI_PATH" ]; then
+                if [ ! -f "$OPENPI_PATH/pyproject.toml" ]; then
+                    echo "--openpi-path is not an OpenPI checkout: $OPENPI_PATH" >&2
+                    exit 1
+                fi
+                uv pip install "$OPENPI_PATH"
+            else
+                uv pip install "git+${GITHUB_PREFIX}https://github.com/RLinf/openpi.git@feat/openpi_lite"
+            fi
+            ;;
+        *)
+            echo "--openpi-package must be rlinf-openpi or rlinf-openpi-lite (got '$OPENPI_PACKAGE')." >&2
+            exit 1
+            ;;
+    esac
+}
+
 install_openpi_model() {
     case "$ENV_NAME" in
         behavior)
             PYTHON_VERSION="3.10"
             create_and_sync_venv
             install_common_embodied_deps
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_behavior_env
             uv pip install "${RAY_COMPAT_DEPS[@]}"
             pushd ~ >/dev/null
@@ -2472,13 +2525,13 @@ install_openpi_model() {
             create_and_sync_venv
             install_common_embodied_deps
             install_${ENV_NAME}_env
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_flash_attn
             ;;
         metaworld)
             create_and_sync_venv
             install_common_embodied_deps
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_flash_attn
             install_metaworld_env
             ;;
@@ -2490,34 +2543,41 @@ install_openpi_model() {
             # Stock transformers and rlinf-transformer-openpi share the
             # transformers/ dir but are different packages; uninstall first so
             # 4.57/5.x leftovers are not scanned as mistral-common backends.
-            uv pip uninstall -y transformers || true
-            uv pip install "rlinf-openpi==0.1.1"
+            # rlinf-openpi-lite keeps the stock transformers package.
+            if [ "$OPENPI_PACKAGE" = "rlinf-openpi" ]; then
+                uv pip uninstall -y transformers || true
+            fi
+            install_openpi_distribution
             ;;
         robocasa)
             create_and_sync_venv
             install_common_embodied_deps
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_flash_attn
             install_robocasa_env
             ;;
         robocasa365)
             create_and_sync_venv
             install_common_embodied_deps
-            uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            if [ "$OPENPI_PACKAGE" = "rlinf-openpi-lite" ]; then
+                install_openpi_distribution
+            else
+                uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            fi
             install_flash_attn
             install_robocasa365_env
             ;;
         robotwin)
             create_and_sync_venv
             install_common_embodied_deps
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_flash_attn
             install_robotwin_env
             ;;
         isaaclab)
             create_and_sync_venv
             install_common_embodied_deps
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_isaaclab_env
             # Torch is modified in Isaac Lab, install flash-attn afterwards
             install_flash_attn
@@ -2526,7 +2586,7 @@ install_openpi_model() {
         roboverse)
             create_and_sync_venv
             install_common_embodied_deps
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_flash_attn
             install_roboverse_env
             ;;
@@ -2534,14 +2594,14 @@ install_openpi_model() {
             create_and_sync_venv
             install_common_embodied_deps
             install_franka_franky_env
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             install_flash_attn
             ;;
         polaris)
             create_and_sync_venv
             install_common_embodied_deps
             install_polaris_env
-            uv pip install "rlinf-openpi==0.1.1"
+            install_openpi_distribution
             ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for OpenPI model." >&2
@@ -2549,30 +2609,33 @@ install_openpi_model() {
             ;;
     esac
 
-    # Enforce RLinf-compatible runtime pins to avoid known breakages.
-    # openpi/orbax require jax.experimental.layout.DeviceLocalLayout (removed in jax>=0.7.0).
-    uv pip install -r "$SCRIPT_DIR/embodied/models/openpi.txt"
-    if [ "$PLATFORM" = "ascend" ]; then
-        uv pip install -r "$SCRIPT_DIR/embodied/models/ascend/openpi.txt"
-    fi
+    if [ "$OPENPI_PACKAGE" = "rlinf-openpi" ]; then
+        # Enforce RLinf-compatible runtime pins to avoid known breakages.
+        # openpi/orbax require jax.experimental.layout.DeviceLocalLayout (removed in jax>=0.7.0).
+        uv pip install -r "$SCRIPT_DIR/embodied/models/openpi.txt"
 
-    # Replace transformers models with OpenPI's modified versions
-    local py_major_minor
-    py_major_minor=$(python - <<'EOF'
+        # Replace transformers models with OpenPI's modified versions.
+        # rlinf-openpi-lite does not import PI0Pytorch, so it keeps stock transformers.
+        local py_major_minor
+        py_major_minor=$(python - <<'EOF'
 import sys
 print(f"{sys.version_info.major}.{sys.version_info.minor}")
 EOF
 )
-    cp -r "$VENV_DIR/lib/python${py_major_minor}/site-packages/openpi/models_pytorch/transformers_replace/"* \
-        "$VENV_DIR/lib/python${py_major_minor}/site-packages/transformers/"
-    
+        cp -r "$VENV_DIR/lib/python${py_major_minor}/site-packages/openpi/models_pytorch/transformers_replace/"* \
+            "$VENV_DIR/lib/python${py_major_minor}/site-packages/transformers/"
+        # rlinf-openpi pulls rlinf-transformer-openpi (a transformers 4.53 fork) into
+        # the same package dir as the stock transformers, so two distributions claim
+        # `transformers` with conflicting tokenizers bounds. The fork's files win at
+        # runtime, so re-assert its bound; otherwise a later resolve drifts tokenizers
+        # past 0.22 and transformers refuses to import.
+        uv pip install "tokenizers>=0.21,<0.22"
+    fi
+    if [ "$PLATFORM" = "ascend" ]; then
+        uv pip install -r "$SCRIPT_DIR/embodied/models/ascend/openpi.txt"
+    fi
+
     bash $SCRIPT_DIR/embodied/download_assets.sh --assets openpi
-    # rlinf-openpi pulls rlinf-transformer-openpi (a transformers 4.53 fork) into
-    # the same package dir as the stock transformers, so two distributions claim
-    # `transformers` with conflicting tokenizers bounds. The fork's files win at
-    # runtime, so re-assert its bound; otherwise a later resolve drifts tokenizers
-    # past 0.22 and transformers refuses to import.
-    uv pip install "tokenizers>=0.21,<0.22"
     uv pip uninstall pynvml || true
 }
 
