@@ -410,7 +410,8 @@ jobs:
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
           # resume is off, so LeRobot always creates rank_0/id_0. This runner
-          # keeps /workspace/results across jobs.
+          # keeps /workspace/results across jobs. Delete before create(); a
+          # cleanup step after this one never runs if create() raises here.
           rm -rf /workspace/results/realworld_dual_yam_collect_data_mock
           bash tests/e2e_tests/embodied/run.sh realworld_dual_yam_collect_data_mock
 
@@ -423,6 +424,7 @@ jobs:
           bash tests/e2e_tests/evaluations/run.sh realworld_dual_yam_openpi_pi05_mock_eval
 
       - name: Clean up
+        if: always()
         run: |
           rm -rf .venv
           uv cache prune
