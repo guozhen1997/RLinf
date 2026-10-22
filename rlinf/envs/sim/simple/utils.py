@@ -12,15 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""In-process SIMPLE System-0 adapters for high-level Psi0 actions."""
+"""Psi0 SIMPLE observation and action layout helpers."""
 
 from __future__ import annotations
 
-import time
-from typing import Any, Callable, Protocol
-
 import numpy as np
-import torch
+
+SIMPLE_ACTION_CHUNK_SIZE = 24
+SIMPLE_ACTION_DIM = 36
+SIMPLE_STATE_DIM = 32
+SIMPLE_JOINT_QPOS_MIN_DIM = 43
+SIMPLE_ACTION_CHUNK_SHAPE = (SIMPLE_ACTION_CHUNK_SIZE, SIMPLE_ACTION_DIM)
 
 _STATE_SLICES = (
     (29, 32),
@@ -33,18 +35,19 @@ _STATE_SLICES = (
 
 
 def extract_psi0_state(joint_qpos: np.ndarray, base_height: float) -> np.ndarray:
-    """Build the official 32-D SIMPLE Teleop proprioceptive state."""
+    """Build the official SIMPLE Teleop proprioceptive state."""
     joint_qpos = np.asarray(joint_qpos)
-    if joint_qpos.ndim != 1 or joint_qpos.shape[0] < 43:
+    if joint_qpos.ndim != 1 or joint_qpos.shape[0] < SIMPLE_JOINT_QPOS_MIN_DIM:
         raise ValueError(
-            "SIMPLE joint_qpos must be one-dimensional with at least 43 joints."
+            "SIMPLE joint_qpos must be one-dimensional with at least "
+            f"{SIMPLE_JOINT_QPOS_MIN_DIM} joints."
         )
     waist_rpy = joint_qpos[[13, 14, 12]]
     state = np.concatenate(
         [joint_qpos[start:end] for start, end in _STATE_SLICES]
         + [waist_rpy, np.asarray([base_height])]
     )
-    if state.shape != (32,):
+    if state.shape != (SIMPLE_STATE_DIM,):
         raise RuntimeError(f"Unexpected Psi0 SIMPLE state shape: {state.shape}.")
     return state.astype(np.float32, copy=False)
 
@@ -52,9 +55,10 @@ def extract_psi0_state(joint_qpos: np.ndarray, base_height: float) -> np.ndarray
 def psi0_upper_joint_values(action: np.ndarray) -> np.ndarray:
     """Reorder Psi0's first 28 values into SIMPLE's upper-joint order."""
     action = np.asarray(action)
-    if action.shape != (36,):
+    if action.shape != (SIMPLE_ACTION_DIM,):
         raise ValueError(
-            f"Psi0 SIMPLE action must have shape (36,), got {action.shape}."
+            "Psi0 SIMPLE action must have shape "
+            f"({SIMPLE_ACTION_DIM},), got {action.shape}."
         )
     return np.concatenate(
         (
@@ -65,132 +69,3 @@ def psi0_upper_joint_values(action: np.ndarray) -> np.ndarray:
             action[7:14],
         )
     ).astype(np.float32, copy=False)
-
-
-class SimpleController(Protocol):
-    """Controller boundary owned by a SIMPLE runtime process."""
-
-    last_base_height: float
-    control_dt: float
-
-    def reset(self) -> None: ...
-
-    def stabilize(self, observation: dict[str, Any]) -> Any: ...
-
-    def is_stabilized(self) -> bool: ...
-
-    def finish_stabilization(self) -> None: ...
-
-    def action(
-        self, observation: dict[str, Any], high_level_action: np.ndarray
-    ) -> Any: ...
-
-
-def _load_wbc_onnx_policy(
-    _policy: Any, model_path: str
-) -> Callable[[torch.Tensor], torch.Tensor]:
-    """Load a WBC policy without ORT's automatic CPU affinity or thread pools."""
-    import onnxruntime as ort
-
-    options = ort.SessionOptions()
-    # Small control policies run per simulator. One thread avoids competing
-    # pools and affinity assignments outside a container's allowed CPU set.
-    options.intra_op_num_threads = 1
-    model = ort.InferenceSession(model_path, sess_options=options)
-
-    def run_inference(input_tensor: torch.Tensor) -> torch.Tensor:
-        ort_inputs = {model.get_inputs()[0].name: input_tensor.cpu().numpy()}
-        ort_outs = model.run(None, ort_inputs)
-        return torch.tensor(ort_outs[0], device="cpu")
-
-    return run_inference
-
-
-class SimpleTeleopController:
-    """Drive the fixed SIMPLE decoupled-WBC runtime without an HTTP agent."""
-
-    def __init__(self, robot: Any, sonic_config: dict[str, Any]) -> None:
-        from decoupled_wbc.control.policy.g1_gear_wbc_policy import G1GearWbcPolicy
-        from simple.agents.sonic_decoupled_wbc_agent import SonicDecoupledWbcAgent
-
-        self.robot = robot
-        # The pinned upstream factory has no session-options argument. Override
-        # only its WBC loader during this synchronous construction, then restore
-        # it even on failure. ONNX Runtime's global API remains unchanged.
-        original_loader = G1GearWbcPolicy.load_onnx_policy
-        try:
-            G1GearWbcPolicy.load_onnx_policy = _load_wbc_onnx_policy
-            self._agent = SonicDecoupledWbcAgent(robot, sonic_config=sonic_config)
-        finally:
-            G1GearWbcPolicy.load_onnx_policy = original_loader
-        indices = self._agent._dwbc_robot_model.get_joint_group_indices("upper_body")
-        self._upper_joint_names = [
-            name
-            for name, index in self._agent._dwbc_robot_model.joint_to_dof_index.items()
-            if index in indices
-        ]
-        self.last_base_height = 0.74
-        self.control_dt = 4 * float(self._agent.sim_dt)
-
-    def reset(self) -> None:
-        self._agent.reset()
-        self._agent._wbc_policy.lower_body_policy.use_policy_action = True
-        self.last_base_height = 0.74
-
-    def stabilize(self, observation: dict[str, Any]) -> Any:
-        return self._agent.get_stabilize_action(observation)
-
-    def is_stabilized(self) -> bool:
-        return bool(self.robot.stabilized)
-
-    def finish_stabilization(self) -> None:
-        """Match SIMPLE's policy-start gait phase."""
-        self._agent._wbc_policy.lower_body_policy.gait_indices = torch.zeros(
-            (1,), dtype=torch.float32
-        )
-
-    def action(self, observation: dict[str, Any], high_level_action: np.ndarray) -> Any:
-        """Convert one 36-D command to one frozen decoupled-WBC action."""
-        from simple.core.action import ActionCmd
-
-        command = np.asarray(high_level_action, dtype=np.float32)
-        upper_values = psi0_upper_joint_values(command)
-        target_upper_body_pose = dict(zip(self.robot.joint_names[15:], upper_values))
-        target_upper_body_pose.update(
-            {
-                "waist_yaw_joint": command[30],
-                "waist_roll_joint": command[28],
-                "waist_pitch_joint": command[29],
-            }
-        )
-
-        proprio = self.robot.prepare_obs()
-        wbc_obs = self._agent._build_wbc_observation(proprio)
-        self._agent._wbc_policy.set_observation(wbc_obs)
-        now = time.monotonic()
-        control_frequency = self._agent._control_frequency
-        goal = {
-            "target_upper_body_pose": np.asarray(
-                [target_upper_body_pose[name] for name in self._upper_joint_names],
-                dtype=np.float32,
-            ),
-            "navigate_cmd": command[32:36],
-            "base_height_command": command[31:32],
-            "target_time": now + 1 / control_frequency,
-            "interpolation_garbage_collection_time": now - 2 / control_frequency,
-            "timestamp": now,
-        }
-        self._agent._wbc_policy.set_goal(goal)
-        wbc_action = self._agent._wbc_policy.get_action(time=now)
-        robot_model = self._agent._dwbc_robot_model
-        self.last_base_height = float(command[31])
-        return ActionCmd(
-            "decoupled_wbc",
-            target_q=robot_model.get_body_actuated_joints(wbc_action["q"]),
-            left_hand_q=robot_model.get_hand_actuated_joints(
-                wbc_action["q"], side="left"
-            ),
-            right_hand_q=robot_model.get_hand_actuated_joints(
-                wbc_action["q"], side="right"
-            ),
-        )

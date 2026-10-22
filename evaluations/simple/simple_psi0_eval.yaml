@@ -33,6 +33,9 @@ env:
     env_type: "simple"
     total_num_envs: 1
     auto_reset: false
+    # One episode per eval rollout epoch; stop when the episode ends instead of
+    # padding no-op chunks out to max_steps_per_rollout_epoch.
+    early_stop_on_done: true
     ignore_terminations: false
     seed: 0
     group_size: 1

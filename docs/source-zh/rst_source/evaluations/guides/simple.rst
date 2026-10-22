@@ -29,6 +29,35 @@ state、action 和 System-0 协议，暂不支持。
      --env simple
    source .venv/bin/activate
 
+.. _simple-sim-assets:
+
+仿真资源
+~~~~~~~~
+
+安装结束前会从 `USC-PSI-Lab/SIMPLE <https://huggingface.co/datasets/USC-PSI-Lab/SIMPLE>`_ 下载 OpenOven 用到的仿真资源，解压到 ``.venv/SIMPLE/data``，然后删掉 zip。下面这些目录已经存在时，对应的包会跳过，不再访问 Hugging Face：
+
+- ``robots/g1``
+- ``assets/graspnet``
+- ``assets/articulated``
+- ``scenes/hssd/102344280``（任务里的 ``hssd:scene1``）
+- ``vMaterials_2``
+
+资源留在虚拟环境里时，删掉 ``.venv`` 就会一起丢掉。安装前设置 ``SIMPLE_ASSETS_PATH``，可以把它们放到虚拟环境外面。安装脚本把 ``.venv/SIMPLE/data`` 里已有的文件拷入该目录（不覆盖已存在的文件），再把 ``.venv/SIMPLE/data`` 软链过去。之后每次安装只重建软链，并跳过已经解压的包。
+
+.. code-block:: bash
+
+   export SIMPLE_ASSETS_PATH=/path/to/simple_assets
+   bash requirements/install.sh embodied \
+     --model psi0 \
+     --env simple
+
+未设置该变量时，资源仍写在 ``.venv/SIMPLE/data``。也可以不重装环境，单独补下缺失的包：
+
+.. code-block:: bash
+
+   bash requirements/embodied/download_assets.sh --assets simple --dir .venv/SIMPLE
+
+``install.sh --use-mirror`` 会把 ``HF_ENDPOINT`` 传给这次下载。单独运行上面的命令时，加上 ``--use-mirror``。
 
 .. _simple-tasks:
 

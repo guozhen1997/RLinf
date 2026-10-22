@@ -14,6 +14,7 @@
 
 """SIMPLE benchmark integration."""
 
+from rlinf.envs.sim.simple.dataset import SimpleLeRobotResetDataset
 from rlinf.envs.sim.simple.simple_env import SimpleEnv
 
-__all__ = ["SimpleEnv"]
+__all__ = ["SimpleEnv", "SimpleLeRobotResetDataset"]

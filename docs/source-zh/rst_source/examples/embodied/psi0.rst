@@ -65,6 +65,8 @@ adapter 将头部相机图像、机器人状态和任务指令输入模型，再
 
 安装脚本固定了 `Psi0 <https://github.com/physical-superintelligence-lab/Psi0/tree/a32e57a3fabb8590c80677f9cd3d1fc3db60eb06>`_ 和 `SIMPLE <https://github.com/physical-superintelligence-lab/SIMPLE/tree/5e3d6f84e85343e34e9bca8d157f0d7813231185>`_ 代码版本。系统依赖见 :doc:`安装指南 </rst_source/start/installation>`。
 
+同一条安装命令会下载 OpenOven 的仿真资源，并解压到 ``.venv/SIMPLE/data``。对应目录已经存在时跳过该包。安装前设置 ``SIMPLE_ASSETS_PATH`` 后，资源放在虚拟环境外面，``.venv/SIMPLE/data`` 只保留指向它的软链，重复安装不会重新下载。详见 :ref:`仿真资源 <simple-sim-assets>`。
+
 .. _psi0-model-download:
 
 下载模型

@@ -16,28 +16,36 @@
 
 from __future__ import annotations
 
-import json
-import logging
+import copy
 import os
 import sys
 import tempfile
 import time
-from functools import wraps
-from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
 import numpy as np
 import ray
 import torch
-from filelock import FileLock
 from gymnasium.wrappers import TimeLimit
 from omegaconf import DictConfig
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
-from rlinf.envs.sim.simple.utils import (
+from rlinf.envs.sim.simple.controller import (
     SimpleController,
     SimpleTeleopController,
+)
+from rlinf.envs.sim.simple.dataset import SimpleLeRobotResetDataset
+from rlinf.envs.sim.simple.runtime import (
+    anchor_hssd_material_references,
+    install_articulation_reuse_guard,
+    install_data_path_lock,
+    resolve_hssd_scene_dir,
+)
+from rlinf.envs.sim.simple.utils import (
+    SIMPLE_ACTION_CHUNK_SHAPE,
+    SIMPLE_ACTION_CHUNK_SIZE,
+    SIMPLE_ACTION_DIM,
     extract_psi0_state,
 )
 
@@ -53,193 +61,6 @@ _SUPPORTED_TASK_IDS = frozenset(
         "simple/G1WholebodyPickAndPlaceAndHugContainerTeleop-v0",
     }
 )
-
-
-def _install_data_path_lock() -> None:
-    """Guard the upstream resolver before importing SIMPLE runtime modules.
-
-    Hugging Face locks only the download. SIMPLE subsequently extracts and
-    deletes the archive, so callers must share a lock for the whole operation.
-    Even an existing target must be checked under the lock: another worker may
-    have created that directory without finishing extraction yet.
-
-    This changes only the SIMPLE resolver in the current worker process. All
-    RLinf SIMPLE workers sharing its data directory use the same lock file.
-    """
-    import simple.utils as simple_utils
-
-    original = simple_utils.resolve_data_path
-    if getattr(original, "_rlinf_data_path_lock", False):
-        return
-
-    lock_path = str(
-        Path(simple_utils.get_data_dir()) / ".cache" / "rlinf" / "resolve-data.lock"
-    )
-
-    def keep_log(record: logging.LogRecord) -> bool:
-        # Suppress only this lock's DEBUG chatter, not other locks or warnings.
-        return not (
-            record.levelno == logging.DEBUG
-            and isinstance(record.args, tuple)
-            and lock_path in record.args
-        )
-
-    logging.getLogger("filelock").addFilter(keep_log)
-
-    @wraps(original)
-    def resolve_data_path(
-        rel_path: str | None = None,
-        create_if_not_exist: bool = False,
-        auto_download: bool = False,
-    ) -> str:
-        if not rel_path:
-            return original(rel_path, create_if_not_exist, auto_download)
-
-        Path(lock_path).parent.mkdir(parents=True, exist_ok=True)
-        # Separate from HF's download lock to avoid recursively acquiring it.
-        # Never unlink this file: waiters must keep locking the same inode.
-        with FileLock(lock_path).acquire(poll_interval=0.5):
-            resolved = original(rel_path, create_if_not_exist, auto_download)
-            if not Path(resolved).exists():
-                raise FileNotFoundError(
-                    f"SIMPLE asset preparation did not create {resolved}."
-                )
-            return resolved
-
-    resolve_data_path._rlinf_data_path_lock = True
-    simple_utils.resolve_data_path = resolve_data_path
-
-
-def _install_articulation_reuse_guard(native_env: Any) -> None:
-    """Keep SIMPLE from rebuilding an unchanged Isaac articulation on reset."""
-    isaac = native_env.isaac
-    original_add = isaac.add_articulated_object
-    asset_keys: dict[str, tuple[str, str]] = {}
-
-    def add_articulated_object_once(obj_name: str, obj_info: Any) -> None:
-        asset_name = str(obj_info.asset.name)
-        asset_key = (str(obj_info.asset.uid), str(obj_info.asset.usd_path))
-        if asset_name in isaac.articulated_objects:
-            if asset_keys.get(asset_name) != asset_key:
-                raise RuntimeError(
-                    f"Cannot replace SIMPLE articulated object {asset_name!r} "
-                    "without rebuilding its Isaac physics views."
-                )
-            return
-        original_add(obj_name, obj_info)
-        asset_keys[asset_name] = asset_key
-
-    isaac.add_articulated_object = add_articulated_object_once
-
-
-def _resolve_hssd_scene_dir(state: dict[str, Any]) -> Path | None:
-    """Resolve the HSSD scene directory used by relative USD references."""
-    scene = state.get("dr_state_dict", {}).get("scene", {})
-    if not str(scene.get("uid", "")).startswith("hssd:"):
-        return None
-
-    data_dir = scene.get("data_dir")
-    if not isinstance(data_dir, str):
-        raise ValueError("SIMPLE HSSD reset state is missing scene.data_dir.")
-
-    from simple.utils import resolve_data_path
-
-    scene_dir = Path(resolve_data_path(data_dir, auto_download=True))
-    props_dir = scene_dir / "props"
-    if not props_dir.is_dir():
-        raise FileNotFoundError(
-            f"SIMPLE HSSD material assets are missing under {props_dir}."
-        )
-    return scene_dir
-
-
-def _anchor_hssd_material_references(scene_dir: Path) -> Any:
-    """Anchor HSSD material references to their containing scene layer."""
-    from pxr import Sdf
-
-    scene_path = scene_dir / f"{scene_dir.name}.usd"
-    layer = Sdf.Layer.FindOrOpen(str(scene_path))
-    if layer is None:
-        raise FileNotFoundError(f"Cannot open SIMPLE HSSD scene layer {scene_path}.")
-    props_dir = scene_dir / "props"
-    material_files = {
-        path.relative_to(props_dir).as_posix().casefold(): path.relative_to(
-            props_dir
-        ).as_posix()
-        for path in props_dir.rglob("*")
-        if path.is_file()
-    }
-    material_refs = [
-        asset_path
-        for asset_path in layer.GetCompositionAssetDependencies()
-        if "/props/" in asset_path
-    ]
-    if not material_refs:
-        raise ValueError(f"SIMPLE HSSD scene has no material references: {scene_path}.")
-    for asset_path in material_refs:
-        requested_path = asset_path.rsplit("/props/", 1)[1]
-        actual_path = material_files.get(requested_path.casefold())
-        if actual_path is None:
-            raise FileNotFoundError(
-                f"SIMPLE HSSD material {requested_path} is missing under {props_dir}."
-            )
-        anchored_path = f"./props/{actual_path}"
-        if not layer.UpdateCompositionAssetDependency(asset_path, anchored_path):
-            raise RuntimeError(
-                f"Cannot update SIMPLE HSSD material reference {asset_path}."
-            )
-    return layer
-
-
-class SimpleLeRobotResetDataset:
-    """Load fixed SIMPLE reset states from LeRobot episode metadata."""
-
-    def __init__(
-        self,
-        path: str | Path,
-        *,
-        dr_level: int,
-        episode_start: int,
-        num_episodes: int,
-    ):
-        dataset_path = Path(path).expanduser()
-        if dataset_path.suffix == ".zip":
-            raise ValueError("Extract the SIMPLE reset-state zip before loading it.")
-        if episode_start < 0 or num_episodes <= 0:
-            raise ValueError("episode_start must be >= 0 and num_episodes must be > 0.")
-
-        level_name = f"level-{dr_level}"
-        metadata_files = [
-            path
-            for path in dataset_path.rglob("meta/episodes.jsonl")
-            if path.parent.parent.name == level_name
-        ]
-        if len(metadata_files) != 1:
-            raise ValueError(
-                f"Expected one {level_name}/meta/episodes.jsonl under "
-                f"{dataset_path}, found {len(metadata_files)}."
-            )
-        with metadata_files[0].open() as file:
-            episodes = [json.loads(line) for line in file if line.strip()]
-        episodes.sort(key=lambda episode: int(episode["episode_index"]))
-        self._episodes = episodes[episode_start : episode_start + num_episodes]
-        if len(self._episodes) != num_episodes:
-            raise ValueError(
-                f"Requested {num_episodes} reset episodes from index {episode_start}, "
-                f"but found {len(self._episodes)} in {metadata_files[0]}."
-            )
-
-    def __len__(self) -> int:
-        return len(self._episodes)
-
-    def load(self, index: int) -> tuple[dict[str, Any], Any]:
-        episode = self._episodes[index]
-        encoded_config = episode.get("environment_config")
-        if not isinstance(encoded_config, str):
-            raise ValueError(
-                "SIMPLE LeRobot episode metadata is missing environment_config."
-            )
-        return json.loads(encoded_config), episode
 
 
 @ray.remote(
@@ -260,11 +81,6 @@ class SimpleProcess(gym.Env):
         task_id = str(cfg.init_params.task_id)
         if task_id not in _SUPPORTED_TASK_IDS:
             raise ValueError(f"Unsupported Psi0 SIMPLE task: {task_id}.")
-        if cfg.auto_reset:
-            raise ValueError(
-                "Psi0 SIMPLE requires auto_reset=false to preserve one episode "
-                "per rollout epoch."
-            )
 
         self.cfg = cfg
         self.num_envs = 1
@@ -288,12 +104,12 @@ class SimpleProcess(gym.Env):
         self._dataset_index = initial_dataset_index - 1
         initial_state, _ = self._dataset.load(initial_dataset_index)
         # Install before any SIMPLE asset modules capture the resolver by import.
-        _install_data_path_lock()
-        self._hssd_scene_dir = _resolve_hssd_scene_dir(initial_state)
+        install_data_path_lock()
+        self._hssd_scene_dir = resolve_hssd_scene_dir(initial_state)
         self._hssd_scene_layer = None
         self._raw_env, self._native_env, self._controller = self._create_runtime()
         self.action_space = gym.spaces.Box(
-            -np.inf, np.inf, shape=(36,), dtype=np.float32
+            -np.inf, np.inf, shape=(SIMPLE_ACTION_DIM,), dtype=np.float32
         )
         self.observation_space = gym.spaces.Dict({})
 
@@ -340,7 +156,7 @@ class SimpleProcess(gym.Env):
             sys.argv = original_argv
         native_env = raw_env.unwrapped
         if sim_mode == "mujoco_isaac":
-            _install_articulation_reuse_guard(native_env)
+            install_articulation_reuse_guard(native_env)
             if not native_env.task.metadata.get("debug", False):
                 # SIMPLE otherwise renders and discards the MuJoCo camera frames.
                 native_env._render_frame = native_env.isaac.render
@@ -392,14 +208,14 @@ class SimpleProcess(gym.Env):
         if seed is not None:
             self.seed = int(seed)
         state, _ = self._dataset.load(self._next_dataset_index())
-        scene_dir = _resolve_hssd_scene_dir(state)
+        scene_dir = resolve_hssd_scene_dir(state)
         if scene_dir != self._hssd_scene_dir:
             raise ValueError(
                 "A SIMPLE worker cannot switch HSSD scenes after USD startup: "
                 f"initial={self._hssd_scene_dir}, requested={scene_dir}."
             )
         if scene_dir is not None and self._hssd_scene_layer is None:
-            self._hssd_scene_layer = _anchor_hssd_material_references(scene_dir)
+            self._hssd_scene_layer = anchor_hssd_material_references(scene_dir)
         observation, info = self._raw_env.reset(options={"state_dict": state})
         self._controller.reset()
 
@@ -424,39 +240,60 @@ class SimpleProcess(gym.Env):
         self._last_observation = observation
         return self._wrap_observation(observation, reset=True), info
 
+    def _handle_auto_reset(
+        self,
+        terminal_observation: dict[str, Any],
+        terminal_info: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Reset after a terminal chunk step and keep Gymnasium final_* fields."""
+        reset_obs, reset_info = self.reset()
+        infos = dict(reset_info)
+        infos["final_observation"] = copy.deepcopy(terminal_observation)
+        infos["final_info"] = copy.deepcopy(terminal_info)
+        infos["_final_observation"] = np.array([True])
+        infos["_final_info"] = np.array([True])
+        infos["_elapsed_steps"] = np.array([True])
+        infos["executed_mask"] = terminal_info["executed_mask"]
+        return reset_obs, infos
+
     def chunk_step(self, chunk_actions):
-        """Synchronously execute a valid prefix of one 24-step Psi0 response."""
+        """Synchronously execute a valid prefix of one Psi0 action chunk."""
         actions = np.asarray(chunk_actions, dtype=np.float32)
-        if actions.shape != (1, 24, 36):
+        expected_shape = (1, *SIMPLE_ACTION_CHUNK_SHAPE)
+        if actions.shape != expected_shape:
             raise ValueError(
-                f"SIMPLE chunk actions must have shape (1, 24, 36), got {actions.shape}."
+                "SIMPLE chunk actions must have shape "
+                f"{expected_shape}, got {actions.shape}."
             )
         if self._last_observation is None:
             raise RuntimeError("SIMPLE environment must be reset before chunk_step().")
 
-        if self._terminal_episode is not None:
+        chunk_mask_shape = (1, SIMPLE_ACTION_CHUNK_SIZE)
+        # Finished-episode padding: only used when auto_reset=false, until the
+        # worker calls reset() at the next epoch boundary.
+        if not self.auto_reset and self._terminal_episode is not None:
             terminal_observation = self._wrap_observation(
                 self._last_observation, reset=False
             )
-            infos_list = [{} for _ in range(24)]
+            infos_list = [{} for _ in range(SIMPLE_ACTION_CHUNK_SIZE)]
             infos_list[-1] = {
                 "episode": self._terminal_episode,
-                "executed_mask": torch.zeros((1, 24), dtype=torch.bool),
+                "executed_mask": torch.zeros(chunk_mask_shape, dtype=torch.bool),
             }
             return (
-                [terminal_observation] * 24,
-                torch.zeros((1, 24), dtype=torch.float32),
-                torch.zeros((1, 24), dtype=torch.bool),
-                torch.zeros((1, 24), dtype=torch.bool),
+                [terminal_observation] * SIMPLE_ACTION_CHUNK_SIZE,
+                torch.zeros(chunk_mask_shape, dtype=torch.float32),
+                torch.zeros(chunk_mask_shape, dtype=torch.bool),
+                torch.zeros(chunk_mask_shape, dtype=torch.bool),
                 infos_list,
             )
 
         obs_list = []
         infos_list = []
-        rewards = torch.zeros((1, 24), dtype=torch.float32)
-        raw_terminations = torch.zeros((1, 24), dtype=torch.bool)
-        raw_truncations = torch.zeros((1, 24), dtype=torch.bool)
-        executed_mask = torch.zeros((1, 24), dtype=torch.bool)
+        rewards = torch.zeros(chunk_mask_shape, dtype=torch.float32)
+        raw_terminations = torch.zeros(chunk_mask_shape, dtype=torch.bool)
+        raw_truncations = torch.zeros(chunk_mask_shape, dtype=torch.bool)
+        executed_mask = torch.zeros(chunk_mask_shape, dtype=torch.bool)
         terminal_observation = None
         terminal_info = None
 
@@ -487,27 +324,28 @@ class SimpleProcess(gym.Env):
                 "return": torch.tensor([self._return], dtype=torch.float32),
                 "episode_len": torch.tensor([self._elapsed_steps]),
             }
-            self._terminal_episode = episode
             terminal_info["episode"] = episode
             terminal_info["executed_mask"] = executed_mask
-            while len(obs_list) < 24:
+            while len(obs_list) < SIMPLE_ACTION_CHUNK_SIZE:
                 obs_list.append(terminal_observation)
                 infos_list.append({})
             infos_list[-1] = terminal_info
+            if self.auto_reset:
+                obs_list[-1], infos_list[-1] = self._handle_auto_reset(
+                    terminal_observation, terminal_info
+                )
+            else:
+                self._terminal_episode = episode
+                self._last_observation = observation
         else:
             infos_list[-1]["executed_mask"] = executed_mask
+            self._last_observation = observation
 
-        self._last_observation = observation
         terminations = torch.zeros_like(raw_terminations)
         truncations = torch.zeros_like(raw_truncations)
         terminations[:, -1] = raw_terminations.any(dim=1)
         truncations[:, -1] = raw_truncations.any(dim=1)
         return obs_list, rewards, terminations, truncations, infos_list
-
-    def capture_image(self) -> np.ndarray | None:
-        if self._last_observation is None:
-            return None
-        return np.asarray(self._last_observation["head_stereo_left"])[None]
 
     def close(self):
         self._raw_env.close()
@@ -535,9 +373,8 @@ class SimpleEnv(gym.Env):
         self.ignore_terminations = bool(cfg.ignore_terminations)
         self.is_start = True
         self._process = None
-        self._image: np.ndarray | None = None
         self.action_space = gym.spaces.Box(
-            -np.inf, np.inf, shape=(36,), dtype=np.float32
+            -np.inf, np.inf, shape=(SIMPLE_ACTION_DIM,), dtype=np.float32
         )
         self.observation_space = gym.spaces.Dict({})
 
@@ -587,14 +424,13 @@ class SimpleEnv(gym.Env):
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Reset once in the simulator process and cache its initial image."""
+        """Reset once in the simulator process."""
         observation, info = ray.get(
             self._require_process().reset.remote(seed=seed, options=options)
         )
         if seed is not None:
             self.seed = int(seed)
         self.is_start = False
-        self._image = observation["main_images"].numpy()
         return observation, info
 
     def chunk_step(
@@ -610,22 +446,18 @@ class SimpleEnv(gym.Env):
         if isinstance(chunk_actions, torch.Tensor):
             chunk_actions = chunk_actions.detach().cpu().numpy()
         result = ray.get(self._require_process().chunk_step.remote(chunk_actions))
-        observations, _, _, _, infos = result
+        _, _, _, _, infos = result
         executed_mask = infos[-1].get("executed_mask")
         if (
             not isinstance(executed_mask, torch.Tensor)
             or executed_mask.dtype != torch.bool
-            or executed_mask.shape != (1, 24)
+            or executed_mask.shape != (1, SIMPLE_ACTION_CHUNK_SIZE)
         ):
             raise RuntimeError(
-                "SIMPLE must return a bool executed_mask of shape [1, 24]."
+                "SIMPLE must return a bool executed_mask of shape "
+                f"[1, {SIMPLE_ACTION_CHUNK_SIZE}]."
             )
-        self._image = observations[-1]["main_images"].numpy()
         return result
-
-    def capture_image(self) -> np.ndarray | None:
-        """Return the latest frame without an additional simulator RPC."""
-        return self._image
 
     def update_reset_state_ids(self) -> None:
         """Leave reset cursor advancement to the process's next reset call."""
@@ -644,4 +476,3 @@ class SimpleEnv(gym.Env):
                     pass
         finally:
             self._kill_process()
-            self._image = None

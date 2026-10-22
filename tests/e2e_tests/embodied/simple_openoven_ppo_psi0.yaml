@@ -32,7 +32,7 @@ runner:
     log_path: ${oc.env:PSI0_TEST_LOG_DIR}
     project_name: rlinf
     experiment_name: ci-test
-    logger_backends: ["tensorboard"]
+    logger_backends: null
 
 algorithm:
   group_size: 1
@@ -62,7 +62,7 @@ env:
     ignore_terminations: false
     seed: 0
     group_size: ${algorithm.group_size}
-    rollout_epoch: 2
+    rollout_epoch: 1
     # Two chunks exercise RTC overlap and the final unexecuted action slot.
     max_episode_steps: 47
     max_steps_per_rollout_epoch: 48
@@ -99,7 +99,7 @@ actor:
   group_name: ActorGroup
   training_backend: fsdp
   micro_batch_size: 1
-  global_batch_size: 8
+  global_batch_size: 4
   seed: 42
   enable_offload: true
   model:

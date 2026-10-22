@@ -33,6 +33,46 @@ Install the Psi0 and SIMPLE dependencies into the default virtual environment:
      --env simple
    source .venv/bin/activate
 
+.. _simple-sim-assets:
+
+Simulation Assets
+~~~~~~~~~~~~~~~~~
+
+Before the installer finishes, it downloads the OpenOven simulation assets from
+`USC-PSI-Lab/SIMPLE <https://huggingface.co/datasets/USC-PSI-Lab/SIMPLE>`_,
+unpacks them into ``.venv/SIMPLE/data``, and removes the zip files. A package
+is skipped when its unpacked directory is already present:
+
+- ``robots/g1``
+- ``assets/graspnet``
+- ``assets/articulated``
+- ``scenes/hssd/102344280`` (the task's ``hssd:scene1``)
+- ``vMaterials_2``
+
+Assets stored inside the virtual environment are deleted with ``.venv``. Set
+``SIMPLE_ASSETS_PATH`` before installation to keep them outside it. The
+installer copies any files already in ``.venv/SIMPLE/data`` into that directory
+without overwriting existing files, then replaces ``.venv/SIMPLE/data`` with a
+symlink. Later installs only recreate the symlink and skip packages that are
+already unpacked.
+
+.. code-block:: bash
+
+   export SIMPLE_ASSETS_PATH=/path/to/simple_assets
+   bash requirements/install.sh embodied \
+     --model psi0 \
+     --env simple
+
+Without this variable, assets stay in ``.venv/SIMPLE/data``. To fetch only the
+missing packages without reinstalling the environment:
+
+.. code-block:: bash
+
+   bash requirements/embodied/download_assets.sh --assets simple --dir .venv/SIMPLE
+
+``install.sh --use-mirror`` forwards ``HF_ENDPOINT`` to this download. Pass
+``--use-mirror`` when running the command above on its own.
+
 .. _simple-tasks:
 
 Select a Task and Download Assets

@@ -3567,6 +3567,38 @@ import isaacsim
 EOF
 }
 
+# SIMPLE_ASSETS_PATH keeps the unpacked dataset outside the venv. CI deletes
+# .venv after every job, so a checkout-local data/ would be downloaded again.
+# The venv only keeps a symlink, matching ROBOCASA_ASSETS_PATH.
+link_simple_data_dir() {
+    local simple_dir="$1"
+    local assets_path="${SIMPLE_ASSETS_PATH:-}"
+    local data_dir="$simple_dir/data"
+    local current target
+
+    [ -n "$assets_path" ] || return 0
+    mkdir -p "$assets_path"
+    target=$(readlink -f "$assets_path")
+
+    if [ -L "$data_dir" ]; then
+        current=$(readlink -f "$data_dir" || true)
+        if [ "$current" = "$target" ]; then
+            echo "[install.sh] SIMPLE data already linked: $data_dir -> $assets_path"
+            return 0
+        fi
+        rm -f "$data_dir"
+    elif [ -d "$data_dir" ]; then
+        echo "[install.sh] Copying SIMPLE data from $data_dir to $assets_path"
+        cp -an "$data_dir/." "$assets_path/"
+        rm -rf "$data_dir"
+    elif [ -e "$data_dir" ]; then
+        rm -rf "$data_dir"
+    fi
+
+    ln -s "$assets_path" "$data_dir"
+    echo "[install.sh] Linked $data_dir -> $assets_path"
+}
+
 install_simple_env() {
     local simple_dir
     # Checkout the fixed parent revision before initializing its gitlink-pinned
@@ -3591,6 +3623,12 @@ install_simple_env() {
     UV_NO_CACHE=1 UV_LINK_MODE=copy \
         UV_PROJECT_ENVIRONMENT="$(realpath "$VENV_DIR")" \
         bash "$simple_dir/scripts/install_curobo.sh"
+
+    # Robot, grasp, oven, HSSD scene and vMaterials. Training otherwise fetches
+    # these on the first rollout via resolve_data_path. With SIMPLE_ASSETS_PATH
+    # the files stay outside .venv and this step only refreshes the symlink.
+    link_simple_data_dir "$simple_dir"
+    bash "$SCRIPT_DIR/embodied/download_assets.sh" --assets simple --dir "$simple_dir"
 }
 
 install_isaaclab_env() {
