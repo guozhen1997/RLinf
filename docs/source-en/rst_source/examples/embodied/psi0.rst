@@ -78,6 +78,12 @@ and
 `SIMPLE <https://github.com/physical-superintelligence-lab/SIMPLE/tree/5e3d6f84e85343e34e9bca8d157f0d7813231185>`_.
 See :doc:`Installation </rst_source/start/installation>` for system prerequisites.
 
+The same command downloads the OpenOven simulation assets and unpacks them into
+``.venv/SIMPLE/data``. A package is skipped when its directory is already there.
+Set ``SIMPLE_ASSETS_PATH`` before installation to store the assets outside the
+virtual environment; ``.venv/SIMPLE/data`` becomes a symlink, and later installs
+do not download those packages again. See :ref:`Simulation Assets <simple-sim-assets>`.
+
 .. _psi0-model-download:
 
 Download the Model
