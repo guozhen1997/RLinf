@@ -245,14 +245,6 @@ class MultiStepRolloutWorker(Worker):
                 ),
             }
 
-    def _decoupled_inflight_gets(self) -> dict[Any, asyncio.Task]:
-        """One unfinished ``channel.get`` per route key, kept across gathers."""
-        inflight = getattr(self, "_decoupled_inflight_get_tasks", None)
-        if inflight is None:
-            inflight = {}
-            self._decoupled_inflight_get_tasks = inflight
-        return inflight
-
     async def _take_decoupled_shard(
         self,
         channel: Any,
@@ -266,7 +258,10 @@ class MultiStepRolloutWorker(Worker):
         later observation, while the env workers that produced the first one stay
         blocked until its actions are sent.
         """
-        inflight = self._decoupled_inflight_gets()
+        inflight = getattr(self, "decoupled_inflight_get_tasks", None)
+        if inflight is None:
+            inflight = {}
+            self.decoupled_inflight_get_tasks = inflight
         task = inflight.get(key)
         if task is None:
             work = channel.get(key=key, async_op=True)
