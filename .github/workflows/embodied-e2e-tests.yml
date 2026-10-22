@@ -409,6 +409,9 @@ jobs:
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
+          # resume is off, so LeRobot always creates rank_0/id_0. This runner
+          # keeps /workspace/results across jobs.
+          rm -rf /workspace/results/realworld_dual_yam_collect_data_mock
           bash tests/e2e_tests/embodied/run.sh realworld_dual_yam_collect_data_mock
 
       - name: Dual-YAM OpenPI Pi05 mock-robot evaluation test
