@@ -1404,6 +1404,10 @@ def validate_embodied_cfg(cfg):
                 "env.eval.early_stop_on_done requires one eval env per worker "
                 f"(got {eval_num_envs_per_stage})."
             )
+            assert component_placement.get_world_size("rollout") == env_world_size, (
+                "env.eval.early_stop_on_done requires equal env and rollout "
+                "worker counts."
+            )
             assert not cfg.runner.get("enable_decoupled_mode", False), (
                 "env.eval.early_stop_on_done does not support decoupled mode."
             )

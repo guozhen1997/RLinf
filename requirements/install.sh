@@ -3595,7 +3595,7 @@ link_simple_data_dir() {
         rm -rf "$data_dir"
     fi
 
-    ln -s "$assets_path" "$data_dir"
+    ln -s "$target" "$data_dir"
     echo "[install.sh] Linked $data_dir -> $assets_path"
 }
 

@@ -1,9 +1,9 @@
-Psi0 + SIMPLE 评测与训练
-========================
+SIMPLE 评测
+===========
 
-本页介绍如何通过 RLinf 在 SIMPLE 的八个 Teleop 任务上评测 Psi0，并在
-OpenOven 上进行四卡 PPO 后训练。每个任务必须使用对应的 checkpoint 和
-reset states。
+本页介绍如何通过 RLinf 在 SIMPLE 的八个 Teleop 任务上评测 Psi0。
+每个任务使用对应的 checkpoint 和 reset states；PPO 后训练见
+:doc:`Psi0 指南 </rst_source/examples/embodied/psi0>`。
 
 适用范围与版本固定
 ------------------
@@ -34,15 +34,21 @@ state、action 和 System-0 协议，暂不支持。
 仿真资源
 ~~~~~~~~
 
-安装结束前会从 `USC-PSI-Lab/SIMPLE <https://huggingface.co/datasets/USC-PSI-Lab/SIMPLE>`_ 下载 OpenOven 用到的仿真资源，解压到 ``.venv/SIMPLE/data``，然后删掉 zip。下面这些目录已经存在时，对应的包会跳过，不再访问 Hugging Face：
+安装结束前会从
+`USC-PSI-Lab/SIMPLE <https://huggingface.co/datasets/USC-PSI-Lab/SIMPLE>`_
+下载 OpenOven 用到的仿真资源，解压到 ``.venv/SIMPLE/data``，然后删掉 zip。
+下面这些目录已经存在时，对应的包会跳过，不再访问 Hugging Face：
 
 - ``robots/g1``
 - ``assets/graspnet``
 - ``assets/articulated``
-- ``scenes/hssd/102344280``（任务里的 ``hssd:scene1``）
+- ``scenes/hssd/102344280``\ （任务里的 ``hssd:scene1``）
 - ``vMaterials_2``
 
-资源留在虚拟环境里时，删掉 ``.venv`` 就会一起丢掉。安装前设置 ``SIMPLE_ASSETS_PATH``，可以把它们放到虚拟环境外面。安装脚本把 ``.venv/SIMPLE/data`` 里已有的文件拷入该目录（不覆盖已存在的文件），再把 ``.venv/SIMPLE/data`` 软链过去。之后每次安装只重建软链，并跳过已经解压的包。
+资源留在虚拟环境里时，删掉 ``.venv`` 就会一起丢掉。
+安装前设置 ``SIMPLE_ASSETS_PATH``，可以把它们放到虚拟环境外面。
+安装脚本把 ``.venv/SIMPLE/data`` 里已有的文件拷入该目录（不覆盖已存在的文件），
+再把 ``.venv/SIMPLE/data`` 软链过去。之后每次安装只重建软链，并跳过已经解压的包。
 
 .. code-block:: bash
 
@@ -57,7 +63,8 @@ state、action 和 System-0 协议，暂不支持。
 
    bash requirements/embodied/download_assets.sh --assets simple --dir .venv/SIMPLE
 
-``install.sh --use-mirror`` 会把 ``HF_ENDPOINT`` 传给这次下载。单独运行上面的命令时，加上 ``--use-mirror``。
+``install.sh --use-mirror`` 会把 ``HF_ENDPOINT`` 传给这次下载。
+单独运行上面的命令时，加上 ``--use-mirror``。
 
 .. _simple-tasks:
 
@@ -176,14 +183,17 @@ Psi0 的联合 checkpoint 已包含 System-2 的 ``vlm_model`` 权重和 System-
 运行 Eval
 ---------
 
-``evaluations/simple/simple_psi0_eval.yaml`` 默认运行 OpenOven、DR0 和一条轨迹，
-与训练配置使用同一任务。最小 smoke 只需覆盖本地资产路径：
+``evaluations/simple/simple_psi0_eval.yaml`` 默认运行 OpenOven、DR0 和一条轨迹。
+设置本地资产路径后运行：
 
 .. code-block:: bash
 
    bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}"
+
+评测输出 ``eval/success``，日志和视频保存在
+``logs/<timestamp>-simple_psi0_eval/`` 下。
 
 完整的三个 DR level 各运行 10 条轨迹：
 
@@ -249,12 +259,15 @@ checkpoint、reset 数据与 ``task_id`` 必须属于同一任务。三档评测
 300 步 stabilization，以及 30/24/6 RTC。官方结果每档只有 10 条轨迹，应分别
 报告三个 level；单条 smoke 或总成功数不能作为严格复现结论。
 
-运行 OpenOven PPO 后训练
+.. _simple-trained-checkpoint:
+
+评测训练后的 Checkpoint
 ------------------------
 
-开始训练前，先恢复 OpenOven 资产路径。当前训练配置使用 DR0、600 步上限、
-四卡四环境；8 轮 rollout 共采集 32 条轨迹，``global_batch_size=200``、
-``update_epoch=1``，每轮训练执行 4 次优化器更新。
+使用原始 run 目录构建模型和 processor，通过 ``runner.ckpt_path`` 加载保存的 PPO 权重。
+设置 ``rollout.model.add_value_head=true`` 恢复一同保存的 value-head 参数。
+
+评测 OpenOven checkpoint 时，先选择对应资产，再按官方 1000 步 horizon 运行：
 
 .. code-block:: bash
 
@@ -262,32 +275,6 @@ checkpoint、reset 数据与 ``task_id`` 必须属于同一任务。三档评测
    export PSI0_RUN_REL=psi0/simple-checkpoints/g1wholebodyopenoventeleop-v0.simple.flow1000.cosine.lr1.0e-04.b128.gpus8.2605120604
    export PSI0_RUN_DIR="${PSI0_ARTIFACT_ROOT}/psi-model/${PSI0_RUN_REL}"
    export SIMPLE_RESET_DIR="${PSI0_ARTIFACT_ROOT}/reset-states/${SIMPLE_TASK}"
-
-   bash examples/embodiment/run_embodiment.sh simple_openoven_ppo_psi0
-
-切换其他 Teleop 任务时，先按下载段更新 ``PSI0_RUN_DIR`` 和 ``SIMPLE_RESET_DIR``。
-配置的 actor、rollout 模型路径和训练 reset 路径会读取这两个变量。
-
-同时在 ``examples/embodiment/config/simple_openoven_ppo_psi0.yaml`` 中修改
-``env.train.init_params.task_id``、``env.train.max_episode_steps`` 和
-``env.train.max_steps_per_rollout_epoch``，任务 ID 与步数对应关系见前面的评测段。
-修改 horizon 后，还需检查 ``actor.global_batch_size`` 与每轮采样 chunk 数的整除关系。
-这些任务字段在 YAML 中修改，不追加到上述 bash 命令后。
-
-.. _simple-trained-checkpoint:
-
-评测训练后的 Checkpoint
-------------------------
-
-先将 ``PSI0_RUN_DIR`` 和 ``SIMPLE_RESET_DIR`` 恢复为 OpenOven 路径。
-原始 run 目录用于构建模型和 processor，``runner.ckpt_path`` 加载 PPO 权重，
-``add_value_head=true`` 恢复一同保存的 value-head 参数。value head 用于训练，
-生成动作时使用 policy。
-
-下面按官方 1000 步 horizon 评测 OpenOven：
-
-.. code-block:: bash
-
    export PSI0_PPO_CHECKPOINT=/absolute/path/to/global_step_20
 
    bash evaluations/run_eval.sh simple simple_psi0_eval \

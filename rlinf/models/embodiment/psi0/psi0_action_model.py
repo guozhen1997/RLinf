@@ -210,6 +210,14 @@ class Psi0Policy(torch.nn.Module, BasePolicy):
             raise ValueError(f"Unsupported Psi0 policy mode: {mode!r}.")
         return self._predict_eval(processed)
 
+    @torch.no_grad()
+    def predict_value_batch(self, env_obs: dict[str, Any]) -> torch.Tensor:
+        """Evaluate the critic without resetting or sampling an RTC plan."""
+        processed = self.processor.process(env_obs)
+        hidden_states, states = self._encode_system2(processed)
+        values = self._predict_value(self._value_features(hidden_states, states))
+        return values.detach().cpu().contiguous()
+
     def _predict_eval(self, processed) -> tuple[torch.Tensor, dict[str, Any]]:
         predict_kwargs = {
             "observations": processed.observations,

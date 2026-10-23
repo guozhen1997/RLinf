@@ -1,9 +1,9 @@
 Psi0
 ====
 
-Run Psi0 evaluation and PPO post-training on SIMPLE humanoid tasks. This example
-uses OpenOven; the :doc:`SIMPLE guide </rst_source/evaluations/guides/simple>`
-covers all eight tasks and their evaluation protocols.
+Run PPO post-training for Psi0 on SIMPLE humanoid tasks, starting from the
+official OpenOven checkpoint. For task checkpoints and evaluation commands, see
+the :doc:`SIMPLE evaluation guide </rst_source/evaluations/guides/simple>`.
 
 `Psi0 <https://github.com/physical-superintelligence-lab/Psi0>`__ combines a
 Qwen3-VL-2B vision-language model (System-2), a flow-matching action expert
@@ -13,8 +13,7 @@ PPO, and updates the action expert and an added value head.
 Overview
 --------
 
-Use a task-specific official checkpoint for evaluation, then fine-tune it with
-the OpenOven PPO configuration.
+Fine-tune the official OpenOven checkpoint with PPO.
 
 .. grid:: 2 4 4 4
    :gutter: 2
@@ -37,7 +36,7 @@ the OpenOven PPO configuration.
    .. grid-item-card:: Hardware
       :text-align: center
 
-      Evaluation: 1 GPU · PPO: 4 GPUs
+      4 GPUs
 
 Observation and Action
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -139,32 +138,15 @@ Download the matching reset data before launching SIMPLE:
    unzip -q "${PSI0_ARTIFACT_ROOT}/psi-data/simple-eval/${SIMPLE_TASK}.zip" \
      -d "${SIMPLE_RESET_DIR}"
 
-``PSI0_RUN_DIR`` and ``SIMPLE_RESET_DIR`` now point to the OpenOven assets used
-below. To select another task, use the matching checkpoint, reset data, and
-horizon from the :ref:`SIMPLE task table <simple-tasks>`.
+The training configuration reads ``PSI0_RUN_DIR`` for both actor and rollout
+models, and ``SIMPLE_RESET_DIR`` for reset data.
+
+.. _psi0-ppo-training:
 
 Run It
 ------
 
-Evaluate one OpenOven episode at DR0 with the official checkpoint:
-
-.. code-block:: bash
-
-   bash evaluations/run_eval.sh simple simple_psi0_eval \
-     rollout.model.model_path="${PSI0_RUN_DIR}" \
-     env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}"
-
-The eval config defaults to OpenOven at DR0 with 10-step deterministic Euler
-sampling.
-For the full three-level DR protocol, follow the
-:doc:`SIMPLE guide </rst_source/evaluations/guides/simple>`.
-
-.. _psi0-ppo-training:
-
-PPO Post-Training
-~~~~~~~~~~~~~~~~~
-
-With the same asset paths exported, launch the OpenOven training configuration:
+With the asset paths exported, launch the OpenOven training configuration:
 
 .. code-block:: bash
 
@@ -176,28 +158,31 @@ on four GPUs with DR0 and a 600-step horizon. Each iteration collects 32
 trajectories over 8 rollout epochs and performs 4 optimizer steps with
 ``global_batch_size=200`` and ``update_epoch=1``.
 
-Edit ``examples/embodiment/config/simple_openoven_ppo_psi0.yaml`` to change the
-training task, horizon, or batch size. Keep both model paths and the reset data
-matched to the task, and check that ``actor.global_batch_size`` divides the
-number of sampled chunks per update. The launcher reads these settings from YAML.
+To train another Teleop task, set ``PSI0_RUN_DIR`` and ``SIMPLE_RESET_DIR`` to its
+assets from the :ref:`SIMPLE task table <simple-tasks>`. In
+``examples/embodiment/config/simple_openoven_ppo_psi0.yaml``, update
+``env.train.init_params.task_id``, ``env.train.max_episode_steps``, and
+``env.train.max_steps_per_rollout_epoch``. Choose ``actor.global_batch_size`` to
+divide the number of sampled chunks per update. The launcher reads these
+settings from YAML.
 
 .. admonition:: Configure Further
    :class: note
 
-   - Model settings → ``examples/embodiment/config/model/psi0.yaml``. Keep the 30/24/6 plan, execution, and overlap horizons aligned.
-   - Placement → one environment per rollout worker and ``rollout.pipeline_stage_num: 1``.
-   - Saved PPO weights → :ref:`Evaluate a Trained Checkpoint <simple-trained-checkpoint>`.
+   - Model settings → ``examples/embodiment/config/model/psi0.yaml``.
+     Keep the 30/24/6 plan, execution, and overlap horizons aligned.
+   - Placement → one environment per rollout worker and
+     ``rollout.pipeline_stage_num: 1``.
 
 Visualization and Results
 -------------------------
 
-Evaluation reports ``eval/success`` and saves videos under the run's log
-directory. Terminal logs are written to:
+Follow training in TensorBoard and the terminal log:
 
 .. code-block:: text
 
-   logs/<timestamp>-simple_psi0_eval/eval_embodiment.log
    logs/<timestamp>-simple_openoven_ppo_psi0/run_embodiment.log
 
-For task-level reference results and evaluation limits, see the
-:doc:`SIMPLE guide </rst_source/evaluations/guides/simple>`.
+See :doc:`Training Metrics </rst_source/reference/metrics>` for metric definitions.
+To evaluate saved weights, follow
+:ref:`Evaluate a Trained Checkpoint <simple-trained-checkpoint>`.

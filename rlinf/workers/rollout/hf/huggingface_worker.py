@@ -740,14 +740,17 @@ class MultiStepRolloutWorker(Worker):
                 raise ValueError(
                     "Terminal inference requires a post-action observation."
                 )
-            _, result = self._predict_rollout_actions(next_obs)
-            values = result.get("prev_values")
+            if self.model_cfg.model_type == SupportedModel.PSI0.value:
+                values = self.hf_model.predict_value_batch(next_obs)
+            else:
+                _, result = self._predict_rollout_actions(next_obs)
+                values = result.get("prev_values")
+                if self.enable_rlt:
+                    next_rlt_obs = extract_rlt_obs_from_forward_inputs(
+                        result.get("forward_inputs"), transition=True
+                    )
             if values is not None:
                 final_prev_values = values.cpu().contiguous()
-            if self.enable_rlt:
-                next_rlt_obs = extract_rlt_obs_from_forward_inputs(
-                    result.get("forward_inputs"), transition=True
-                )
         # Republish environment-owned data here to keep one Actor-channel writer.
         actor_channel.put(
             env_part.complete(

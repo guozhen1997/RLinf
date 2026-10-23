@@ -1,9 +1,9 @@
-Psi0 + SIMPLE Evaluation and Training
-=====================================
+SIMPLE Evaluation
+=================
 
-This guide evaluates Psi0 on eight SIMPLE Teleop tasks through RLinf and runs
-four-GPU PPO post-training on OpenOven. Every task requires its matching
-checkpoint and reset states.
+Evaluate Psi0 on eight SIMPLE Teleop tasks through RLinf. Each task uses its
+matching checkpoint and reset states. For PPO post-training, see the
+:doc:`Psi0 guide </rst_source/examples/embodied/psi0>`.
 
 Scope and Reproducibility
 -------------------------
@@ -190,14 +190,16 @@ Run Evaluation
 --------------
 
 ``evaluations/simple/simple_psi0_eval.yaml`` defaults to OpenOven, one episode,
-and DR0, matching the training task. For a smoke run, override the local asset
-paths:
+and DR0. Set the local asset paths to run it:
 
 .. code-block:: bash
 
    bash evaluations/run_eval.sh simple simple_psi0_eval \
      rollout.model.model_path="${PSI0_RUN_DIR}" \
      env.eval.reset_dataset.path="${SIMPLE_RESET_DIR}"
+
+Evaluation reports ``eval/success``; logs and videos are saved under
+``logs/<timestamp>-simple_psi0_eval/``.
 
 For a full evaluation, run 10 episodes at each of the three DR levels:
 
@@ -267,13 +269,17 @@ All eight tasks use ``mujoco_isaac``, 50 Hz rendering, 200 Hz physics, at most
 only 10 episodes per level. Report each level separately; neither a one-episode
 smoke nor an aggregate count establishes strict reproduction.
 
-Run PPO Post-Training on OpenOven
-----------------------------------
+.. _simple-trained-checkpoint:
 
-Restore the OpenOven asset paths before starting.
-The current training config uses DR0, a 600-step limit, and four environments
-on four GPUs. Each iteration collects 32 trajectories over 8 rollout epochs;
-``global_batch_size=200`` and ``update_epoch=1`` give 4 optimizer steps.
+Evaluate a Trained Checkpoint
+-----------------------------
+
+Use the original run directory to build the model and processor, then load the
+saved PPO weights with ``runner.ckpt_path``. Set
+``rollout.model.add_value_head=true`` to restore the saved value-head parameters.
+
+For an OpenOven checkpoint, select the matching assets and evaluate at the
+official 1,000-step horizon:
 
 .. code-block:: bash
 
@@ -281,36 +287,6 @@ on four GPUs. Each iteration collects 32 trajectories over 8 rollout epochs;
    export PSI0_RUN_REL=psi0/simple-checkpoints/g1wholebodyopenoventeleop-v0.simple.flow1000.cosine.lr1.0e-04.b128.gpus8.2605120604
    export PSI0_RUN_DIR="${PSI0_ARTIFACT_ROOT}/psi-model/${PSI0_RUN_REL}"
    export SIMPLE_RESET_DIR="${PSI0_ARTIFACT_ROOT}/reset-states/${SIMPLE_TASK}"
-
-   bash examples/embodiment/run_embodiment.sh simple_openoven_ppo_psi0
-
-To switch to another Teleop task, update ``PSI0_RUN_DIR`` and ``SIMPLE_RESET_DIR``
-as described in the download section. This config reads both variables for the
-actor and rollout model paths and the training reset path; no repeated overrides
-are needed.
-
-In ``examples/embodiment/config/simple_openoven_ppo_psi0.yaml``, also change
-``env.train.init_params.task_id``, ``env.train.max_episode_steps``, and
-``env.train.max_steps_per_rollout_epoch`` using the task IDs and horizons in the
-evaluation section. After changing the horizon, check that
-``actor.global_batch_size`` divides the number of sampled chunks per update.
-Edit these task fields in the YAML rather than appending them to the bash command.
-
-.. _simple-trained-checkpoint:
-
-Evaluate a Trained Checkpoint
---------------------------------
-
-Set ``PSI0_RUN_DIR`` and ``SIMPLE_RESET_DIR`` back to OpenOven before starting.
-The original run directory builds the model and processor.
-``runner.ckpt_path`` loads the PPO weights;
-``add_value_head=true`` restores the value-head parameters saved alongside
-them. The value head is used during training; action generation uses the policy.
-
-The command below evaluates OpenOven at its official 1,000-step horizon:
-
-.. code-block:: bash
-
    export PSI0_PPO_CHECKPOINT=/absolute/path/to/global_step_20
 
    bash evaluations/run_eval.sh simple simple_psi0_eval \
