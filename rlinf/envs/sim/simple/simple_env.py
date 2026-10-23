@@ -20,7 +20,7 @@ import copy
 import os
 import sys
 import tempfile
-import time
+from contextlib import nullcontext
 from typing import Any
 
 import gymnasium as gym
@@ -37,9 +37,11 @@ from rlinf.envs.sim.simple.controller import (
 )
 from rlinf.envs.sim.simple.dataset import SimpleLeRobotResetDataset
 from rlinf.envs.sim.simple.runtime import (
+    IsaacFrameGate,
     anchor_hssd_material_references,
     install_articulation_reuse_guard,
     install_data_path_lock,
+    link_kit_cache,
     resolve_hssd_scene_dir,
 )
 from rlinf.envs.sim.simple.utils import (
@@ -107,6 +109,8 @@ class SimpleProcess(gym.Env):
         install_data_path_lock()
         self._hssd_scene_dir = resolve_hssd_scene_dir(initial_state)
         self._hssd_scene_layer = None
+        self._kit_cache_lock = None
+        self._frames: IsaacFrameGate | None = None
         self._raw_env, self._native_env, self._controller = self._create_runtime()
         self.action_space = gym.spaces.Box(
             -np.inf, np.inf, shape=(SIMPLE_ACTION_DIM,), dtype=np.float32
@@ -140,9 +144,11 @@ class SimpleProcess(gym.Env):
         try:
             if "isaac" in sim_mode:
                 # SimulationApp reads Kit CLI options during gym.make(). Give
-                # each process its own writable caches/config/logs; keep SIMPLE
-                # source assets shared. Preserve logs after a crash for diagnosis.
+                # each process its own writable config/logs and a warm cache
+                # slot; keep SIMPLE source assets shared. Preserve logs after a
+                # crash for diagnosis.
                 runtime_dir = tempfile.mkdtemp(prefix="rlinf-simple-isaac-")
+                self._kit_cache_lock = link_kit_cache(runtime_dir)
                 sys.argv = [*original_argv, "--portable-root", runtime_dir]
             raw_env = gym.make(
                 str(self.cfg.init_params.task_id),
@@ -160,6 +166,8 @@ class SimpleProcess(gym.Env):
             if not native_env.task.metadata.get("debug", False):
                 # SIMPLE otherwise renders and discards the MuJoCo camera frames.
                 native_env._render_frame = native_env.isaac.render
+            if self.cfg.init_params.get("render_policy_frames_only", True):
+                self._frames = IsaacFrameGate(native_env)
         task_horizon = int(native_env.task.metadata["max_episode_steps"])
         configured_horizon = int(self.cfg.max_episode_steps)
         if configured_horizon <= 0 or configured_horizon > task_horizon:
@@ -196,6 +204,10 @@ class SimpleProcess(gym.Env):
             "reset_mask": torch.tensor([reset], dtype=torch.bool),
         }
 
+    def _defer_rendering(self) -> Any:
+        """Skip Isaac mirroring and rendering for observations RLinf drops."""
+        return nullcontext() if self._frames is None else self._frames.deferred()
+
     def _next_dataset_index(self) -> int:
         self._dataset_index = (self._dataset_index + 1) % len(self._dataset)
         return self._dataset_index
@@ -219,18 +231,18 @@ class SimpleProcess(gym.Env):
         observation, info = self._raw_env.reset(options={"state_dict": state})
         self._controller.reset()
 
-        control_dt = self._controller.control_dt
-        for _ in range(int(self.cfg.init_params.stabilization_steps)):
-            if self._controller.is_stabilized():
-                break
-            step_start = time.monotonic()
-            low_level_action = self._controller.stabilize(observation)
-            observation, *_, info = self._native_env.step(low_level_action)
-            self._native_env.update_viewer()
-            self._native_env.update_reward()
-            remaining = control_dt - (time.monotonic() - step_start)
-            if remaining > 0:
-                time.sleep(remaining)
+        # The controller follows simulated time, so this loop need not keep
+        # pace with wall time.
+        with self._defer_rendering():
+            for _ in range(int(self.cfg.init_params.stabilization_steps)):
+                if self._controller.is_stabilized():
+                    break
+                low_level_action = self._controller.stabilize(observation)
+                observation, *_, info = self._native_env.step(low_level_action)
+                self._native_env.update_viewer()
+                self._native_env.update_reward()
+        if self._frames is not None:
+            observation = self._frames.observe()
         self._controller.finish_stabilization()
 
         self._elapsed_steps = 0
@@ -298,18 +310,28 @@ class SimpleProcess(gym.Env):
         terminal_info = None
 
         observation = self._last_observation
+        last_index = SIMPLE_ACTION_CHUNK_SIZE - 1
         for index, high_level_action in enumerate(actions[0]):
             low_level_action = self._controller.action(observation, high_level_action)
-            observation, reward, terminated, truncated, info = self._raw_env.step(
-                low_level_action
-            )
+            with self._defer_rendering():
+                observation, reward, terminated, truncated, info = self._raw_env.step(
+                    low_level_action
+                )
             self._elapsed_steps += 1
             self._return += float(reward)
             executed_mask[0, index] = True
             rewards[0, index] = float(reward)
             raw_terminations[0, index] = bool(terminated)
             raw_truncations[0, index] = bool(truncated)
-            obs_list.append(self._wrap_observation(observation, reset=False))
+            if self._frames is None:
+                obs_list.append(self._wrap_observation(observation, reset=False))
+            elif terminated or truncated or index == last_index:
+                observation = self._frames.observe()
+                obs_list.append(self._wrap_observation(observation, reset=False))
+            else:
+                # RLinf reads only the final or terminal observation of a chunk;
+                # RecordVideo skips None entries.
+                obs_list.append(None)
             infos_list.append(dict(info))
             if terminated or truncated:
                 terminal_observation = obs_list[-1]

@@ -16,12 +16,17 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from filelock import FileLock
+import numpy as np
+from filelock import FileLock, Timeout
 
 
 def install_data_path_lock() -> None:
@@ -99,6 +104,78 @@ def install_articulation_reuse_guard(native_env: Any) -> None:
         asset_keys[asset_name] = asset_key
 
     isaac.add_articulated_object = add_articulated_object_once
+
+
+def link_kit_cache(portable_root: str) -> FileLock:
+    """Point a per-process Kit root at a warm, exclusively locked cache slot.
+
+    Kit stores compiled RTX shaders and MDL materials under
+    ``<portable-root>/cache``; rebuilding them adds about 90 s to every
+    simulator start. Data and logs stay in the per-process root. Each process
+    holds its slot lock until it exits, so live simulators never share a slot.
+    """
+    default_root = Path.home() / ".cache" / "rlinf" / "simple-kit"
+    cache_root = Path(os.environ.get("RLINF_SIMPLE_KIT_CACHE_DIR", default_root))
+    cache_root.mkdir(parents=True, exist_ok=True)
+    for slot in itertools.count():
+        lock = FileLock(str(cache_root / f"slot-{slot}.lock"))
+        try:
+            lock.acquire(timeout=0)
+        except Timeout:
+            continue
+        cache_dir = cache_root / f"slot-{slot}"
+        cache_dir.mkdir(exist_ok=True)
+        (Path(portable_root) / "cache").symlink_to(cache_dir, target_is_directory=True)
+        return lock
+
+
+class IsaacFrameGate:
+    """Mirror MuJoCo into Isaac only for observations RLinf consumes.
+
+    In ``mujoco_isaac`` mode Isaac only renders: every 200 Hz physics substep
+    copies MuJoCo poses into Isaac and renders an RTX frame, although RLinf
+    reads one frame per action chunk. ``sync_states`` overwrites every mirrored
+    pose and zeroes velocities, so skipping intermediate mirrors leaves the next
+    rendered state unchanged. Deferred steps return MuJoCo joint positions with
+    the previous frames; ``observe`` mirrors and renders the current state.
+    """
+
+    def __init__(self, native_env: Any) -> None:
+        self._env = native_env
+        self._isaac_step = native_env.isaac.step
+        self._get_obs = native_env._get_obs
+        self._deferred = False
+        self._frames: dict[str, Any] = {}
+        native_env.isaac.step = self._step_isaac
+        native_env._get_obs = self._observe_or_defer
+
+    @contextmanager
+    def deferred(self) -> Iterator[None]:
+        """Step physics without mirroring or rendering Isaac."""
+        self._deferred = True
+        try:
+            yield
+        finally:
+            self._deferred = False
+
+    def observe(self) -> dict[str, Any]:
+        """Mirror the current MuJoCo state into Isaac once and render it."""
+        if self._deferred:
+            raise RuntimeError("Cannot render Isaac inside a deferred block.")
+        self._isaac_step(self._env.mujoco)
+        return self._observe_or_defer()
+
+    def _step_isaac(self, *args: Any, **kwargs: Any) -> Any:
+        if not self._deferred:
+            return self._isaac_step(*args, **kwargs)
+
+    def _observe_or_defer(self) -> dict[str, Any]:
+        if self._deferred:
+            qpos = list(self._env.mujoco.get_robot_qpos().values())
+            return {"joint_qpos": np.asarray(qpos, dtype=np.float32), **self._frames}
+        observation = self._get_obs()
+        self._frames = {k: v for k, v in observation.items() if k != "joint_qpos"}
+        return observation
 
 
 def resolve_hssd_scene_dir(state: dict[str, Any]) -> Path | None:

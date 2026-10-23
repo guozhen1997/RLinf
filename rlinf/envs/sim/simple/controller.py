@@ -25,6 +25,43 @@ import torch
 from rlinf.envs.sim.simple.utils import psi0_upper_joint_values
 
 
+class _SimulationClock:
+    """Stand-in for the ``time`` module whose monotonic clock follows simulation.
+
+    The decoupled WBC interpolates upper-body and navigation goals by
+    ``target_time`` and times out teleop goals older than one second. Both
+    assume one 50 Hz control step per 20 ms of wall time, as in real-time
+    teleoperation. Advancing by simulated control steps keeps that contract
+    regardless of how fast this process can render.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(time, name)
+
+
+def _install_simulation_clock() -> _SimulationClock:
+    """Route the WBC agent and policy clocks through simulated time.
+
+    SimpleProcess owns exactly one controller, so the process-wide patch only
+    affects that controller's upstream modules.
+    """
+    import decoupled_wbc.control.policy.g1_decoupled_whole_body_policy as policy
+    import simple.agents.sonic_decoupled_wbc_agent as agent
+
+    clock = agent.time
+    if not isinstance(clock, _SimulationClock):
+        clock = _SimulationClock()
+        agent.time = clock
+    policy.time_module = clock
+    return clock
+
+
 class SimpleController(Protocol):
     """Controller boundary owned by a SIMPLE runtime process."""
 
@@ -72,6 +109,8 @@ class SimpleTeleopController:
         from simple.agents.sonic_decoupled_wbc_agent import SonicDecoupledWbcAgent
 
         self.robot = robot
+        # Install before construction: the WBC policy stamps its last goal time.
+        self._clock = _install_simulation_clock()
         # The pinned upstream factory has no session-options argument. Override
         # only its WBC loader during this synchronous construction, then restore
         # it even on failure. ONNX Runtime's global API remains unchanged.
@@ -96,7 +135,9 @@ class SimpleTeleopController:
         self.last_base_height = 0.74
 
     def stabilize(self, observation: dict[str, Any]) -> Any:
-        return self._agent.get_stabilize_action(observation)
+        action = self._agent.get_stabilize_action(observation)
+        self._clock.now += self.control_dt
+        return action
 
     def is_stabilized(self) -> bool:
         return bool(self.robot.stabilized)
@@ -125,7 +166,7 @@ class SimpleTeleopController:
         proprio = self.robot.prepare_obs()
         wbc_obs = self._agent._build_wbc_observation(proprio)
         self._agent._wbc_policy.set_observation(wbc_obs)
-        now = time.monotonic()
+        now = self._clock.monotonic()
         control_frequency = self._agent._control_frequency
         goal = {
             "target_upper_body_pose": np.asarray(
@@ -140,6 +181,7 @@ class SimpleTeleopController:
         }
         self._agent._wbc_policy.set_goal(goal)
         wbc_action = self._agent._wbc_policy.get_action(time=now)
+        self._clock.now += self.control_dt
         robot_model = self._agent._dwbc_robot_model
         self.last_base_height = float(command[31])
         return ActionCmd(
