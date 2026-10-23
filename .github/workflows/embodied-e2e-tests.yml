@@ -1991,7 +1991,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-gr00t_n1d6-maniskill-libero-test:
+  embodied-gr00t_n1d6-libero-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -2020,7 +2020,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-gr00t_n1d7-maniskill-libero-test:
+  embodied-gr00t_n1d7-libero-test:
     runs-on: embodied
     steps:
       - name: Checkout code
