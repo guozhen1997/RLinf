@@ -6,7 +6,7 @@ WoVR: World Models as Reliable Simulators for Post-Training VLA Policies with RL
 Overview
 --------
 
-.. image:: https://github.com/RLinf/misc/raw/main/pic/wovr_overview.png
+.. image:: https://raw.githubusercontent.com/RLinf/misc/main/pic/wovr_overview.png
    :alt: WoVR framework overview
    :align: center
 
@@ -59,9 +59,10 @@ Citation
 
 .. code-block:: bibtex
 
-   @misc{jiang2026wovr,
-      title={WoVR: World Models as Reliable Simulators for Post-Training VLA Policies with RL}, 
-      author={Jiang, Zhennan and Zhou, Shangqing and Jiang, Yutong and Huang, Zefang and Wei, Mingjie and Chen, Yuhui and Zhou, Tianxing and Guo, Zhen and Lin, Hao and Zhang, Quanlu and Wang, Yu and Li, Haoran and Yu, Chao and Zhao, Dongbin},
-      year={2026},
-      journal={arXiv preprint arXiv:2602.13977},
-    }
+   @article{jiang2026wovr,
+     title={WoVR: World Models as Reliable Simulators for Post-Training VLA Policies with RL},
+     author={Zhennan Jiang and Shangqing Zhou and Yutong Jiang and Zefang Huang and Mingjie Wei and Yuhui Chen and Tianxing Zhou and Zhen Guo and Hao Lin and Quanlu Zhang and Yu Wang and Haoran Li and Chao Yu and Dongbin Zhao},
+     year={2026},
+     journal={arXiv preprint arXiv:2602.13977},
+     url={https://arxiv.org/abs/2602.13977},
+   }

@@ -91,12 +91,12 @@ env:
 
 rollout:
   group_name: "RolloutGroup"
-  backend: "huggingface"
+  rollout_backend: "huggingface"
   enable_offload: True
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/model/RLinf-pi05-SFT-Stack-cube" # https://huggingface.co/YifWRobotics/RLinf-pi05-SFT-Stack-cube
+    model_path: ${actor.model.model_path}
     precision: ${actor.model.precision}
 
 actor:
@@ -139,7 +139,7 @@ actor:
   fsdp_config:
     strategy: "fsdp"
     sharding_strategy: "no_shard"
-    gradient_checkpointing: False # for openpi, gradient checkpointing is not supported, please do not change this value
+    gradient_checkpointing: False
     mixed_precision:
       param_dtype: ${actor.model.precision}
       reduce_dtype: ${actor.model.precision}

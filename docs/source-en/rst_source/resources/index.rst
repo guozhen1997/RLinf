@@ -1,8 +1,10 @@
+:orphan:
+
 Resources
 =========
 
 Use Resources for the project rationale, updates, publications, release notes,
-and troubleshooting.
+troubleshooting, and contributor policy.
 
 .. grid:: 1 2 2 3
    :gutter: 2
@@ -25,11 +27,11 @@ and troubleshooting.
 
       Papers and technical reports built on RLinf.
 
-   .. grid-item-card:: v0.1 & v0.2 Release Notes
-      :link: release_v0.1_v0.2
+   .. grid-item-card:: v0.4 Release Notes
+      :link: release_v0.4
       :link-type: doc
 
-      What changed in RLinf v0.1 and v0.2.
+      What changed in RLinf v0.4.
 
    .. grid-item-card:: v0.3 Release Notes
       :link: release_v0.3
@@ -37,18 +39,20 @@ and troubleshooting.
 
       What changed in RLinf v0.3.
 
+   .. grid-item-card:: v0.1 & v0.2 Release Notes
+      :link: release_v0.1_v0.2
+      :link-type: doc
+
+      What changed in RLinf v0.1 and v0.2.
+
    .. grid-item-card:: FAQ
       :link: faq
       :link-type: doc
 
       Debugging, rendering, network, NCCL/CUDA, and timeout fixes.
 
-.. toctree::
-   :hidden:
+   .. grid-item-card:: Contributor Policy
+      :link: maintainer_policy
+      :link-type: doc
 
-   Why RLinf <why_rlinf>
-   Blog <blog/index>
-   Publications <publications/index>
-   v0.1 & v0.2 Release Notes <release_v0.1_v0.2>
-   v0.3 Release Notes <release_v0.3>
-   FAQ <faq>
+      Grow from contributor to Area Owner through sustained contributions and peer review.

@@ -43,6 +43,13 @@ from . import VLLM_WORKER_CLS, VLLMExecutor
 
 
 class VLLMWorker(Worker):
+    """vLLM-backed rollout worker for LLM response generation.
+
+    Owns an asynchronous vLLM engine instance that consumes rollout requests
+    over channels and returns sampled responses with optional logprobs.
+    Receives updated policy weights from actor workers between training steps.
+    """
+
     def __init__(self, config: DictConfig, placement: ModelParallelComponentPlacement):
         Worker.__init__(self)
         self._cfg = config
@@ -53,6 +60,7 @@ class VLLMWorker(Worker):
         self._sampling_params = self._get_sampling_params_from_config()
         self._tokenizer = self._load_tokenizer()
         self._vllm_engine = None
+        self._async_engine = None
 
         self._validate_sampling_params = SamplingParams(temperature=0, max_tokens=32)
         self._validate_prompts = [
@@ -330,6 +338,14 @@ class VLLMWorker(Worker):
             task: asyncio.Task = self._running_generate_tasks.pop(request_id, None)
             if task is not None:
                 task.cancel()
+
+    def stop(self):
+        """Stop the vLLM async engine and its EngineCore background process."""
+        if self._async_engine is not None:
+            self.log_info(f"Stopping VLLM worker {self._rank} ...")
+            self._async_engine.shutdown()
+            self._async_engine = None
+            self.log_info(f"VLLM worker {self._rank} stopped.")
 
     async def init_worker(self) -> None:
         """

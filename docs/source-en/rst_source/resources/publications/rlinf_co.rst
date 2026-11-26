@@ -7,7 +7,7 @@ Overview
 --------
 
 
-.. image:: https://github.com/RLinf/misc/raw/main/pic/rlinf-co/overview.png
+.. image:: https://raw.githubusercontent.com/RLinf/misc/main/pic/rlinf-co/overview.png
    :alt: RLinf-Co overview
    :align: center
 
@@ -77,7 +77,7 @@ Main Results
 Ablation Study
 ~~~~~~~~~~~~~~
 
-.. image:: https://github.com/RLinf/misc/raw/main/pic/rlinf-co/success_rate.png
+.. image:: https://raw.githubusercontent.com/RLinf/misc/main/pic/rlinf-co/success_rate.png
    :alt: Ablation study on simulation SFT initialization
    :align: center
 
@@ -86,7 +86,7 @@ Ablation study on simulation SFT initialization. We report the simulation succes
 Data Efficiency
 ~~~~~~~~~~~~~~~
 
-.. image:: https://github.com/RLinf/misc/raw/main/pic/rlinf-co/data_efficiency.png
+.. image:: https://raw.githubusercontent.com/RLinf/misc/main/pic/rlinf-co/data_efficiency.png
    :alt: Effect of the number of real-world demonstrations
    :align: center
 
@@ -102,9 +102,10 @@ Citation
 
 .. code-block:: bibtex
 
-    @article{shi2026rlinf,
-      title={Beyond Imitation: Reinforcement Learning-Based Sim-Real Co-Training for VLA Models},
-      author={Shi, Liangzhi and Chen, Shuaihang and Gao, Feng and Chen, Yinuo and Chen, Kang and Zhang, Tonghe and Zhang, Hongzhi and Zhang, Weinan and Yu, Chao and Wang, Yu},
-      journal={arXiv preprint arXiv:2602.12628},
-      year={2026}
-    }
+   @article{shi2026rlinf,
+     title={Beyond Imitation: Reinforcement Learning-Based Sim-Real Co-Training for VLA Models},
+     author={Shi, Liangzhi and Chen, Shuaihang and Gao, Feng and Chen, Yinuo and Chen, Kang and Zhang, Tonghe and Zang, Hongzhi and Zhou, Jiakai and Zhang, Weinan and Yu, Chao and Wang, Yu},
+     journal={arXiv preprint arXiv:2602.12628},
+     year={2026},
+     url={https://arxiv.org/abs/2602.12628},
+   }

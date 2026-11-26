@@ -6,12 +6,12 @@ RLinf-VLA: A Unified and Efficient Framework for VLA+RL Training
    :height: 16px
    :class: inline-icon
 
-**Paper:** `RSS 2026 <https://roboticsconference.org/program/papers/89/>`__ | `arXiv:2510.06710 <https://arxiv.org/abs/2510.06710>`__ | **Models:** `RLinf-OpenVLA <https://huggingface.co/collections/RLinf/openvla>`__ | `RLinf-OpenVLAOFT <https://huggingface.co/collections/RLinf/openvla-oft>`__
+**Paper:** `RSS 2026 <https://roboticsproceedings.org/rss22/p089.html>`__ | `arXiv:2510.06710 <https://arxiv.org/abs/2510.06710>`__ | **Models:** `RLinf-OpenVLA <https://huggingface.co/collections/RLinf/openvla>`__ | `RLinf-OpenVLAOFT <https://huggingface.co/collections/RLinf/openvla-oft>`__
 
 Overview
 --------
 
-.. image:: https://github.com/RLinf/misc/raw/main/pic/rlinf-vla/rlinf_vla_overview.png
+.. image:: https://raw.githubusercontent.com/RLinf/misc/main/pic/rlinf-vla/rlinf_vla_overview.png
    :alt: RLinf-VLA overview
    :align: center
 
@@ -29,11 +29,11 @@ Training curves (ManiSkill)
    <table border="0">
      <tr>
        <td align="center">
-         <img src="https://github.com/RLinf/misc/raw/main/pic/rlinf-vla/mani_openvla.png" alt="mani_openvla" width="350"/>
+         <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/rlinf-vla/mani_openvla.png" alt="mani_openvla" width="350"/>
          <br/><strong>OpenVLA</strong>
        </td>
        <td align="center">
-         <img src="https://github.com/RLinf/misc/raw/main/pic/rlinf-vla/mani_openvlaoft.png" alt="mani_openvlaoft" width="350"/>
+         <img src="https://raw.githubusercontent.com/RLinf/misc/main/pic/rlinf-vla/mani_openvlaoft.png" alt="mani_openvlaoft" width="350"/>
          <br/><strong>OpenVLA-OFT</strong>
        </td>
      </tr>
@@ -192,11 +192,16 @@ Quick Start
 Citation
 --------
 
+Cite the RSS 2026 paper:
+
 .. code-block:: bibtex
 
-   @article{zang2025rlinf,
-     title={RLinf-VLA: A unified and efficient framework for VLA+ RL training},
-     author={Zang, Hongzhi and Wei, Mingjie and Xu, Si and Wu, Yongji and Guo, Zhen and Wang, Yuanqing and Lin, Hao and Shi, Liangzhi and Xie, Yuqing and Xu, Zhexuan and others},
-     journal={arXiv preprint arXiv:2510.06710},
-     year={2025}
+   @INPROCEEDINGS{ZangH2-RSS-26,
+       AUTHOR    = {Hongzhi Zang AND Mingjie Wei AND Si Xu AND Yongji Wu AND Zhen Guo AND Yuanqing Wang AND Hao Lin AND Peihong Wang AND Hua Yuan AND Yixian Zhang AND Liangzhi Shi AND Yuqing Xie AND Zhexuan Xu AND Zhihao Liu AND Kang Chen AND Wenhao Tang AND Quanlu Zhang AND Weinan Zhang AND Chao Yu AND Yu Wang},
+       TITLE     = {{RLinf-VLA: A Unified and Efficient Framework for Reinforcement Learning of Vision-Language-Action Models}},
+       BOOKTITLE = {Proceedings of Robotics: Science and Systems},
+       YEAR      = {2026},
+       ADDRESS   = {Sydney, Australia},
+       MONTH     = {July},
+       DOI       = {10.15607/RSS.2026.XXII.089}
    }

@@ -73,34 +73,57 @@ Our framework supports the use of PPO in both LLM inference tasks and embodied t
 3.1. Embodied Tasks
 ~~~~~~~~~~~~~~~~~~~
 
-The following first provides an example configuration for an embodied task:
+Embodied PPO presets live in ``examples/embodiment/config/algorithm/ppo.yaml``. See :doc:`ManiSkill <../../examples/embodied/maniskill>` and ``examples/embodiment/config/maniskill_ppo_openvla_quickstart.yaml`` for a runnable recipe:
 
 .. code-block:: yaml
 
    algorithm:
-
-      # Core PPO settings (recommended not to change)
+      # Core PPO settings
       normalize_advantages: True
       group_size: 1
       adv_type: gae
       loss_type: actor_critic
       loss_agg_func: "token-mean"
 
-      # Algorithm parameters (typically require tuning)
-
-      rollout_micro_batch_size: 256
-      logprob_forward_micro_batch_size: 16  # Larger batch_size improves stability.
-                                            # Adjust according to compute resources and model size.
-
+      # Algorithm parameters
+      kl_beta: 0.0
       entropy_bonus: 0          # Optional: encourage exploration
       clip_ratio_high: 0.2      # PPO clipping parameter (epsilon)
       clip_ratio_low: 0.2       # Should match clip_ratio_high
+      clip_ratio_c: 3.0         # Dual-clip bound
       value_clip: 0.2           # Stabilizes value function updates
 
       gamma: 0.99               # Discount factor for GAE
       gae_lambda: 0.95          # Lambda parameter for GAE
-
       huber_delta: 10.0         # Delta parameter for Huber loss in value training
+
+Rollout and Actor Importance Sampling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When rollout generation and actor training use different inference implementations,
+their action log probabilities may differ even after synchronizing the same weights.
+Synchronous embodied PPO can replay the sampled transitions with the actor and apply
+the same importance-sampling correction used by reasoning training:
+
+.. code-block:: yaml
+
+   algorithm:
+      importance_sampling_fix: True
+      importance_sampling_clip: 1.0
+      recompute_logprobs: True
+
+With ``algorithm.recompute_logprobs`` enabled, the actor recomputes the old-policy
+log-probabilities before training. Let :math:`q` be the rollout behavior policy and
+:math:`p` the actor replay policy. The correction multiplies the advantage by
+:math:`\min(p/q,\;c)` and uses :math:`p` as the PPO old-policy anchor. The ratio is
+calculated at the configured ``logprob_type`` granularity. Value predictions and
+GAE still use the values returned by rollout.
+
+This mode requires synchronous, non-pipelined embodied training with
+``loss_type: actor`` or ``loss_type: actor_critic``. Monitor
+``actor/importance_sampling_weight``, ``actor/importance_sampling_clip_fraction``,
+``actor/behav_approx_kl``, and ``actor/recomputed_logprob_abs_diff`` to measure
+rollout-actor divergence.
 
 3.2. LLM Reasoning Tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -154,6 +177,41 @@ Furthermore, in LLM reasoning tasks, we use an independent critic model rather t
       # The rest of the critic configuration is very similar to the actor configuration in the GRPO settings for reasoning.
       ...
 
+
+3.3. Multi-Turn Agent Tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+See :doc:`Search-R1 training </rst_source/examples/agentic/searchr1/index>` for model and data
+setup. Use ``examples/agent/searchr1/config/train_qwen2.5_ppo.yaml``
+with these key settings:
+
+.. code-block:: yaml
+
+   runner:
+     synchronous: true
+
+   algorithm:
+     group_size: 1
+     adv_type: gae_dynamic
+     gamma: 1.0
+     gae_lambda: 1.0
+     normalize_advantages: true
+     use_valid_token_scale: true
+     kl_beta: 0.0
+     loss_scales: []
+     recompute_logprobs: false
+
+   critic:
+     use_critic_model: true
+
+   rollout:
+     return_logprobs: true
+
+Launch PPO with the Search-R1 training script:
+
+.. code-block:: bash
+
+   bash examples/agent/searchr1/run_train.sh train_qwen2.5_ppo
 
 4. Notes
 ---------
