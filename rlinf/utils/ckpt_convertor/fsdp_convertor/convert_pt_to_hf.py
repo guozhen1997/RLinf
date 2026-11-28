@@ -338,13 +338,49 @@ def _save_hf_checkpoint(
             )
 
 
+def _load_model_for_conversion(model_cfg: DictConfig):
+    """Build the model skeleton for FSDP-to-HF conversion, falling back to HF AutoModel."""
+    model = get_model(model_cfg)
+    if model is not None:
+        return model
+
+    from transformers import AutoConfig, AutoModelForCausalLM
+
+    try:
+        from transformers import AutoModelForImageTextToText as AutoVLMModel
+    except ImportError:
+        try:
+            from transformers import AutoModelForVision2Seq as AutoVLMModel
+        except ImportError:
+            AutoVLMModel = None
+
+    trust_remote_code = bool(model_cfg.get("trust_remote_code", True))
+    hf_config = AutoConfig.from_pretrained(
+        model_cfg.model_path, trust_remote_code=trust_remote_code
+    )
+    if (
+        AutoVLMModel is not None
+        and type(hf_config) in AutoVLMModel._model_mapping.keys()
+    ):
+        auto_model_cls = AutoVLMModel
+    else:
+        auto_model_cls = AutoModelForCausalLM
+
+    dtype = resolve_save_torch_dtype(model_cfg.get("precision", None))
+    return auto_model_cls.from_config(
+        hf_config,
+        torch_dtype=dtype,
+        trust_remote_code=trust_remote_code,
+    )
+
+
 @hydra.main(
     version_base="1.1", config_path="config", config_name="fsdp_model_convertor"
 )
 def main(cfg) -> None:
     load_user_extension_module()
     model_cfg = _prepare_model_cfg(_resolve_model_cfg(cfg))
-    model = get_model(model_cfg)
+    model = _load_model_for_conversion(model_cfg)
 
     checkpoint = torch.load(cfg.convertor.ckpt_path, map_location="cpu")
     model_dict = _normalize_state_dict_keys(_extract_state_dict(checkpoint))

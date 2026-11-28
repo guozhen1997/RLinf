@@ -100,27 +100,40 @@ def collate_fn(data_list: list[Any]) -> dict[str, Any]:
     batch_idx = torch.tensor([int(it.idx) for it in data_list], dtype=torch.long)
 
     multi_modal_list = [
-        it.multi_modal_inputs for it in data_list if it.multi_modal_inputs is not None
+        it.multi_modal_inputs if it.multi_modal_inputs is not None else {}
+        for it in data_list
     ]
+    all_mm_keys: list[str] = []
+    for mm in multi_modal_list:
+        for key in mm.keys():
+            if key not in all_mm_keys:
+                all_mm_keys.append(key)
+
     multi_modal_inputs = {}
-    if multi_modal_list:
-        for key in multi_modal_list[0].keys():
-            vals = [m[key] for m in multi_modal_list]
-            if key in ("pixel_values", "pixel_values_videos"):
-                # Keep per-sample tensors as a list; Qwen VL video/image
-                # processors emit variable-length vision tokens.
+    for key in all_mm_keys:
+        if key in ("pixel_values", "pixel_values_videos"):
+            # Keep per-sample tensors as a list; Qwen VL video/image
+            # processors emit variable-length vision tokens.
+            vals = [m[key] for m in multi_modal_list if key in m and m[key] is not None]
+            if vals:
                 multi_modal_inputs[key] = vals
-            elif key in ("image_grid_thw", "video_grid_thw"):
+        elif key in ("image_grid_thw", "video_grid_thw"):
+            vals = [m[key] for m in multi_modal_list if key in m and m[key] is not None]
+            if vals:
                 multi_modal_inputs[key] = (
                     torch.cat(vals, dim=0)
                     if isinstance(vals[0], torch.Tensor)
                     else vals
                 )
-            elif key == "mm_token_type_ids":
-                # transformers >= 5 emits this; the model needs it to compute
-                # M-RoPE. Left-pad with 0 (text token) to match the prompts.
-                mm_type_ids = []
-                for v in vals:
+        elif key == "mm_token_type_ids":
+            # transformers >= 5 emits this; the model needs it to compute
+            # M-RoPE. Left-pad with 0 (text token) to match the prompts.
+            mm_type_ids = []
+            for m, prompt_len in zip(multi_modal_list, lens):
+                v = m.get(key)
+                if v is None:
+                    t = torch.zeros(prompt_len, dtype=torch.long)
+                else:
                     t = (
                         v
                         if isinstance(v, torch.Tensor)
@@ -129,13 +142,13 @@ def collate_fn(data_list: list[Any]) -> dict[str, Any]:
                     if t.dim() == 2 and t.size(0) == 1:
                         t = t.squeeze(0)
                     t = t.to(dtype=torch.long)
-                    pad = target_len - t.numel()
-                    if pad > 0:
-                        t = torch.nn.functional.pad(t, (pad, 0), value=0)
-                    mm_type_ids.append(t)
-                multi_modal_inputs[key] = torch.stack(mm_type_ids, dim=0)
-            else:
-                raise ValueError(f"Unsupported multi_modal_input key: {key}")
+                pad = target_len - t.numel()
+                if pad > 0:
+                    t = torch.nn.functional.pad(t, (pad, 0), value=0)
+                mm_type_ids.append(t)
+            multi_modal_inputs[key] = torch.stack(mm_type_ids, dim=0)
+        else:
+            raise ValueError(f"Unsupported multi_modal_input key: {key}")
 
     batch: dict[str, Any] = {
         "prompt": batch_prompt,

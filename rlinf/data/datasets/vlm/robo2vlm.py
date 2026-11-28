@@ -126,6 +126,11 @@ class Robo2VLMSFTDataset(Robo2VLMDataset):
     ) -> None:
         super().__init__(data_paths, config, tokenizer, eval_dataset)
         self.apply_chat_template = config.data.apply_chat_template
+        self.enable_thinking = config.data.get("enable_thinking", None)
+        self.reasoning_effort = config.data.get("reasoning_effort", None)
+        self.trust_remote_code = bool(
+            config.actor.model.get("trust_remote_code", True)
+        )
 
     def _process_raw_record(self, raw: dict[str, Any], idx: int) -> DatasetItem:
         images = self.get_image_list(raw)
@@ -157,14 +162,26 @@ class Robo2VLMSFTDataset(Robo2VLMDataset):
         self,
         prompt: dict[str, Any],
         images_inputs: list[Any],
+        *,
+        add_generation_prompt: bool = True,
     ):
         if self._processor is None:
             self._processor = AutoProcessor.from_pretrained(
-                self.cfg.actor.model.model_path
+                self.cfg.actor.model.model_path,
+                trust_remote_code=self.trust_remote_code,
             )
 
+        template_kwargs: dict[str, Any] = {}
+        if self.enable_thinking is not None:
+            template_kwargs["enable_thinking"] = bool(self.enable_thinking)
+        if self.reasoning_effort is not None:
+            template_kwargs["reasoning_effort"] = str(self.reasoning_effort)
+
         prompt_text = self._processor.apply_chat_template(
-            prompt, tokenize=False, add_generation_prompt=True
+            prompt,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+            **template_kwargs,
         )
 
         assert isinstance(prompt_text[0], str), (
@@ -231,8 +248,11 @@ class Robo2VLMSFTDataset(Robo2VLMDataset):
             image_obj = None
             if isinstance(image, Image.Image):
                 image_obj = image.convert("RGB")
-            if isinstance(image, (bytes, bytearray)):
+            elif isinstance(image, (bytes, bytearray)):
                 image_obj = Image.open(BytesIO(image)).convert("RGB")
+            elif isinstance(image, str):
+                with Image.open(image) as img:
+                    image_obj = img.convert("RGB")
             images_inputs.append(image_obj)
 
         # Handle both letter format (A, B, C, D) and index format (0, 1, 2, 3)
@@ -283,10 +303,12 @@ class Robo2VLMSFTDataset(Robo2VLMDataset):
 
         # get the vlm model prompt inputs
         # prompt_inputs = input_ids, attention_mask, pixel_values, image_grid_thw
-        prompt_inputs = self.vlm_vision_convert(prompt, images_inputs)
+        prompt_inputs = self.vlm_vision_convert(
+            prompt, images_inputs, add_generation_prompt=False
+        )
         # get the vlm model prompt inputs without assistant for label
         label_prompt_inputs = self.vlm_vision_convert(
-            without_assistant_prompt, images_inputs
+            without_assistant_prompt, images_inputs, add_generation_prompt=True
         )
 
         if self.eval_dataset:

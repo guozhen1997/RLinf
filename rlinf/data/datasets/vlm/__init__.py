@@ -22,6 +22,7 @@ from transformers import AutoTokenizer
 
 from rlinf.data.datasets.vlm.base import VLMBaseDataset
 from rlinf.data.datasets.vlm.collate_fn import collate_fn
+from rlinf.data.datasets.vlm.multimodal_sft import MultimodalSFTDataset
 from rlinf.data.datasets.vlm.registry import VLMDatasetRegistry
 from rlinf.data.datasets.vlm.robo2vlm import Robo2VLMDataset, Robo2VLMSFTDataset
 from rlinf.data.datasets.vlm.vlm_trend_reward import (
@@ -99,6 +100,7 @@ def create_vlm_datasets(
 
 
 __all__ = [
+    "MultimodalSFTDataset",
     "Robo2VLMDataset",
     "Robo2VLMSFTDataset",
     "SimpleVLMTrendRewardSFTDataset",

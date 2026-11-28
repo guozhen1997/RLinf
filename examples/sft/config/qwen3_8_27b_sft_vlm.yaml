@@ -1,0 +1,108 @@
+defaults:
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor: all
+
+runner:
+  task_type: sft
+  logger:
+    log_path: ${runner.output_dir}/${runner.experiment_name}
+    project_name: rlinf
+    experiment_name: ${runner.experiment_name}
+    logger_backends: ["tensorboard"] # wandb, swanlab
+
+  # sft runner uses len(dataset) as one epoch
+  max_epochs: -1
+  max_steps: 1000
+  val_check_interval: -1
+  save_interval: 200
+  experiment_name: qwen3_8_27b_sft
+  output_dir: ../results
+  resume_dir: null
+
+data:
+  type: vlm
+  # Supports "multimodal_sft" (OpenAI messages / ShareGPT conversations / QA
+  # in JSON, JSONL, or Parquet) and "robo2vlmsft" (Robo2VLM multiple-choice QA).
+  dataset_name: "multimodal_sft"
+  apply_chat_template: True
+  use_chat_template: True
+  # Set train_data_paths to null for eval-only mode
+  train_data_paths: "/path/to/multimodal_sft/train.jsonl"
+  val_data_paths: null
+  # Optional root directory for resolving relative image paths in JSON/JSONL
+  image_root: null
+  messages_key: "messages"
+  conversations_key: "conversations"
+  prompt_key: "prompt"
+  response_key: "response"
+  answer_key: "answer"
+  reasoning_key: "reasoning_content"
+  image_keys: ["images", "image"]
+  # Qwen3.8 chat template thinking controls (null uses template defaults)
+  enable_thinking: True
+  reasoning_effort: "low"
+  max_prompt_length: 8192
+  max_seq_length: 8192
+  lazy_loading: true
+  num_workers: 8
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 1
+  eval_batch_size: 1
+  global_batch_size: 32
+  # Use chunked FP32 LM-head cross-entropy to avoid materializing [B, S, 248320] logits
+  use_fp32_head: True
+  # "loss" computes validation CE loss (recommended for open-ended multimodal SFT);
+  # "generate" runs greedy decoding + exact-match accuracy (for QA benchmarks).
+  eval_mode: "loss"
+  eval_max_new_tokens: 256
+  seed: 42
+
+  model:
+    model_type: "qwen3_8"
+    precision: "bf16"
+    model_path: "/path/to/Qwen3.8-27B" # https://huggingface.co/Qwen/Qwen3.8-27B
+    trust_remote_code: True
+    is_lora: False
+
+  optim:
+    lr: 1.0e-5
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    adam_eps: 1.0e-08
+    weight_decay: 0.01
+    clip_grad: 1.0
+    lr_scheduler: "cosine"
+    total_training_steps: ${runner.max_steps}
+    lr_warmup_steps: 50
+    streamed_adamw: True
+    streamed_adamw_chunk_bytes: 536870912
+
+  fsdp_config:
+    strategy: "fsdp2"
+    sharding_strategy: "full_shard"
+    gradient_checkpointing: True
+    gradient_checkpointing_use_reentrant: False
+    # Reduce-scatter each layer's gradient on every micro-batch to avoid holding
+    # unsharded 27B gradients across layers.
+    enable_gradient_accumulation: False
+    activation_cpu_offload: False
+    use_liger_kernel: False
+    mixed_precision:
+      param_dtype: bf16
+      reduce_dtype: fp32
+      buffer_dtype: fp32
+      fp32_modules: ["model.visual"]
+      fp32_modules_tf32: True
+      fp32_residual: True
