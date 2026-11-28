@@ -16,9 +16,13 @@ import dataclasses
 import pathlib
 
 import numpy as np
-import openpi.models.model as _model
-import openpi.transforms as _transforms
-from openpi.training.config import DataConfig, DataConfigFactory, ModelTransformFactory
+from rlinf.models.embodiment.openpi.dataconfig.base import (
+    DataConfig,
+    DataConfigFactory,
+    ModelTransformFactory,
+)
+from rlinf.models.embodiment.openpi.modules import model as _model
+from rlinf.models.embodiment.openpi.transforms import core as _transforms
 from typing_extensions import override
 
 from rlinf.models.embodiment.openpi.policies import franka_policy

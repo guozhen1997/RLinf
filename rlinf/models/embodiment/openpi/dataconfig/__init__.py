@@ -18,11 +18,10 @@ import difflib
 import pathlib
 from typing import Optional
 
-import openpi.models.pi0_config as pi0_config
-import openpi.training.optimizer as _optimizer
-import openpi.training.weight_loaders as weight_loaders
 from omegaconf import DictConfig, OmegaConf
-from openpi.training.config import (
+
+from rlinf.models.embodiment.openpi import pi0_config
+from rlinf.models.embodiment.openpi.dataconfig.base import (
     AssetsConfig,
     DataConfig,
     TrainConfig,
@@ -96,9 +95,6 @@ _CONFIGS = [
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_libero/assets"),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
     ),
     TrainConfig(
@@ -109,9 +105,6 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_libero/assets"),
             extra_delta_transform=True,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
     ),
@@ -127,17 +120,7 @@ _CONFIGS = [
             extra_delta_transform=False,
         ),
         batch_size=256,
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=10_000,
-            peak_lr=5e-5,
-            decay_steps=1_000_000,
-            decay_lr=5e-5,
-        ),
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
     ),
     TrainConfig(
@@ -191,13 +174,9 @@ _CONFIGS = [
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi05_maniskill/assets"),
             extra_delta_transform=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         seed=0,
         batch_size=256,
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
         num_workers=8,
         num_train_steps=5_000,
@@ -221,13 +200,9 @@ _CONFIGS = [
             default_prompt="insert the peg in the hole",
             output_action_dim=8,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         seed=0,
         batch_size=256,
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
         num_workers=8,
         num_train_steps=5_000,
@@ -247,13 +222,9 @@ _CONFIGS = [
             ),
             output_action_dim=6,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         seed=0,
         batch_size=16,
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
         num_workers=8,
         num_train_steps=5_000,
@@ -274,13 +245,9 @@ _CONFIGS = [
             output_action_dim=7,
             pad_state=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         seed=0,
         batch_size=16,
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
         num_workers=8,
         num_train_steps=5_000,
@@ -303,9 +270,6 @@ _CONFIGS = [
             ),
             extra_delta_transform=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         seed=0,
         batch_size=32,
@@ -326,13 +290,9 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=False),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi05_base/assets"),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         seed=0,
         batch_size=16,
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
         num_workers=8,
         num_train_steps=5_000,
@@ -352,13 +312,9 @@ _CONFIGS = [
                 assets_dir="checkpoints/torch/pi05_maniskill_sim_real_co_training/assets"
             ),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         seed=0,
         batch_size=16,
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
         num_workers=8,
         num_train_steps=5_000,
@@ -374,9 +330,6 @@ _CONFIGS = [
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_metaworld/assets"),
             extra_delta_transform=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
     ),
     TrainConfig(
@@ -390,9 +343,6 @@ _CONFIGS = [
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_metaworld/assets"),
             extra_delta_transform=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
     ),
     TrainConfig(
@@ -405,9 +355,6 @@ _CONFIGS = [
             ),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_calvin/assets"),
             extra_delta_transform=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
         num_train_steps=30_000,
@@ -425,9 +372,6 @@ _CONFIGS = [
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_calvin/assets"),
             extra_delta_transform=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         num_train_steps=30_000,
     ),
@@ -439,9 +383,6 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(asset_id="physical-intelligence/robocasa_all_human"),
             extra_delta_transform=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
         num_train_steps=100_000,
@@ -456,9 +397,6 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_robocasa365/assets"),
             extra_delta_transform=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
         num_train_steps=30_000,
@@ -475,9 +413,6 @@ _CONFIGS = [
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_robocasa365/assets"),
             extra_delta_transform=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
         num_train_steps=30_000,
     ),
@@ -493,7 +428,6 @@ _CONFIGS = [
             ),
             extra_delta_transform=True,  # True for delta action, False for abs_action
         ),
-        freeze_filter=pi0_config.Pi0Config().get_freeze_filter(),
         pytorch_weight_path="checkpoints/torch/pi0_base",
         num_train_steps=30_000,
     ),
@@ -520,9 +454,6 @@ _CONFIGS = [
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_behavior/assets"),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
         num_train_steps=30_000,
     ),
@@ -538,9 +469,6 @@ _CONFIGS = [
             use_all_wrist_images=True,
             use_quantile_norm=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi0_base/params"
-        ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
         num_train_steps=30_000,
     ),
@@ -554,9 +482,6 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_r2s2r/assets"),
             extra_delta_transform=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
         num_train_steps=30_000,
@@ -595,9 +520,6 @@ _CONFIGS = [
             repo_id="RLinf/IsaacLab-Stack-Cube-Data",
             base_config=DataConfig(prompt_from_task=False),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_isaaclab/assets"),
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            "checkpoints/jax/pi05_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
     ),

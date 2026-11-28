@@ -18,14 +18,19 @@ from omegaconf import DictConfig
 
 
 def get_model(cfg: DictConfig, torch_dtype=None):
+    import dataclasses
     import glob
 
-    import openpi.shared.download as download
-    import openpi.transforms as transforms
     import safetensors
-    from openpi.training import checkpoints as _checkpoints
 
-    from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+    from rlinf.models.embodiment.openpi.dataconfig import (
+        base as _checkpoints,
+        get_openpi_config,
+    )
+    from rlinf.models.embodiment.openpi.transforms import (
+        core as transforms,
+        download,
+    )
     from rlinf.models.embodiment.openpi_cfg.openpi_cfg_action_model import (
         OpenPi0Config,
         OpenPi0ForCFGActionPrediction,
@@ -34,7 +39,10 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     config_name = getattr(cfg.openpi, "config_name", None)
     actor_train_config = get_openpi_config(config_name)
     actor_model_config = actor_train_config.model
-    actor_model_config = OpenPi0Config(**actor_model_config.__dict__)
+    valid_fields = {f.name for f in dataclasses.fields(OpenPi0Config)}
+    actor_model_config = OpenPi0Config(
+        **{k: v for k, v in actor_model_config.__dict__.items() if k in valid_fields}
+    )
     override_config_kwargs = cfg.openpi
     if override_config_kwargs is not None:
         for key, val in override_config_kwargs.items():

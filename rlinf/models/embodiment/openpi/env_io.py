@@ -48,7 +48,7 @@ class EnvIO:
         output_transforms: Sequence,
     ) -> None:
         """Install the openpi.transforms input/output pipelines."""
-        from openpi.transforms import compose
+        from rlinf.models.embodiment.openpi.transforms.core import compose
 
         self._input_transform_fn = compose(transforms)
         self._output_transform_fn = compose(output_transforms)

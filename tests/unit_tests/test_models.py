@@ -3082,9 +3082,7 @@ def test_apxinf_close_delegates_to_model():
 
 def test_so101_openpi_transforms_pad_six_joint_contract():
     np = pytest.importorskip("numpy")
-    pytest.importorskip("openpi")
-    from openpi.models import model as openpi_model
-
+    from rlinf.models.embodiment.openpi.modules import model as openpi_model
     from rlinf.models.embodiment.openpi.policies.so101_policy import SO101Inputs
 
     image = np.zeros((8, 8, 3), dtype=np.uint8)
@@ -3104,7 +3102,6 @@ def test_so101_openpi_transforms_pad_six_joint_contract():
 
 def test_aloha_inputs_mask_wrist_views_missing_from_a_head_only_observation():
     np = pytest.importorskip("numpy")
-    pytest.importorskip("openpi")
     from rlinf.models.embodiment.openpi.policies.aloha_policy import AlohaInputs
 
     image = np.zeros((8, 8, 3), dtype=np.uint8)
@@ -3124,12 +3121,10 @@ def test_aloha_inputs_mask_wrist_views_missing_from_a_head_only_observation():
 
 def test_so101_dataconfig_repacks_lerobot_task_as_prompt():
     np = pytest.importorskip("numpy")
-    pytest.importorskip("openpi")
-    from openpi.models.pi0_config import Pi0Config
-
     from rlinf.models.embodiment.openpi.dataconfig.so101_dataconfig import (
         SO101JointDataConfig,
     )
+    from rlinf.models.embodiment.openpi.pi0_config import Pi0Config
 
     data_config = SO101JointDataConfig(repo_id="so101_joint").create(
         assets_dirs=Path("/tmp/nonexistent-openpi-assets"),

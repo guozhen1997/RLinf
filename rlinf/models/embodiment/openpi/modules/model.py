@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import enum
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -28,6 +29,23 @@ import torch.nn as nn
 import torch.nn.functional as tF
 
 logger = logging.getLogger("openpi")
+
+
+class ModelType(str, enum.Enum):
+    """Supported OpenPI model types."""
+
+    PI0 = "pi0"
+    PI0_FAST = "pi0_fast"
+    PI05 = "pi05"
+
+
+def coerce_model_type(value: ModelType | str | enum.Enum) -> ModelType:
+    """Normalize a local or foreign ModelType enum/string to ``ModelType``."""
+    if isinstance(value, ModelType):
+        return value
+    raw = value.value if isinstance(value, enum.Enum) else value
+    return ModelType(raw)
+
 
 # Image keys expected by the model
 IMAGE_KEYS = (

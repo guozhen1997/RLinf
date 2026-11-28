@@ -51,6 +51,10 @@ class Pi0Config:
         if self.discrete_state_input is None:
             object.__setattr__(self, "discrete_state_input", self.pi05)
 
+    @property
+    def model_type(self) -> model.ModelType:
+        return model.ModelType.PI05 if self.pi05 else model.ModelType.PI0
+
     def fake_obs(self, batch_size: int = 1) -> model.Observation:
         image = torch.ones(batch_size, *model.IMAGE_RESOLUTION, 3)
         image_mask = torch.ones(batch_size, dtype=torch.bool)

@@ -21,8 +21,8 @@ import dataclasses
 
 import einops
 import numpy as np
-from openpi import transforms
-from openpi.models import model as _model
+from rlinf.models.embodiment.openpi.modules import model as _model
+from rlinf.models.embodiment.openpi.transforms import core as transforms
 
 _STATE_SLICE_DIM = 20  # padded to action_dim downstream
 

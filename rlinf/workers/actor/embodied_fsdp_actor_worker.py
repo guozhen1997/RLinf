@@ -842,7 +842,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                     "LeRobot repo id when enable_sft_co_train=True."
                 )
 
-            import openpi.training.data_loader as _data
+            from rlinf.data.datasets.openpi import torch_data_loader as _data
 
             from rlinf.models.embodiment.openpi.dataconfig import (
                 get_openpi_config,

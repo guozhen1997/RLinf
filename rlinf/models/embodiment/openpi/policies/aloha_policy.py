@@ -16,7 +16,7 @@ from typing import ClassVar
 
 import einops
 import numpy as np
-from openpi import transforms
+from rlinf.models.embodiment.openpi.transforms import core as transforms
 
 
 def make_aloha_example() -> dict:

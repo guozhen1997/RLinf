@@ -138,11 +138,12 @@ class FSDPCfgWorker(FSDPSftWorker):
             import lerobot.datasets.lerobot_dataset as lerobot_dataset
         except ModuleNotFoundError:  # lerobot < 0.2
             import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
-        import openpi.training.data_loader as openpi_data_loader
-        import openpi.transforms as transforms
-
+        from rlinf.data.datasets.openpi import (
+            torch_data_loader as openpi_data_loader,
+        )
         from rlinf.data.storage.lerobot import resolve_lerobot_dataset_root
         from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+        from rlinf.models.embodiment.openpi.transforms import core as transforms
 
         data_cfg = self.cfg.get("data", {})
         openpi_cfg = self.cfg.actor.model.openpi

@@ -16,8 +16,8 @@ import logging
 
 import einops
 import numpy as np
-from openpi import transforms
-from openpi.models import model as _model
+from rlinf.models.embodiment.openpi.modules import model as _model
+from rlinf.models.embodiment.openpi.transforms import core as transforms
 from typing_extensions import Dict, List, Union
 
 

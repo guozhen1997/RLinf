@@ -37,7 +37,7 @@ def build_official_openpi_sft_dataloader(
 ) -> tuple[Any, Any]:
     """Build the SFT loader provided by OpenPI for a LeRobot dataset."""
     del rank
-    import openpi.training.data_loader as openpi_data_loader
+    from rlinf.data.datasets.openpi import torch_data_loader as openpi_data_loader
 
     config = build_official_openpi_sft_config(cfg, world_size, data_paths, eval_dataset)
     data_loader = openpi_data_loader.create_data_loader(

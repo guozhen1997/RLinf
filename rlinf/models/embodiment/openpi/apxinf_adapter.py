@@ -80,13 +80,16 @@ class _RLInfOpenPITransforms:
     """Build and run RLinf's native OpenPI transforms without PyTorch weights."""
 
     def __init__(self, model_cfg: DictConfig | Mapping[str, Any]) -> None:
-        import openpi.shared.download as download
-        import openpi.transforms as transforms
-        from openpi.models.model import IMAGE_KEYS
-        from openpi.shared import normalize as normalize_lib
-        from openpi.training import checkpoints
-
-        from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+        from rlinf.models.embodiment.openpi.dataconfig import (
+            base as checkpoints,
+            get_openpi_config,
+        )
+        from rlinf.models.embodiment.openpi.modules.model import IMAGE_KEYS
+        from rlinf.models.embodiment.openpi.transforms import (
+            core as transforms,
+            download,
+            normalize as normalize_lib,
+        )
 
         self.model_cfg = model_cfg
         self.num_action_chunks = int(model_cfg.get("num_action_chunks"))

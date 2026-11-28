@@ -22,7 +22,7 @@ import dataclasses
 from typing import Any, Sequence
 
 import numpy as np
-from openpi import transforms as _transforms
+from rlinf.models.embodiment.openpi.transforms import core as _transforms
 
 from rlinf.utils.rot6d import (
     matrix_to_rot6d,

@@ -146,11 +146,18 @@ def build_dataloader(
     eval_dataset: bool = False,
 ) -> tuple[StatefulDataLoader, Any]:
     """Build a resumable LeRobot loader with configurable past-frame sampling."""
-    import openpi.transforms as transforms
-    from lerobot.common.datasets.lerobot_dataset import (
-        LeRobotDataset,
-        LeRobotDatasetMetadata,
-    )
+    try:  # lerobot >= 0.2 layout
+        from lerobot.datasets.lerobot_dataset import (
+            LeRobotDataset,
+            LeRobotDatasetMetadata,
+        )
+    except ModuleNotFoundError:  # lerobot < 0.2
+        from lerobot.common.datasets.lerobot_dataset import (
+            LeRobotDataset,
+            LeRobotDatasetMetadata,
+        )
+
+    from rlinf.models.embodiment.openpi.transforms import core as transforms
 
     train_config = build_official_openpi_sft_config(
         cfg, world_size, data_paths, eval_dataset

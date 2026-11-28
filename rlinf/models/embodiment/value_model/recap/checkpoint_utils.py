@@ -89,7 +89,9 @@ def load_norm_stats(checkpoint_dir: pathlib.Path, asset_id: str = "libero") -> d
     Returns:
         Dictionary mapping stat names to openpi NormStats objects
     """
-    import openpi.transforms as _openpi_transforms
+    from rlinf.models.embodiment.openpi.transforms import (
+        core as _openpi_transforms,
+    )
 
     possible_paths = [
         checkpoint_dir / "norm_stats" / asset_id / "norm_stats.json",
@@ -148,8 +150,10 @@ def build_input_transforms(
     Uses openpi policies for robot-specific transforms and openpi transforms
     for model transforms (Normalize, ResizeImages, PadStatesAndActions).
     """
-    import openpi.models.model as _openpi_model
-    import openpi.transforms as _openpi_transforms
+    from rlinf.models.embodiment.openpi.modules import model as _openpi_model
+    from rlinf.models.embodiment.openpi.transforms import (
+        core as _openpi_transforms,
+    )
 
     from rlinf.models.embodiment.openpi.policies import (
         franka_policy,

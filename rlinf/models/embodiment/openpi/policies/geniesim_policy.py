@@ -23,7 +23,7 @@ import dataclasses
 
 import einops
 import numpy as np
-from openpi import transforms
+from rlinf.models.embodiment.openpi.transforms import core as transforms
 
 # Canonical G2 dual-arm layout: 14 arm joints followed by 2 grippers. Everything
 # past dim 16 is waist/padding and is masked to zero (``include_waist=False``).

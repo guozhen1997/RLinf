@@ -711,7 +711,7 @@ class ValueCriticModel(nn.Module):
             use_quantile_norm=use_quantile_norm,
         )
 
-        from openpi.transforms import compose
+        from rlinf.models.embodiment.openpi.transforms.core import compose
 
         model._input_transform = compose(transforms)
         model._device = device

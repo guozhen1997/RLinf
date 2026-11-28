@@ -333,7 +333,7 @@ class PhyAIRolloutWorker(Worker):
             config_name,
             data_kwargs=data_kwargs,
         )
-        from openpi.transforms import compose
+        from rlinf.models.embodiment.openpi.transforms.core import compose
 
         self._input_transform_fn = compose(input_transforms)
         self._output_transform_fn = compose(output_transforms)

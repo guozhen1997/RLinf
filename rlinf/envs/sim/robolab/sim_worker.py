@@ -52,7 +52,7 @@ def main() -> None:
         import omni.kit.app
         import omni.timeline
         import robolab.constants
-        from openpi_client import image_tools
+        from rlinf.models.embodiment.openpi.transforms import image_tools
         from robolab.constants import set_output_dir
         from robolab.core.environments.runtime import create_env, end_episode
         from robolab.core.logging.results import get_current_subtask_info

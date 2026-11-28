@@ -13,16 +13,18 @@
 # limitations under the License.
 
 import numpy as np
-import openpi.models.model as _model
-import openpi.shared.normalize as normalize
-import openpi.training.data_loader as _data_loader
-import openpi.transforms as transforms
 import tqdm
 import tyro
-from openpi.training.config import DataConfig
 
+from rlinf.data.datasets.openpi import torch_data_loader as _data_loader
 from rlinf.data.storage.lerobot import resolve_lerobot_dataset_root
 from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+from rlinf.models.embodiment.openpi.dataconfig.base import DataConfig
+from rlinf.models.embodiment.openpi.modules import model as _model
+from rlinf.models.embodiment.openpi.transforms import (
+    core as transforms,
+    normalize,
+)
 
 
 class RemoveStrings(transforms.DataTransformFn):
@@ -122,17 +124,16 @@ def main(
     data_config = config.data.create(config.assets_dirs, config.model)
 
     if data_config.rlds_data_dir is not None:
-        data_loader, num_batches = create_rlds_dataloader(
-            data_config, config.model.action_horizon, config.batch_size
+        raise NotImplementedError(
+            "RLDS norm-stats calculation is not supported in the JAX-free loader."
         )
-    else:
-        data_loader, num_batches = create_torch_dataloader(
-            data_config,
-            config.model.action_horizon,
-            config.batch_size,
-            config.model,
-            config.num_workers,
-        )
+    data_loader, num_batches = create_torch_dataloader(
+        data_config,
+        config.model.action_horizon,
+        config.batch_size,
+        config.model,
+        config.num_workers,
+    )
 
     keys = ["state", "actions"]
     stats = {key: normalize.RunningStats() for key in keys}

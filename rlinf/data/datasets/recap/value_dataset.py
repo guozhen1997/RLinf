@@ -23,8 +23,6 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 import numpy as np
-import openpi.models.model as _openpi_model
-import openpi.transforms as _openpi_transforms
 import torch
 
 try:  # lerobot >= 0.2 layout
@@ -37,11 +35,13 @@ except ModuleNotFoundError:  # lerobot < 0.2
         LeRobotDataset,
         LeRobotDatasetMetadata,
     )
-from openpi.transforms import DataTransformFn
 from torch.utils.data import Dataset
 
 from rlinf.data.storage.lerobot import episode_boundaries
+from rlinf.models.embodiment.openpi.modules import model as _openpi_model
 from rlinf.models.embodiment.openpi.policies import franka_policy, libero_policy
+from rlinf.models.embodiment.openpi.transforms import core as _openpi_transforms
+from rlinf.models.embodiment.openpi.transforms.core import DataTransformFn
 
 from .common import BaseDataLoaderImpl, ReCapMixtureDataset
 from .utils import (

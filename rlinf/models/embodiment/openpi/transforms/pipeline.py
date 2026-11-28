@@ -29,7 +29,7 @@ def split_short_memory_transforms(
     The first stage retains the prompt for the second stage. Normalization and
     camera transforms run before this boundary without changing their order.
     """
-    import openpi.transforms as transforms
+    from rlinf.models.embodiment.openpi.transforms import core as transforms
 
     for index, transform in enumerate(input_transforms):
         if isinstance(
@@ -98,7 +98,7 @@ def build_openpi_transforms(
     ``{assets_dir}/{asset_id}/norm_stats.json`` from the TrainConfig (after
     ``model_path`` is applied) and missing files skip normalization.
     """
-    import openpi.transforms as transforms
+    from rlinf.models.embodiment.openpi.transforms import core as transforms
 
     from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
 
